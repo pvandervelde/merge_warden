@@ -571,15 +571,44 @@ impl<P: GitProvider> MergeWarden<P> {
     /// # Examples
     ///
     /// ```rust,no_run
+    /// use anyhow::Result;
+    /// use async_trait::async_trait;
     /// use merge_warden_core::MergeWarden;
-    /// # use merge_warden_core::GitProvider;
-    /// # struct MyProvider;
-    /// # impl GitProvider for MyProvider { /* ... */ }
-    /// # fn example() {
-    /// let provider = MyProvider;
-    /// let warden = MergeWarden::new(provider);
-    /// # }
-    /// # fn main() {}
+    /// use merge_warden_core::GitProvider;
+    ///
+    /// use merge_warden_core::models::{Comment, Label, PullRequest};
+    ///
+    /// struct MyProvider;
+    ///
+    /// #[async_trait]
+    /// impl GitProvider for MyProvider {
+    ///     async fn get_pull_request(
+    ///         &self,
+    ///         repo_owner: &str,
+    ///         repo_name: &str,
+    ///         pr_number: u64,
+    ///     ) -> Result<PullRequest> {
+    ///         // Implementation to fetch PR from GitHub API
+    ///         // ...
+    ///         # unimplemented!()
+    ///     }
+    ///
+    ///     // Implement other required methods...
+    ///     # async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<()> { unimplemented!() }
+    ///     # async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<()> { unimplemented!() }
+    ///     # async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<Comment>> { unimplemented!() }
+    ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<()> { unimplemented!() }
+    ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<()> { unimplemented!() }
+    ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>> { unimplemented!() }
+    ///     # async fn update_pr_mergeable_state(&self, _: &str, _: &str, _: u64, _: bool) -> Result<()> { unimplemented!() }
+    /// }
+    ///
+    /// fn example() {
+    ///     let provider = MyProvider;
+    ///     let warden = MergeWarden::new(provider);
+    /// }
+    ///
+    /// fn main() {}
     /// ```
     pub fn new(provider: P) -> Self {
         Self {
@@ -610,11 +639,37 @@ impl<P: GitProvider> MergeWarden<P> {
     /// # Examples
     ///
     /// ```rust,no_run
+    /// use async_trait::async_trait;
     /// use merge_warden_core::MergeWarden;
     /// use anyhow::Result;
-    /// # use merge_warden_core::GitProvider;
-    /// # struct MyProvider;
-    /// # impl GitProvider for MyProvider { /* ... */ }
+    /// use merge_warden_core::GitProvider;
+    ///
+    /// use merge_warden_core::models::{Comment, Label, PullRequest};
+    ///
+    /// struct MyProvider;
+    ///
+    /// #[async_trait]
+    /// impl GitProvider for MyProvider {
+    ///     async fn get_pull_request(
+    ///         &self,
+    ///         repo_owner: &str,
+    ///         repo_name: &str,
+    ///         pr_number: u64,
+    ///     ) -> Result<PullRequest> {
+    ///         // Implementation to fetch PR from GitHub API
+    ///         // ...
+    ///         # unimplemented!()
+    ///     }
+    ///
+    ///     // Implement other required methods...
+    ///     # async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<()> { unimplemented!() }
+    ///     # async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<()> { unimplemented!() }
+    ///     # async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<Comment>> { unimplemented!() }
+    ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<()> { unimplemented!() }
+    ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<()> { unimplemented!() }
+    ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>> { unimplemented!() }
+    ///     # async fn update_pr_mergeable_state(&self, _: &str, _: &str, _: u64, _: bool) -> Result<()> { unimplemented!() }
+    /// }
     ///
     /// async fn example() -> Result<()> {
     ///     let provider = MyProvider;
@@ -630,7 +685,8 @@ impl<P: GitProvider> MergeWarden<P> {
     ///
     ///     Ok(())
     /// }
-    /// # fn main() {}
+    ///
+    /// fn main() {}
     /// ```
     pub async fn process_pull_request(
         &self,
@@ -706,20 +762,50 @@ impl<P: GitProvider> MergeWarden<P> {
     /// # Examples
     ///
     /// ```rust,no_run
+    /// use anyhow::Result;
+    /// use async_trait::async_trait;
     /// use merge_warden_core::{MergeWarden, config::ValidationConfig};
-    /// # use merge_warden_core::GitProvider;
-    /// # struct MyProvider;
-    /// # impl GitProvider for MyProvider { /* ... */ }
-    /// # fn example() {
-    /// let provider = MyProvider;
-    /// let config = ValidationConfig {
-    ///     enforce_conventional_commits: true,
-    ///     require_work_item_references: false,
-    ///     auto_label: true,
-    /// };
-    /// let warden = MergeWarden::with_config(provider, config);
-    /// # }
-    /// # fn main() {}
+    /// use merge_warden_core::GitProvider;
+    ///
+    /// use merge_warden_core::models::{Comment, Label, PullRequest};
+    ///
+    /// struct MyProvider;
+    ///
+    /// #[async_trait]
+    /// impl GitProvider for MyProvider {
+    ///     async fn get_pull_request(
+    ///         &self,
+    ///         repo_owner: &str,
+    ///         repo_name: &str,
+    ///         pr_number: u64,
+    ///     ) -> Result<PullRequest> {
+    ///         // Implementation to fetch PR from GitHub API
+    ///         // ...
+    ///         # unimplemented!()
+    ///     }
+    ///
+    ///     // Implement other required methods...
+    ///     # async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<()> { unimplemented!() }
+    ///     # async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<()> { unimplemented!() }
+    ///     # async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<Comment>> { unimplemented!() }
+    ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<()> { unimplemented!() }
+    ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<()> { unimplemented!() }
+    ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>> { unimplemented!() }
+    ///     # async fn update_pr_mergeable_state(&self, _: &str, _: &str, _: u64, _: bool) -> Result<()> { unimplemented!() }
+    /// }
+    ///
+    /// fn example() {
+    ///     let provider = MyProvider;
+    ///     let config = ValidationConfig {
+    ///         enforce_conventional_commits: true,
+    ///         require_work_item_references: false,
+    ///         auto_label: true,
+    ///     };
+    ///
+    ///     let warden = MergeWarden::with_config(provider, config);
+    /// }
+    ///
+    /// fn main() {}
     /// ```
     pub fn with_config(provider: P, config: ValidationConfig) -> Self {
         Self { provider, config }
