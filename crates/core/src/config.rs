@@ -29,11 +29,6 @@ lazy_static! {
         r"^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9/-]+\))?!?: .+"
     ).expect("Failed to compile conventional commit regex");
 
-    /// Pre-compiled regex for extracting scope from PR title
-    pub static ref PR_SCOPE_REGEX: Regex = Regex::new(
-        r"\(([a-z0-9/-]+)\)"
-    ).expect("Failed to compile PR scope regex");
-
     /// Pre-compiled regex for extracting PR type from title
     pub static ref PR_TYPE_REGEX: Regex = Regex::new(
         r"^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)"

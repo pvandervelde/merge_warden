@@ -9,11 +9,7 @@
 //! - Breaking change indicators
 //! - Special labels based on PR description keywords
 
-use crate::{
-    config::{PR_SCOPE_REGEX, PR_TYPE_REGEX},
-    models::PullRequest,
-    GitProvider,
-};
+use crate::{config::PR_TYPE_REGEX, models::PullRequest, GitProvider};
 use anyhow::Result;
 
 #[cfg(test)]
@@ -94,20 +90,19 @@ pub async fn determine_labels<P: GitProvider>(
         }
     }
 
-    // Extract scope from PR title if present using pre-compiled regex
-    if let Some(captures) = PR_SCOPE_REGEX.captures(&pr.title) {
-        let scope = captures.get(1).unwrap().as_str();
-        labels.push(format!("scope:{}", scope));
-    }
-
     // Check if PR is a breaking change
+    let breaking_change_label = "breaking-change".to_string();
     if pr.title.contains("!:") || pr.title.to_lowercase().contains("breaking change") {
-        labels.push("breaking-change".to_string());
+        labels.push(breaking_change_label.clone());
     }
 
     // Check PR description for keywords
     if let Some(body) = &pr.body {
         let body_lower = body.to_lowercase();
+
+        if body_lower.contains("breaking change") && !labels.contains(&breaking_change_label) {
+            labels.push(breaking_change_label.clone());
+        }
 
         if body_lower.contains("security") || body_lower.contains("vulnerability") {
             labels.push("security".to_string());

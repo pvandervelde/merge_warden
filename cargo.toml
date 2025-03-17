@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "crates/core",
-    "crates/github",
+    #"crates/github",
     #"crates/aws-lambda",
     #"crates/azure-functions",
     #"crates/cli"

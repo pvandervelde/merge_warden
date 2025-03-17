@@ -72,8 +72,9 @@ impl GitProvider for MockGitProvider {
         comment: &str,
     ) -> Result<()> {
         let mut comments = self.comments.lock().unwrap();
+        let number_of_comments = comments.len() as u64;
         comments.push(Comment {
-            id: comments.len() as u64 + 1,
+            id: number_of_comments + 1,
             body: comment.to_string(),
         });
         Ok(())
@@ -409,7 +410,7 @@ async fn test_handle_title_validation_invalid_to_valid() {
 
     // Handle title validation with valid title
     warden
-        .handle_title_validation("owner", "repo", &pr, true)
+        .communicate_pr_title_validity_status("owner", "repo", &pr, true)
         .await
         .unwrap();
 
@@ -463,7 +464,7 @@ async fn test_handle_work_item_validation_missing_to_present() {
 
     // Handle work item validation with valid work item reference
     warden
-        .handle_work_item_validation("owner", "repo", &pr, true)
+        .communicate_pr_work_item_validity_status("owner", "repo", &pr, true)
         .await
         .unwrap();
 

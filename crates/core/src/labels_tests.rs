@@ -1,3 +1,4 @@
+use super::*;
 use crate::{
     labels::determine_labels,
     models::{Comment, Label, PullRequest},
@@ -6,6 +7,7 @@ use crate::{
 use anyhow::Result;
 use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
+use tokio::test;
 
 // Mock implementation of GitProvider for testing
 struct MockGitProvider {
@@ -111,9 +113,6 @@ impl GitProvider for MockGitProvider {
     }
 }
 
-use super::*;
-use tokio::test;
-
 #[test]
 async fn test_determine_labels_feature() {
     let provider = MockGitProvider::new();
@@ -171,15 +170,13 @@ async fn test_determine_labels_with_scope() {
         .await
         .unwrap();
 
-    assert_eq!(labels.len(), 2);
+    assert_eq!(labels.len(), 1);
     assert!(labels.contains(&"feature".to_string()));
-    assert!(labels.contains(&"scope:auth".to_string()));
 
     // Verify labels were added to the PR
     let added_labels = provider.get_labels();
-    assert_eq!(added_labels.len(), 2);
+    assert_eq!(added_labels.len(), 1);
     assert!(added_labels.iter().any(|l| l.name == "feature"));
-    assert!(added_labels.iter().any(|l| l.name == "scope:auth"));
 }
 
 #[test]
@@ -195,16 +192,14 @@ async fn test_determine_labels_breaking_change() {
         .await
         .unwrap();
 
-    assert_eq!(labels.len(), 3);
+    assert_eq!(labels.len(), 2);
     assert!(labels.contains(&"feature".to_string()));
-    assert!(labels.contains(&"scope:api".to_string()));
     assert!(labels.contains(&"breaking-change".to_string()));
 
     // Verify labels were added to the PR
     let added_labels = provider.get_labels();
-    assert_eq!(added_labels.len(), 3);
+    assert_eq!(added_labels.len(), 2);
     assert!(added_labels.iter().any(|l| l.name == "feature"));
-    assert!(added_labels.iter().any(|l| l.name == "scope:api"));
     assert!(added_labels.iter().any(|l| l.name == "breaking-change"));
 }
 
@@ -221,16 +216,14 @@ async fn test_determine_labels_breaking_change_in_body() {
         .await
         .unwrap();
 
-    assert_eq!(labels.len(), 3);
+    assert_eq!(labels.len(), 2);
     assert!(labels.contains(&"feature".to_string()));
-    assert!(labels.contains(&"scope:api".to_string()));
     assert!(labels.contains(&"breaking-change".to_string()));
 
     // Verify labels were added to the PR
     let added_labels = provider.get_labels();
-    assert_eq!(added_labels.len(), 3);
+    assert_eq!(added_labels.len(), 2);
     assert!(added_labels.iter().any(|l| l.name == "feature"));
-    assert!(added_labels.iter().any(|l| l.name == "scope:api"));
     assert!(added_labels.iter().any(|l| l.name == "breaking-change"));
 }
 
@@ -322,18 +315,16 @@ async fn test_determine_labels_multiple_keywords() {
         .await
         .unwrap();
 
-    assert_eq!(labels.len(), 5);
+    assert_eq!(labels.len(), 4);
     assert!(labels.contains(&"bug".to_string()));
-    assert!(labels.contains(&"scope:auth".to_string()));
     assert!(labels.contains(&"security".to_string()));
     assert!(labels.contains(&"hotfix".to_string()));
     assert!(labels.contains(&"tech-debt".to_string()));
 
     // Verify labels were added to the PR
     let added_labels = provider.get_labels();
-    assert_eq!(added_labels.len(), 5);
+    assert_eq!(added_labels.len(), 4);
     assert!(added_labels.iter().any(|l| l.name == "bug"));
-    assert!(added_labels.iter().any(|l| l.name == "scope:auth"));
     assert!(added_labels.iter().any(|l| l.name == "security"));
     assert!(added_labels.iter().any(|l| l.name == "hotfix"));
     assert!(added_labels.iter().any(|l| l.name == "tech-debt"));
