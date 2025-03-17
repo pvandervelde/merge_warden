@@ -11,6 +11,47 @@ The core crate contains the business logic for PR validation and is designed to 
 - CLI
 - Future deployment targets
 
+## Requirements
+
+- The PR title must follow the [Conventional Commits](https://www.conventionalcommits.org/) format. Acceptable prefixes are:
+  - build
+  - chore
+  - ci
+  - docs
+  - feat
+  - fix
+  - perf
+  - refactor
+  - revert
+  - style
+  - test
+- The PR body must contain at least one GitHub issue reference in the following formats:
+  - `#123`
+  - `GH-123`
+  - `org/repo#123`
+- Work item references may be prefixed with one of the following prefixes. Prefixes are case-insensitive:
+  - `closes`
+  - `fixes`
+  - `relates to`
+  - `references`
+- If the PR title or description is invalid, the service should:
+  - Apply the `invalid-title` label
+  - Block the PR from being merged
+  - Post a comment with specific details on what is wrong or missing with the title
+- If the PR description is missing a work item reference, the service should:
+  - Apply a `missing-workitem` label
+  - Block the PR from being merged
+  - Post a comment with an example of a valid work item reference
+- If the PR title is updated to be valid, the service should:
+  - Remove the `invalid-title` label
+  - Unblock the PR from being merged but only if all the other validations pass
+  - Remove any previous comments about the title being invalid
+- If the PR description is updated to contain a work item reference, the service should:
+  - Remove the `missing-workitem` label
+  - Unblock the PR from being merged but only if all the other validations pass
+  - Remove any previous comments about the work item reference being missing
+- The service should be able to handle multiple PR events concurrently
+
 ## Key Use Cases
 
 ### 1. PR Created (Initial Validation)
