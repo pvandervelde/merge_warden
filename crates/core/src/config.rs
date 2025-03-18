@@ -6,6 +6,10 @@
 use lazy_static::lazy_static;
 use regex::Regex;
 
+#[cfg(test)]
+#[path = "config_tests.rs"]
+mod tests;
+
 /// Label applied to PRs missing work item references
 pub const MISSING_WORK_ITEM_LABEL: &str = "missing-work-item";
 
@@ -26,7 +30,7 @@ pub const WORK_ITEM_COMMENT_MARKER: &str = "<!-- PR_WORK_ITEM_CHECK -->";
 lazy_static! {
     /// Pre-compiled regex for conventional commit format validation
     pub static ref CONVENTIONAL_COMMIT_REGEX: Regex = Regex::new(
-        r"^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9/-]+\))?!?: .+"
+        r"^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9/_/-]+\))?!?: .+"
     ).expect("Failed to compile conventional commit regex");
 
     /// Pre-compiled regex for extracting PR type from title
