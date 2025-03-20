@@ -1,9 +1,11 @@
 [package]
-name = "merge-warden-core"
-version = "0.1.0"
-edition = "2021"
+authors.workspace = true
 description = "Core business logic for Merge Warden PR validation"
-license = "MIT"
+edition = "2021"
+license-file.workspace = true
+name = "merge-warden-core"
+repository.workspace = true
+version.workspace = true
 
 [dependencies]
 serde = { workspace = true }
