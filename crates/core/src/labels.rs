@@ -45,7 +45,7 @@ mod tests;
 /// # Examples
 ///
 /// ```rust,no_run
-/// use merge_warden_core::{GitProvider, models::PullRequest, labels::determine_labels};
+/// use merge_warden_core::{GitProvider, models::PullRequest, labels::set_pull_request_labels};
 /// use anyhow::Result;
 ///
 /// async fn example<P: GitProvider>(provider: &P) -> Result<()> {
@@ -55,7 +55,7 @@ mod tests;
 ///         body: Some("This PR adds GitHub login functionality.".to_string()),
 ///     };
 ///
-///     let labels = determine_labels(provider, "owner", "repo", &pr).await?;
+///     let labels = set_pull_request_labels(provider, "owner", "repo", &pr).await?;
 ///     println!("Applied labels: {:?}", labels);
 ///
 ///     Ok(())
