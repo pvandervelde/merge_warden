@@ -20,6 +20,8 @@ struct ErrorMockGitProvider {
     error_on_get_pr: bool,
     error_on_add_labels: bool,
     error_on_add_comment: bool,
+    invalid_pr_title: bool,
+    invalid_pr_body: bool,
 }
 
 impl ErrorMockGitProvider {
@@ -28,31 +30,29 @@ impl ErrorMockGitProvider {
             error_on_get_pr: false,
             error_on_add_labels: false,
             error_on_add_comment: false,
+            invalid_pr_body: false,
+            invalid_pr_title: false,
         }
     }
 
-    fn with_get_pr_error() -> Self {
-        Self {
-            error_on_get_pr: true,
-            error_on_add_labels: false,
-            error_on_add_comment: false,
-        }
+    fn with_add_comment_error(&mut self) {
+        self.error_on_add_comment = true;
     }
 
-    fn with_add_labels_error() -> Self {
-        Self {
-            error_on_get_pr: false,
-            error_on_add_labels: true,
-            error_on_add_comment: false,
-        }
+    fn with_add_labels_error(&mut self) {
+        self.error_on_add_labels = true;
     }
 
-    fn with_add_comment_error() -> Self {
-        Self {
-            error_on_get_pr: false,
-            error_on_add_labels: false,
-            error_on_add_comment: true,
-        }
+    fn with_get_pr_error(&mut self) {
+        self.error_on_get_pr = true;
+    }
+
+    fn with_invalid_pr_body(&mut self) {
+        self.invalid_pr_body = true;
+    }
+
+    fn with_invalid_pr_title(&mut self) {
+        self.invalid_pr_title = true;
     }
 }
 
@@ -67,10 +67,22 @@ impl GitProvider for ErrorMockGitProvider {
         if self.error_on_get_pr {
             Err(anyhow!("Failed to get pull request"))
         } else {
+            let title = if self.invalid_pr_title {
+                "test"
+            } else {
+                "feat: test"
+            };
+
+            let body = if self.invalid_pr_body {
+                "Fixes stuff"
+            } else {
+                "Fixes #123"
+            };
+
             Ok(PullRequest {
                 number: 1,
-                title: "feat: test".to_string(),
-                body: Some("Fixes #123".to_string()),
+                title: title.to_string(),
+                body: Some(body.to_string()),
             })
         }
     }
@@ -995,7 +1007,9 @@ async fn test_process_pull_request_dynamic_provider() {
 #[test]
 async fn test_process_pull_request_error_add_comment() {
     // Create a mock provider that returns an error when adding a comment
-    let provider = ErrorMockGitProvider::with_add_comment_error();
+    let mut provider = ErrorMockGitProvider::new();
+    provider.with_invalid_pr_title();
+    provider.with_add_comment_error();
 
     // Create a MergeWarden instance
     let warden = MergeWarden::new(provider);
@@ -1018,7 +1032,8 @@ async fn test_process_pull_request_error_add_comment() {
 #[test]
 async fn test_process_pull_request_error_add_labels() {
     // Create a mock provider that returns an error when adding labels
-    let provider = ErrorMockGitProvider::with_add_labels_error();
+    let mut provider = ErrorMockGitProvider::new();
+    provider.with_add_labels_error();
 
     // Create a MergeWarden instance
     let warden = MergeWarden::new(provider);
@@ -1041,7 +1056,8 @@ async fn test_process_pull_request_error_add_labels() {
 #[test]
 async fn test_process_pull_request_error_get_pr() {
     // Create a mock provider that returns an error when getting a PR
-    let provider = ErrorMockGitProvider::with_get_pr_error();
+    let mut provider = ErrorMockGitProvider::new();
+    provider.with_get_pr_error();
 
     // Create a MergeWarden instance
     let warden = MergeWarden::new(provider);

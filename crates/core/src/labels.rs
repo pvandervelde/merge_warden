@@ -9,7 +9,7 @@
 //! - Breaking change indicators
 //! - Special labels based on PR description keywords
 
-use crate::{config::PR_TYPE_REGEX, models::PullRequest, GitProvider};
+use crate::{config::CONVENTIONAL_COMMIT_REGEX, models::PullRequest, GitProvider};
 use anyhow::Result;
 
 #[cfg(test)]
@@ -61,7 +61,7 @@ mod tests;
 ///     Ok(())
 /// }
 /// ```
-pub async fn determine_labels<P: GitProvider>(
+pub async fn set_pull_request_labels<P: GitProvider>(
     provider: &P,
     owner: &str,
     repo: &str,
@@ -70,7 +70,7 @@ pub async fn determine_labels<P: GitProvider>(
     let mut labels = Vec::new();
 
     // Extract type from PR title using pre-compiled regex
-    if let Some(captures) = PR_TYPE_REGEX.captures(&pr.title) {
+    if let Some(captures) = CONVENTIONAL_COMMIT_REGEX.captures(&pr.title) {
         let pr_type = captures.get(1).unwrap().as_str();
 
         // Add type-based label

@@ -30,17 +30,12 @@ pub const WORK_ITEM_COMMENT_MARKER: &str = "<!-- PR_WORK_ITEM_CHECK -->";
 lazy_static! {
     /// Pre-compiled regex for conventional commit format validation
     pub static ref CONVENTIONAL_COMMIT_REGEX: Regex = Regex::new(
-        r"^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9/_/-]+\))?!?: .+"
+        r"^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9_-]+\))?!?: .+"
     ).expect("Failed to compile conventional commit regex");
-
-    /// Pre-compiled regex for extracting PR type from title
-    pub static ref PR_TYPE_REGEX: Regex = Regex::new(
-        r"^(feat|fix|docs|style|refactor|perf|test|build|ci|chore|revert)"
-    ).expect("Failed to compile PR type regex");
 
     /// Pre-compiled regex for work item reference validation
     pub static ref WORK_ITEM_REGEX: Regex = Regex::new(
-        r"(?i)(fixes|closes|resolves|references|relates to)\s+(#\d+|GH-\d+|https://github\.com/[^/]+/[^/]+/issues/\d+)"
+        r"(?i)(fixes|closes|resolves|references|relates to)\s+(#\d+|GH-\d+|https://github\.com/[^/]+/[^/]+/issues/\d+|[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+#\d+)"
     ).expect("Failed to compile work item regex");
 }
 

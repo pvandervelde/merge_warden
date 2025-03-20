@@ -58,14 +58,16 @@ fn test_invalid_separators() {
 fn test_invalid_title_formats() {
     // Test various invalid title formats
     let invalid_titles = vec![
-        "add new feature",             // Missing type
-        "Feature: add new feature",    // Capitalized type
-        "feat - add new feature",      // Wrong separator
-        "feat(AUTH): add new feature", // Uppercase scope
-        "feat(): empty scope",         // Empty scope
-        "feat: ",                      // Empty description
-        "feat",                        // Missing description and separator
-        "feat(api) add new feature",   // Missing separator
+        "add new feature",                              // Missing type
+        "Feature: add new feature",                     // Capitalized type
+        "feat - add new feature",                       // Wrong separator
+        "feat(AUTH): add new feature",                  // Uppercase scope
+        "feat(): empty scope",                          // Empty scope
+        "feat: ",                                       // Empty description
+        "feat",                                         // Missing description and separator
+        "feat(api) add new feature",                    // Missing separator
+        "refactor(auth/flow): simplify authentication", // slash in the scope
+        "docs(readme.md): update documentation",        // file name in the scope
     ];
 
     for title in invalid_titles {
@@ -109,21 +111,11 @@ fn test_multiple_scopes() {
         };
 
         let result = check_pr_title(&pr).unwrap();
-        // The current regex might not support multiple scopes, so we check the actual behavior
-        // If it passes, great! If not, we document the current behavior
-        if result {
-            assert!(
-                result,
-                "Title '{}' with multiple scopes should be valid",
-                title
-            );
-        } else {
-            assert!(
-                !result,
-                "Title '{}' with multiple scopes is currently invalid with the existing regex",
-                title
-            );
-        }
+        assert!(
+            !result,
+            "Title '{}' with multiple scopes is not a valid scope",
+            title
+        );
     }
 }
 
@@ -133,8 +125,6 @@ fn test_scope_with_special_characters() {
     let titles_with_special_scopes = vec![
         "feat(api-v1): add feature",
         "fix(ui_component): fix styling",
-        "refactor(auth/flow): simplify authentication",
-        "docs(readme.md): update documentation",
         "chore(deps-dev): update development dependencies",
     ];
 

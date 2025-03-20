@@ -555,7 +555,7 @@ impl<P: GitProvider> MergeWarden<P> {
             return Ok(Vec::new());
         }
 
-        labels::determine_labels(&self.provider, repo_owner, repo_name, pr).await
+        labels::set_pull_request_labels(&self.provider, repo_owner, repo_name, pr).await
     }
 
     /// Creates a new `MergeWarden` instance with default configuration.

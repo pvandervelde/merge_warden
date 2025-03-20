@@ -1,16 +1,14 @@
-use crate::config::{ValidationConfig, CONVENTIONAL_COMMIT_REGEX, PR_TYPE_REGEX, WORK_ITEM_REGEX};
+use crate::config::{ValidationConfig, CONVENTIONAL_COMMIT_REGEX, WORK_ITEM_REGEX};
 use proptest::prelude::*;
 
 // New corner case tests for CONVENTIONAL_COMMIT_REGEX
 #[test]
 fn test_conventional_commit_regex_edge_cases() {
     let edge_cases = vec![
-        "feat(api)(auth): add new feature", // Multiple scopes
-        "feat(api-v1): add feature",        // Scope with hyphen
-        "feat(api_v1): add feature",        // Scope with underscore
-        "feat(api/v1): add feature",        // Scope with slash
-        "feat(api)!: breaking change",      // Breaking change indicator
-        "feat!: breaking change",           // Breaking change indicator without scope
+        "feat(api-v1): add feature",   // Scope with hyphen
+        "feat(api_v1): add feature",   // Scope with underscore
+        "feat(api)!: breaking change", // Breaking change indicator
+        "feat!: breaking change",      // Breaking change indicator without scope
         "feat(api)!: add feature with special chars !@#$%^&*()", // Special characters in description
     ];
 
@@ -26,13 +24,15 @@ fn test_conventional_commit_regex_edge_cases() {
 #[test]
 fn test_conventional_commit_regex_invalid_formats() {
     let invalid_titles = vec![
-        "unknown: add feature",    // Invalid prefix
-        "feat-add feature",        // Incorrect separator
-        "feat add feature",        // Missing separator
-        "feat:add feature",        // No space after colon
-        "feat",                    // Missing description
-        "feat: ",                  // Empty description
-        "feat(AUTH): add feature", // Uppercase scope
+        "unknown: add feature",             // Invalid prefix
+        "feat-add feature",                 // Incorrect separator
+        "feat add feature",                 // Missing separator
+        "feat:add feature",                 // No space after colon
+        "feat",                             // Missing description
+        "feat: ",                           // Empty description
+        "feat(AUTH): add feature",          // Uppercase scope
+        "feat(api/v1): add feature",        // Scope with slash
+        "feat(api)(auth): add new feature", // Multiple scopes
     ];
 
     for title in invalid_titles {
@@ -71,69 +71,6 @@ fn test_conventional_commit_regex_valid_formats() {
     }
 }
 
-#[test]
-fn test_pr_type_regex_edge_cases() {
-    let edge_cases = vec![
-        " feat: add feature", // Leading whitespace
-        "feat: add feature ", // Trailing whitespace
-        "feat: add feature!", // Special character at the end
-        "feat: add feature#", // Special character at the end
-    ];
-
-    for title in edge_cases {
-        assert!(
-            !PR_TYPE_REGEX.is_match(title.trim()),
-            "PR_TYPE_REGEX should not match edge case '{}'",
-            title
-        );
-    }
-}
-
-#[test]
-fn test_pr_type_regex_invalid_formats() {
-    let invalid_titles = vec![
-        "unknown: add feature", // Invalid prefix
-        "feat-add feature",     // Incorrect separator
-        "feat add feature",     // Missing separator
-        "feat:add feature",     // No space after colon
-        "feat",                 // Missing description
-        "feat: ",               // Empty description
-    ];
-
-    for title in invalid_titles {
-        assert!(
-            !PR_TYPE_REGEX.is_match(title),
-            "PR_TYPE_REGEX should not match invalid title '{}'",
-            title
-        );
-    }
-}
-
-#[test]
-fn test_pr_type_regex_valid_formats() {
-    let valid_titles = vec![
-        "feat: add new feature",
-        "fix: correct login issue",
-        "docs: update README",
-        "style: format code",
-        "refactor: simplify logic",
-        "perf: improve performance",
-        "test: add unit tests",
-        "build: update dependencies",
-        "ci: configure GitHub Actions",
-        "chore: update gitignore",
-        "revert: remove feature X",
-    ];
-
-    for title in valid_titles {
-        assert!(
-            PR_TYPE_REGEX.is_match(title),
-            "PR_TYPE_REGEX should match valid title '{}'",
-            title
-        );
-    }
-}
-
 // Test for ValidationConfig::default()
 #[test]
 fn test_validation_config_default() {
@@ -166,9 +103,9 @@ fn test_work_item_regex_edge_cases() {
     ];
 
     // Test which ones should match according to the current regex
-    let should_match = vec![
+    let should_match = [
         "Fixes GH-123",
-        "References https://github.com/owner/repo/pull/123",
+        "Closes org/repo#123",
         "Relates to https://github.com/owner/repo/issues/123?query=param",
     ];
 
@@ -232,11 +169,6 @@ proptest! {
     #[test]
     fn test_conventional_commit_regex_random_inputs(input in ".*") {
         let _ = CONVENTIONAL_COMMIT_REGEX.is_match(&input); // Ensure no panic occurs
-    }
-
-    #[test]
-    fn test_pr_type_regex_random_inputs(input in ".*") {
-        let _ = PR_TYPE_REGEX.is_match(&input); // Ensure no panic occurs
     }
 
     #[test]

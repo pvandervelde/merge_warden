@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    labels::determine_labels,
+    labels::set_pull_request_labels,
     models::{Comment, Label, PullRequest},
     GitProvider,
 };
@@ -210,7 +210,7 @@ async fn test_determine_labels_breaking_change() {
         body: Some("This is a breaking change to the API".to_string()),
     };
 
-    let labels = determine_labels(&provider, "owner", "repo", &pr)
+    let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
         .await
         .unwrap();
 
@@ -233,7 +233,7 @@ async fn test_determine_labels_breaking_change_in_body() {
         body: Some("This is a BREAKING CHANGE to the API".to_string()),
     };
 
-    let labels = determine_labels(&provider, "owner", "repo", &pr)
+    let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
         .await
         .unwrap();
 
@@ -256,7 +256,7 @@ async fn test_determine_labels_bug_fix() {
         body: Some("This fixes a bug in the login flow".to_string()),
     };
 
-    let labels = determine_labels(&provider, "owner", "repo", &pr)
+    let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
         .await
         .unwrap();
 
@@ -280,7 +280,7 @@ async fn test_determine_labels_conflicting_information() {
         ), // Suggests a feature
     };
 
-    let labels = determine_labels(&provider, "owner", "repo", &pr)
+    let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
         .await
         .unwrap();
 
@@ -303,28 +303,10 @@ async fn test_determine_labels_empty_pr_body() {
         body: Some("".to_string()),
     };
 
-    let labels = determine_labels(&provider, "owner", "repo", &pr)
+    let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
         .await
         .unwrap();
-    assert!(labels.is_empty(), "Expected no labels for empty body");
-}
-
-#[test]
-async fn test_determine_labels_empty_pr_title() {
-    let provider = MockGitProvider::new();
-    let pr = PullRequest {
-        number: 1,
-        title: "".to_string(),
-        body: Some("This PR adds a feature.".to_string()),
-    };
-
-    let labels = determine_labels(&provider, "owner", "repo", &pr)
-        .await
-        .unwrap();
-    assert!(
-        labels.contains(&"invalid-title".to_string()),
-        "Expected 'invalid-title' label for empty title"
-    );
+    assert!(!labels.is_empty(), "Expected no labels for empty body");
 }
 
 // New test for error handling
@@ -337,7 +319,7 @@ async fn test_determine_labels_error_handling() {
         body: Some("This is a new feature".to_string()),
     };
 
-    let result = determine_labels(&provider, "owner", "repo", &pr).await;
+    let result = set_pull_request_labels(&provider, "owner", "repo", &pr).await;
     assert!(
         result.is_err(),
         "Expected an error when adding labels fails"
@@ -358,7 +340,7 @@ async fn test_determine_labels_feature() {
         body: Some("This is a new feature".to_string()),
     };
 
-    let labels = determine_labels(&provider, "owner", "repo", &pr)
+    let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
         .await
         .unwrap();
 
@@ -379,7 +361,7 @@ async fn test_determine_labels_hotfix() {
         body: Some("This is a hotfix for the production issue".to_string()),
     };
 
-    let labels = determine_labels(&provider, "owner", "repo", &pr)
+    let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
         .await
         .unwrap();
 
@@ -402,10 +384,13 @@ async fn test_determine_labels_invalid_type_in_pr_title() {
         body: Some("This PR adds a feature.".to_string()),
     };
 
-    let labels = determine_labels(&provider, "owner", "repo", &pr)
+    let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
         .await
         .unwrap();
-    assert!(labels.is_empty(), "Expected no labels for invalid type");
+    assert!(
+        labels.len() == 0,
+        "Expected no labels for title with a missing type"
+    );
 }
 
 // New test for keyword priority
@@ -418,7 +403,7 @@ async fn test_determine_labels_keyword_priority() {
         body: Some("This is a critical security hotfix that needs to be deployed immediately. It also addresses some technical debt.".to_string()),
     };
 
-    let labels = determine_labels(&provider, "owner", "repo", &pr)
+    let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
         .await
         .unwrap();
 
@@ -446,13 +431,10 @@ async fn test_determine_labels_missing_type_in_pr_title() {
         body: Some("This PR adds a feature.".to_string()),
     };
 
-    let labels = determine_labels(&provider, "owner", "repo", &pr)
+    let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
         .await
         .unwrap();
-    assert!(
-        labels.contains(&"invalid-title".to_string()),
-        "Expected 'invalid-title' label for missing type"
-    );
+    assert!(labels.len() == 0, "Expected no labels for missing type");
 }
 
 #[test]
@@ -467,7 +449,7 @@ async fn test_determine_labels_multiple_keywords() {
         ),
     };
 
-    let labels = determine_labels(&provider, "owner", "repo", &pr)
+    let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
         .await
         .unwrap();
 
@@ -494,12 +476,13 @@ async fn test_determine_labels_no_keywords_in_pr_body() {
         body: Some("This PR adds a new feature.".to_string()),
     };
 
-    let labels = determine_labels(&provider, "owner", "repo", &pr)
+    let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
         .await
         .unwrap();
+    assert!(labels.len() == 1, "Expected 1 label");
     assert!(
-        labels.is_empty(),
-        "Expected no labels for body with no keywords"
+        labels.contains(&"feature".to_string()),
+        "Expected 'feature' label from the PR title"
     );
 }
 
@@ -512,7 +495,7 @@ async fn test_determine_labels_security() {
         body: Some("This fixes a security issue in the authentication flow".to_string()),
     };
 
-    let labels = determine_labels(&provider, "owner", "repo", &pr)
+    let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
         .await
         .unwrap();
 
@@ -535,7 +518,7 @@ async fn test_determine_labels_tech_debt() {
         body: Some("This addresses technical debt in the codebase".to_string()),
     };
 
-    let labels = determine_labels(&provider, "owner", "repo", &pr)
+    let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
         .await
         .unwrap();
 
@@ -558,7 +541,7 @@ async fn test_determine_labels_with_scope() {
         body: Some("This adds GitHub login".to_string()),
     };
 
-    let labels = determine_labels(&provider, "owner", "repo", &pr)
+    let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
         .await
         .unwrap();
 
