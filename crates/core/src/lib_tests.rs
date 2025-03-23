@@ -16,9 +16,9 @@ use std::{
 use tokio::test;
 
 use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
-use merge_warden_developer_platforms::GitProvider;
+use merge_warden_developer_platforms::PullRequestProvider;
 
-// Mock implementation of GitProvider for testing
+// Mock implementation of PullRequestProvider for testing
 struct ErrorMockGitProvider {
     error_on_get_pr: bool,
     error_on_add_labels: bool,
@@ -60,7 +60,7 @@ impl ErrorMockGitProvider {
 }
 
 #[async_trait]
-impl GitProvider for ErrorMockGitProvider {
+impl PullRequestProvider for ErrorMockGitProvider {
     async fn get_pull_request(
         &self,
         _repo_owner: &str,
@@ -166,7 +166,7 @@ impl GitProvider for ErrorMockGitProvider {
     }
 }
 
-// Mock implementation of GitProvider that returns different PRs based on PR number
+// Mock implementation of PullRequestProvider that returns different PRs based on PR number
 struct DynamicMockGitProvider {
     pull_requests: HashMap<u64, PullRequest>,
     labels: Arc<Mutex<Vec<Label>>>,
@@ -204,7 +204,7 @@ impl DynamicMockGitProvider {
 }
 
 #[async_trait]
-impl GitProvider for DynamicMockGitProvider {
+impl PullRequestProvider for DynamicMockGitProvider {
     async fn get_pull_request(
         &self,
         _repo_owner: &str,
@@ -305,7 +305,7 @@ impl GitProvider for DynamicMockGitProvider {
     }
 }
 
-// Mock implementation of GitProvider for testing
+// Mock implementation of PullRequestProvider for testing
 struct MockGitProvider {
     pull_request: Arc<Mutex<Option<PullRequest>>>,
     labels: Arc<Mutex<Vec<Label>>>,
@@ -344,7 +344,7 @@ impl MockGitProvider {
 }
 
 #[async_trait]
-impl GitProvider for MockGitProvider {
+impl PullRequestProvider for MockGitProvider {
     async fn get_pull_request(
         &self,
         _repo_owner: &str,

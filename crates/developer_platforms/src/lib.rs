@@ -15,7 +15,7 @@ use models::{Comment, Label, PullRequest};
 /// # Example Implementation
 ///
 /// ```rust,no_run
-/// use merge_warden_developer_platforms::{GitProvider, models::{Comment, Label, PullRequest}};
+/// use merge_warden_developer_platforms::{PullRequestProvider, models::{Comment, Label, PullRequest}};
 /// use anyhow::Result;
 /// use async_trait::async_trait;
 ///
@@ -25,7 +25,7 @@ use models::{Comment, Label, PullRequest};
 /// }
 ///
 /// #[async_trait]
-/// impl GitProvider for GitHubProvider {
+/// impl PullRequestProvider for GitHubProvider {
 ///     async fn get_pull_request(
 ///         &self,
 ///         repo_owner: &str,
@@ -48,7 +48,7 @@ use models::{Comment, Label, PullRequest};
 /// }
 /// ```
 #[async_trait]
-pub trait GitProvider {
+pub trait PullRequestProvider {
     /// Retrieves a pull request from the Git provider.
     ///
     /// # Arguments
@@ -229,7 +229,7 @@ pub trait GitProvider {
 // }
 
 // #[async_trait]
-// impl GitProvider for GitHubProvider {
+// impl PullRequestProvider for GitHubProvider {
 //     async fn get_pull_request(
 //         &self,
 //         repo_owner: &str,

@@ -12,7 +12,7 @@
 use crate::config::CONVENTIONAL_COMMIT_REGEX;
 use anyhow::Result;
 use merge_warden_developer_platforms::models::PullRequest;
-use merge_warden_developer_platforms::GitProvider;
+use merge_warden_developer_platforms::PullRequestProvider;
 
 #[cfg(test)]
 #[path = "labels_tests.rs"]
@@ -47,12 +47,12 @@ mod tests;
 /// # Examples
 ///
 /// ```rust,no_run
-/// use merge_warden_developer_platforms::GitProvider;
+/// use merge_warden_developer_platforms::PullRequestProvider;
 /// use merge_warden_developer_platforms::models::PullRequest;
 /// use merge_warden_core::labels::set_pull_request_labels;
 /// use anyhow::Result;
 ///
-/// async fn example<P: GitProvider>(provider: &P) -> Result<()> {
+/// async fn example<P: PullRequestProvider>(provider: &P) -> Result<()> {
 ///     let pr = PullRequest {
 ///         number: 123,
 ///         title: "feat(auth): add GitHub login".to_string(),
@@ -65,7 +65,7 @@ mod tests;
 ///     Ok(())
 /// }
 /// ```
-pub async fn set_pull_request_labels<P: GitProvider>(
+pub async fn set_pull_request_labels<P: PullRequestProvider>(
     provider: &P,
     owner: &str,
     repo: &str,

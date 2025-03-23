@@ -6,9 +6,9 @@ use std::sync::{Arc, Mutex};
 use tokio::test;
 
 use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
-use merge_warden_developer_platforms::GitProvider;
+use merge_warden_developer_platforms::PullRequestProvider;
 
-// Mock implementation of GitProvider for testing
+// Mock implementation of PullRequestProvider for testing
 struct MockGitProvider {
     labels: Arc<Mutex<Vec<Label>>>,
 }
@@ -26,7 +26,7 @@ impl MockGitProvider {
     }
 }
 
-// Mock implementation of GitProvider that returns an error when adding labels
+// Mock implementation of PullRequestProvider that returns an error when adding labels
 struct ErrorMockGitProvider;
 
 impl ErrorMockGitProvider {
@@ -36,7 +36,7 @@ impl ErrorMockGitProvider {
 }
 
 #[async_trait]
-impl GitProvider for MockGitProvider {
+impl PullRequestProvider for MockGitProvider {
     async fn get_pull_request(
         &self,
         _repo_owner: &str,
@@ -122,7 +122,7 @@ impl GitProvider for MockGitProvider {
 }
 
 #[async_trait]
-impl GitProvider for ErrorMockGitProvider {
+impl PullRequestProvider for ErrorMockGitProvider {
     async fn get_pull_request(
         &self,
         _repo_owner: &str,

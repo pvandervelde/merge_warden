@@ -11,11 +11,11 @@
 //! ## Example Usage
 //!
 //! ```rust,no_run
-//! use merge_warden_developer_platforms::GitProvider;
+//! use merge_warden_developer_platforms::PullRequestProvider;
 //! use merge_warden_core::{MergeWarden, config::ValidationConfig};
 //! use anyhow::Result;
 //!
-//! async fn validate_pr<P: GitProvider>(provider: P) -> Result<()> {
+//! async fn validate_pr<P: PullRequestProvider>(provider: P) -> Result<()> {
 //!     // Create a MergeWarden instance with default configuration
 //!     let warden = MergeWarden::new(provider);
 //!
@@ -36,7 +36,7 @@
 //! }
 //!
 //! // With custom configuration
-//! async fn validate_pr_custom<P: GitProvider>(provider: P) -> Result<()> {
+//! async fn validate_pr_custom<P: PullRequestProvider>(provider: P) -> Result<()> {
 //!     // Create a custom configuration
 //!     let config = ValidationConfig {
 //!         enforce_conventional_commits: true,
@@ -62,7 +62,7 @@ pub mod labels;
 use anyhow::Result;
 use async_trait::async_trait;
 use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
-use merge_warden_developer_platforms::GitProvider;
+use merge_warden_developer_platforms::PullRequestProvider;
 
 /// Result of processing a pull request through Merge Warden.
 ///
@@ -89,11 +89,11 @@ use config::ValidationConfig;
 /// # Examples
 ///
 /// ```rust,no_run
-/// use merge_warden_developer_platforms::GitProvider;
+/// use merge_warden_developer_platforms::PullRequestProvider;
 /// use merge_warden_core::MergeWarden;
 /// use anyhow::Result;
 ///
-/// async fn example<P: GitProvider>(provider: P) -> Result<()> {
+/// async fn example<P: PullRequestProvider>(provider: P) -> Result<()> {
 ///     // Create a new MergeWarden instance with default configuration
 ///     let warden = MergeWarden::new(provider);
 ///
@@ -104,7 +104,7 @@ use config::ValidationConfig;
 ///     Ok(())
 /// }
 /// ```
-pub struct MergeWarden<P: GitProvider> {
+pub struct MergeWarden<P: PullRequestProvider> {
     provider: P,
     config: ValidationConfig,
 }
@@ -113,7 +113,7 @@ pub struct MergeWarden<P: GitProvider> {
 #[path = "lib_tests.rs"]
 mod tests;
 
-impl<P: GitProvider> MergeWarden<P> {
+impl<P: PullRequestProvider> MergeWarden<P> {
     /// Checks if the PR title follows the Conventional Commits format.
     ///
     /// This is a wrapper around the `checks::title::check_pr_title` function.
@@ -369,7 +369,7 @@ impl<P: GitProvider> MergeWarden<P> {
     ///
     /// # Arguments
     ///
-    /// * `provider` - An implementation of the `GitProvider` trait
+    /// * `provider` - An implementation of the `PullRequestProvider` trait
     ///
     /// # Returns
     ///
@@ -381,14 +381,14 @@ impl<P: GitProvider> MergeWarden<P> {
     /// use anyhow::Result;
     /// use async_trait::async_trait;
     /// use merge_warden_core::MergeWarden;
-    /// use merge_warden_developer_platforms::GitProvider;
+    /// use merge_warden_developer_platforms::PullRequestProvider;
     ///
     /// use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
     ///
     /// struct MyProvider;
     ///
     /// #[async_trait]
-    /// impl GitProvider for MyProvider {
+    /// impl PullRequestProvider for MyProvider {
     ///     async fn get_pull_request(
     ///         &self,
     ///         repo_owner: &str,
@@ -449,14 +449,14 @@ impl<P: GitProvider> MergeWarden<P> {
     /// use async_trait::async_trait;
     /// use merge_warden_core::MergeWarden;
     /// use anyhow::Result;
-    /// use merge_warden_developer_platforms::GitProvider;
+    /// use merge_warden_developer_platforms::PullRequestProvider;
     ///
     /// use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
     ///
     /// struct MyProvider;
     ///
     /// #[async_trait]
-    /// impl GitProvider for MyProvider {
+    /// impl PullRequestProvider for MyProvider {
     ///     async fn get_pull_request(
     ///         &self,
     ///         repo_owner: &str,
@@ -559,7 +559,7 @@ impl<P: GitProvider> MergeWarden<P> {
     ///
     /// # Arguments
     ///
-    /// * `provider` - An implementation of the `GitProvider` trait
+    /// * `provider` - An implementation of the `PullRequestProvider` trait
     /// * `config` - A custom `ValidationConfig` instance
     ///
     /// # Returns
@@ -572,14 +572,14 @@ impl<P: GitProvider> MergeWarden<P> {
     /// use anyhow::Result;
     /// use async_trait::async_trait;
     /// use merge_warden_core::{MergeWarden, config::ValidationConfig};
-    /// use merge_warden_developer_platforms::GitProvider;
+    /// use merge_warden_developer_platforms::PullRequestProvider;
     ///
     /// use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
     ///
     /// struct MyProvider;
     ///
     /// #[async_trait]
-    /// impl GitProvider for MyProvider {
+    /// impl PullRequestProvider for MyProvider {
     ///     async fn get_pull_request(
     ///         &self,
     ///         repo_owner: &str,
