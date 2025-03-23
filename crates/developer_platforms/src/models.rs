@@ -8,11 +8,6 @@
 
 use serde::{Deserialize, Serialize};
 
-// Constants moved to config.rs
-pub use crate::config::{
-    MISSING_WORK_ITEM_LABEL, TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL, WORK_ITEM_COMMENT_MARKER,
-};
-
 /// Represents a pull request from a Git provider.
 ///
 /// This struct contains the essential information about a pull request
@@ -27,7 +22,7 @@ pub use crate::config::{
 /// # Examples
 ///
 /// ```
-/// use merge_warden_core::models::PullRequest;
+/// use merge_warden_developer_platforms::models::PullRequest;
 ///
 /// let pr = PullRequest {
 ///     number: 123,
@@ -60,7 +55,7 @@ pub struct PullRequest {
 /// # Examples
 ///
 /// ```
-/// use merge_warden_core::models::Comment;
+/// use merge_warden_developer_platforms::models::Comment;
 ///
 /// let comment = Comment {
 ///     id: 456,
@@ -88,7 +83,7 @@ pub struct Comment {
 /// # Examples
 ///
 /// ```
-/// use merge_warden_core::models::Label;
+/// use merge_warden_developer_platforms::models::Label;
 ///
 /// let label = Label {
 ///     name: "bug".to_string(),

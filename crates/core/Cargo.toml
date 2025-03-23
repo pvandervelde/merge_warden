@@ -3,11 +3,12 @@ authors.workspace = true
 description = "Core business logic for Merge Warden PR validation"
 edition = "2021"
 license-file.workspace = true
-name = "merge-warden-core"
+name = "merge_warden_core"
 repository.workspace = true
 version.workspace = true
 
 [dependencies]
+merge_warden_developer_platforms = { path = "../developer_platforms" }
 serde = { workspace = true }
 serde_json = { workspace = true }
 regex = { workspace = true }

@@ -11,7 +11,8 @@
 //! ## Example Usage
 //!
 //! ```rust,no_run
-//! use merge_warden_core::{MergeWarden, GitProvider, config::ValidationConfig};
+//! use merge_warden_developer_platforms::GitProvider;
+//! use merge_warden_core::{MergeWarden, config::ValidationConfig};
 //! use anyhow::Result;
 //!
 //! async fn validate_pr<P: GitProvider>(provider: P) -> Result<()> {
@@ -57,11 +58,11 @@ pub mod checks;
 pub mod config;
 pub mod errors;
 pub mod labels;
-pub mod models;
 
 use anyhow::Result;
 use async_trait::async_trait;
-use models::{Comment, Label, PullRequest};
+use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
+use merge_warden_developer_platforms::GitProvider;
 
 /// Result of processing a pull request through Merge Warden.
 ///
@@ -78,201 +79,6 @@ pub struct CheckResult {
     pub labels: Vec<String>,
 }
 
-/// Trait for interacting with Git hosting providers (e.g., GitHub, GitLab).
-///
-/// Implementations of this trait provide the necessary functionality to
-/// interact with pull requests, comments, labels, and other Git provider features.
-///
-/// # Example Implementation
-///
-/// ```rust,no_run
-/// use merge_warden_core::{GitProvider, models::{Comment, Label, PullRequest}};
-/// use anyhow::Result;
-/// use async_trait::async_trait;
-///
-/// struct GitHubProvider {
-///     // Fields for authentication, etc.
-///     token: String,
-/// }
-///
-/// #[async_trait]
-/// impl GitProvider for GitHubProvider {
-///     async fn get_pull_request(
-///         &self,
-///         repo_owner: &str,
-///         repo_name: &str,
-///         pr_number: u64,
-///     ) -> Result<PullRequest> {
-///         // Implementation to fetch PR from GitHub API
-///         // ...
-///         # unimplemented!()
-///     }
-///
-///     // Implement other required methods...
-///     # async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<()> { unimplemented!() }
-///     # async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<()> { unimplemented!() }
-///     # async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<Comment>> { unimplemented!() }
-///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<()> { unimplemented!() }
-///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<()> { unimplemented!() }
-///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>> { unimplemented!() }
-///     # async fn update_pr_mergeable_state(&self, _: &str, _: &str, _: u64, _: bool) -> Result<()> { unimplemented!() }
-/// }
-/// ```
-#[async_trait]
-pub trait GitProvider {
-    /// Retrieves a pull request from the Git provider.
-    ///
-    /// # Arguments
-    ///
-    /// * `repo_owner` - The owner of the repository
-    /// * `repo_name` - The name of the repository
-    /// * `pr_number` - The pull request number
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing the pull request information
-    async fn get_pull_request(
-        &self,
-        repo_owner: &str,
-        repo_name: &str,
-        pr_number: u64,
-    ) -> Result<PullRequest>;
-
-    /// Adds a comment to a pull request.
-    ///
-    /// # Arguments
-    ///
-    /// * `repo_owner` - The owner of the repository
-    /// * `repo_name` - The name of the repository
-    /// * `pr_number` - The pull request number
-    /// * `comment` - The comment text to add
-    ///
-    /// # Returns
-    ///
-    /// A `Result` indicating success or failure
-    async fn add_comment(
-        &self,
-        repo_owner: &str,
-        repo_name: &str,
-        pr_number: u64,
-        comment: &str,
-    ) -> Result<()>;
-
-    /// Deletes a comment from a pull request.
-    ///
-    /// # Arguments
-    ///
-    /// * `repo_owner` - The owner of the repository
-    /// * `repo_name` - The name of the repository
-    /// * `comment_id` - The ID of the comment to delete
-    ///
-    /// # Returns
-    ///
-    /// A `Result` indicating success or failure
-    async fn delete_comment(
-        &self,
-        repo_owner: &str,
-        repo_name: &str,
-        comment_id: u64,
-    ) -> Result<()>;
-
-    /// Lists all comments on a pull request.
-    ///
-    /// # Arguments
-    ///
-    /// * `repo_owner` - The owner of the repository
-    /// * `repo_name` - The name of the repository
-    /// * `pr_number` - The pull request number
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing a vector of comments
-    async fn list_comments(
-        &self,
-        repo_owner: &str,
-        repo_name: &str,
-        pr_number: u64,
-    ) -> Result<Vec<Comment>>;
-
-    /// Adds labels to a pull request.
-    ///
-    /// # Arguments
-    ///
-    /// * `repo_owner` - The owner of the repository
-    /// * `repo_name` - The name of the repository
-    /// * `pr_number` - The pull request number
-    /// * `labels` - The labels to add
-    ///
-    /// # Returns
-    ///
-    /// A `Result` indicating success or failure
-    async fn add_labels(
-        &self,
-        repo_owner: &str,
-        repo_name: &str,
-        pr_number: u64,
-        labels: &[String],
-    ) -> Result<()>;
-
-    /// Removes a label from a pull request.
-    ///
-    /// # Arguments
-    ///
-    /// * `repo_owner` - The owner of the repository
-    /// * `repo_name` - The name of the repository
-    /// * `pr_number` - The pull request number
-    /// * `label` - The label to remove
-    ///
-    /// # Returns
-    ///
-    /// A `Result` indicating success or failure
-    async fn remove_label(
-        &self,
-        repo_owner: &str,
-        repo_name: &str,
-        pr_number: u64,
-        label: &str,
-    ) -> Result<()>;
-
-    /// Lists all labels on a pull request.
-    ///
-    /// # Arguments
-    ///
-    /// * `repo_owner` - The owner of the repository
-    /// * `repo_name` - The name of the repository
-    /// * `pr_number` - The pull request number
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing a vector of labels
-    async fn list_labels(
-        &self,
-        repo_owner: &str,
-        repo_name: &str,
-        pr_number: u64,
-    ) -> Result<Vec<Label>>;
-
-    /// Updates the mergeable state of a pull request.
-    ///
-    /// # Arguments
-    ///
-    /// * `repo_owner` - The owner of the repository
-    /// * `repo_name` - The name of the repository
-    /// * `pr_number` - The pull request number
-    /// * `mergeable` - Whether the PR should be mergeable
-    ///
-    /// # Returns
-    ///
-    /// A `Result` indicating success or failure
-    async fn update_pr_mergeable_state(
-        &self,
-        repo_owner: &str,
-        repo_name: &str,
-        pr_number: u64,
-        mergeable: bool,
-    ) -> Result<()>;
-}
-
 use config::ValidationConfig;
 
 /// Main struct for validating and managing pull requests.
@@ -283,7 +89,8 @@ use config::ValidationConfig;
 /// # Examples
 ///
 /// ```rust,no_run
-/// use merge_warden_core::{MergeWarden, GitProvider};
+/// use merge_warden_developer_platforms::GitProvider;
+/// use merge_warden_core::MergeWarden;
 /// use anyhow::Result;
 ///
 /// async fn example<P: GitProvider>(provider: P) -> Result<()> {
@@ -360,7 +167,7 @@ impl<P: GitProvider> MergeWarden<P> {
         pr: &PullRequest,
         is_valid_title: bool,
     ) -> Result<()> {
-        use models::{TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL};
+        use config::{TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL};
 
         // Skip if conventional commits are not enforced
         if !self.config.enforce_conventional_commits {
@@ -455,7 +262,7 @@ impl<P: GitProvider> MergeWarden<P> {
         pr: &PullRequest,
         has_work_item: bool,
     ) -> Result<()> {
-        use models::{MISSING_WORK_ITEM_LABEL, WORK_ITEM_COMMENT_MARKER};
+        use config::{MISSING_WORK_ITEM_LABEL, WORK_ITEM_COMMENT_MARKER};
 
         // Skip if work item references are not required
         if !self.config.require_work_item_references {
@@ -574,9 +381,9 @@ impl<P: GitProvider> MergeWarden<P> {
     /// use anyhow::Result;
     /// use async_trait::async_trait;
     /// use merge_warden_core::MergeWarden;
-    /// use merge_warden_core::GitProvider;
+    /// use merge_warden_developer_platforms::GitProvider;
     ///
-    /// use merge_warden_core::models::{Comment, Label, PullRequest};
+    /// use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
     ///
     /// struct MyProvider;
     ///
@@ -600,7 +407,7 @@ impl<P: GitProvider> MergeWarden<P> {
     ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<()> { unimplemented!() }
     ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<()> { unimplemented!() }
     ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>> { unimplemented!() }
-    ///     # async fn update_pr_mergeable_state(&self, _: &str, _: &str, _: u64, _: bool) -> Result<()> { unimplemented!() }
+    ///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: bool) -> Result<()> { unimplemented!() }
     /// }
     ///
     /// fn example() {
@@ -642,9 +449,9 @@ impl<P: GitProvider> MergeWarden<P> {
     /// use async_trait::async_trait;
     /// use merge_warden_core::MergeWarden;
     /// use anyhow::Result;
-    /// use merge_warden_core::GitProvider;
+    /// use merge_warden_developer_platforms::GitProvider;
     ///
-    /// use merge_warden_core::models::{Comment, Label, PullRequest};
+    /// use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
     ///
     /// struct MyProvider;
     ///
@@ -668,7 +475,7 @@ impl<P: GitProvider> MergeWarden<P> {
     ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<()> { unimplemented!() }
     ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<()> { unimplemented!() }
     ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>> { unimplemented!() }
-    ///     # async fn update_pr_mergeable_state(&self, _: &str, _: &str, _: u64, _: bool) -> Result<()> { unimplemented!() }
+    ///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: bool) -> Result<()> { unimplemented!() }
     /// }
     ///
     /// async fn example() -> Result<()> {
@@ -733,11 +540,11 @@ impl<P: GitProvider> MergeWarden<P> {
         // Update PR mergeability
         if is_title_valid && is_work_item_referenced {
             self.provider
-                .update_pr_mergeable_state(repo_owner, repo_name, pr_number, true)
+                .update_pr_blocking_review(repo_owner, repo_name, pr_number, true)
                 .await?;
         } else {
             self.provider
-                .update_pr_mergeable_state(repo_owner, repo_name, pr_number, false)
+                .update_pr_blocking_review(repo_owner, repo_name, pr_number, false)
                 .await?;
         }
 
@@ -765,9 +572,9 @@ impl<P: GitProvider> MergeWarden<P> {
     /// use anyhow::Result;
     /// use async_trait::async_trait;
     /// use merge_warden_core::{MergeWarden, config::ValidationConfig};
-    /// use merge_warden_core::GitProvider;
+    /// use merge_warden_developer_platforms::GitProvider;
     ///
-    /// use merge_warden_core::models::{Comment, Label, PullRequest};
+    /// use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
     ///
     /// struct MyProvider;
     ///
@@ -791,7 +598,7 @@ impl<P: GitProvider> MergeWarden<P> {
     ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<()> { unimplemented!() }
     ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<()> { unimplemented!() }
     ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>> { unimplemented!() }
-    ///     # async fn update_pr_mergeable_state(&self, _: &str, _: &str, _: u64, _: bool) -> Result<()> { unimplemented!() }
+    ///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: bool) -> Result<()> { unimplemented!() }
     /// }
     ///
     /// fn example() {

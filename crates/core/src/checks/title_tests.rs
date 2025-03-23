@@ -1,4 +1,5 @@
-use crate::{checks::title::check_pr_title, models::PullRequest};
+use merge_warden_developer_platforms::models::PullRequest;
+use crate::checks::title::check_pr_title;
 use anyhow::Result;
 
 #[test]

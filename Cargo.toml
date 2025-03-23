@@ -2,7 +2,7 @@
 resolver = "2"
 members = [
     "crates/core",
-    #"crates/github",
+    "crates/developer_platforms",
     #"crates/aws-lambda",
     #"crates/azure-functions",
     #"crates/cli"

@@ -7,8 +7,9 @@
 //! messages. It provides an easy set of rules for creating an explicit commit history,
 //! which makes it easier to write automated tools on top of.
 
-use crate::{config::CONVENTIONAL_COMMIT_REGEX, models::PullRequest};
+use crate::config::CONVENTIONAL_COMMIT_REGEX;
 use anyhow::Result;
+use merge_warden_developer_platforms::models::PullRequest;
 
 #[cfg(test)]
 #[path = "title_tests.rs"]
@@ -43,7 +44,8 @@ mod tests;
 /// # Examples
 ///
 /// ```
-/// use merge_warden_core::{models::PullRequest, checks::title::check_pr_title};
+/// use merge_warden_developer_platforms::models::PullRequest;
+/// use merge_warden_core::checks::title::check_pr_title;
 ///
 /// let pr = PullRequest {
 ///     number: 123,

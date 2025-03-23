@@ -1,0 +1,19 @@
+[package]
+authors.workspace = true
+description = "APIs for interacting with developer platforms"
+edition = "2021"
+license-file.workspace = true
+name = "merge_warden_developer_platforms"
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+octocrab = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tokio = { workspace = true }
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+async-trait = { workspace = true }
+tracing = { workspace = true }
+jsonwebtoken = { workspace = true }

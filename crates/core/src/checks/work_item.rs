@@ -7,7 +7,8 @@
 //! code changes to the issues or tasks they address. This helps with project management,
 //! release notes generation, and understanding the purpose of changes.
 
-use crate::{config::WORK_ITEM_REGEX, models::PullRequest};
+use merge_warden_developer_platforms::models::PullRequest;
+use crate::config::WORK_ITEM_REGEX;
 use anyhow::Result;
 
 #[cfg(test)]
@@ -45,7 +46,8 @@ mod tests;
 /// # Examples
 ///
 /// ```
-/// use merge_warden_core::{models::PullRequest, checks::work_item::check_work_item_reference};
+/// use merge_warden_developer_platforms::models::PullRequest;
+/// use merge_warden_core::checks::work_item::check_work_item_reference;
 ///
 /// // PR with a work item reference
 /// let pr_with_reference = PullRequest {

@@ -1,13 +1,12 @@
 use super::*;
-use crate::{
-    labels::set_pull_request_labels,
-    models::{Comment, Label, PullRequest},
-    GitProvider,
-};
+use crate::labels::set_pull_request_labels;
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use std::sync::{Arc, Mutex};
 use tokio::test;
+
+use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
+use merge_warden_developer_platforms::GitProvider;
 
 // Mock implementation of GitProvider for testing
 struct MockGitProvider {
@@ -111,7 +110,7 @@ impl GitProvider for MockGitProvider {
         Ok(labels.clone())
     }
 
-    async fn update_pr_mergeable_state(
+    async fn update_pr_blocking_review(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
@@ -190,7 +189,7 @@ impl GitProvider for ErrorMockGitProvider {
         Ok(Vec::new())
     }
 
-    async fn update_pr_mergeable_state(
+    async fn update_pr_blocking_review(
         &self,
         _repo_owner: &str,
         _repo_name: &str,

@@ -1,11 +1,11 @@
 use super::*;
 use crate::{
     config::ValidationConfig,
-    models::{
-        Comment, Label, PullRequest, MISSING_WORK_ITEM_LABEL, TITLE_COMMENT_MARKER,
-        TITLE_INVALID_LABEL, WORK_ITEM_COMMENT_MARKER,
+    config::{
+        MISSING_WORK_ITEM_LABEL, TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL,
+        WORK_ITEM_COMMENT_MARKER,
     },
-    CheckResult, GitProvider, MergeWarden,
+    CheckResult, MergeWarden,
 };
 use anyhow::{anyhow, Result};
 use async_trait::async_trait;
@@ -14,6 +14,9 @@ use std::{
     sync::{Arc, Mutex},
 };
 use tokio::test;
+
+use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
+use merge_warden_developer_platforms::GitProvider;
 
 // Mock implementation of GitProvider for testing
 struct ErrorMockGitProvider {
@@ -152,7 +155,7 @@ impl GitProvider for ErrorMockGitProvider {
         Ok(Vec::new())
     }
 
-    async fn update_pr_mergeable_state(
+    async fn update_pr_blocking_review(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
@@ -289,7 +292,7 @@ impl GitProvider for DynamicMockGitProvider {
         Ok(labels.clone())
     }
 
-    async fn update_pr_mergeable_state(
+    async fn update_pr_blocking_review(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
@@ -430,7 +433,7 @@ impl GitProvider for MockGitProvider {
         Ok(labels.clone())
     }
 
-    async fn update_pr_mergeable_state(
+    async fn update_pr_blocking_review(
         &self,
         _repo_owner: &str,
         _repo_name: &str,

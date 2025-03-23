@@ -1,5 +1,6 @@
-use crate::{checks::work_item::check_work_item_reference, models::PullRequest};
+use crate::checks::work_item::check_work_item_reference;
 use anyhow::Result;
+use merge_warden_developer_platforms::models::PullRequest;
 
 #[test]
 fn test_empty_body() {

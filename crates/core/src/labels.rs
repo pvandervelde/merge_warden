@@ -9,8 +9,10 @@
 //! - Breaking change indicators
 //! - Special labels based on PR description keywords
 
-use crate::{config::CONVENTIONAL_COMMIT_REGEX, models::PullRequest, GitProvider};
+use crate::config::CONVENTIONAL_COMMIT_REGEX;
 use anyhow::Result;
+use merge_warden_developer_platforms::models::PullRequest;
+use merge_warden_developer_platforms::GitProvider;
 
 #[cfg(test)]
 #[path = "labels_tests.rs"]
@@ -45,7 +47,9 @@ mod tests;
 /// # Examples
 ///
 /// ```rust,no_run
-/// use merge_warden_core::{GitProvider, models::PullRequest, labels::set_pull_request_labels};
+/// use merge_warden_developer_platforms::GitProvider;
+/// use merge_warden_developer_platforms::models::PullRequest;
+/// use merge_warden_core::labels::set_pull_request_labels;
 /// use anyhow::Result;
 ///
 /// async fn example<P: GitProvider>(provider: &P) -> Result<()> {
