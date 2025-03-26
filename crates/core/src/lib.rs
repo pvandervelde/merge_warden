@@ -60,8 +60,8 @@ pub mod errors;
 pub mod labels;
 
 use anyhow::Result;
-use async_trait::async_trait;
-use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
+use indoc::formatdoc;
+use merge_warden_developer_platforms::models::PullRequest;
 use merge_warden_developer_platforms::PullRequestProvider;
 
 /// Result of processing a pull request through Merge Warden.
@@ -365,6 +365,73 @@ impl<P: PullRequestProvider> MergeWarden<P> {
         labels::set_pull_request_labels(&self.provider, repo_owner, repo_name, pr).await
     }
 
+    /// Generates a review message based on the validation status of PR title and body
+    fn generate_review_message(&self, title_valid: bool, body_valid: bool) -> String {
+        match (title_valid, body_valid) {
+            // Both are incorrect
+            (false, false) => formatdoc!(
+                "The pull request needs some improvements:
+
+    1. Title Convention: Your PR title does not follow the conventional commit message format.
+    - Supported types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
+    - Expected format: <type>(<optional scope>): <description>
+    - Examples:
+        * feat(auth): add login functionality
+        * fix: resolve null pointer exception
+    - For full details, see: https://www.conventionalcommits.org/
+
+    2. Work Item Tracking: The PR body is missing a valid work item reference.
+    - Supported formats:
+        * Prefixes: fixes, closes, resolves, references, relates to
+        * Work Item Identifiers: #XXX or GH-XXX
+    - Examples:
+        * fixes #1234
+        * closes GH-5678
+        * resolves #9012
+        * references GH-3456
+        * relates to #7890
+
+    Please update both the title and body to meet these requirements."
+            ),
+
+            // Title is incorrect, body is valid
+            (false, true) => formatdoc!(
+                "The pull request title needs correction:
+
+    1. Title Convention: Your PR title does not follow the conventional commit message format.
+    - Supported types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
+    - Expected format: <type>(<optional scope>): <description>
+    - Examples:
+        * feat(auth): add login functionality
+        * fix: resolve null pointer exception
+    - For full details, see: https://www.conventionalcommits.org/
+
+    Please update the PR title to match the conventional commit message guidelines."
+            ),
+
+            // Title is valid, body is incorrect
+            (true, false) => formatdoc!(
+                "The pull request body needs improvement:
+
+    1. Work Item Tracking: The PR body is missing a valid work item reference.
+    - Supported formats:
+        * Prefixes: fixes, closes, resolves, references, relates to
+        * Work Item Identifiers: #XXX or GH-XXX
+    - Examples:
+        * fixes #1234
+        * closes GH-5678
+        * resolves #9012
+        * references GH-3456
+        * relates to #7890
+
+    Please update the PR body to include a valid work item reference."
+            ),
+
+            // Both are correct (this will return None, effectively removing the review)
+            (true, true) => String::new(),
+        }
+    }
+
     /// Creates a new `MergeWarden` instance with default configuration.
     ///
     /// # Arguments
@@ -538,15 +605,16 @@ impl<P: PullRequestProvider> MergeWarden<P> {
         let labels = self.determine_labels(repo_owner, repo_name, &pr).await?;
 
         // Update PR mergeability
-        if is_title_valid && is_work_item_referenced {
-            self.provider
-                .update_pr_blocking_review(repo_owner, repo_name, pr_number, true)
-                .await?;
-        } else {
-            self.provider
-                .update_pr_blocking_review(repo_owner, repo_name, pr_number, false)
-                .await?;
-        }
+        let review_message = self.generate_review_message(is_title_valid, is_work_item_referenced);
+        self.provider
+            .update_pr_blocking_review(
+                repo_owner,
+                repo_name,
+                pr_number,
+                review_message.as_str(),
+                is_title_valid && is_work_item_referenced,
+            )
+            .await?;
 
         Ok(CheckResult {
             title_valid: is_title_valid,
