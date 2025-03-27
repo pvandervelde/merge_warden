@@ -211,7 +211,6 @@ impl RateLimiter {
 1. **Architecture**:
    - Keep platform-agnostic (no cloud-specific code)
    - Async/await for all I/O operations
-   - Generic GitProvider trait for multi-platform support
 
 2. **Error Handling**:
 

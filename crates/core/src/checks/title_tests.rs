@@ -1,5 +1,5 @@
-use crate::{checks::title::check_pr_title, models::PullRequest};
-use anyhow::Result;
+use crate::checks::title::check_pr_title;
+use merge_warden_developer_platforms::models::PullRequest;
 
 #[test]
 fn test_empty_title() {
@@ -9,7 +9,7 @@ fn test_empty_title() {
         body: Some("Test body".to_string()),
     };
 
-    let result = check_pr_title(&pr).unwrap();
+    let result = check_pr_title(&pr);
     assert!(!result, "Empty title should be invalid");
 }
 
@@ -28,7 +28,7 @@ fn test_invalid_prefixes() {
             body: Some("Test body".to_string()),
         };
 
-        let result = check_pr_title(&pr).unwrap();
+        let result = check_pr_title(&pr);
         assert!(!result, "Title '{}' should be invalid", title);
     }
 }
@@ -49,7 +49,7 @@ fn test_invalid_separators() {
             body: Some("Test body".to_string()),
         };
 
-        let result = check_pr_title(&pr).unwrap();
+        let result = check_pr_title(&pr);
         assert!(!result, "Title '{}' should be invalid", title);
     }
 }
@@ -77,7 +77,7 @@ fn test_invalid_title_formats() {
             body: Some("Test body".to_string()),
         };
 
-        let result = check_pr_title(&pr).unwrap();
+        let result = check_pr_title(&pr);
         assert!(!result, "Title '{}' should be invalid", title);
     }
 }
@@ -90,7 +90,7 @@ fn test_missing_prefix() {
         body: Some("Test body".to_string()),
     };
 
-    let result = check_pr_title(&pr).unwrap();
+    let result = check_pr_title(&pr);
     assert!(!result, "Title with missing prefix should be invalid");
 }
 
@@ -110,7 +110,7 @@ fn test_multiple_scopes() {
             body: Some("Test body".to_string()),
         };
 
-        let result = check_pr_title(&pr).unwrap();
+        let result = check_pr_title(&pr);
         assert!(
             !result,
             "Title '{}' with multiple scopes is not a valid scope",
@@ -135,7 +135,7 @@ fn test_scope_with_special_characters() {
             body: Some("Test body".to_string()),
         };
 
-        let result = check_pr_title(&pr).unwrap();
+        let result = check_pr_title(&pr);
         assert!(
             result,
             "Title '{}' with special characters in scope should be valid",
@@ -152,7 +152,7 @@ fn test_special_characters_in_title() {
         body: Some("Test body".to_string()),
     };
 
-    let result = check_pr_title(&pr).unwrap();
+    let result = check_pr_title(&pr);
     assert!(result, "Title with special characters should be valid");
 }
 
@@ -165,7 +165,7 @@ fn test_title_correction() {
         body: Some("Test body".to_string()),
     };
 
-    let result = check_pr_title(&pr).unwrap();
+    let result = check_pr_title(&pr);
     assert!(!result, "Title should be invalid");
 
     // Now update with valid title
@@ -175,7 +175,7 @@ fn test_title_correction() {
         body: Some("Test body".to_string()),
     };
 
-    let result = check_pr_title(&updated_pr).unwrap();
+    let result = check_pr_title(&updated_pr);
     assert!(result, "Updated title should be valid");
 }
 
@@ -196,7 +196,7 @@ fn test_title_with_breaking_change_indicators() {
             body: Some("Test body".to_string()),
         };
 
-        let result = check_pr_title(&pr).unwrap();
+        let result = check_pr_title(&pr);
         assert!(
             result,
             "Title '{}' with breaking change indicator should be valid",
@@ -231,7 +231,7 @@ fn test_valid_title_formats() {
             body: Some("Test body".to_string()),
         };
 
-        let result = check_pr_title(&pr).unwrap();
+        let result = check_pr_title(&pr);
         assert!(result, "Title '{}' should be valid", title);
     }
 }
@@ -245,6 +245,6 @@ fn test_very_long_title() {
         body: Some("Test body".to_string()),
     };
 
-    let result = check_pr_title(&pr).unwrap();
+    let result = check_pr_title(&pr);
     assert!(result, "Very long title should be valid");
 }

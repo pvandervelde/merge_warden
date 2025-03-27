@@ -1,5 +1,5 @@
-use crate::{checks::work_item::check_work_item_reference, models::PullRequest};
-use anyhow::Result;
+use crate::checks::work_item::check_work_item_reference;
+use merge_warden_developer_platforms::models::PullRequest;
 
 #[test]
 fn test_empty_body() {
@@ -9,7 +9,7 @@ fn test_empty_body() {
         body: None,
     };
 
-    let result = check_work_item_reference(&pr).unwrap();
+    let result = check_work_item_reference(&pr);
     assert!(!result, "PR with no body should be invalid");
 }
 
@@ -33,7 +33,7 @@ fn test_alternative_keywords() {
             body: Some(reference.to_string()),
         };
 
-        let result = check_work_item_reference(&pr).unwrap();
+        let result = check_work_item_reference(&pr);
         // The current regex might not support all these keywords, so we check the actual behavior
         // If it passes, great! If not, we document the current behavior
         if result {
@@ -70,7 +70,7 @@ fn test_case_sensitivity() {
             body: Some(reference.to_string()),
         };
 
-        let result = check_work_item_reference(&pr).unwrap();
+        let result = check_work_item_reference(&pr);
         assert!(
             result,
             "Reference '{}' should be valid regardless of case",
@@ -99,7 +99,7 @@ fn test_different_issue_formats() {
             body: Some(reference.to_string()),
         };
 
-        let result = check_work_item_reference(&pr).unwrap();
+        let result = check_work_item_reference(&pr);
         // The current regex might not support all these formats, so we check the actual behavior
         if result {
             assert!(result, "Reference '{}' should be valid", reference);
@@ -133,7 +133,7 @@ fn test_invalid_work_item_references() {
             body: Some(reference.to_string()),
         };
 
-        let result = check_work_item_reference(&pr).unwrap();
+        let result = check_work_item_reference(&pr);
         assert!(!result, "Reference '{}' should be invalid", reference);
     }
 }
@@ -154,7 +154,7 @@ fn test_malformed_references() {
             body: Some(reference.to_string()),
         };
 
-        let result = check_work_item_reference(&pr).unwrap();
+        let result = check_work_item_reference(&pr);
         assert!(
             !result,
             "Malformed reference '{}' should be invalid",
@@ -171,7 +171,7 @@ fn test_mixed_valid_and_invalid_references() {
         body: Some("Fixes #123\nInvalid reference\nCloses #456".to_string()),
     };
 
-    let result = check_work_item_reference(&pr).unwrap();
+    let result = check_work_item_reference(&pr);
     assert!(
         result,
         "PR with mixed valid and invalid references should be valid"
@@ -186,7 +186,7 @@ fn test_multiple_valid_work_item_references() {
         body: Some("Fixes #123\nCloses #456\nResolves #789".to_string()),
     };
 
-    let result = check_work_item_reference(&pr).unwrap();
+    let result = check_work_item_reference(&pr);
     assert!(result, "PR with multiple valid references should be valid");
 }
 
@@ -208,7 +208,7 @@ fn test_position_in_body() {
             body: Some(body.to_string()),
         };
 
-        let result = check_work_item_reference(&pr).unwrap();
+        let result = check_work_item_reference(&pr);
         assert!(result, "Reference at position '{}' should be valid", body);
     }
 }
@@ -237,7 +237,7 @@ fn test_valid_work_item_references() {
             body: Some(reference.to_string()),
         };
 
-        let result = check_work_item_reference(&pr).unwrap();
+        let result = check_work_item_reference(&pr);
         assert!(result, "Reference '{}' should be valid", reference);
     }
 }
@@ -251,7 +251,7 @@ fn test_very_long_body() {
         body: Some(long_body),
     };
 
-    let result = check_work_item_reference(&pr).unwrap();
+    let result = check_work_item_reference(&pr);
     assert!(
         result,
         "PR with very long body containing valid references should be valid"
@@ -266,7 +266,7 @@ fn test_work_item_correction() {
         body: Some("No reference here".to_string()),
     };
 
-    let result = check_work_item_reference(&pr).unwrap();
+    let result = check_work_item_reference(&pr);
     assert!(!result, "PR with no work item reference should be invalid");
 
     let updated_pr = PullRequest {
@@ -275,7 +275,7 @@ fn test_work_item_correction() {
         body: Some("Fixes #123".to_string()),
     };
 
-    let result = check_work_item_reference(&updated_pr).unwrap();
+    let result = check_work_item_reference(&updated_pr);
     assert!(
         result,
         "Updated PR with work item reference should be valid"

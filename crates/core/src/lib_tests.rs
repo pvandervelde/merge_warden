@@ -1,13 +1,12 @@
 use super::*;
 use crate::{
     config::ValidationConfig,
-    models::{
-        Comment, Label, PullRequest, MISSING_WORK_ITEM_LABEL, TITLE_COMMENT_MARKER,
-        TITLE_INVALID_LABEL, WORK_ITEM_COMMENT_MARKER,
+    config::{
+        MISSING_WORK_ITEM_LABEL, TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL,
+        WORK_ITEM_COMMENT_MARKER,
     },
-    CheckResult, GitProvider, MergeWarden,
+    CheckResult, MergeWarden,
 };
-use anyhow::{anyhow, Result};
 use async_trait::async_trait;
 use std::{
     collections::HashMap,
@@ -15,7 +14,11 @@ use std::{
 };
 use tokio::test;
 
-// Mock implementation of GitProvider for testing
+use merge_warden_developer_platforms::errors::Error;
+use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
+use merge_warden_developer_platforms::PullRequestProvider;
+
+// Mock implementation of PullRequestProvider for testing
 struct ErrorMockGitProvider {
     error_on_get_pr: bool,
     error_on_add_labels: bool,
@@ -57,15 +60,15 @@ impl ErrorMockGitProvider {
 }
 
 #[async_trait]
-impl GitProvider for ErrorMockGitProvider {
+impl PullRequestProvider for ErrorMockGitProvider {
     async fn get_pull_request(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-    ) -> Result<PullRequest> {
+    ) -> Result<PullRequest, Error> {
         if self.error_on_get_pr {
-            Err(anyhow!("Failed to get pull request"))
+            Err(Error::ApiError())
         } else {
             let title = if self.invalid_pr_title {
                 "test"
@@ -93,9 +96,11 @@ impl GitProvider for ErrorMockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
         _comment: &str,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         if self.error_on_add_comment {
-            Err(anyhow!("Failed to add comment"))
+            Err(Error::FailedToUpdatePullRequest(
+                "Failed to add comment".to_string(),
+            ))
         } else {
             Ok(())
         }
@@ -106,7 +111,7 @@ impl GitProvider for ErrorMockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         _comment_id: u64,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         Ok(())
     }
 
@@ -115,7 +120,7 @@ impl GitProvider for ErrorMockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-    ) -> Result<Vec<Comment>> {
+    ) -> Result<Vec<Comment>, Error> {
         Ok(Vec::new())
     }
 
@@ -125,9 +130,11 @@ impl GitProvider for ErrorMockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
         _labels: &[String],
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         if self.error_on_add_labels {
-            Err(anyhow!("Failed to add labels"))
+            Err(Error::FailedToUpdatePullRequest(
+                "Failed to add labels".to_string(),
+            ))
         } else {
             Ok(())
         }
@@ -139,7 +146,7 @@ impl GitProvider for ErrorMockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
         _label: &str,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         Ok(())
     }
 
@@ -148,22 +155,23 @@ impl GitProvider for ErrorMockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-    ) -> Result<Vec<Label>> {
+    ) -> Result<Vec<Label>, Error> {
         Ok(Vec::new())
     }
 
-    async fn update_pr_mergeable_state(
+    async fn update_pr_blocking_review(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-        _mergeable: bool,
-    ) -> Result<()> {
+        _message: &str,
+        _is_approved: bool,
+    ) -> Result<(), Error> {
         Ok(())
     }
 }
 
-// Mock implementation of GitProvider that returns different PRs based on PR number
+// Mock implementation of PullRequestProvider that returns different PRs based on PR number
 struct DynamicMockGitProvider {
     pull_requests: HashMap<u64, PullRequest>,
     labels: Arc<Mutex<Vec<Label>>>,
@@ -201,16 +209,16 @@ impl DynamicMockGitProvider {
 }
 
 #[async_trait]
-impl GitProvider for DynamicMockGitProvider {
+impl PullRequestProvider for DynamicMockGitProvider {
     async fn get_pull_request(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
         pr_number: u64,
-    ) -> Result<PullRequest> {
+    ) -> Result<PullRequest, Error> {
         match self.pull_requests.get(&pr_number) {
             Some(pr) => Ok(pr.clone()),
-            None => Err(anyhow!("Pull request not found")),
+            None => Err(Error::InvalidResponse),
         }
     }
 
@@ -220,7 +228,7 @@ impl GitProvider for DynamicMockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
         comment: &str,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         let mut comments = self.comments.lock().unwrap();
         let number_of_comments = comments.len() as u64;
         comments.push(Comment {
@@ -235,7 +243,7 @@ impl GitProvider for DynamicMockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         comment_id: u64,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         let mut comments = self.comments.lock().unwrap();
         comments.retain(|c| c.id != comment_id);
         Ok(())
@@ -246,7 +254,7 @@ impl GitProvider for DynamicMockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-    ) -> Result<Vec<Comment>> {
+    ) -> Result<Vec<Comment>, Error> {
         let comments = self.comments.lock().unwrap();
         Ok(comments.clone())
     }
@@ -257,7 +265,7 @@ impl GitProvider for DynamicMockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
         labels: &[String],
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         let mut current_labels = self.labels.lock().unwrap();
         for label in labels {
             current_labels.push(Label {
@@ -273,7 +281,7 @@ impl GitProvider for DynamicMockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
         label: &str,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         let mut current_labels = self.labels.lock().unwrap();
         current_labels.retain(|l| l.name != label);
         Ok(())
@@ -284,30 +292,32 @@ impl GitProvider for DynamicMockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-    ) -> Result<Vec<Label>> {
+    ) -> Result<Vec<Label>, Error> {
         let labels = self.labels.lock().unwrap();
         Ok(labels.clone())
     }
 
-    async fn update_pr_mergeable_state(
+    async fn update_pr_blocking_review(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-        mergeable: bool,
-    ) -> Result<()> {
+        _message: &str,
+        is_approved: bool,
+    ) -> Result<(), Error> {
         let mut pr_mergeable = self.pr_mergeable.lock().unwrap();
-        *pr_mergeable = mergeable;
+        *pr_mergeable = is_approved;
         Ok(())
     }
 }
 
-// Mock implementation of GitProvider for testing
+// Mock implementation of PullRequestProvider for testing
 struct MockGitProvider {
     pull_request: Arc<Mutex<Option<PullRequest>>>,
     labels: Arc<Mutex<Vec<Label>>>,
     comments: Arc<Mutex<Vec<Comment>>>,
     pr_mergeable: Arc<Mutex<bool>>,
+    last_review_message: Arc<Mutex<String>>,
 }
 
 impl MockGitProvider {
@@ -317,6 +327,7 @@ impl MockGitProvider {
             labels: Arc::new(Mutex::new(Vec::new())),
             comments: Arc::new(Mutex::new(Vec::new())),
             pr_mergeable: Arc::new(Mutex::new(true)),
+            last_review_message: Arc::new(Mutex::new(String::new())),
         }
     }
 
@@ -338,16 +349,21 @@ impl MockGitProvider {
     fn is_mergeable(&self) -> bool {
         *self.pr_mergeable.lock().unwrap()
     }
+
+    fn get_last_review_message(&self) -> String {
+        let message = self.last_review_message.lock().unwrap().clone();
+        message
+    }
 }
 
 #[async_trait]
-impl GitProvider for MockGitProvider {
+impl PullRequestProvider for MockGitProvider {
     async fn get_pull_request(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-    ) -> Result<PullRequest> {
+    ) -> Result<PullRequest, Error> {
         let pull_request = self.pull_request.lock().unwrap();
         match &*pull_request {
             Some(pr) => Ok(pr.clone()),
@@ -361,7 +377,7 @@ impl GitProvider for MockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
         comment: &str,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         let mut comments = self.comments.lock().unwrap();
         let number_of_comments = comments.len() as u64;
         comments.push(Comment {
@@ -376,7 +392,7 @@ impl GitProvider for MockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         comment_id: u64,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         let mut comments = self.comments.lock().unwrap();
         comments.retain(|c| c.id != comment_id);
         Ok(())
@@ -387,7 +403,7 @@ impl GitProvider for MockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-    ) -> Result<Vec<Comment>> {
+    ) -> Result<Vec<Comment>, Error> {
         let comments = self.comments.lock().unwrap();
         Ok(comments.clone())
     }
@@ -398,7 +414,7 @@ impl GitProvider for MockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
         labels: &[String],
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         let mut current_labels = self.labels.lock().unwrap();
         for label in labels {
             current_labels.push(Label {
@@ -414,7 +430,7 @@ impl GitProvider for MockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
         label: &str,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         let mut current_labels = self.labels.lock().unwrap();
         current_labels.retain(|l| l.name != label);
         Ok(())
@@ -425,20 +441,26 @@ impl GitProvider for MockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-    ) -> Result<Vec<Label>> {
+    ) -> Result<Vec<Label>, Error> {
         let labels = self.labels.lock().unwrap();
         Ok(labels.clone())
     }
 
-    async fn update_pr_mergeable_state(
+    async fn update_pr_blocking_review(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-        mergeable: bool,
-    ) -> Result<()> {
+        message: &str,
+        is_approved: bool,
+    ) -> Result<(), Error> {
         let mut pr_mergeable = self.pr_mergeable.lock().unwrap();
-        *pr_mergeable = mergeable;
+        *pr_mergeable = is_approved;
+
+        // Store the review message for testing
+        let mut last_message = self.last_review_message.lock().unwrap();
+        *last_message = message.to_string();
+
         Ok(())
     }
 }
@@ -605,6 +627,13 @@ async fn test_process_pull_request_invalid_title() {
             .any(|c| c.body.contains(TITLE_COMMENT_MARKER)),
         "Title comment should be added"
     );
+
+    // Verify the review message contains title validation guidance
+    let review_message = warden.provider.get_last_review_message();
+    assert!(
+        review_message.contains("Title Convention"),
+        "Review message should contain title validation guidance"
+    );
 }
 
 #[test]
@@ -656,6 +685,13 @@ async fn test_process_pull_request_missing_work_item() {
             .iter()
             .any(|c| c.body.contains(WORK_ITEM_COMMENT_MARKER)),
         "Work item comment should be added"
+    );
+
+    // Verify the review message contains work item validation guidance
+    let review_message = warden.provider.get_last_review_message();
+    assert!(
+        review_message.contains("Work Item Tracking"),
+        "Review message should contain work item validation guidance"
     );
 }
 
@@ -718,6 +754,14 @@ async fn test_process_pull_request_both_invalid() {
             .iter()
             .any(|c| c.body.contains(WORK_ITEM_COMMENT_MARKER)),
         "Work item comment should be added"
+    );
+
+    // Verify the review message contains both title and work item validation guidance
+    let review_message = warden.provider.get_last_review_message();
+    assert!(
+        review_message.contains("Title Convention")
+            && review_message.contains("Work Item Tracking"),
+        "Review message should contain both title and work item validation guidance"
     );
 }
 
@@ -1024,7 +1068,7 @@ async fn test_process_pull_request_error_add_comment() {
     );
     assert_eq!(
         result.unwrap_err().to_string(),
-        "Failed to add comment",
+        "Failed to update pull request. Issue was: 'Failed to add comment'.",
         "Should return the specific error message"
     );
 }
@@ -1048,7 +1092,7 @@ async fn test_process_pull_request_error_add_labels() {
     );
     assert_eq!(
         result.unwrap_err().to_string(),
-        "Failed to add labels",
+        "Failed to update pull request. Issue was: 'Failed to add label'.",
         "Should return the specific error message"
     );
 }
@@ -1072,7 +1116,7 @@ async fn test_process_pull_request_error_get_pr() {
     );
     assert_eq!(
         result.unwrap_err().to_string(),
-        "Failed to get pull request",
+        "Git provider error: Failed to find the PR with number [1] in owner/repo",
         "Should return the specific error message"
     );
 }

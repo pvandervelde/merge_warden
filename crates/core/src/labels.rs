@@ -9,8 +9,10 @@
 //! - Breaking change indicators
 //! - Special labels based on PR description keywords
 
-use crate::{config::CONVENTIONAL_COMMIT_REGEX, models::PullRequest, GitProvider};
-use anyhow::Result;
+use crate::config::CONVENTIONAL_COMMIT_REGEX;
+use crate::errors::MergeWardenError;
+use merge_warden_developer_platforms::models::PullRequest;
+use merge_warden_developer_platforms::PullRequestProvider;
 
 #[cfg(test)]
 #[path = "labels_tests.rs"]
@@ -45,10 +47,12 @@ mod tests;
 /// # Examples
 ///
 /// ```rust,no_run
-/// use merge_warden_core::{GitProvider, models::PullRequest, labels::set_pull_request_labels};
+/// use merge_warden_developer_platforms::PullRequestProvider;
+/// use merge_warden_developer_platforms::models::PullRequest;
+/// use merge_warden_core::labels::set_pull_request_labels;
 /// use anyhow::Result;
 ///
-/// async fn example<P: GitProvider>(provider: &P) -> Result<()> {
+/// async fn example<P: PullRequestProvider>(provider: &P) -> Result<()> {
 ///     let pr = PullRequest {
 ///         number: 123,
 ///         title: "feat(auth): add GitHub login".to_string(),
@@ -61,12 +65,12 @@ mod tests;
 ///     Ok(())
 /// }
 /// ```
-pub async fn set_pull_request_labels<P: GitProvider>(
+pub async fn set_pull_request_labels<P: PullRequestProvider>(
     provider: &P,
     owner: &str,
     repo: &str,
     pr: &PullRequest,
-) -> Result<Vec<String>> {
+) -> Result<Vec<String>, MergeWardenError> {
     let mut labels = Vec::new();
 
     // Extract type from PR title using pre-compiled regex
@@ -119,7 +123,12 @@ pub async fn set_pull_request_labels<P: GitProvider>(
 
     // Add the labels to the PR
     if !labels.is_empty() {
-        provider.add_labels(owner, repo, pr.number, &labels).await?;
+        provider
+            .add_labels(owner, repo, pr.number, &labels)
+            .await
+            .map_err(|_| {
+                MergeWardenError::FailedToUpdatePullRequest("Failed to add label".to_string())
+            })?;
     }
 
     Ok(labels)

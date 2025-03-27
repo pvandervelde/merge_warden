@@ -7,8 +7,8 @@
 //! code changes to the issues or tasks they address. This helps with project management,
 //! release notes generation, and understanding the purpose of changes.
 
-use crate::{config::WORK_ITEM_REGEX, models::PullRequest};
-use anyhow::Result;
+use crate::config::WORK_ITEM_REGEX;
+use merge_warden_developer_platforms::models::PullRequest;
 
 #[cfg(test)]
 #[path = "work_item_tests.rs"]
@@ -45,7 +45,8 @@ mod tests;
 /// # Examples
 ///
 /// ```
-/// use merge_warden_core::{models::PullRequest, checks::work_item::check_work_item_reference};
+/// use merge_warden_developer_platforms::models::PullRequest;
+/// use merge_warden_core::checks::work_item::check_work_item_reference;
 ///
 /// // PR with a work item reference
 /// let pr_with_reference = PullRequest {
@@ -54,7 +55,7 @@ mod tests;
 ///     body: Some("This PR adds a new feature.\n\nFixes #42".to_string()),
 /// };
 ///
-/// let has_reference = check_work_item_reference(&pr_with_reference).unwrap();
+/// let has_reference = check_work_item_reference(&pr_with_reference);
 /// assert!(has_reference);
 ///
 /// // PR without a work item reference
@@ -64,15 +65,13 @@ mod tests;
 ///     body: Some("This PR adds another feature.".to_string()),
 /// };
 ///
-/// let has_reference = check_work_item_reference(&pr_without_reference).unwrap();
+/// let has_reference = check_work_item_reference(&pr_without_reference);
 /// assert!(!has_reference);
 /// ```
-pub fn check_work_item_reference(pr: &PullRequest) -> Result<bool> {
+pub fn check_work_item_reference(pr: &PullRequest) -> bool {
     // Use the pre-compiled regex from config
-    let has_work_item = match &pr.body {
+    match &pr.body {
         Some(body) => WORK_ITEM_REGEX.is_match(body),
         None => false,
-    };
-
-    Ok(has_work_item)
+    }
 }

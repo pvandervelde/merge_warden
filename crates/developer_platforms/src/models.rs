@@ -8,44 +8,9 @@
 
 use serde::{Deserialize, Serialize};
 
-// Constants moved to config.rs
-pub use crate::config::{
-    MISSING_WORK_ITEM_LABEL, TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL, WORK_ITEM_COMMENT_MARKER,
-};
-
-/// Represents a pull request from a Git provider.
-///
-/// This struct contains the essential information about a pull request
-/// that is needed for validation and processing.
-///
-/// # Fields
-///
-/// * `number` - The pull request number
-/// * `title` - The title of the pull request
-/// * `body` - The description/body of the pull request, if any
-///
-/// # Examples
-///
-/// ```
-/// use merge_warden_core::models::PullRequest;
-///
-/// let pr = PullRequest {
-///     number: 123,
-///     title: "feat(auth): add GitHub login".to_string(),
-///     body: Some("This PR adds GitHub login functionality.\n\nFixes #42".to_string()),
-/// };
-/// ```
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PullRequest {
-    /// The pull request number
-    pub number: u64,
-
-    /// The title of the pull request
-    pub title: String,
-
-    /// The description/body of the pull request, if any
-    pub body: Option<String>,
-}
+#[cfg(test)]
+#[path = "models_tests.rs"]
+mod tests;
 
 /// Represents a comment on a pull request.
 ///
@@ -60,7 +25,7 @@ pub struct PullRequest {
 /// # Examples
 ///
 /// ```
-/// use merge_warden_core::models::Comment;
+/// use merge_warden_developer_platforms::models::Comment;
 ///
 /// let comment = Comment {
 ///     id: 456,
@@ -88,7 +53,7 @@ pub struct Comment {
 /// # Examples
 ///
 /// ```
-/// use merge_warden_core::models::Label;
+/// use merge_warden_developer_platforms::models::Label;
 ///
 /// let label = Label {
 ///     name: "bug".to_string(),
@@ -98,4 +63,51 @@ pub struct Comment {
 pub struct Label {
     /// The name of the label
     pub name: String,
+}
+
+/// Represents a pull request from a Git provider.
+///
+/// This struct contains the essential information about a pull request
+/// that is needed for validation and processing.
+///
+/// # Fields
+///
+/// * `number` - The pull request number
+/// * `title` - The title of the pull request
+/// * `body` - The description/body of the pull request, if any
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_developer_platforms::models::PullRequest;
+///
+/// let pr = PullRequest {
+///     number: 123,
+///     title: "feat(auth): add GitHub login".to_string(),
+///     body: Some("This PR adds GitHub login functionality.\n\nFixes #42".to_string()),
+/// };
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PullRequest {
+    /// The pull request number
+    pub number: u64,
+
+    /// The title of the pull request
+    pub title: String,
+
+    /// The description/body of the pull request, if any
+    pub body: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct Review {
+    id: u64,
+    state: String,
+    user: User,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct User {
+    id: u64,
+    login: String,
 }

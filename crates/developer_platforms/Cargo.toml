@@ -1,24 +1,20 @@
 [package]
 authors.workspace = true
-description = "Core business logic for Merge Warden PR validation"
+description = "APIs for interacting with developer platforms"
 edition = "2021"
 license-file.workspace = true
-name = "merge_warden_core"
+name = "merge_warden_developer_platforms"
 repository.workspace = true
 version.workspace = true
 
 [dependencies]
-merge_warden_developer_platforms = { path = "../developer_platforms" }
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-indoc = "2.0.6"
-lazy_static = "1.5.0"
-regex = { workspace = true }
+chrono = "0.4.40"
+jsonwebtoken = { workspace = true }
+octocrab = "0.43"
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-
-[dev-dependencies]
-proptest = "1.6.0"
