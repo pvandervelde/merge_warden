@@ -16,7 +16,7 @@ use models::{Comment, Label, PullRequest};
 /// # Example Implementation
 ///
 /// ```rust,no_run
-/// use merge_warden_developer_platforms::{PullRequestProvider, models::{Comment, Label, PullRequest}};
+/// use merge_warden_developer_platforms::{PullRequestProvider, errors::Error, models::{Comment, Label, PullRequest}};
 /// use anyhow::Result;
 /// use async_trait::async_trait;
 ///
@@ -32,20 +32,20 @@ use models::{Comment, Label, PullRequest};
 ///         repo_owner: &str,
 ///         repo_name: &str,
 ///         pr_number: u64,
-///     ) -> Result<PullRequest> {
+///     ) -> Result<PullRequest, Error> {
 ///         // Implementation to fetch PR from GitHub API
 ///         // ...
 ///         # unimplemented!()
 ///     }
 ///
 ///     // Implement other required methods...
-///     # async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<()> { unimplemented!() }
-///     # async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<()> { unimplemented!() }
-///     # async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<Comment>> { unimplemented!() }
-///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<()> { unimplemented!() }
-///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<()> { unimplemented!() }
-///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>> { unimplemented!() }
-///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: bool) -> Result<()> { unimplemented!() }
+///     # async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+///     # async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
+///     # async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<Comment>, Error> { unimplemented!() }
+///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
+///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
+///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: &str, _: bool) -> Result<(), Error> { unimplemented!() }
 /// }
 /// ```
 #[async_trait]

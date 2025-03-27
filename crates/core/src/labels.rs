@@ -10,7 +10,7 @@
 //! - Special labels based on PR description keywords
 
 use crate::config::CONVENTIONAL_COMMIT_REGEX;
-use anyhow::Result;
+use crate::errors::MergeWardenError;
 use merge_warden_developer_platforms::models::PullRequest;
 use merge_warden_developer_platforms::PullRequestProvider;
 
@@ -70,7 +70,7 @@ pub async fn set_pull_request_labels<P: PullRequestProvider>(
     owner: &str,
     repo: &str,
     pr: &PullRequest,
-) -> Result<Vec<String>> {
+) -> Result<Vec<String>, MergeWardenError> {
     let mut labels = Vec::new();
 
     // Extract type from PR title using pre-compiled regex
@@ -123,7 +123,12 @@ pub async fn set_pull_request_labels<P: PullRequestProvider>(
 
     // Add the labels to the PR
     if !labels.is_empty() {
-        provider.add_labels(owner, repo, pr.number, &labels).await?;
+        provider
+            .add_labels(owner, repo, pr.number, &labels)
+            .await
+            .map_err(|_| {
+                MergeWardenError::FailedToUpdatePullRequest("Failed to add label".to_string())
+            })?;
     }
 
     Ok(labels)

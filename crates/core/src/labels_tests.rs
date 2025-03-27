@@ -1,7 +1,7 @@
 use super::*;
 use crate::labels::set_pull_request_labels;
-use anyhow::{anyhow, Result};
 use async_trait::async_trait;
+use merge_warden_developer_platforms::errors::Error;
 use std::sync::{Arc, Mutex};
 use tokio::test;
 
@@ -42,7 +42,7 @@ impl PullRequestProvider for MockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-    ) -> Result<PullRequest> {
+    ) -> Result<PullRequest, Error> {
         unimplemented!("Not needed for this test")
     }
 
@@ -52,7 +52,7 @@ impl PullRequestProvider for MockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
         _comment: &str,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         unimplemented!("Not needed for this test")
     }
 
@@ -61,7 +61,7 @@ impl PullRequestProvider for MockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         _comment_id: u64,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         unimplemented!("Not needed for this test")
     }
 
@@ -70,7 +70,7 @@ impl PullRequestProvider for MockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-    ) -> Result<Vec<Comment>> {
+    ) -> Result<Vec<Comment>, Error> {
         unimplemented!("Not needed for this test")
     }
 
@@ -80,7 +80,7 @@ impl PullRequestProvider for MockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
         labels: &[String],
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         let mut current_labels = self.labels.lock().unwrap();
         for label in labels {
             current_labels.push(Label {
@@ -96,7 +96,7 @@ impl PullRequestProvider for MockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
         _label: &str,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         unimplemented!("Not needed for this test")
     }
 
@@ -105,18 +105,19 @@ impl PullRequestProvider for MockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-    ) -> Result<Vec<Label>> {
+    ) -> Result<Vec<Label>, Error> {
         let labels = self.labels.lock().unwrap();
         Ok(labels.clone())
     }
 
     async fn update_pr_blocking_review(
         &self,
-        _repo_owner: &str,
-        _repo_name: &str,
-        _pr_number: u64,
-        _mergeable: bool,
-    ) -> Result<()> {
+        repo_owner: &str,
+        repo_name: &str,
+        pr_number: u64,
+        message: &str,
+        is_approved: bool,
+    ) -> Result<(), Error> {
         unimplemented!("Not needed for this test")
     }
 }
@@ -128,7 +129,7 @@ impl PullRequestProvider for ErrorMockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-    ) -> Result<PullRequest> {
+    ) -> Result<PullRequest, Error> {
         unimplemented!("Not needed for this test")
     }
 
@@ -138,7 +139,7 @@ impl PullRequestProvider for ErrorMockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
         _comment: &str,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         unimplemented!("Not needed for this test")
     }
 
@@ -147,7 +148,7 @@ impl PullRequestProvider for ErrorMockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         _comment_id: u64,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         unimplemented!("Not needed for this test")
     }
 
@@ -156,7 +157,7 @@ impl PullRequestProvider for ErrorMockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-    ) -> Result<Vec<Comment>> {
+    ) -> Result<Vec<Comment>, Error> {
         unimplemented!("Not needed for this test")
     }
 
@@ -166,8 +167,8 @@ impl PullRequestProvider for ErrorMockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
         _labels: &[String],
-    ) -> Result<()> {
-        Err(anyhow!("Failed to add labels"))
+    ) -> Result<(), Error> {
+        Err(Error::FailedToUpdatePullRequest("Failed".to_string()))
     }
 
     async fn remove_label(
@@ -176,7 +177,7 @@ impl PullRequestProvider for ErrorMockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
         _label: &str,
-    ) -> Result<()> {
+    ) -> Result<(), Error> {
         unimplemented!("Not needed for this test")
     }
 
@@ -185,17 +186,18 @@ impl PullRequestProvider for ErrorMockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-    ) -> Result<Vec<Label>> {
+    ) -> Result<Vec<Label>, Error> {
         Ok(Vec::new())
     }
 
     async fn update_pr_blocking_review(
         &self,
-        _repo_owner: &str,
-        _repo_name: &str,
-        _pr_number: u64,
-        _mergeable: bool,
-    ) -> Result<()> {
+        repo_owner: &str,
+        repo_name: &str,
+        pr_number: u64,
+        message: &str,
+        is_approved: bool,
+    ) -> Result<(), Error> {
         unimplemented!("Not needed for this test")
     }
 }
@@ -325,7 +327,7 @@ async fn test_determine_labels_error_handling() {
     );
     assert_eq!(
         result.unwrap_err().to_string(),
-        "Failed to add labels",
+        "Failed to update pull request. Issue was: 'Failed to add label'.",
         "Expected specific error message"
     );
 }

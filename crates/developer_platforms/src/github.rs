@@ -54,7 +54,7 @@ struct JWTClaims {
 /// # Example
 ///
 /// ```rust
-/// use your_crate::create_app_client;
+/// use merge_warden_developer_platforms::github::create_app_client;
 ///
 /// #[tokio::main]
 /// async fn main() {

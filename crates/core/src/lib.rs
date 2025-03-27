@@ -54,15 +54,16 @@
 //! }
 //! ```
 
-pub mod checks;
-pub mod config;
-pub mod errors;
-pub mod labels;
-
-use anyhow::Result;
 use indoc::formatdoc;
 use merge_warden_developer_platforms::models::PullRequest;
 use merge_warden_developer_platforms::PullRequestProvider;
+
+pub mod checks;
+pub mod config;
+pub mod errors;
+use errors::MergeWardenError;
+
+pub mod labels;
 
 /// Result of processing a pull request through Merge Warden.
 ///
@@ -125,7 +126,7 @@ impl<P: PullRequestProvider> MergeWarden<P> {
     /// # Returns
     ///
     /// A `Result` containing a boolean indicating whether the title is valid
-    fn check_title(&self, pr: &PullRequest) -> Result<bool> {
+    fn check_title(&self, pr: &PullRequest) -> bool {
         checks::title::check_pr_title(pr)
     }
 
@@ -140,7 +141,7 @@ impl<P: PullRequestProvider> MergeWarden<P> {
     /// # Returns
     ///
     /// A `Result` containing a boolean indicating whether a work item is referenced
-    fn check_work_item_reference(&self, pr: &PullRequest) -> Result<bool> {
+    fn check_work_item_reference(&self, pr: &PullRequest) -> bool {
         checks::work_item::check_work_item_reference(pr)
     }
 
@@ -166,7 +167,7 @@ impl<P: PullRequestProvider> MergeWarden<P> {
         repo_name: &str,
         pr: &PullRequest,
         is_valid_title: bool,
-    ) -> Result<()> {
+    ) -> Result<(), MergeWardenError> {
         use config::{TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL};
 
         // Skip if conventional commits are not enforced
@@ -176,23 +177,25 @@ impl<P: PullRequestProvider> MergeWarden<P> {
 
         if !is_valid_title {
             // Check if PR already has the invalid title label
-            let labels = self
+            let labels = (self
                 .provider
                 .list_labels(repo_owner, repo_name, pr.number)
-                .await?;
+                .await)
+                .unwrap_or_default();
             let has_invalid_title_label =
                 labels.iter().any(|label| label.name == TITLE_INVALID_LABEL);
 
             if !has_invalid_title_label {
                 // Add invalid title label
-                self.provider
+                let _ = self
+                    .provider
                     .add_labels(
                         repo_owner,
                         repo_name,
                         pr.number,
                         &[TITLE_INVALID_LABEL.to_string()],
                     )
-                    .await?;
+                    .await;
 
                 // Add comment with suggestions
                 let comment = format!(
@@ -202,34 +205,48 @@ impl<P: PullRequestProvider> MergeWarden<P> {
 
                 self.provider
                     .add_comment(repo_owner, repo_name, pr.number, &comment)
-                    .await?;
+                    .await
+                    .map_err(|_| {
+                        MergeWardenError::FailedToUpdatePullRequest(
+                            "Failed to add comment".to_string(),
+                        )
+                    })?;
             }
         } else {
             // Check if PR has the invalid title label to remove it
-            let labels = self
+            let labels = (self
                 .provider
                 .list_labels(repo_owner, repo_name, pr.number)
-                .await?;
+                .await)
+                .unwrap_or_default();
+
             let has_invalid_title_label =
                 labels.iter().any(|label| label.name == TITLE_INVALID_LABEL);
 
             if has_invalid_title_label {
                 // Remove the invalid title label
-                self.provider
+                let _ = self
+                    .provider
                     .remove_label(repo_owner, repo_name, pr.number, TITLE_INVALID_LABEL)
-                    .await?;
+                    .await;
 
                 // Find and remove the comment
-                let comments = self
+                let comments = (self
                     .provider
                     .list_comments(repo_owner, repo_name, pr.number)
-                    .await?;
+                    .await)
+                    .unwrap_or_default();
 
                 for comment in comments {
                     if comment.body.contains(TITLE_COMMENT_MARKER) {
                         self.provider
                             .delete_comment(repo_owner, repo_name, comment.id)
-                            .await?;
+                            .await
+                            .map_err(|_| {
+                                MergeWardenError::FailedToUpdatePullRequest(
+                                    "Failed to add comment".to_string(),
+                                )
+                            })?;
                         break;
                     }
                 }
@@ -261,7 +278,7 @@ impl<P: PullRequestProvider> MergeWarden<P> {
         repo_name: &str,
         pr: &PullRequest,
         has_work_item: bool,
-    ) -> Result<()> {
+    ) -> Result<(), MergeWardenError> {
         use config::{MISSING_WORK_ITEM_LABEL, WORK_ITEM_COMMENT_MARKER};
 
         // Skip if work item references are not required
@@ -271,10 +288,11 @@ impl<P: PullRequestProvider> MergeWarden<P> {
 
         if !has_work_item {
             // Check if PR already has the missing work item label
-            let labels = self
+            let labels = (self
                 .provider
                 .list_labels(repo_owner, repo_name, pr.number)
-                .await?;
+                .await)
+                .unwrap_or_default();
             let has_missing_work_item_label = labels
                 .iter()
                 .any(|label| label.name == MISSING_WORK_ITEM_LABEL);
@@ -288,7 +306,12 @@ impl<P: PullRequestProvider> MergeWarden<P> {
                         pr.number,
                         &[MISSING_WORK_ITEM_LABEL.to_string()],
                     )
-                    .await?;
+                    .await
+                    .map_err(|_| {
+                        MergeWardenError::FailedToUpdatePullRequest(
+                            "Failed to add label".to_string(),
+                        )
+                    })?;
 
                 // Add comment with suggestions
                 let comment = format!(
@@ -298,35 +321,49 @@ impl<P: PullRequestProvider> MergeWarden<P> {
 
                 self.provider
                     .add_comment(repo_owner, repo_name, pr.number, &comment)
-                    .await?;
+                    .await
+                    .map_err(|_| {
+                        MergeWardenError::FailedToUpdatePullRequest(
+                            "Failed to add comment".to_string(),
+                        )
+                    })?;
             }
         } else {
             // Check if PR has the missing work item label to remove it
-            let labels = self
+            let labels = (self
                 .provider
                 .list_labels(repo_owner, repo_name, pr.number)
-                .await?;
+                .await)
+                .unwrap_or_default();
+
             let has_missing_work_item_label = labels
                 .iter()
                 .any(|label| label.name == MISSING_WORK_ITEM_LABEL);
 
             if has_missing_work_item_label {
                 // Remove the missing work item label
-                self.provider
+                let _ = self
+                    .provider
                     .remove_label(repo_owner, repo_name, pr.number, MISSING_WORK_ITEM_LABEL)
-                    .await?;
+                    .await;
 
                 // Find and remove the comment
-                let comments = self
+                let comments = (self
                     .provider
                     .list_comments(repo_owner, repo_name, pr.number)
-                    .await?;
+                    .await)
+                    .unwrap_or_default();
 
                 for comment in comments {
                     if comment.body.contains(WORK_ITEM_COMMENT_MARKER) {
                         self.provider
                             .delete_comment(repo_owner, repo_name, comment.id)
-                            .await?;
+                            .await
+                            .map_err(|_| {
+                                MergeWardenError::FailedToUpdatePullRequest(
+                                    "Failed to delete comment".to_string(),
+                                )
+                            })?;
                         break;
                     }
                 }
@@ -356,7 +393,7 @@ impl<P: PullRequestProvider> MergeWarden<P> {
         repo_owner: &str,
         repo_name: &str,
         pr: &PullRequest,
-    ) -> Result<Vec<String>> {
+    ) -> Result<Vec<String>, MergeWardenError> {
         // Skip auto-labeling if disabled
         if !self.config.auto_label {
             return Ok(Vec::new());
@@ -449,7 +486,7 @@ impl<P: PullRequestProvider> MergeWarden<P> {
     /// use async_trait::async_trait;
     /// use merge_warden_core::MergeWarden;
     /// use merge_warden_developer_platforms::PullRequestProvider;
-    ///
+    /// use merge_warden_developer_platforms::errors::Error;
     /// use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
     ///
     /// struct MyProvider;
@@ -461,20 +498,20 @@ impl<P: PullRequestProvider> MergeWarden<P> {
     ///         repo_owner: &str,
     ///         repo_name: &str,
     ///         pr_number: u64,
-    ///     ) -> Result<PullRequest> {
+    ///     ) -> Result<PullRequest, Error> {
     ///         // Implementation to fetch PR from GitHub API
     ///         // ...
     ///         # unimplemented!()
     ///     }
     ///
     ///     // Implement other required methods...
-    ///     # async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<()> { unimplemented!() }
-    ///     # async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<()> { unimplemented!() }
-    ///     # async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<Comment>> { unimplemented!() }
-    ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<()> { unimplemented!() }
-    ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<()> { unimplemented!() }
-    ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>> { unimplemented!() }
-    ///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: bool) -> Result<()> { unimplemented!() }
+    ///     # async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+    ///     # async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
+    ///     # async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<Comment>, Error> { unimplemented!() }
+    ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
+    ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+    ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
+    ///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: &str, _: bool) -> Result<(), Error> { unimplemented!() }
     /// }
     ///
     /// fn example() {
@@ -517,7 +554,7 @@ impl<P: PullRequestProvider> MergeWarden<P> {
     /// use merge_warden_core::MergeWarden;
     /// use anyhow::Result;
     /// use merge_warden_developer_platforms::PullRequestProvider;
-    ///
+    /// use merge_warden_developer_platforms::errors::Error;
     /// use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
     ///
     /// struct MyProvider;
@@ -529,20 +566,20 @@ impl<P: PullRequestProvider> MergeWarden<P> {
     ///         repo_owner: &str,
     ///         repo_name: &str,
     ///         pr_number: u64,
-    ///     ) -> Result<PullRequest> {
+    ///     ) -> Result<PullRequest, Error> {
     ///         // Implementation to fetch PR from GitHub API
     ///         // ...
     ///         # unimplemented!()
     ///     }
     ///
     ///     // Implement other required methods...
-    ///     # async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<()> { unimplemented!() }
-    ///     # async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<()> { unimplemented!() }
-    ///     # async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<Comment>> { unimplemented!() }
-    ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<()> { unimplemented!() }
-    ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<()> { unimplemented!() }
-    ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>> { unimplemented!() }
-    ///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: bool) -> Result<()> { unimplemented!() }
+    ///     # async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+    ///     # async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
+    ///     # async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<Comment>, Error> { unimplemented!() }
+    ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
+    ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+    ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
+    ///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: &str, _: bool) -> Result<(), Error> { unimplemented!() }
     /// }
     ///
     /// async fn example() -> Result<()> {
@@ -567,23 +604,29 @@ impl<P: PullRequestProvider> MergeWarden<P> {
         repo_owner: &str,
         repo_name: &str,
         pr_number: u64,
-    ) -> Result<CheckResult> {
+    ) -> Result<CheckResult, MergeWardenError> {
         // Get the PR
         let pr = self
             .provider
             .get_pull_request(repo_owner, repo_name, pr_number)
-            .await?;
+            .await
+            .map_err(|_| {
+                MergeWardenError::GitProviderError(format!(
+                    "Failed to find the PR with number [{}] in {}/{}",
+                    pr_number, repo_owner, repo_name
+                ))
+            })?;
 
         // Check PR title follows the conventional commit structure if enabled
         let is_title_valid = if self.config.enforce_conventional_commits {
-            self.check_title(&pr)?
+            self.check_title(&pr)
         } else {
             true
         };
 
         // Check that the PR body has a reference to a work item if enabled
         let is_work_item_referenced = if self.config.require_work_item_references {
-            self.check_work_item_reference(&pr)?
+            self.check_work_item_reference(&pr)
         } else {
             true
         };
@@ -614,7 +657,10 @@ impl<P: PullRequestProvider> MergeWarden<P> {
                 review_message.as_str(),
                 is_title_valid && is_work_item_referenced,
             )
-            .await?;
+            .await
+            .map_err(|_| {
+                MergeWardenError::FailedToUpdatePullRequest("Failed to add review".to_string())
+            })?;
 
         Ok(CheckResult {
             title_valid: is_title_valid,
@@ -641,7 +687,7 @@ impl<P: PullRequestProvider> MergeWarden<P> {
     /// use async_trait::async_trait;
     /// use merge_warden_core::{MergeWarden, config::ValidationConfig};
     /// use merge_warden_developer_platforms::PullRequestProvider;
-    ///
+    /// use merge_warden_developer_platforms::errors::Error;
     /// use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
     ///
     /// struct MyProvider;
@@ -653,20 +699,20 @@ impl<P: PullRequestProvider> MergeWarden<P> {
     ///         repo_owner: &str,
     ///         repo_name: &str,
     ///         pr_number: u64,
-    ///     ) -> Result<PullRequest> {
+    ///     ) -> Result<PullRequest, Error> {
     ///         // Implementation to fetch PR from GitHub API
     ///         // ...
     ///         # unimplemented!()
     ///     }
     ///
     ///     // Implement other required methods...
-    ///     # async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<()> { unimplemented!() }
-    ///     # async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<()> { unimplemented!() }
-    ///     # async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<Comment>> { unimplemented!() }
-    ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<()> { unimplemented!() }
-    ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<()> { unimplemented!() }
-    ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>> { unimplemented!() }
-    ///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: bool) -> Result<()> { unimplemented!() }
+    ///     # async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+    ///     # async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
+    ///     # async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<Comment>, Error> { unimplemented!() }
+    ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
+    ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+    ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
+    ///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: &str, _: bool) -> Result<(), Error> { unimplemented!() }
     /// }
     ///
     /// fn example() {

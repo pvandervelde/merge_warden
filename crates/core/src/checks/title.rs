@@ -8,7 +8,6 @@
 //! which makes it easier to write automated tools on top of.
 
 use crate::config::CONVENTIONAL_COMMIT_REGEX;
-use anyhow::Result;
 use merge_warden_developer_platforms::models::PullRequest;
 
 #[cfg(test)]
@@ -53,11 +52,10 @@ mod tests;
 ///     body: Some("This PR adds GitHub login functionality.".to_string()),
 /// };
 ///
-/// let is_valid = check_pr_title(&pr).unwrap();
+/// let is_valid = check_pr_title(&pr);
 /// assert!(is_valid);
 /// ```
-pub fn check_pr_title(pr: &PullRequest) -> Result<bool> {
+pub fn check_pr_title(pr: &PullRequest) -> bool {
     // Use the pre-compiled regex from config
-    let is_valid_title = CONVENTIONAL_COMMIT_REGEX.is_match(&pr.title);
-    Ok(is_valid_title)
+    CONVENTIONAL_COMMIT_REGEX.is_match(&pr.title)
 }
