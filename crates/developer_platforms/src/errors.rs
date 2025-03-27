@@ -1,3 +1,7 @@
+#[cfg(test)]
+#[path = "errors_tests.rs"]
+mod tests;
+
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
     #[error("API request failed")]

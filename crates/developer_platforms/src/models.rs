@@ -8,6 +8,10 @@
 
 use serde::{Deserialize, Serialize};
 
+#[cfg(test)]
+#[path = "models_tests.rs"]
+mod tests;
+
 /// Represents a comment on a pull request.
 ///
 /// This struct contains the essential information about a comment
