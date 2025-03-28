@@ -1,0 +1,87 @@
+use anyhow::Result;
+use clap::{Parser, Subcommand};
+use tracing::{error, info};
+
+mod commands;
+mod config;
+mod errors;
+
+use commands::{auth::AuthCommands, check_pr::CheckPrArgs, config_cmd::ConfigCommands};
+use errors::CliError;
+
+/// Merge Warden CLI - Validate pull requests against configured rules
+#[derive(Parser)]
+#[command(author, version, about, long_about = None)]
+struct Cli {
+    /// Enable verbose output
+    #[arg(short, long)]
+    verbose: bool,
+
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    /// Validate a pull request against configured rules
+    #[command(name = "check-pr")]
+    CheckPr(CheckPrArgs),
+
+    /// Manage configuration
+    #[command(subcommand)]
+    Config(ConfigCommands),
+
+    /// Authenticate with Git providers
+    #[command(subcommand)]
+    Auth(AuthCommands),
+}
+
+#[tokio::main]
+async fn main() -> Result<(), CliError> {
+    // Initialize logging
+    tracing_subscriber::fmt::init();
+
+    // Parse command line arguments
+    let cli = Cli::parse();
+
+    // Set verbose logging if requested
+    if cli.verbose {
+        info!("Verbose mode enabled");
+    }
+
+    // Execute the appropriate command
+    match cli.command {
+        Commands::CheckPr(args) => match commands::check_pr::execute(args).await {
+            Ok(result) => {
+                if result.passed {
+                    println!("✅ Pull request validation passed");
+                    std::process::exit(0);
+                } else {
+                    println!("❌ Pull request validation failed:");
+                    for failure in result.failures {
+                        println!("  - {}", failure);
+                    }
+                    std::process::exit(1);
+                }
+            }
+            Err(e) => {
+                error!("Error validating pull request: {}", e);
+                return Err(e.into());
+            }
+        },
+        Commands::Config(cmd) => {
+            if let Err(e) = commands::config_cmd::execute(cmd).await {
+                error!("Error executing config command: {}", e);
+                return Err(e.into());
+            }
+        }
+        Commands::Auth(cmd) => {
+            if let Err(e) = commands::auth::execute(cmd).await {
+                error!("Error executing auth command: {}", e);
+                return Err(e.into());
+            }
+        }
+    }
+
+    Ok(())
+}

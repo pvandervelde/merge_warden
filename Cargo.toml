@@ -5,7 +5,7 @@ members = [
     "crates/developer_platforms",
     #"crates/aws-lambda",
     #"crates/azure-functions",
-    #"crates/cli"
+    "crates/cli",
 ]
 
 [workspace.package]
