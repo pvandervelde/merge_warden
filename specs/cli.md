@@ -11,18 +11,15 @@ validation system.
 ### `check-pr`
 
 ```text
-Validate a pull request against configured rules
+Starts a server that waits for webhook messages related to pull request updates. Once it receives a
+pull request message it will validate the pull requests against configured rules.
 
 USAGE:
-    merge-warden check-pr [OPTIONS] --provider <PROVIDER> --repo <REPO> --pr <PR_NUMBER>
+    merge-warden check-pr [OPTIONS] --provider <PROVIDER>
 
 OPTIONS:
     -p, --provider <PROVIDER>  Supported Git providers: github
-    -r, --repo <REPO>          Repository in format: owner/repo
-    -n, --pr <PR_NUMBER>       Pull request number
-    -j, --json                 Machine-readable JSON output
     -c, --config <FILE>        Alternate config file [default: .merge-warden.toml]
-    -v, --verbose              Show detailed validation results
 ```
 
 ### `config`
@@ -58,18 +55,10 @@ min_approvals = 1
 
 [authentication]
 auth_method = "token"
+
+[pr_validation]
+port = 3100
 ```
-
-## Error Handling
-
-| Exit Code | Description               | Example Scenario                     |
-|-----------|---------------------------|---------------------------------------|
-| 0         | Success                   | Validation passed                    |
-| 1         | Validation failed         | PR failed rule checks                |
-| 2         | Configuration error       | Invalid config file syntax           |
-| 3         | Authentication error      | Invalid or expired credentials       |
-| 4         | Network error             | API connection failure               |
-| 5         | Invalid arguments         | Missing required parameters          |
 
 ## Testing Strategy
 
@@ -96,13 +85,7 @@ auth_method = "token"
 Basic validation:
 
 ```bash
-merge-warden check-pr -p github -r owner/repo -n 42
-```
-
-JSON output:
-
-```bash
-merge-warden check-pr -p github -r group/project -n 123 --json
+merge-warden check-pr -p github
 ```
 
 Initialize configuration:
