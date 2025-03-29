@@ -1,6 +1,5 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
-use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 use tracing::{debug, info};
@@ -9,6 +8,12 @@ use crate::errors::CliError;
 
 /// Default configuration file name
 pub const DEFAULT_CONFIG_FILENAME: &str = ".merge-warden.toml";
+
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct AuthenticationConfig {
+    #[serde(default = "default_auth_method")]
+    pub auth_method: String,
+}
 
 /// Configuration for Merge Warden CLI
 #[derive(Debug, Serialize, Deserialize)]
@@ -23,44 +28,9 @@ pub struct Config {
 
     #[serde(default)]
     pub authentication: AuthenticationConfig,
-}
 
-/// Default configuration settings
-#[derive(Debug, Serialize, Deserialize, Default)]
-pub struct DefaultConfig {
-    /// Default Git provider
-    #[serde(default = "default_provider")]
-    pub provider: String,
-}
-
-fn default_provider() -> String {
-    "github".to_string()
-}
-
-/// Rules configuration
-#[derive(Debug, Serialize, Deserialize, Default)]
-pub struct RulesConfig {
-    /// Require work items to be linked
     #[serde(default)]
-    pub require_work_items: bool,
-
-    /// Enforce title convention
-    #[serde(default)]
-    pub enforce_title_convention: Option<String>,
-
-    /// Minimum number of approvals required
-    #[serde(default)]
-    pub min_approvals: Option<u32>,
-}
-
-#[derive(Debug, Serialize, Deserialize, Default)]
-pub struct AuthenticationConfig {
-    #[serde(default = "default_auth_method")]
-    pub auth_method: String,
-}
-
-fn default_auth_method() -> String {
-    "token".to_string()
+    pub pr_validation: PRValidationConfig,
 }
 
 impl Config {
@@ -114,8 +84,53 @@ impl Config {
             default: DefaultConfig::default(),
             rules: RulesConfig::default(),
             authentication: AuthenticationConfig::default(),
+            pr_validation: PRValidationConfig::default(),
         }
     }
+}
+
+/// Default configuration settings
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct DefaultConfig {
+    /// Default Git provider
+    #[serde(default = "default_provider")]
+    pub provider: String,
+}
+
+/// Pull Request Validation configuration
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct PRValidationConfig {
+    /// The port on which webhooks will be received
+    #[serde(default = "default_port")]
+    pub port: u32,
+}
+
+/// Rules configuration
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct RulesConfig {
+    /// Require work items to be linked
+    #[serde(default)]
+    pub require_work_items: bool,
+
+    /// Enforce title convention
+    #[serde(default)]
+    pub enforce_title_convention: Option<bool>,
+
+    /// Minimum number of approvals required
+    #[serde(default)]
+    pub min_approvals: Option<u32>,
+}
+
+fn default_auth_method() -> String {
+    "token".to_string()
+}
+
+fn default_port() -> u32 {
+    3100
+}
+
+fn default_provider() -> String {
+    "github".to_string()
 }
 
 /// Get the path to the configuration file

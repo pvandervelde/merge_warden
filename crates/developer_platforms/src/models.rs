@@ -41,6 +41,12 @@ pub struct Comment {
     pub body: String,
 }
 
+#[derive(Deserialize)]
+pub struct Installation {
+    pub id: u64,
+    pub node_id: String,
+}
+
 /// Represents a label on a pull request.
 ///
 /// This struct contains the essential information about a label
@@ -62,6 +68,12 @@ pub struct Comment {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Label {
     /// The name of the label
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Organization {
+    /// The name of the organization
     pub name: String,
 }
 
@@ -97,6 +109,14 @@ pub struct PullRequest {
 
     /// The description/body of the pull request, if any
     pub body: Option<String>,
+}
+
+#[derive(Deserialize)]
+pub struct Repository {
+    pub full_name: String,
+    pub name: String,
+    pub node_id: String,
+    pub private: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

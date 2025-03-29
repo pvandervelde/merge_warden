@@ -155,8 +155,8 @@ fn get_config_value(config: &Config, key: &str) -> Result<String, CliError> {
             Some(&"enforce_title_convention") => Ok(config
                 .rules
                 .enforce_title_convention
-                .clone()
-                .unwrap_or_default()),
+                .unwrap_or_default()
+                .to_string()),
             Some(&"min_approvals") => Ok(config
                 .rules
                 .min_approvals
@@ -215,7 +215,8 @@ fn set_config_value(config: &mut Config, key: &str, value: &str) -> Result<(), C
                 if value.is_empty() {
                     config.rules.enforce_title_convention = None;
                 } else {
-                    config.rules.enforce_title_convention = Some(value.to_string());
+                    let enforce = value.parse().unwrap_or(false);
+                    config.rules.enforce_title_convention = Some(enforce);
                 }
                 Ok(())
             }

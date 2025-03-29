@@ -15,13 +15,24 @@ path = "src/main.rs"
 merge_warden_core = { path = "../core" }
 merge_warden_developer_platforms = { path = "../developer_platforms" }
 anyhow = { workspace = true }
+axum = { workspace = true }
 clap = { workspace = true }
 dirs = "5.0"
+hex.workspace = true
+hmac.workspace = true
+jsonwebtoken.workspace = true
+keyring = { version = "3.6.2", features = [
+    "apple-native",
+    "linux-native",
+    "windows-native",
+] }
+octocrab = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sha2.workspace = true
 thiserror = { workspace = true }
 tokio = { workspace = true }
 toml = "0.8"
-tracing = { workspace = true }
-tracing-subscriber = "0.3"
-keyring = { version = "3.6.2", features = ["apple-native", "linux-native", "windows-native"] }
+tracing = { workspace = true, features = ["log"] }
+tracing-opentelemetry = { workspace = true, features = ["thiserror"] }
+tracing-subscriber = { workspace = true, features = ["env-filter"] }

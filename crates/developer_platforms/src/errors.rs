@@ -13,6 +13,12 @@ pub enum Error {
     #[error("Authentication failed: {0}")]
     AuthError(String),
 
+    #[error("Failed to create an app access token for repository: {0}/{1}. For app with ID: {2}")]
+    FailedToCreateAccessToken(String, String, u64),
+
+    #[error("Failed to find installation for repository: {0}/{1} with ID: {2}")]
+    FailedToFindAppInstallation(String, String, u64),
+
     #[error("Failed to update the PR.")]
     FailedToUpdatePullRequest(String),
 

@@ -1,15 +1,15 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use async_trait::async_trait;
-use jsonwebtoken::{Algorithm, EncodingKey, Header};
+use jsonwebtoken::EncodingKey;
 use octocrab::{
     models::{
         pulls::{Review, ReviewState},
-        ReviewId,
+        InstallationId, InstallationToken, ReviewId,
     },
-    Octocrab,
+    params::apps::CreateInstallationAccessToken,
+    Octocrab, Page,
 };
 use serde::{Deserialize, Serialize};
+use tracing::debug;
 
 use crate::{
     errors::Error,
@@ -24,97 +24,182 @@ struct JWTClaims {
     iss: u64,
 }
 
-/// Creates an authenticated GitHub client using a GitHub App's credentials.
+/// Authenticates with GitHub using an installation access token for a specific app installation.
 ///
-/// This function generates a JSON Web Token (JWT) for authenticating as a GitHub App
-/// and optionally retrieves an installation token if an installation ID is provided.
+/// This function retrieves an access token for a GitHub App installation and creates a new
+/// `Octocrab` client authenticated with that token. It is useful for performing API operations
+/// on behalf of a GitHub App installation.
 ///
-/// See: https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation
+/// # Arguments
+///
+/// * `octocrab` - An existing `Octocrab` client instance.
+/// * `installation_id` - The ID of the GitHub App installation.
+/// * `repository_owner` - The owner of the repository associated with the installation.
+/// * `source_repository` - The name of the repository associated with the installation.
+///
+/// # Returns
+///
+/// A `Result` containing a new `Octocrab` client authenticated with the installation access token,
+/// or an `Error` if the operation fails.
+///
+/// # Errors
+///
+/// This function returns an `Error` in the following cases:
+/// - If the app installation cannot be found.
+/// - If the access token cannot be created.
+/// - If the new `Octocrab` client cannot be built.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use anyhow::Result;
+/// use octocrab::Octocrab;
+/// use merge_warden_developer_platforms::github::authenticate_with_access_token;
+///
+/// #[tokio::main]
+/// async fn main() -> Result<()> {
+///     let octocrab = Octocrab::builder().build().unwrap();
+///     let installation_id = 12345678; // Replace with your installation ID
+///     let repository_owner = "example-owner";
+///     let source_repository = "example-repo";
+///
+///     let authenticated_client = authenticate_with_access_token(
+///         &octocrab,
+///         installation_id,
+///         repository_owner,
+///         source_repository,
+///     )
+///     .await?;
+///
+///     // Use `authenticated_client` to perform API operations
+///     Ok(())
+/// }
+/// ```
+pub async fn authenticate_with_access_token(
+    octocrab: &Octocrab,
+    installation_id: u64,
+    repository_owner: &str,
+    source_repository: &str,
+) -> Result<Octocrab, Error> {
+    // Get an access token for the specific app installation that sent the event
+    // First find all the installations and use those to grab the specific one that
+    // sent the event
+    let installations = octocrab
+        .apps()
+        .installations()
+        .send()
+        .await
+        .unwrap_or(Page::<octocrab::models::Installation>::default())
+        .take_items();
+
+    let id = InstallationId(installation_id);
+    let Some(installation_index) = installations.iter().position(|l| l.id == id) else {
+        return Err(Error::FailedToFindAppInstallation(
+            repository_owner.to_string(),
+            source_repository.to_string(),
+            installation_id,
+        ));
+    };
+
+    let installation = &installations[installation_index];
+    debug!(
+        "Creating access token for installation with id {}. Linked to repository at {}",
+        installation.id,
+        installation
+            .repositories_url
+            .clone()
+            .unwrap_or("".to_string())
+    );
+
+    let create_access_token = CreateInstallationAccessToken::default();
+    //create_access_token.repositories = vec![repository_name.clone()];
+
+    // Create an access token for the installation
+    let access: InstallationToken = octocrab
+        .post(
+            installations[installation_index]
+                .access_tokens_url
+                .as_ref()
+                .unwrap(),
+            Some(&create_access_token),
+        )
+        .await
+        .map_err(|_| {
+            Error::FailedToCreateAccessToken(
+                repository_owner.to_string(),
+                source_repository.to_string(),
+                installation_id,
+            )
+        })?;
+
+    // USe the API token
+    let api_with_token = octocrab::OctocrabBuilder::new()
+        .personal_token(access.token)
+        .build()
+        .unwrap();
+
+    Ok(api_with_token)
+}
+
+/// Creates an `Octocrab` client authenticated as a GitHub App using a JWT token.
+///
+/// This function generates a JSON Web Token (JWT) for the specified GitHub App ID and private key,
+/// and uses it to create an authenticated `Octocrab` client. The client can then be used to perform
+/// API operations on behalf of the GitHub App.
 ///
 /// # Arguments
 ///
 /// * `app_id` - The ID of the GitHub App.
 /// * `private_key` - The private key associated with the GitHub App, in PEM format.
-/// * `installation_id` - An optional installation ID for the GitHub App. If provided,
-///   an installation token will be retrieved for the specified installation.
 ///
 /// # Returns
 ///
-/// Returns a `Result` containing an authenticated `Octocrab` client if successful,
-/// or an `Error` if authentication or client creation fails.
+/// A `Result` containing an authenticated `Octocrab` client, or an `Error` if the operation fails.
 ///
 /// # Errors
 ///
-/// This function will return an error if:
-/// - The private key is invalid.
-/// - The JWT cannot be created.
-/// - The Octocrab client cannot be built.
-/// - The installation token cannot be retrieved (if `installation_id` is provided).
+/// This function returns an `Error` in the following cases:
+/// - If the private key cannot be parsed.
+/// - If the JWT token cannot be created.
+/// - If the `Octocrab` client cannot be built.
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
+/// use anyhow::Result;
 /// use merge_warden_developer_platforms::github::create_app_client;
 ///
 /// #[tokio::main]
-/// async fn main() {
-///     let app_id = 12345;
-///     let private_key = "your-private-key";
-///     let installation_id = Some(67890);
+/// async fn main() -> Result<()> {
+///     let app_id = 123456; // Replace with your GitHub App ID
+///     let private_key = r#"
+/// -----BEGIN RSA PRIVATE KEY-----
+/// ...
+/// -----END RSA PRIVATE KEY-----
+/// "#; // Replace with your GitHub App private key
 ///
-///     match create_app_client(app_id, private_key, installation_id).await {
-///         Ok(client) => {
-///             // Use the authenticated client
-///         }
-///         Err(e) => {
-///             eprintln!("Failed to create app client: {}", e);
-///         }
-///     }
+///     let client = create_app_client(app_id, private_key).await?;
+///
+///     // Use `client` to perform API operations
+///     Ok(())
 /// }
 /// ```
-pub async fn create_app_client(
-    app_id: u64,
-    private_key: &str,
-    installation_id: Option<u64>,
-) -> Result<Octocrab, Error> {
-    // Create JWT for GitHub App authentication
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
+pub async fn create_app_client(app_id: u64, private_key: &str) -> Result<Octocrab, Error> {
+    //let app_id_struct = AppId::from(app_id);
+    let key = EncodingKey::from_rsa_pem(private_key.as_bytes())
+        .map_err(|_| Error::AuthError("Failed to translate the private key.".to_string()))?;
 
-    let claims = JWTClaims {
-        iat: now - 60,
-        exp: now + (10 * 60), // 10 minutes expiration
-        iss: app_id,
-    };
+    //let octocrab = Octocrab::builder().app(app_id_struct, key).build()?;
 
-    let encoding_key = EncodingKey::from_rsa_pem(private_key.as_bytes())
-        .map_err(|e| Error::AuthError(format!("Invalid private key: {}", e)))?;
-
-    let jwt = jsonwebtoken::encode(&Header::new(Algorithm::RS256), &claims, &encoding_key)
-        .map_err(|e| Error::AuthError(format!("Failed to create JWT: {}", e)))?;
-
-    // Create an authenticated octocrab instance
-    let app_client = Octocrab::builder()
-        .personal_token(jwt)
+    let token = octocrab::auth::create_jwt(app_id.into(), &key).unwrap();
+    let octocrab = Octocrab::builder()
+        .personal_token(token)
         .build()
-        .map_err(|e| Error::AuthError(format!("Failed to build octocrab instance: {}", e)))?;
+        .map_err(|_| {
+            Error::AuthError("Failed to get a personal token for the app install.".to_string())
+        })?;
 
-    // If installation ID is provided, get an installation token
-    if let Some(installation_id) = installation_id {
-        let installation_result = app_client
-            .installation_and_token(installation_id.into())
-            .await;
-        let (client, _secret) = match installation_result {
-            Ok(p) => p,
-            Err(e) => return Err(Error::AuthError(e.to_string())),
-        };
-
-        Ok(client)
-    } else {
-        Ok(app_client)
-    }
+    Ok(octocrab)
 }
 
 pub fn create_token_client(token: &str) -> Result<Octocrab, Error> {
@@ -214,20 +299,6 @@ impl GitHubProvider {
         })?;
 
         Ok(())
-    }
-
-    pub async fn from_app(
-        app_id: u64,
-        private_key: &str,
-        installation_id: Option<u64>,
-    ) -> Result<Self, Error> {
-        let client = create_app_client(app_id, private_key, installation_id).await?;
-        Ok(Self::new(client))
-    }
-
-    pub fn from_token(token: &str) -> Result<Self, Error> {
-        let client = create_token_client(token)?;
-        Ok(Self::new(client))
     }
 
     /// Lists all reviews for a pull request.

@@ -53,19 +53,10 @@ async fn main() -> Result<(), CliError> {
     match cli.command {
         Commands::CheckPr(args) => match commands::check_pr::execute(args).await {
             Ok(result) => {
-                if result.passed {
-                    println!("✅ Pull request validation passed");
-                    std::process::exit(0);
-                } else {
-                    println!("❌ Pull request validation failed:");
-                    for failure in result.failures {
-                        println!("  - {}", failure);
-                    }
-                    std::process::exit(1);
-                }
+                return Ok(result);
             }
             Err(e) => {
-                error!("Error validating pull request: {}", e);
+                error!("Error validating pull requests: {}", e);
                 return Err(e.into());
             }
         },

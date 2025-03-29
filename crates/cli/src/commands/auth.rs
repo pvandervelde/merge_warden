@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Subcommand;
 use keyring::Entry;
 use std::path::PathBuf;
-use tracing::{debug, info};
+use tracing::debug;
 
 use crate::config::{get_config_path, Config};
 use crate::errors::CliError;
@@ -11,6 +11,7 @@ pub const KEY_RING_SERVICE_NAME: &str = "merge_warden_cli";
 pub const KEY_RING_APP_ID: &str = "github_app_id";
 pub const KEY_RING_APP_TOKEN: &str = "github_private_key_path";
 pub const KEY_RING_USER_TOKEN: &str = "github_token";
+pub const KEY_RING_WEB_HOOK_SECRET: &str = "webhook_secret";
 
 /// Subcommands for the auth command
 #[derive(Subcommand, Debug)]
@@ -75,6 +76,14 @@ async fn auth_github(method: &str) -> Result<(), CliError> {
                 )));
             }
 
+            // Get the webhook secret
+            println!("Webhook secret:");
+            let mut webhook_secret = String::new();
+            std::io::stdin()
+                .read_line(&mut webhook_secret)
+                .map_err(|e| CliError::AuthError(format!("Failed to read input: {}", e)))?;
+            let webhook_secret = webhook_secret.trim();
+
             let keyring_app_id =
                 Entry::new(KEY_RING_SERVICE_NAME, KEY_RING_APP_ID).map_err(|e| {
                     CliError::AuthError(format!("Failed to create an entry in the keyring: {}", e))
@@ -82,7 +91,7 @@ async fn auth_github(method: &str) -> Result<(), CliError> {
             keyring_app_id
                 .set_password(&app_id.to_string())
                 .map_err(|e| {
-                    CliError::AuthError(format!("Failed to save app_id to keyring: {}", e))
+                    CliError::AuthError(format!("Failed to save the app ID to the keyring: {}", e))
                 })?;
 
             let keyring_key_path =
@@ -90,8 +99,24 @@ async fn auth_github(method: &str) -> Result<(), CliError> {
                     CliError::AuthError(format!("Failed to create an entry in the keyring: {}", e))
                 })?;
             keyring_key_path.set_password(key_path).map_err(|e| {
-                CliError::AuthError(format!("Failed to save private_key_path to keyring: {}", e))
+                CliError::AuthError(format!(
+                    "Failed to save the app private key to the keyring: {}",
+                    e
+                ))
             })?;
+
+            let keyring_webhook_secret =
+                Entry::new(KEY_RING_SERVICE_NAME, KEY_RING_WEB_HOOK_SECRET).map_err(|e| {
+                    CliError::AuthError(format!("Failed to create an entry in the keyring: {}", e))
+                })?;
+            keyring_webhook_secret
+                .set_password(webhook_secret)
+                .map_err(|e| {
+                    CliError::AuthError(format!(
+                        "Failed to save the webhook secret to the keyring: {}",
+                        e
+                    ))
+                })?;
 
             config.authentication.auth_method = "app".to_string();
             config.save(&config_path)?;

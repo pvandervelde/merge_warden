@@ -65,6 +65,10 @@ use errors::MergeWardenError;
 
 pub mod labels;
 
+#[cfg(test)]
+#[path = "lib_tests.rs"]
+mod tests;
+
 /// Result of processing a pull request through Merge Warden.
 ///
 /// Contains information about the validation status and any labels that were added.
@@ -109,10 +113,6 @@ pub struct MergeWarden<P: PullRequestProvider> {
     provider: P,
     config: ValidationConfig,
 }
-
-#[cfg(test)]
-#[path = "lib_tests.rs"]
-mod tests;
 
 impl<P: PullRequestProvider> MergeWarden<P> {
     /// Checks if the PR title follows the Conventional Commits format.
