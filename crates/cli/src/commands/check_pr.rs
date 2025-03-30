@@ -17,11 +17,12 @@ use merge_warden_developer_platforms::models::{
 use octocrab::Octocrab;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
+use std::fs;
 use std::sync::Arc;
 use tracing::{debug, info, instrument, warn};
 
 use crate::commands::auth::{
-    KEY_RING_APP_ID, KEY_RING_APP_TOKEN, KEY_RING_SERVICE_NAME, KEY_RING_USER_TOKEN,
+    KEY_RING_APP_ID, KEY_RING_APP_PRIVATE_KEY_PATH, KEY_RING_SERVICE_NAME, KEY_RING_USER_TOKEN,
 };
 use crate::config::{get_config_path, Config};
 use crate::errors::CliError;
@@ -144,14 +145,24 @@ async fn create_github_app(config: &Config) -> Result<Octocrab, CliError> {
                     CliError::AuthError(format!("Failed to get app ID from the keyring: {}", e))
                 })?;
 
-            let app_key = Entry::new(KEY_RING_SERVICE_NAME, KEY_RING_APP_TOKEN)
+            let app_key_path = Entry::new(KEY_RING_SERVICE_NAME, KEY_RING_APP_PRIVATE_KEY_PATH)
                 .map_err(|e| {
                     CliError::AuthError(format!("Failed to create an entry in the keyring: {}", e))
                 })?
                 .get_password()
                 .map_err(|e| {
-                    CliError::AuthError(format!("Failed to get app key from the keyring: {}", e))
+                    CliError::AuthError(format!(
+                        "Failed to get app key location from the keyring: {}",
+                        e
+                    ))
                 })?;
+
+            let app_key = fs::read_to_string(app_key_path).map_err(|e| {
+                CliError::ConfigError(format!(
+                    "Failed to load the app key from the provided file: {}",
+                    e
+                ))
+            })?;
 
             info!("Using GitHub token authentication");
             let app_id_number = app_id.parse::<u64>().map_err(|e| {

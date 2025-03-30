@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::Subcommand;
 use keyring::Entry;
+use std::fs;
 use std::path::PathBuf;
 use tracing::debug;
 
@@ -9,7 +10,7 @@ use crate::errors::CliError;
 
 pub const KEY_RING_SERVICE_NAME: &str = "merge_warden_cli";
 pub const KEY_RING_APP_ID: &str = "github_app_id";
-pub const KEY_RING_APP_TOKEN: &str = "github_private_key_path";
+pub const KEY_RING_APP_PRIVATE_KEY_PATH: &str = "github_private_key_path";
 pub const KEY_RING_USER_TOKEN: &str = "github_token";
 pub const KEY_RING_WEB_HOOK_SECRET: &str = "webhook_secret";
 
@@ -17,6 +18,7 @@ pub const KEY_RING_WEB_HOOK_SECRET: &str = "webhook_secret";
 #[derive(Subcommand, Debug)]
 pub enum AuthCommands {
     /// Authenticate with GitHub
+    #[command(name = "github")]
     GitHub {
         /// Authentication method (app or token)
         #[arg(default_value = "token")]
@@ -58,6 +60,7 @@ async fn auth_github(method: &str) -> Result<(), CliError> {
             std::io::stdin()
                 .read_line(&mut app_id)
                 .map_err(|e| CliError::AuthError(format!("Failed to read input: {}", e)))?;
+            let app_id = app_id.trim();
 
             // Get private key path
             println!("Path to private key file:");
@@ -88,14 +91,12 @@ async fn auth_github(method: &str) -> Result<(), CliError> {
                 Entry::new(KEY_RING_SERVICE_NAME, KEY_RING_APP_ID).map_err(|e| {
                     CliError::AuthError(format!("Failed to create an entry in the keyring: {}", e))
                 })?;
-            keyring_app_id
-                .set_password(&app_id.to_string())
-                .map_err(|e| {
-                    CliError::AuthError(format!("Failed to save the app ID to the keyring: {}", e))
-                })?;
+            keyring_app_id.set_password(app_id).map_err(|e| {
+                CliError::AuthError(format!("Failed to save the app ID to the keyring: {}", e))
+            })?;
 
-            let keyring_key_path =
-                Entry::new(KEY_RING_SERVICE_NAME, KEY_RING_APP_TOKEN).map_err(|e| {
+            let keyring_key_path = Entry::new(KEY_RING_SERVICE_NAME, KEY_RING_APP_PRIVATE_KEY_PATH)
+                .map_err(|e| {
                     CliError::AuthError(format!("Failed to create an entry in the keyring: {}", e))
                 })?;
             keyring_key_path.set_password(key_path).map_err(|e| {
