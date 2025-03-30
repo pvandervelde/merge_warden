@@ -24,7 +24,7 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     /// Validate a pull request against configured rules
-    #[command(name = "check-pr")]
+    #[command(name = "checkpr")]
     CheckPr(CheckPrArgs),
 
     /// Manage configuration
