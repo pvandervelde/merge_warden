@@ -186,8 +186,11 @@ pub async fn authenticate_with_access_token(
 /// ```
 pub async fn create_app_client(app_id: u64, private_key: &str) -> Result<Octocrab, Error> {
     //let app_id_struct = AppId::from(app_id);
-    let key = EncodingKey::from_rsa_pem(private_key.as_bytes())
-        .map_err(|_| Error::AuthError("Failed to translate the private key.".to_string()))?;
+    let key = EncodingKey::from_rsa_pem(private_key.as_bytes()).map_err(|e| {
+        Error::AuthError(
+            format!("Failed to translate the private key. Error was: {}", e).to_string(),
+        )
+    })?;
 
     //let octocrab = Octocrab::builder().app(app_id_struct, key).build()?;
 
