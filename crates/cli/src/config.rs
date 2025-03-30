@@ -15,6 +15,14 @@ pub struct AuthenticationConfig {
     pub auth_method: String,
 }
 
+impl AuthenticationConfig {
+    pub fn new() -> Self {
+        AuthenticationConfig {
+            auth_method: default_auth_method(),
+        }
+    }
+}
+
 /// Configuration for Merge Warden CLI
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {
@@ -81,10 +89,10 @@ impl Config {
     /// Create a default configuration
     pub fn default() -> Self {
         Config {
-            default: DefaultConfig::default(),
-            rules: RulesConfig::default(),
-            authentication: AuthenticationConfig::default(),
-            pr_validation: PRValidationConfig::default(),
+            default: DefaultConfig::new(),
+            rules: RulesConfig::new(),
+            authentication: AuthenticationConfig::new(),
+            pr_validation: PRValidationConfig::new(),
         }
     }
 }
@@ -97,12 +105,28 @@ pub struct DefaultConfig {
     pub provider: String,
 }
 
+impl DefaultConfig {
+    pub fn new() -> Self {
+        DefaultConfig {
+            provider: default_provider(),
+        }
+    }
+}
+
 /// Pull Request Validation configuration
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct PRValidationConfig {
     /// The port on which webhooks will be received
     #[serde(default = "default_port")]
     pub port: u32,
+}
+
+impl PRValidationConfig {
+    pub fn new() -> Self {
+        PRValidationConfig {
+            port: default_port(),
+        }
+    }
 }
 
 /// Rules configuration
@@ -119,6 +143,16 @@ pub struct RulesConfig {
     /// Minimum number of approvals required
     #[serde(default)]
     pub min_approvals: Option<u32>,
+}
+
+impl RulesConfig {
+    pub fn new() -> Self {
+        RulesConfig {
+            require_work_items: false,
+            enforce_title_convention: Some(false),
+            min_approvals: Some(1),
+        }
+    }
 }
 
 fn default_auth_method() -> String {
