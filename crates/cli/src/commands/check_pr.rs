@@ -11,15 +11,13 @@ use merge_warden_core::MergeWarden;
 use merge_warden_developer_platforms::github::{
     authenticate_with_access_token, create_app_client, create_token_client, GitHubProvider,
 };
-use merge_warden_developer_platforms::models::{
-    Installation, Organization, PullRequest, Repository,
-};
+use merge_warden_developer_platforms::models::{Installation, PullRequest, Repository};
 use octocrab::Octocrab;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::fs;
 use std::sync::Arc;
-use tracing::{debug, info, instrument, warn};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::commands::auth::{
     KEY_RING_APP_ID, KEY_RING_APP_PRIVATE_KEY_PATH, KEY_RING_SERVICE_NAME, KEY_RING_USER_TOKEN,
@@ -61,7 +59,6 @@ pub struct ValidationResult {
 struct WebhookPayload {
     action: String,
     pull_request: Option<PullRequest>,
-    organization: Option<Organization>,
     repository: Option<Repository>,
     installation: Option<Installation>,
 }
@@ -114,8 +111,10 @@ struct WebhookPayload {
 /// }
 /// ```
 async fn create_github_app(config: &Config) -> Result<Octocrab, CliError> {
+    debug!("Creating GitHub app client");
     let provider = match config.authentication.auth_method.as_str() {
         "token" => {
+            info!("Using GitHub token authentication");
             let github_token = Entry::new(KEY_RING_SERVICE_NAME, KEY_RING_USER_TOKEN)
                 .map_err(|e| {
                     CliError::AuthError(format!("Failed to create an entry in the keyring: {}", e))
@@ -128,14 +127,16 @@ async fn create_github_app(config: &Config) -> Result<Octocrab, CliError> {
                     ))
                 })?;
 
-            info!("Using GitHub token authentication");
-            create_token_client(&github_token).map_err(|e| {
+            let client = create_token_client(&github_token).map_err(|e| {
                 CliError::AuthError(
                     format!("Failed to load the GitHub provider. Error was: {}", e).to_string(),
                 )
-            })?
+            })?;
+            debug!("GitHub token client created successfully");
+            client
         }
         "app" => {
+            info!(message = "Using GitHub App authentication");
             let app_id = Entry::new(KEY_RING_SERVICE_NAME, KEY_RING_APP_ID)
                 .map_err(|e| {
                     CliError::AuthError(format!("Failed to create an entry in the keyring: {}", e))
@@ -164,7 +165,6 @@ async fn create_github_app(config: &Config) -> Result<Octocrab, CliError> {
                 ))
             })?;
 
-            info!("Using GitHub token authentication");
             let app_id_number = app_id.parse::<u64>().map_err(|e| {
                 CliError::InvalidArguments(
                     format!(
@@ -174,22 +174,26 @@ async fn create_github_app(config: &Config) -> Result<Octocrab, CliError> {
                     .to_string(),
                 )
             })?;
-            create_app_client(app_id_number, &app_key)
+            let client = create_app_client(app_id_number, &app_key)
                 .await
                 .map_err(|e| {
                     CliError::AuthError(
                         format!("Failed to load the GitHub provider. Error was: {}", e).to_string(),
                     )
-                })?
+                })?;
+            debug!(message = "GitHub App client created successfully");
+            client
         }
         _ => {
-            return Err(CliError::InvalidArguments(
+            let err = CliError::InvalidArguments(
                 format!(
                     "Unsupported authentication method: {}",
                     config.authentication.auth_method
                 )
                 .to_string(),
-            ))
+            );
+            error!(message = "Failed to create GitHub app client", error = ?err);
+            return Err(err);
         }
     };
 
@@ -230,6 +234,7 @@ async fn create_github_app(config: &Config) -> Result<Octocrab, CliError> {
 /// The function uses Axum to set up the HTTP server and routes. It listens for webhook events
 /// on the `/webhook` endpoint and processes them asynchronously. The server runs indefinitely
 /// until manually stopped.
+#[instrument]
 pub async fn execute(args: CheckPrArgs) -> Result<(), CliError> {
     // Load configuration
     let config_path = get_config_path(args.config.as_deref());
@@ -264,49 +269,96 @@ async fn handle_webhook(
     headers: HeaderMap,
     body: String,
 ) -> Result<StatusCode, StatusCode> {
-    info!("Received webhook call from Github");
+    info!(message = "Received webhook call from Github");
 
     if !verify_github_signature(&state.webhook_secret, &headers, &body) {
-        warn!("Webhook did not have valid signature");
+        warn!(message = "Webhook did not have valid signature");
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    info!("Webhook has valid signature. Processing information ...");
+    info!(message = "Webhook has valid signature. Processing information ...");
 
     let payload: WebhookPayload =
         serde_json::from_str(&body).map_err(|_| StatusCode::BAD_REQUEST)?;
 
-    debug!("Github action is {}", payload.action.as_str());
+    debug!(action = payload.action.as_str(), "Github action");
     let action = payload.action.as_str();
-    if action == "closed" || action == "converted_to_draft" || action == "locked" {
+    if action != "opened"
+        && action != "edited"
+        && action != "ready_for_review"
+        && action != "reopened"
+        && action != "unlocked"
+    {
+        info!(
+            action = payload.action.as_str(),
+            message = "Pull request change type means no scanning required."
+        );
         return Ok(StatusCode::OK);
     }
 
     let Some(installation) = payload.installation else {
+        warn!(message = "Web hook payload did not include installation information. Cannot process changes.");
         return Err(StatusCode::BAD_REQUEST);
     };
     let installation_id = installation.id;
 
     let Some(repository) = payload.repository else {
+        warn!(
+            message =
+                "Web hook payload did not include repository information. Cannot process changes."
+        );
         return Err(StatusCode::BAD_REQUEST);
     };
 
     let Some(pr) = payload.pull_request else {
+        warn!(message = "Web hook payload did not include pull request information. Cannot process changes.");
         return Err(StatusCode::BAD_REQUEST);
     };
 
-    let organization = payload.organization.map_or(String::new(), |o| o.name);
+    // If the pull request is a draft then we don't review it initially. We wait until it is ready for review
+    if pr.draft {
+        info!(message = "Pull request is in draft mode. Will not review pull request until it is marked as ready for review.");
+        return Ok(StatusCode::OK);
+    }
+
+    let parts: Vec<&str> = repository.full_name.split('/').collect();
+    if parts.len() != 2 {
+        warn!(
+            repository = &repository.name,
+            pull_request = pr.number,
+            "Failed to extract the name of the repository owner"
+        );
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let repo_owner = parts[0];
+
+    info!(
+        repository_owner = repo_owner,
+        repository = &repository.name,
+        pull_request = pr.number,
+        "Processing pull request"
+    );
 
     let api_with_pat = match authenticate_with_access_token(
         &state.octocrab,
         installation_id,
-        organization.as_str(),
+        repo_owner,
         &repository.name,
     )
     .await
     {
         Ok(o) => o,
-        Err(_) => return Err(StatusCode::UNAUTHORIZED),
+        Err(e) => {
+            error!(
+                repository_owner = repo_owner,
+                repository = &repository.name,
+                pull_request = pr.number,
+                error = e.to_string(),
+                "Failed to authenticate with GitHub"
+            );
+            return Err(StatusCode::UNAUTHORIZED);
+        }
     };
 
     let provider = GitHubProvider::new(api_with_pat);
@@ -323,14 +375,29 @@ async fn handle_webhook(
     let warden = MergeWarden::with_config(provider, config);
 
     // Process a pull request
+    info!(
+        message = "Processing pull request",
+        pull_request = pr.number,
+        repository = &repository.name
+    );
     let _ = warden
-        .process_pull_request(&organization, &repository.name, pr.number)
-        .await;
+        .process_pull_request(repo_owner, &repository.name, pr.number)
+        .await
+        .inspect_err(|e| {
+            error!(
+                repository_owner = repo_owner,
+                repository = &repository.name,
+                pull_request = pr.number,
+                error = e.to_string(),
+                "Failed to process pull request"
+            );
+        });
 
     Ok(StatusCode::OK)
 }
 
 fn retrieve_webhook_secret() -> Result<String, CliError> {
+    debug!(message = "Retrieving webhook secret");
     let webhook_secret = Entry::new(KEY_RING_SERVICE_NAME, KEY_RING_WEB_HOOK_SECRET)
         .map_err(|e| {
             CliError::AuthError(format!("Failed to create an entry in the keyring: {}", e))
@@ -343,6 +410,7 @@ fn retrieve_webhook_secret() -> Result<String, CliError> {
             ))
         })?;
 
+    debug!(message = "Webhook secret retrieved successfully");
     Ok(webhook_secret)
 }
 

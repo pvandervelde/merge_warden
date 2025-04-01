@@ -107,6 +107,9 @@ pub struct PullRequest {
     /// The title of the pull request
     pub title: String,
 
+    /// Indicates if the pull request is a draft or not
+    pub draft: bool,
+
     /// The description/body of the pull request, if any
     pub body: Option<String>,
 }

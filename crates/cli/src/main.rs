@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
-use tracing::{error, info};
+use tracing::{error, info, instrument};
 
 mod commands;
 mod config;
@@ -8,6 +8,7 @@ mod errors;
 
 use commands::{auth::AuthCommands, check_pr::CheckPrArgs, config_cmd::ConfigCommands};
 use errors::CliError;
+use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
 /// Merge Warden CLI - Validate pull requests against configured rules
 #[derive(Parser)]
@@ -37,9 +38,13 @@ enum Commands {
 }
 
 #[tokio::main]
+#[instrument]
 async fn main() -> Result<(), CliError> {
     // Initialize logging
-    tracing_subscriber::fmt::init();
+    tracing_subscriber::registry()
+        .with(fmt::layer())
+        .with(EnvFilter::from_env("MERGE_WARDEN_LOG"))
+        .init();
 
     // Parse command line arguments
     let cli = Cli::parse();

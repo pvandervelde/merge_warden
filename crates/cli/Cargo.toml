@@ -35,4 +35,4 @@ tokio = { workspace = true }
 toml = "0.8"
 tracing = { workspace = true, features = ["log"] }
 tracing-opentelemetry = { workspace = true, features = ["thiserror"] }
-tracing-subscriber = { workspace = true, features = ["env-filter"] }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }

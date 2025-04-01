@@ -1,6 +1,6 @@
 use anyhow::Result;
 use clap::Subcommand;
-use tracing::debug;
+use tracing::{debug, error, info, instrument};
 
 use crate::config::{get_config_path, Config};
 use crate::errors::CliError;
@@ -47,6 +47,7 @@ pub enum ConfigCommands {
 }
 
 /// Execute the config command
+#[instrument]
 pub async fn execute(cmd: ConfigCommands) -> Result<(), CliError> {
     match cmd {
         ConfigCommands::Init { path } => init_config(path.as_deref()),
@@ -57,44 +58,71 @@ pub async fn execute(cmd: ConfigCommands) -> Result<(), CliError> {
 }
 
 /// Initialize a new configuration file
+#[instrument]
 fn init_config(path: Option<&str>) -> Result<(), CliError> {
     let config_path = get_config_path(path);
-    debug!("Initializing configuration at {:?}", config_path);
+    debug!(message = "Initializing configuration", path = ?config_path);
 
     if config_path.exists() {
-        return Err(CliError::ConfigError(format!(
+        let err = CliError::ConfigError(format!(
             "Configuration file already exists at {:?}",
             config_path
-        )));
+        ));
+        error!(
+            message = "Configuration file already exists",
+            path = ?config_path,
+            error = ?err
+        );
+        return Err(err);
     }
 
     let config = Config::default();
-    config.save(&config_path)?;
+    if let Err(e) = config.save(&config_path) {
+        error!(message = "Failed to save configuration", path = ?config_path, error = ?e);
+        return Err(e);
+    }
 
+    info!(message = "Configuration initialized", path = ?config_path);
     println!("Configuration initialized at {:?}", config_path);
     Ok(())
 }
 
 /// Validate a configuration file
+#[instrument]
 fn validate_config(path: Option<&str>) -> Result<(), CliError> {
     let config_path = get_config_path(path);
-    debug!("Validating configuration at {:?}", config_path);
+    debug!(message = "Validating configuration", path = ?config_path);
 
     match Config::load(&config_path) {
         Ok(_) => {
+            info!(message = "Configuration is valid", path = ?config_path);
             println!("Configuration is valid");
             Ok(())
         }
-        Err(e) => Err(e),
+        Err(e) => {
+            error!(
+                message = "Configuration is invalid",
+                path = ?config_path,
+                error = ?e
+            );
+            Err(e)
+        }
     }
 }
 
 /// Get a configuration value
+#[instrument]
 fn get_config(path: Option<&str>, key: Option<&str>) -> Result<(), CliError> {
     let config_path = get_config_path(path);
-    debug!("Getting configuration from {:?}", config_path);
+    debug!(message = "Getting configuration", path = ?config_path, key = ?key);
 
-    let config = Config::load(&config_path)?;
+    let config = match Config::load(&config_path) {
+        Ok(c) => c,
+        Err(e) => {
+            error!(message = "Failed to load configuration", path = ?config_path, error = ?e);
+            return Err(e);
+        }
+    };
 
     if let Some(key) = key {
         // Get specific key
@@ -112,23 +140,42 @@ fn get_config(path: Option<&str>, key: Option<&str>) -> Result<(), CliError> {
 }
 
 /// Set a configuration value
+#[instrument]
 fn set_config(path: Option<&str>, key: &str, value: &str) -> Result<(), CliError> {
     let config_path = get_config_path(path);
-    debug!("Setting configuration at {:?}", config_path);
+    debug!(
+        message = "Setting configuration",
+        path = ?config_path,
+        key = key,
+        value = value
+    );
 
     // Load existing config or create a new one
-    let mut config = if config_path.exists() {
-        Config::load(&config_path)?
+    let mut config = match if config_path.exists() {
+        Config::load(&config_path)
     } else {
-        Config::default()
+        Ok(Config::default())
+    } {
+        Ok(c) => c,
+        Err(e) => {
+            error!(message = "Failed to load configuration", path = ?config_path, error = ?e);
+            return Err(e);
+        }
     };
 
     // Update the config
-    set_config_value(&mut config, key, value)?;
+    if let Err(e) = set_config_value(&mut config, key, value) {
+        error!(message = "Failed to set configuration value", key = key, value = value, error = ?e);
+        return Err(e);
+    }
 
     // Save the updated config
-    config.save(&config_path)?;
+    if let Err(e) = config.save(&config_path) {
+        error!(message = "Failed to save configuration", path = ?config_path, error = ?e);
+        return Err(e);
+    }
 
+    info!(message = "Configuration updated", key = key, value = value);
     println!("Configuration updated: {} = {}", key, value);
     Ok(())
 }
