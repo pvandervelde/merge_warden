@@ -28,6 +28,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Run release-plz
-        uses: MarcoIeni/release-plz-action@e28810957ef1fedfa89b5e9692e750ce45f62a67 # v0.5
+        uses: MarcoIeni/release-plz-action@7419a2cb1535b9c0e852b4dec626967baf65c022 # v0.5
         env:
           GITHUB_TOKEN: ${{ steps.generate-token.outputs.token }}
