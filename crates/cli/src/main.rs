@@ -42,7 +42,7 @@ enum Commands {
 async fn main() -> Result<(), CliError> {
     // Initialize logging
     tracing_subscriber::registry()
-        .with(fmt::layer())
+        .with(fmt::layer().pretty())
         .with(EnvFilter::from_env("MERGE_WARDEN_LOG"))
         .init();
 

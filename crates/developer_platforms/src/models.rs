@@ -39,12 +39,18 @@ pub struct Comment {
 
     /// The text content of the comment
     pub body: String,
+
+    // The user who made the comment
+    pub user: User,
 }
 
 #[derive(Deserialize)]
 pub struct Installation {
     pub id: u64,
+    pub slug: Option<String>,
+    pub client_id: Option<String>,
     pub node_id: String,
+    pub name: Option<String>,
 }
 
 /// Represents a label on a pull request.
@@ -123,14 +129,14 @@ pub struct Repository {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct Review {
-    id: u64,
-    state: String,
-    user: User,
+pub struct Review {
+    pub id: u64,
+    pub state: String,
+    pub user: User,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct User {
-    id: u64,
-    login: String,
+pub struct User {
+    pub id: u64,
+    pub login: String,
 }

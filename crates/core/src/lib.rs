@@ -61,8 +61,8 @@ use merge_warden_developer_platforms::PullRequestProvider;
 pub mod checks;
 pub mod config;
 use config::ValidationConfig;
-use config::{MISSING_WORK_ITEM_LABEL, WORK_ITEM_COMMENT_MARKER};
-use config::{TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL};
+use config::MISSING_WORK_ITEM_LABEL;
+use config::TITLE_INVALID_LABEL;
 
 pub mod errors;
 use errors::MergeWardenError;
@@ -184,7 +184,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
             repository_owner = repo_owner,
             repository = repo_name,
             pull_request = pr.number,
-            "Validating that the pull request description has a valid title",
+            "Updating the pull request to indicate if the pull request has a valid title",
         );
 
         // Skip if conventional commits are not enforced
@@ -205,6 +205,14 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
                 .list_labels(repo_owner, repo_name, pr.number)
                 .await)
                 .unwrap_or_default();
+            debug!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                pull_request = pr.number,
+                count = labels.len(),
+                "Searched for existing labels",
+            );
+
             let has_invalid_title_label =
                 labels.iter().any(|label| label.name == TITLE_INVALID_LABEL);
 
@@ -225,27 +233,6 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
                     pull_request = pr.number,
                     "The pull request title is invalid. Added a label to indicate the issue."
                 );
-
-                // Add comment with suggestions
-                let comment = format!(
-                    "{}\n## Invalid PR Title Format\n\nYour PR title doesn't follow the [Conventional Commits](https://www.conventionalcommits.org/) format.\n\nPlease update your title to follow this format:\n\n`<type>(<scope>): <description>`\n\nValid types: build, chore, ci, docs, feat, fix, perf, refactor, revert, style, test\n\nExamples:\n- `feat(auth): add login with GitHub`\n- `fix: correct typo in readme`\n- `docs: update API documentation`\n- `refactor(api): simplify error handling`",
-                    TITLE_COMMENT_MARKER
-                );
-
-                self.provider
-                    .add_comment(repo_owner, repo_name, pr.number, &comment)
-                    .await
-                    .map_err(|_| {
-                        MergeWardenError::FailedToUpdatePullRequest(
-                            "Failed to add comment".to_string(),
-                        )
-                    })?;
-                info!(
-                    repository_owner = repo_owner,
-                    repository = repo_name,
-                    pull_request = pr.number,
-                    "The pull request title is invalid. Added a comment to indicate the issue."
-                );
             }
         } else {
             // Check if PR has the invalid title label to remove it
@@ -254,6 +241,14 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
                 .list_labels(repo_owner, repo_name, pr.number)
                 .await)
                 .unwrap_or_default();
+
+            debug!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                pull_request = pr.number,
+                count = labels.len(),
+                "Searched for existing labels",
+            );
 
             let has_invalid_title_label =
                 labels.iter().any(|label| label.name == TITLE_INVALID_LABEL);
@@ -272,34 +267,6 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
                     "The pull request title is valid. Removed a label that was indicating the issue."
                 );
             }
-
-            // Find and remove the comment
-            let comments = (self
-                .provider
-                .list_comments(repo_owner, repo_name, pr.number)
-                .await)
-                .unwrap_or_default();
-
-            for comment in comments {
-                if comment.body.contains(TITLE_COMMENT_MARKER) {
-                    self.provider
-                        .delete_comment(repo_owner, repo_name, comment.id)
-                        .await
-                        .map_err(|_| {
-                            MergeWardenError::FailedToUpdatePullRequest(
-                                "Failed to remove comment".to_string(),
-                            )
-                        })?;
-                    break;
-                }
-            }
-
-            info!(
-                repository_owner = repo_owner,
-                repository = repo_name,
-                pull_request = pr.number,
-                "The pull request title is valid. Removed a comment that was indicating the issue."
-            );
         }
 
         Ok(())
@@ -333,7 +300,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
             repository_owner = repo_owner,
             repository = repo_name,
             pull_request = pr.number,
-            "Validating that the pull request description contains a work item reference",
+            "Updating the pull request to indicate if the pull request description contains a work item reference",
         );
 
         // Skip if work item references are not required
@@ -348,6 +315,14 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
                 .list_labels(repo_owner, repo_name, pr.number)
                 .await)
                 .unwrap_or_default();
+            debug!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                pull_request = pr.number,
+                count = labels.len(),
+                "Searched for existing labels",
+            );
+
             let has_missing_work_item_label = labels
                 .iter()
                 .any(|label| label.name == MISSING_WORK_ITEM_LABEL);
@@ -374,28 +349,6 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
                     pull_request = pr.number,
                     "The pull request does not have a work item reference. Added a label to indicate the issue."
                 );
-
-                // Add comment with suggestions
-                let comment = format!(
-                    "{}\n## Missing Work Item Reference\n\nYour PR description doesn't reference a work item or GitHub issue. Please update it to include a reference using one of the following formats:\n\n- `Fixes #123`\n- `Closes #123`\n- `Resolves #123`\n- `References #123`\n- `Relates to #123`\n\nYou can also use the full URL to the issue.",
-                    WORK_ITEM_COMMENT_MARKER
-                );
-
-                self.provider
-                    .add_comment(repo_owner, repo_name, pr.number, &comment)
-                    .await
-                    .map_err(|_| {
-                        MergeWardenError::FailedToUpdatePullRequest(
-                            "Failed to add comment".to_string(),
-                        )
-                    })?;
-
-                info!(
-                    repository_owner = repo_owner,
-                    repository = repo_name,
-                    pull_request = pr.number,
-                    "The pull request does not have a work item reference. Added a comment to indicate the issue."
-                );
             }
         } else {
             // Check if PR has the missing work item label to remove it
@@ -404,6 +357,14 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
                 .list_labels(repo_owner, repo_name, pr.number)
                 .await)
                 .unwrap_or_default();
+
+            debug!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                pull_request = pr.number,
+                count = labels.len(),
+                "Searched for existing labels",
+            );
 
             let has_missing_work_item_label = labels
                 .iter()
@@ -423,34 +384,6 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
                     "The pull request title has a work item reference. Removed a label that was indicating the issue."
                 );
             }
-
-            // Find and remove the comment
-            let comments = (self
-                .provider
-                .list_comments(repo_owner, repo_name, pr.number)
-                .await)
-                .unwrap_or_default();
-
-            for comment in comments {
-                if comment.body.contains(WORK_ITEM_COMMENT_MARKER) {
-                    self.provider
-                        .delete_comment(repo_owner, repo_name, comment.id)
-                        .await
-                        .map_err(|_| {
-                            MergeWardenError::FailedToUpdatePullRequest(
-                                "Failed to delete comment".to_string(),
-                            )
-                        })?;
-                    break;
-                }
-            }
-
-            info!(
-                repository_owner = repo_owner,
-                repository = repo_name,
-                pull_request = pr.number,
-                "The pull request title has a work item reference. Removed a comment that was indicating the issue."
-            );
         }
 
         Ok(())
@@ -493,9 +426,9 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
             (false, false) => formatdoc!(
                 "The pull request needs some improvements:
 
-    1. Title Convention: Your PR title does not follow the conventional commit message format.
+    1. Title Convention: Your PR title does not follow the [Conventional Commits](https://www.conventionalcommits.org/) message format.
     - Supported types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
-    - Expected format: <type>(<optional scope>): <description>
+    - Expected format: `<type>(<optional scope>): <description>`
     - Examples:
         * feat(auth): add login functionality
         * fix: resolve null pointer exception
@@ -519,9 +452,9 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
             (false, true) => formatdoc!(
                 "The pull request title needs correction:
 
-    1. Title Convention: Your PR title does not follow the conventional commit message format.
+    1. Title Convention: Your PR title does not follow the [Conventional Commits](https://www.conventionalcommits.org/) message format.
     - Supported types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
-    - Expected format: <type>(<optional scope>): <description>
+    - Expected format: `<type>(<optional scope>): <description>`
     - Examples:
         * feat(auth): add login functionality
         * fix: resolve null pointer exception
@@ -740,7 +673,16 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
 
         // Apply labels and comments based on the title validation results
         self.communicate_pr_title_validity_status(repo_owner, repo_name, &pr, is_title_valid)
-            .await?;
+            .await
+            .inspect_err(|e| {
+                error!(
+                    repository_owner = repo_owner,
+                    repository = repo_name,
+                    pull_request = pr_number,
+                    error = e.to_string(),
+                    "Failed to update the PR with the status of the title structure."
+                )
+            })?;
 
         // Apply labels and comment based on the work item validation results
         self.communicate_pr_work_item_validity_status(
@@ -749,7 +691,16 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
             &pr,
             is_work_item_referenced,
         )
-        .await?;
+        .await
+        .inspect_err(|e| {
+            error!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                pull_request = pr_number,
+                error = e.to_string(),
+                "Failed to update the PR with the status of the work item reference."
+            )
+        })?;
 
         // Determine labels
         let labels = self.determine_labels(repo_owner, repo_name, &pr).await?;

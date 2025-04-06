@@ -9,9 +9,9 @@ use keyring::Entry;
 use merge_warden_core::config::ValidationConfig;
 use merge_warden_core::MergeWarden;
 use merge_warden_developer_platforms::github::{
-    authenticate_with_access_token, create_app_client, create_token_client, GitHubProvider,
+    authenticate_with_access_token, create_app_client, GitHubProvider,
 };
-use merge_warden_developer_platforms::models::{Installation, PullRequest, Repository};
+use merge_warden_developer_platforms::models::{Installation, PullRequest, Repository, User};
 use octocrab::Octocrab;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
@@ -20,7 +20,7 @@ use std::sync::Arc;
 use tracing::{debug, error, info, instrument, warn};
 
 use crate::commands::auth::{
-    KEY_RING_APP_ID, KEY_RING_APP_PRIVATE_KEY_PATH, KEY_RING_SERVICE_NAME, KEY_RING_USER_TOKEN,
+    KEY_RING_APP_ID, KEY_RING_APP_PRIVATE_KEY_PATH, KEY_RING_SERVICE_NAME,
 };
 use crate::config::{get_config_path, Config};
 use crate::errors::CliError;
@@ -29,6 +29,7 @@ use super::auth::KEY_RING_WEB_HOOK_SECRET;
 
 struct AppState {
     octocrab: Octocrab,
+    user: User,
     config: Config,
     webhook_secret: String,
 }
@@ -110,30 +111,19 @@ struct WebhookPayload {
 ///     Ok(())
 /// }
 /// ```
-async fn create_github_app(config: &Config) -> Result<Octocrab, CliError> {
+async fn create_github_app(config: &Config) -> Result<(Octocrab, User), CliError> {
     debug!("Creating GitHub app client");
     let provider = match config.authentication.auth_method.as_str() {
         "token" => {
-            info!("Using GitHub token authentication");
-            let github_token = Entry::new(KEY_RING_SERVICE_NAME, KEY_RING_USER_TOKEN)
-                .map_err(|e| {
-                    CliError::AuthError(format!("Failed to create an entry in the keyring: {}", e))
-                })?
-                .get_password()
-                .map_err(|e| {
-                    CliError::AuthError(format!(
-                        "Failed to get the user token from the keyring: {}",
-                        e
-                    ))
-                })?;
-
-            let client = create_token_client(&github_token).map_err(|e| {
-                CliError::AuthError(
-                    format!("Failed to load the GitHub provider. Error was: {}", e).to_string(),
+            let err = CliError::InvalidArguments(
+                format!(
+                    "Unsupported authentication method: {}",
+                    config.authentication.auth_method
                 )
-            })?;
-            debug!("GitHub token client created successfully");
-            client
+                .to_string(),
+            );
+            error!(message = "Failed to create GitHub app client", error = ?err);
+            return Err(err);
         }
         "app" => {
             info!(message = "Using GitHub App authentication");
@@ -174,7 +164,7 @@ async fn create_github_app(config: &Config) -> Result<Octocrab, CliError> {
                     .to_string(),
                 )
             })?;
-            let client = create_app_client(app_id_number, &app_key)
+            let pair = create_app_client(app_id_number, &app_key)
                 .await
                 .map_err(|e| {
                     CliError::AuthError(
@@ -182,7 +172,7 @@ async fn create_github_app(config: &Config) -> Result<Octocrab, CliError> {
                     )
                 })?;
             debug!(message = "GitHub App client created successfully");
-            client
+            pair
         }
         _ => {
             let err = CliError::InvalidArguments(
@@ -241,13 +231,14 @@ pub async fn execute(args: CheckPrArgs) -> Result<(), CliError> {
     let config = Config::load(&config_path)
         .map_err(|e| CliError::ConfigError(format!("Failed to load configuration: {}", e)))?;
 
-    let octocrab = create_github_app(&config).await?;
+    let (octocrab, user) = create_github_app(&config).await?;
     let webhook_secret = retrieve_webhook_secret()?;
 
     let addr = format!("0.0.0.0:{}", config.pr_validation.port);
 
     let state = Arc::new(AppState {
         octocrab,
+        user,
         config,
         webhook_secret,
     });
@@ -269,17 +260,23 @@ async fn handle_webhook(
     headers: HeaderMap,
     body: String,
 ) -> Result<StatusCode, StatusCode> {
-    info!(message = "Received webhook call from Github");
+    info!("Received webhook call from Github");
 
     if !verify_github_signature(&state.webhook_secret, &headers, &body) {
-        warn!(message = "Webhook did not have valid signature");
+        warn!("Webhook did not have valid signature");
         return Err(StatusCode::UNAUTHORIZED);
     }
 
-    info!(message = "Webhook has valid signature. Processing information ...");
+    info!("Webhook has valid signature. Processing information ...");
 
-    let payload: WebhookPayload =
-        serde_json::from_str(&body).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let payload: WebhookPayload = serde_json::from_str(&body).map_err(|e| {
+        error!(
+            body = body.clone(),
+            error = e.to_string(),
+            "Could not extract webhook payload from request body"
+        );
+        StatusCode::BAD_REQUEST
+    })?;
 
     debug!(action = payload.action.as_str(), "Github action");
     let action = payload.action.as_str();
@@ -361,7 +358,7 @@ async fn handle_webhook(
         }
     };
 
-    let provider = GitHubProvider::new(api_with_pat);
+    let provider = GitHubProvider::new(api_with_pat, state.user.clone());
 
     // Get pull request
     // Create a custom configuration
