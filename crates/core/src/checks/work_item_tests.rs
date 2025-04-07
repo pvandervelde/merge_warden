@@ -6,6 +6,7 @@ fn test_empty_body() {
     let pr = PullRequest {
         number: 1,
         title: "feat: test".to_string(),
+        draft: false,
         body: None,
     };
 
@@ -30,6 +31,7 @@ fn test_alternative_keywords() {
         let pr = PullRequest {
             number: 1,
             title: "feat: test".to_string(),
+            draft: false,
             body: Some(reference.to_string()),
         };
 
@@ -67,6 +69,7 @@ fn test_case_sensitivity() {
         let pr = PullRequest {
             number: 1,
             title: "feat: test".to_string(),
+            draft: false,
             body: Some(reference.to_string()),
         };
 
@@ -96,6 +99,7 @@ fn test_different_issue_formats() {
         let pr = PullRequest {
             number: 1,
             title: "feat: test".to_string(),
+            draft: false,
             body: Some(reference.to_string()),
         };
 
@@ -130,6 +134,7 @@ fn test_invalid_work_item_references() {
         let pr = PullRequest {
             number: 1,
             title: "feat: test".to_string(),
+            draft: false,
             body: Some(reference.to_string()),
         };
 
@@ -151,6 +156,7 @@ fn test_malformed_references() {
         let pr = PullRequest {
             number: 1,
             title: "feat: test".to_string(),
+            draft: false,
             body: Some(reference.to_string()),
         };
 
@@ -168,6 +174,7 @@ fn test_mixed_valid_and_invalid_references() {
     let pr = PullRequest {
         number: 1,
         title: "feat: test".to_string(),
+        draft: false,
         body: Some("Fixes #123\nInvalid reference\nCloses #456".to_string()),
     };
 
@@ -183,6 +190,7 @@ fn test_multiple_valid_work_item_references() {
     let pr = PullRequest {
         number: 1,
         title: "feat: test".to_string(),
+        draft: false,
         body: Some("Fixes #123\nCloses #456\nResolves #789".to_string()),
     };
 
@@ -205,6 +213,7 @@ fn test_position_in_body() {
         let pr = PullRequest {
             number: 1,
             title: "feat: test".to_string(),
+            draft: false,
             body: Some(body.to_string()),
         };
 
@@ -234,6 +243,7 @@ fn test_valid_work_item_references() {
         let pr = PullRequest {
             number: 1,
             title: "feat: test".to_string(),
+            draft: false,
             body: Some(reference.to_string()),
         };
 
@@ -248,6 +258,7 @@ fn test_very_long_body() {
     let pr = PullRequest {
         number: 1,
         title: "feat: test".to_string(),
+        draft: false,
         body: Some(long_body),
     };
 
@@ -263,6 +274,7 @@ fn test_work_item_correction() {
     let pr = PullRequest {
         number: 1,
         title: "feat: test".to_string(),
+        draft: false,
         body: Some("No reference here".to_string()),
     };
 
@@ -272,6 +284,7 @@ fn test_work_item_correction() {
     let updated_pr = PullRequest {
         number: 1,
         title: "feat: test".to_string(),
+        draft: false,
         body: Some("Fixes #123".to_string()),
     };
 

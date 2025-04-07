@@ -15,7 +15,7 @@
 //! use merge_warden_core::{MergeWarden, config::ValidationConfig};
 //! use anyhow::Result;
 //!
-//! async fn validate_pr<P: PullRequestProvider>(provider: P) -> Result<()> {
+//! async fn validate_pr<P: PullRequestProvider + std::fmt::Debug>(provider: P) -> Result<()> {
 //!     // Create a MergeWarden instance with default configuration
 //!     let warden = MergeWarden::new(provider);
 //!
@@ -36,7 +36,7 @@
 //! }
 //!
 //! // With custom configuration
-//! async fn validate_pr_custom<P: PullRequestProvider>(provider: P) -> Result<()> {
+//! async fn validate_pr_custom<P: PullRequestProvider + std::fmt::Debug>(provider: P) -> Result<()> {
 //!     // Create a custom configuration
 //!     let config = ValidationConfig {
 //!         enforce_conventional_commits: true,
@@ -102,7 +102,7 @@ pub struct CheckResult {
 /// use merge_warden_core::MergeWarden;
 /// use anyhow::Result;
 ///
-/// async fn example<P: PullRequestProvider>(provider: P) -> Result<()> {
+/// async fn example<P: PullRequestProvider + std::fmt::Debug>(provider: P) -> Result<()> {
 ///     // Create a new MergeWarden instance with default configuration
 ///     let warden = MergeWarden::new(provider);
 ///
@@ -512,6 +512,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     /// use merge_warden_developer_platforms::errors::Error;
     /// use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
     ///
+    /// #[derive(Debug)]
     /// struct MyProvider;
     ///
     /// #[async_trait]
@@ -534,7 +535,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
     ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
-    ///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: &str, _: bool) -> Result<(), Error> { unimplemented!() }
+    ///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: bool) -> Result<(), Error> { unimplemented!() }
     /// }
     ///
     /// fn example() {
@@ -580,6 +581,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     /// use merge_warden_developer_platforms::errors::Error;
     /// use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
     ///
+    /// #[derive(Debug)]
     /// struct MyProvider;
     ///
     /// #[async_trait]
@@ -602,7 +604,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
     ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
-    ///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: &str, _: bool) -> Result<(), Error> { unimplemented!() }
+    ///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: bool) -> Result<(), Error> { unimplemented!() }
     /// }
     ///
     /// async fn example() -> Result<()> {
@@ -770,6 +772,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     /// use merge_warden_developer_platforms::errors::Error;
     /// use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
     ///
+    /// #[derive(Debug)]
     /// struct MyProvider;
     ///
     /// #[async_trait]
@@ -792,7 +795,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
     ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
-    ///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: &str, _: bool) -> Result<(), Error> { unimplemented!() }
+    ///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: bool) -> Result<(), Error> { unimplemented!() }
     /// }
     ///
     /// fn example() {

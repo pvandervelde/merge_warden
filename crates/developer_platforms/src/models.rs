@@ -25,11 +25,15 @@ mod tests;
 /// # Examples
 ///
 /// ```
-/// use merge_warden_developer_platforms::models::Comment;
+/// use merge_warden_developer_platforms::models::{ Comment, User };
 ///
 /// let comment = Comment {
 ///     id: 456,
 ///     body: "Please update your PR title to follow the Conventional Commits format.".to_string(),
+///     user: User {
+///         id: 10,
+///         login: "a".to_string(),
+///     }
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -102,6 +106,7 @@ pub struct Organization {
 /// let pr = PullRequest {
 ///     number: 123,
 ///     title: "feat(auth): add GitHub login".to_string(),
+///     draft: false,
 ///     body: Some("This PR adds GitHub login functionality.\n\nFixes #42".to_string()),
 /// };
 /// ```
