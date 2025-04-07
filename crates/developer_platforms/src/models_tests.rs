@@ -1,5 +1,5 @@
 use super::*;
-use serde_json::{from_str, json, to_string};
+use serde_json::{from_str, to_string};
 
 #[test]
 fn test_comment_serialization() {
@@ -7,6 +7,10 @@ fn test_comment_serialization() {
     let comment = Comment {
         id: 123,
         body: "This is a test comment".to_string(),
+        user: User {
+            id: 10,
+            login: "a".to_string(),
+        },
     };
 
     // Serialize to JSON
@@ -21,7 +25,8 @@ fn test_comment_serialization() {
 #[test]
 fn test_comment_deserialization() {
     // Create JSON
-    let json_str = r#"{"id": 456, "body": "Deserialized comment"}"#;
+    let json_str =
+        r#"{"id": 456, "body": "Deserialized comment", "user": { "id": 10, "login": "a" }}"#;
 
     // Deserialize from JSON
     let comment: Comment = from_str(json_str).expect("Failed to deserialize Comment");
@@ -64,6 +69,7 @@ fn test_pull_request_serialization() {
     let pr = PullRequest {
         number: 42,
         title: "feat: add new feature".to_string(),
+        draft: false,
         body: Some("This PR adds a new feature.\n\nFixes #123".to_string()),
     };
 
@@ -83,6 +89,7 @@ fn test_pull_request_deserialization() {
     let json_str = r#"{
         "number": 99,
         "title": "fix: resolve bug",
+        "draft": false,
         "body": "This PR fixes a critical bug.\n\nCloses #456"
     }"#;
 
@@ -104,6 +111,7 @@ fn test_pull_request_without_body() {
     let pr = PullRequest {
         number: 42,
         title: "feat: add new feature".to_string(),
+        draft: false,
         body: None,
     };
 

@@ -25,11 +25,15 @@ mod tests;
 /// # Examples
 ///
 /// ```
-/// use merge_warden_developer_platforms::models::Comment;
+/// use merge_warden_developer_platforms::models::{ Comment, User };
 ///
 /// let comment = Comment {
 ///     id: 456,
 ///     body: "Please update your PR title to follow the Conventional Commits format.".to_string(),
+///     user: User {
+///         id: 10,
+///         login: "a".to_string(),
+///     }
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,6 +43,18 @@ pub struct Comment {
 
     /// The text content of the comment
     pub body: String,
+
+    // The user who made the comment
+    pub user: User,
+}
+
+#[derive(Deserialize)]
+pub struct Installation {
+    pub id: u64,
+    pub slug: Option<String>,
+    pub client_id: Option<String>,
+    pub node_id: String,
+    pub name: Option<String>,
 }
 
 /// Represents a label on a pull request.
@@ -65,6 +81,12 @@ pub struct Label {
     pub name: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Organization {
+    /// The name of the organization
+    pub name: String,
+}
+
 /// Represents a pull request from a Git provider.
 ///
 /// This struct contains the essential information about a pull request
@@ -84,6 +106,7 @@ pub struct Label {
 /// let pr = PullRequest {
 ///     number: 123,
 ///     title: "feat(auth): add GitHub login".to_string(),
+///     draft: false,
 ///     body: Some("This PR adds GitHub login functionality.\n\nFixes #42".to_string()),
 /// };
 /// ```
@@ -95,19 +118,30 @@ pub struct PullRequest {
     /// The title of the pull request
     pub title: String,
 
+    /// Indicates if the pull request is a draft or not
+    pub draft: bool,
+
     /// The description/body of the pull request, if any
     pub body: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct Review {
-    id: u64,
-    state: String,
-    user: User,
+#[derive(Deserialize)]
+pub struct Repository {
+    pub full_name: String,
+    pub name: String,
+    pub node_id: String,
+    pub private: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct User {
-    id: u64,
-    login: String,
+pub struct Review {
+    pub id: u64,
+    pub state: String,
+    pub user: User,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct User {
+    pub id: u64,
+    pub login: String,
 }

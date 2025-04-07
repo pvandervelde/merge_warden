@@ -6,6 +6,7 @@ fn test_empty_title() {
     let pr = PullRequest {
         number: 1,
         title: "".to_string(),
+        draft: false,
         body: Some("Test body".to_string()),
     };
 
@@ -25,6 +26,7 @@ fn test_invalid_prefixes() {
         let pr = PullRequest {
             number: 1,
             title: title.to_string(),
+            draft: false,
             body: Some("Test body".to_string()),
         };
 
@@ -46,6 +48,7 @@ fn test_invalid_separators() {
         let pr = PullRequest {
             number: 1,
             title: title.to_string(),
+            draft: false,
             body: Some("Test body".to_string()),
         };
 
@@ -74,6 +77,7 @@ fn test_invalid_title_formats() {
         let pr = PullRequest {
             number: 1,
             title: title.to_string(),
+            draft: false,
             body: Some("Test body".to_string()),
         };
 
@@ -87,6 +91,7 @@ fn test_missing_prefix() {
     let pr = PullRequest {
         number: 1,
         title: "add feature".to_string(),
+        draft: false,
         body: Some("Test body".to_string()),
     };
 
@@ -107,6 +112,7 @@ fn test_multiple_scopes() {
         let pr = PullRequest {
             number: 1,
             title: title.to_string(),
+            draft: false,
             body: Some("Test body".to_string()),
         };
 
@@ -132,6 +138,7 @@ fn test_scope_with_special_characters() {
         let pr = PullRequest {
             number: 1,
             title: title.to_string(),
+            draft: false,
             body: Some("Test body".to_string()),
         };
 
@@ -149,6 +156,7 @@ fn test_special_characters_in_title() {
     let pr = PullRequest {
         number: 1,
         title: "feat: add feature with special chars !@#$%^&*()".to_string(),
+        draft: false,
         body: Some("Test body".to_string()),
     };
 
@@ -162,6 +170,7 @@ fn test_title_correction() {
     let pr = PullRequest {
         number: 1,
         title: "invalid title".to_string(),
+        draft: false,
         body: Some("Test body".to_string()),
     };
 
@@ -172,6 +181,7 @@ fn test_title_correction() {
     let updated_pr = PullRequest {
         number: 1,
         title: "feat: valid title".to_string(),
+        draft: false,
         body: Some("Test body".to_string()),
     };
 
@@ -193,6 +203,7 @@ fn test_title_with_breaking_change_indicators() {
         let pr = PullRequest {
             number: 1,
             title: title.to_string(),
+            draft: false,
             body: Some("Test body".to_string()),
         };
 
@@ -228,6 +239,7 @@ fn test_valid_title_formats() {
         let pr = PullRequest {
             number: 1,
             title: title.to_string(),
+            draft: false,
             body: Some("Test body".to_string()),
         };
 
@@ -242,6 +254,7 @@ fn test_very_long_title() {
     let pr = PullRequest {
         number: 1,
         title: long_title,
+        draft: false,
         body: Some("Test body".to_string()),
     };
 

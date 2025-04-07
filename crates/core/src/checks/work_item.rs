@@ -52,6 +52,7 @@ mod tests;
 /// let pr_with_reference = PullRequest {
 ///     number: 123,
 ///     title: "feat: add new feature".to_string(),
+///     draft: false,
 ///     body: Some("This PR adds a new feature.\n\nFixes #42".to_string()),
 /// };
 ///
@@ -62,6 +63,7 @@ mod tests;
 /// let pr_without_reference = PullRequest {
 ///     number: 124,
 ///     title: "feat: another feature".to_string(),
+///     draft: false,
 ///     body: Some("This PR adds another feature.".to_string()),
 /// };
 ///

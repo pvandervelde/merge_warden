@@ -1,7 +1,5 @@
-use std::time::{SystemTime, UNIX_EPOCH};
-
 use async_trait::async_trait;
-use jsonwebtoken::{Algorithm, EncodingKey, Header};
+use jsonwebtoken::EncodingKey;
 use octocrab::{
     models::{
         pulls::{Review, ReviewState},
@@ -10,10 +8,11 @@ use octocrab::{
     Octocrab,
 };
 use serde::{Deserialize, Serialize};
+use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
     errors::Error,
-    models::{Comment, Label, PullRequest},
+    models::{Comment, Label, PullRequest, User},
     PullRequestProvider,
 };
 
@@ -24,99 +23,176 @@ struct JWTClaims {
     iss: u64,
 }
 
-/// Creates an authenticated GitHub client using a GitHub App's credentials.
+/// Authenticates with GitHub using an installation access token for a specific app installation.
 ///
-/// This function generates a JSON Web Token (JWT) for authenticating as a GitHub App
-/// and optionally retrieves an installation token if an installation ID is provided.
+/// This function retrieves an access token for a GitHub App installation and creates a new
+/// `Octocrab` client authenticated with that token. It is useful for performing API operations
+/// on behalf of a GitHub App installation.
 ///
-/// See: https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/authenticating-as-a-github-app-installation
+/// # Arguments
+///
+/// * `octocrab` - An existing `Octocrab` client instance.
+/// * `installation_id` - The ID of the GitHub App installation.
+/// * `repository_owner` - The owner of the repository associated with the installation.
+/// * `source_repository` - The name of the repository associated with the installation.
+///
+/// # Returns
+///
+/// A `Result` containing a new `Octocrab` client authenticated with the installation access token,
+/// or an `Error` if the operation fails.
+///
+/// # Errors
+///
+/// This function returns an `Error` in the following cases:
+/// - If the app installation cannot be found.
+/// - If the access token cannot be created.
+/// - If the new `Octocrab` client cannot be built.
+///
+/// # Example
+///
+/// ```rust,no_run
+/// use anyhow::Result;
+/// use octocrab::Octocrab;
+/// use merge_warden_developer_platforms::github::authenticate_with_access_token;
+///
+/// #[tokio::main]
+/// async fn main() -> Result<()> {
+///     let octocrab = Octocrab::builder().build().unwrap();
+///     let installation_id = 12345678; // Replace with your installation ID
+///     let repository_owner = "example-owner";
+///     let source_repository = "example-repo";
+///
+///     let authenticated_client = authenticate_with_access_token(
+///         &octocrab,
+///         installation_id,
+///         repository_owner,
+///         source_repository,
+///     )
+///     .await?;
+///
+///     // Use `authenticated_client` to perform API operations
+///     Ok(())
+/// }
+/// ```
+#[instrument]
+pub async fn authenticate_with_access_token(
+    octocrab: &Octocrab,
+    installation_id: u64,
+    repository_owner: &str,
+    source_repository: &str,
+) -> Result<Octocrab, Error> {
+    debug!(
+        repository_owner = repository_owner,
+        repository = source_repository,
+        installation_id,
+        "Finding installation"
+    );
+
+    let (api_with_token, _) = octocrab
+        .installation_and_token(installation_id.into())
+        .await
+        .map_err(|_| {
+            error!(
+                repository_owner = repository_owner,
+                repository = source_repository,
+                installation_id,
+                "Failed to create a token for the installation",
+            );
+
+            Error::InvalidResponse
+        })?;
+
+    info!(
+        repository_owner = repository_owner,
+        repository = source_repository,
+        installation_id,
+        "Created access token for installation",
+    );
+
+    Ok(api_with_token)
+}
+
+/// Creates an `Octocrab` client authenticated as a GitHub App using a JWT token.
+///
+/// This function generates a JSON Web Token (JWT) for the specified GitHub App ID and private key,
+/// and uses it to create an authenticated `Octocrab` client. The client can then be used to perform
+/// API operations on behalf of the GitHub App.
 ///
 /// # Arguments
 ///
 /// * `app_id` - The ID of the GitHub App.
 /// * `private_key` - The private key associated with the GitHub App, in PEM format.
-/// * `installation_id` - An optional installation ID for the GitHub App. If provided,
-///   an installation token will be retrieved for the specified installation.
 ///
 /// # Returns
 ///
-/// Returns a `Result` containing an authenticated `Octocrab` client if successful,
-/// or an `Error` if authentication or client creation fails.
+/// A `Result` containing an authenticated `Octocrab` client, or an `Error` if the operation fails.
 ///
 /// # Errors
 ///
-/// This function will return an error if:
-/// - The private key is invalid.
-/// - The JWT cannot be created.
-/// - The Octocrab client cannot be built.
-/// - The installation token cannot be retrieved (if `installation_id` is provided).
+/// This function returns an `Error` in the following cases:
+/// - If the private key cannot be parsed.
+/// - If the JWT token cannot be created.
+/// - If the `Octocrab` client cannot be built.
 ///
 /// # Example
 ///
-/// ```rust
+/// ```rust,no_run
+/// use anyhow::Result;
 /// use merge_warden_developer_platforms::github::create_app_client;
 ///
 /// #[tokio::main]
-/// async fn main() {
-///     let app_id = 12345;
-///     let private_key = "your-private-key";
-///     let installation_id = Some(67890);
+/// async fn main() -> Result<()> {
+///     let app_id = 123456; // Replace with your GitHub App ID
+///     let private_key = r#"
+/// -----BEGIN RSA PRIVATE KEY-----
+/// ...
+/// -----END RSA PRIVATE KEY-----
+/// "#; // Replace with your GitHub App private key
 ///
-///     match create_app_client(app_id, private_key, installation_id).await {
-///         Ok(client) => {
-///             // Use the authenticated client
-///         }
-///         Err(e) => {
-///             eprintln!("Failed to create app client: {}", e);
-///         }
-///     }
+///     let client = create_app_client(app_id, private_key).await?;
+///
+///     // Use `client` to perform API operations
+///     Ok(())
 /// }
 /// ```
-pub async fn create_app_client(
-    app_id: u64,
-    private_key: &str,
-    installation_id: Option<u64>,
-) -> Result<Octocrab, Error> {
-    // Create JWT for GitHub App authentication
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_secs();
+#[instrument(skip(private_key))]
+pub async fn create_app_client(app_id: u64, private_key: &str) -> Result<(Octocrab, User), Error> {
+    //let app_id_struct = AppId::from(app_id);
+    let key = EncodingKey::from_rsa_pem(private_key.as_bytes()).map_err(|e| {
+        Error::AuthError(
+            format!("Failed to translate the private key. Error was: {}", e).to_string(),
+        )
+    })?;
 
-    let claims = JWTClaims {
-        iat: now - 60,
-        exp: now + (10 * 60), // 10 minutes expiration
-        iss: app_id,
+    let octocrab = Octocrab::builder()
+        .app(app_id.into(), key)
+        .build()
+        .map_err(|_| {
+            Error::AuthError("Failed to get a personal token for the app install.".to_string())
+        })?;
+
+    info!("Created access token for the GitHub app",);
+
+    let author = match octocrab.current().app().await {
+        Ok(a) => a,
+        Err(e) => {
+            log_octocrab_error(
+                "Failed to retreive App information for the currently authenticated app",
+                e,
+            );
+            return Err(Error::InvalidResponse);
+        }
     };
 
-    let encoding_key = EncodingKey::from_rsa_pem(private_key.as_bytes())
-        .map_err(|e| Error::AuthError(format!("Invalid private key: {}", e)))?;
+    let user = User {
+        id: author.id.into_inner(),
+        login: author.name,
+    };
 
-    let jwt = jsonwebtoken::encode(&Header::new(Algorithm::RS256), &claims, &encoding_key)
-        .map_err(|e| Error::AuthError(format!("Failed to create JWT: {}", e)))?;
-
-    // Create an authenticated octocrab instance
-    let app_client = Octocrab::builder()
-        .personal_token(jwt)
-        .build()
-        .map_err(|e| Error::AuthError(format!("Failed to build octocrab instance: {}", e)))?;
-
-    // If installation ID is provided, get an installation token
-    if let Some(installation_id) = installation_id {
-        let installation_result = app_client
-            .installation_and_token(installation_id.into())
-            .await;
-        let (client, _secret) = match installation_result {
-            Ok(p) => p,
-            Err(e) => return Err(Error::AuthError(e.to_string())),
-        };
-
-        Ok(client)
-    } else {
-        Ok(app_client)
-    }
+    Ok((octocrab, user))
 }
 
+#[instrument(skip(token))]
 pub fn create_token_client(token: &str) -> Result<Octocrab, Error> {
     Octocrab::builder()
         .personal_token(token.to_string())
@@ -124,8 +200,50 @@ pub fn create_token_client(token: &str) -> Result<Octocrab, Error> {
         .map_err(|_| Error::ApiError())
 }
 
+fn log_octocrab_error(message: &str, e: octocrab::Error) {
+    match e {
+        octocrab::Error::GitHub { source, backtrace } => {
+            let err = *source;
+            error!(
+                error_message = err.message,
+                backtrace = backtrace.to_string(),
+                "{}. Received an error from GitHub",
+                message
+            )
+        }
+        octocrab::Error::UriParse { source, backtrace } => error!(
+            error_message = source.to_string(),
+            backtrace = backtrace.to_string(),
+            "{}. Failed to parse URI.",
+            message
+        ),
+
+        octocrab::Error::Uri { source, backtrace } => error!(
+            error_message = source.to_string(),
+            backtrace = backtrace.to_string(),
+            "{}, Failed to parse URI.",
+            message
+        ),
+        octocrab::Error::InvalidHeaderValue { source, backtrace } => error!(
+            error_message = source.to_string(),
+            backtrace = backtrace.to_string(),
+            "{}. One of the header values was invalid.",
+            message
+        ),
+        octocrab::Error::InvalidUtf8 { source, backtrace } => error!(
+            error_message = source.to_string(),
+            backtrace = backtrace.to_string(),
+            "{}. The message wasn't valid UTF-8.",
+            message,
+        ),
+        _ => error!(message,),
+    };
+}
+
+#[derive(Debug)]
 pub struct GitHubProvider {
     client: Octocrab,
+    user: User,
 }
 
 impl GitHubProvider {
@@ -142,6 +260,7 @@ impl GitHubProvider {
     /// # Returns
     ///
     /// A `Result` indicating success or failure
+    #[instrument]
     async fn create_review(
         &self,
         repo_owner: &str,
@@ -150,7 +269,7 @@ impl GitHubProvider {
         body: &str,
         event: &str,
     ) -> Result<(), Error> {
-        // Prevent accidental approvals
+        // The app should never approve a PR
         if event == "APPROVE" {
             return Err(Error::ApprovalProhibited);
         }
@@ -167,11 +286,19 @@ impl GitHubProvider {
         );
         let request = CreateReviewRequest { body, event };
 
+        debug!(
+            repository_owner = repo_owner,
+            repository = repo_name,
+            pull_request = pr_number,
+            "Creating review for pr",
+        );
+
         self.client
             ._post(route, Some(&request))
             .await
             .map_err(|e| {
-                Error::FailedToUpdatePullRequest(format!("Failed to create review: {}", e))
+                log_octocrab_error("Failed to create new review", e);
+                Error::FailedToUpdatePullRequest("Failed to create review".to_string())
             })?;
 
         Ok(())
@@ -190,6 +317,7 @@ impl GitHubProvider {
     /// # Returns
     ///
     /// A `Result` indicating success or failure
+    #[instrument]
     async fn dismiss_review(
         &self,
         repo_owner: &str,
@@ -209,25 +337,20 @@ impl GitHubProvider {
         );
         let request = DismissReviewRequest { message };
 
+        info!(
+            repository_owner = repo_owner,
+            repository = repo_name,
+            pull_request = pr_number,
+            review_id = review_id.into_inner(),
+            "Dismissing review ...",
+        );
+
         self.client._put(route, Some(&request)).await.map_err(|e| {
-            Error::FailedToUpdatePullRequest(format!("Failed to dismiss review: {}", e))
+            log_octocrab_error("Failed to dismiss existing review", e);
+            Error::FailedToUpdatePullRequest("Failed to dismiss review".to_string())
         })?;
 
         Ok(())
-    }
-
-    pub async fn from_app(
-        app_id: u64,
-        private_key: &str,
-        installation_id: Option<u64>,
-    ) -> Result<Self, Error> {
-        let client = create_app_client(app_id, private_key, installation_id).await?;
-        Ok(Self::new(client))
-    }
-
-    pub fn from_token(token: &str) -> Result<Self, Error> {
-        let client = create_token_client(token)?;
-        Ok(Self::new(client))
     }
 
     /// Lists all reviews for a pull request.
@@ -241,6 +364,7 @@ impl GitHubProvider {
     /// # Returns
     ///
     /// A `Result` containing a vector of reviews
+    #[instrument]
     async fn list_reviews(
         &self,
         repo_owner: &str,
@@ -251,13 +375,14 @@ impl GitHubProvider {
             .client
             .pulls(repo_owner, repo_name)
             .list_reviews(pr_number)
-            .per_page(100)
-            .page(2u32)
             .send()
             .await
         {
             Ok(p) => p,
-            Err(_) => return Err(Error::InvalidResponse),
+            Err(e) => {
+                log_octocrab_error("Failed to list reviews", e);
+                return Err(Error::InvalidResponse);
+            }
         };
 
         let mut reviews = current_page.take_items();
@@ -270,54 +395,14 @@ impl GitHubProvider {
         Ok(reviews)
     }
 
-    pub fn new(client: Octocrab) -> Self {
-        Self { client }
-    }
-
-    /// Updates an existing review for a pull request.
-    ///
-    /// Note: GitHub doesn't have a direct API for updating reviews, so we dismiss the old one
-    /// and create a new one.
-    ///
-    /// # Arguments
-    ///
-    /// * `repo_owner` - The owner of the repository
-    /// * `repo_name` - The name of the repository
-    /// * `pr_number` - The pull request number
-    /// * `review_id` - The ID of the review to update
-    /// * `body` - The updated review comment
-    ///
-    /// # Returns
-    ///
-    /// A `Result` indicating success or failure
-    async fn update_review(
-        &self,
-        repo_owner: &str,
-        repo_name: &str,
-        pr_number: u64,
-        review_id: ReviewId,
-        body: &str,
-    ) -> Result<(), Error> {
-        // Dismiss the old review
-        self.dismiss_review(
-            repo_owner,
-            repo_name,
-            pr_number,
-            review_id,
-            "Updating review",
-        )
-        .await?;
-
-        // Create a new review
-        self.create_review(repo_owner, repo_name, pr_number, body, "REQUEST_CHANGES")
-            .await?;
-
-        Ok(())
+    pub fn new(client: Octocrab, user: User) -> Self {
+        Self { client, user }
     }
 }
 
 #[async_trait]
 impl PullRequestProvider for GitHubProvider {
+    #[instrument]
     async fn get_pull_request(
         &self,
         repo_owner: &str,
@@ -333,12 +418,17 @@ impl PullRequestProvider for GitHubProvider {
             Ok(pr) => Ok(PullRequest {
                 number: pr.number,
                 title: pr.title.unwrap_or(String::new()),
+                draft: pr.draft.unwrap_or_default(),
                 body: pr.body,
             }),
-            Err(_) => Err(Error::InvalidResponse),
+            Err(e) => {
+                log_octocrab_error("Failed to get pull request information", e);
+                return Err(Error::InvalidResponse);
+            }
         }
     }
 
+    #[instrument]
     async fn add_comment(
         &self,
         repo_owner: &str,
@@ -353,13 +443,16 @@ impl PullRequestProvider for GitHubProvider {
             .await
         {
             Ok(_) => Ok(()),
-            Err(e) => Err(Error::FailedToUpdatePullRequest(format!(
-                "Failed to add comment: {}",
-                e
-            ))),
+            Err(e) => {
+                log_octocrab_error("Failed to add pull request comment", e);
+                return Err(Error::FailedToUpdatePullRequest(
+                    "Failed to add comment".to_string(),
+                ));
+            }
         }
     }
 
+    #[instrument]
     async fn delete_comment(
         &self,
         repo_owner: &str,
@@ -371,10 +464,17 @@ impl PullRequestProvider for GitHubProvider {
             .delete_comment(comment_id.into())
             .await
             .map_err(|e| {
+                warn!(
+                    repository_owner = repo_owner,
+                    repository = repo_name,
+                    comment = comment_id,
+                    "Failed to delete pr comment",
+                );
                 Error::FailedToUpdatePullRequest(format!("Failed to delete comment: {}", e))
             })
     }
 
+    #[instrument]
     async fn list_comments(
         &self,
         repo_owner: &str,
@@ -385,13 +485,14 @@ impl PullRequestProvider for GitHubProvider {
             .client
             .issues(repo_owner, repo_name)
             .list_comments(pr_number)
-            .since(chrono::Utc::now())
-            .per_page(100)
             .send()
             .await
         {
             Ok(p) => p,
-            Err(_) => return Err(Error::InvalidResponse),
+            Err(e) => {
+                log_octocrab_error("Failed to list comments for pull request", e);
+                return Err(Error::InvalidResponse);
+            }
         };
 
         let mut comments = current_page.take_items();
@@ -406,12 +507,17 @@ impl PullRequestProvider for GitHubProvider {
             .map(|c| Comment {
                 id: c.id.0,
                 body: c.body.unwrap_or_default(),
+                user: User {
+                    id: c.user.id.into_inner(),
+                    login: c.user.login,
+                },
             })
             .collect();
 
         Ok(result)
     }
 
+    #[instrument]
     async fn add_labels(
         &self,
         repo_owner: &str,
@@ -426,13 +532,16 @@ impl PullRequestProvider for GitHubProvider {
             .await
         {
             Ok(_) => Ok(()),
-            Err(e) => Err(Error::FailedToUpdatePullRequest(format!(
-                "Failed to add labels: {}",
-                e
-            ))),
+            Err(e) => {
+                log_octocrab_error("Failed to add new labels", e);
+                return Err(Error::FailedToUpdatePullRequest(
+                    "Failed to add labels".to_string(),
+                ));
+            }
         }
     }
 
+    #[instrument]
     async fn remove_label(
         &self,
         repo_owner: &str,
@@ -447,13 +556,16 @@ impl PullRequestProvider for GitHubProvider {
             .await
         {
             Ok(_) => Ok(()),
-            Err(e) => Err(Error::FailedToUpdatePullRequest(format!(
-                "Failed to remove label: {}",
-                e
-            ))),
+            Err(e) => {
+                log_octocrab_error("Failed to remove label", e);
+                return Err(Error::FailedToUpdatePullRequest(
+                    "Failed to remove label".to_string(),
+                ));
+            }
         }
     }
 
+    #[instrument]
     async fn list_labels(
         &self,
         repo_owner: &str,
@@ -468,7 +580,10 @@ impl PullRequestProvider for GitHubProvider {
             .await
         {
             Ok(p) => p,
-            Err(_) => return Err(Error::InvalidResponse),
+            Err(e) => {
+                log_octocrab_error("Failed to list all labels for pull request", e);
+                return Err(Error::InvalidResponse);
+            }
         };
 
         let mut labels = current_page.take_items();
@@ -507,49 +622,212 @@ impl PullRequestProvider for GitHubProvider {
     ///
     /// # Errors
     /// - Returns an error if the API call to update the pull request fails.
+    #[instrument]
     async fn update_pr_blocking_review(
         &self,
         repo_owner: &str,
         repo_name: &str,
         pr_number: u64,
         message: &str,
+        message_prefix: &str,
         is_approved: bool,
     ) -> Result<(), Error> {
+        let user = self.user.clone();
+        let expected_user_name_on_reviews = format!("{}[bot]", user.login);
+
+        info!(
+            repository_owner = repo_owner,
+            repository = repo_name,
+            pull_request = pr_number,
+            user_id = user.id,
+            user_name = user.login,
+            "Updating pull request review status ...",
+        );
+
         // First, list existing reviews to check if we already have one
         let existing_reviews = self.list_reviews(repo_owner, repo_name, pr_number).await?;
+        let mut own_reviews: Vec<&Review> = existing_reviews
+            .iter()
+            .filter(|r| {
+                let review_user = match &r.user {
+                    Some(u) => u,
+                    None => return false,
+                };
+
+                expected_user_name_on_reviews == review_user.login
+            })
+            .collect();
+        debug!(
+            repository_owner = repo_owner,
+            repository = repo_name,
+            pull_request = pr_number,
+            count = existing_reviews.len(),
+            "Searched for existing reviews",
+        );
+
+        own_reviews.sort_by(|a, b| {
+            let a_time = a.submitted_at.unwrap_or_default();
+            let b_time = b.submitted_at.unwrap_or_default();
+            b_time.cmp(&a_time)
+        });
+
+        // Dismiss every review except the most recent one
+        if !own_reviews.is_empty() {
+            let size = own_reviews.len() - 1;
+            for review in own_reviews.iter().take(size).skip(1) {
+                if review.state != Some(ReviewState::Dismissed) {
+                    match self
+                        .dismiss_review(
+                            repo_owner,
+                            repo_name,
+                            pr_number,
+                            review.id,
+                            "Issues resolved",
+                        )
+                        .await
+                    {
+                        Ok(()) => {
+                            debug!(
+                                repository_owner = repo_owner,
+                                repository = repo_name,
+                                pull_request = pr_number,
+                                review_id = review.id.into_inner(),
+                                "Review removed"
+                            )
+                        }
+                        Err(_) => {
+                            warn!(
+                                repository_owner = repo_owner,
+                                repository = repo_name,
+                                pull_request = pr_number,
+                                review_id = review.id.into_inner(),
+                                "Failed to remove review"
+                            )
+                        }
+                    };
+                }
+            }
+        }
+
+        // Get the most recent review
+        let most_recent_review = own_reviews.first();
 
         if is_approved {
-            // If PR should be approved, dismiss any existing blocking reviews
-            for review in existing_reviews {
-                if review.state == Some(ReviewState::ChangesRequested) {
-                    self.dismiss_review(
+            info!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                pull_request = pr_number,
+                "Pull request approved, removing reviews ...",
+            );
+
+            if let Some(review) = most_recent_review {
+                match self
+                    .dismiss_review(
                         repo_owner,
                         repo_name,
                         pr_number,
                         review.id,
                         "Issues resolved",
                     )
-                    .await?;
-                }
+                    .await
+                {
+                    Ok(_) => {
+                        debug!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr_number,
+                            review_id = review.id.into_inner(),
+                            "Review removed"
+                        )
+                    }
+                    Err(_) => {
+                        warn!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr_number,
+                            review_id = review.id.into_inner(),
+                            "Failed to remove review"
+                        )
+                    }
+                };
             }
         } else {
-            // If PR should be blocked, create or update a review requesting changes
-            let mut existing_review_id = None;
-            for review in existing_reviews {
-                if review.state == Some(ReviewState::ChangesRequested) {
-                    existing_review_id = Some(review.id);
-                    break;
+            info!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                pull_request = pr_number,
+                "Pull request not approved, adding or updating review ...",
+            );
+
+            // If the last review is the same as the current one then we don't make changes
+            let mut found_match = false;
+            if let Some(review) = most_recent_review {
+                debug!(
+                    repository_owner = repo_owner,
+                    repository = repo_name,
+                    pull_request = pr_number,
+                    review_id = review.id.into_inner(),
+                    review_date = review.submitted_at.unwrap_or_default().to_string(),
+                    "Processing review",
+                );
+
+                let review_message_option = review.body.clone();
+                let review_message = review_message_option.unwrap_or_default();
+                if review_message.starts_with(message_prefix) {
+                    found_match = true;
                 }
             }
 
-            if let Some(review_id) = existing_review_id {
-                // Update existing review
-                self.update_review(repo_owner, repo_name, pr_number, review_id, message)
-                    .await?;
+            if found_match {
+                info!(
+                    repository_owner = repo_owner,
+                    repository = repo_name,
+                    pull_request = pr_number,
+                    "Current review is the same as the new one. Will not be creating a new one.",
+                );
             } else {
+                debug!(
+                    repository_owner = repo_owner,
+                    repository = repo_name,
+                    pull_request = pr_number,
+                    "Didn't find existing matching review, creating new one",
+                );
+
+                if let Some(review) = most_recent_review {
+                    match self
+                        .dismiss_review(
+                            repo_owner,
+                            repo_name,
+                            pr_number,
+                            review.id,
+                            "Review no longer valid. Will be creating a new one.",
+                        )
+                        .await
+                    {
+                        Ok(_) => {
+                            debug!(
+                                repository_owner = repo_owner,
+                                repository = repo_name,
+                                pull_request = pr_number,
+                                review_id = review.id.into_inner(),
+                                "Review removed"
+                            )
+                        }
+                        Err(_) => {
+                            warn!(
+                                repository_owner = repo_owner,
+                                repository = repo_name,
+                                pull_request = pr_number,
+                                review_id = review.id.into_inner(),
+                                "Failed to remove review"
+                            )
+                        }
+                    };
+                }
+
                 // Create new review requesting changes
                 self.create_review(repo_owner, repo_name, pr_number, message, "REQUEST_CHANGES")
-                    .await?;
+                    .await?
             }
         }
 

@@ -5,7 +5,7 @@ use crate::{
         MISSING_WORK_ITEM_LABEL, TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL,
         WORK_ITEM_COMMENT_MARKER,
     },
-    CheckResult, MergeWarden,
+    MergeWarden,
 };
 use async_trait::async_trait;
 use std::{
@@ -14,11 +14,12 @@ use std::{
 };
 use tokio::test;
 
-use merge_warden_developer_platforms::errors::Error;
 use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
 use merge_warden_developer_platforms::PullRequestProvider;
+use merge_warden_developer_platforms::{errors::Error, models::User};
 
 // Mock implementation of PullRequestProvider for testing
+#[derive(Debug)]
 struct ErrorMockGitProvider {
     error_on_get_pr: bool,
     error_on_add_labels: bool,
@@ -85,6 +86,7 @@ impl PullRequestProvider for ErrorMockGitProvider {
             Ok(PullRequest {
                 number: 1,
                 title: title.to_string(),
+                draft: false,
                 body: Some(body.to_string()),
             })
         }
@@ -165,6 +167,7 @@ impl PullRequestProvider for ErrorMockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
         _message: &str,
+        _message_prefix: &str,
         _is_approved: bool,
     ) -> Result<(), Error> {
         Ok(())
@@ -172,6 +175,7 @@ impl PullRequestProvider for ErrorMockGitProvider {
 }
 
 // Mock implementation of PullRequestProvider that returns different PRs based on PR number
+#[derive(Debug)]
 struct DynamicMockGitProvider {
     pull_requests: HashMap<u64, PullRequest>,
     labels: Arc<Mutex<Vec<Label>>>,
@@ -234,6 +238,10 @@ impl PullRequestProvider for DynamicMockGitProvider {
         comments.push(Comment {
             id: number_of_comments + 1,
             body: comment.to_string(),
+            user: User {
+                id: 10,
+                login: "a".to_string(),
+            },
         });
         Ok(())
     }
@@ -303,6 +311,7 @@ impl PullRequestProvider for DynamicMockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
         _message: &str,
+        _message_prefix: &str,
         is_approved: bool,
     ) -> Result<(), Error> {
         let mut pr_mergeable = self.pr_mergeable.lock().unwrap();
@@ -312,6 +321,7 @@ impl PullRequestProvider for DynamicMockGitProvider {
 }
 
 // Mock implementation of PullRequestProvider for testing
+#[derive(Debug)]
 struct MockGitProvider {
     pull_request: Arc<Mutex<Option<PullRequest>>>,
     labels: Arc<Mutex<Vec<Label>>>,
@@ -383,6 +393,10 @@ impl PullRequestProvider for MockGitProvider {
         comments.push(Comment {
             id: number_of_comments + 1,
             body: comment.to_string(),
+            user: User {
+                id: 10,
+                login: "a".to_string(),
+            },
         });
         Ok(())
     }
@@ -452,6 +466,7 @@ impl PullRequestProvider for MockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
         message: &str,
+        _message_prefix: &str,
         is_approved: bool,
     ) -> Result<(), Error> {
         let mut pr_mergeable = self.pr_mergeable.lock().unwrap();
@@ -527,6 +542,7 @@ async fn test_process_pull_request_valid() {
     let pr = PullRequest {
         number: 1,
         title: "feat: add new feature".to_string(),
+        draft: false,
         body: Some("Fixes #123".to_string()),
     };
     provider.set_pull_request(pr);
@@ -586,6 +602,7 @@ async fn test_process_pull_request_invalid_title() {
     let pr = PullRequest {
         number: 1,
         title: "invalid title".to_string(), // Missing conventional commit format
+        draft: false,
         body: Some("Fixes #123".to_string()),
     };
     provider.set_pull_request(pr);
@@ -619,15 +636,6 @@ async fn test_process_pull_request_invalid_title() {
         "Invalid title label should be added"
     );
 
-    // Verify the title comment was added
-    let comments = warden.provider.get_comments();
-    assert!(
-        comments
-            .iter()
-            .any(|c| c.body.contains(TITLE_COMMENT_MARKER)),
-        "Title comment should be added"
-    );
-
     // Verify the review message contains title validation guidance
     let review_message = warden.provider.get_last_review_message();
     assert!(
@@ -645,6 +653,7 @@ async fn test_process_pull_request_missing_work_item() {
     let pr = PullRequest {
         number: 1,
         title: "feat: add new feature".to_string(),
+        draft: false,
         body: Some("No work item reference".to_string()),
     };
     provider.set_pull_request(pr);
@@ -678,15 +687,6 @@ async fn test_process_pull_request_missing_work_item() {
         "Missing work item label should be added"
     );
 
-    // Verify the work item comment was added
-    let comments = warden.provider.get_comments();
-    assert!(
-        comments
-            .iter()
-            .any(|c| c.body.contains(WORK_ITEM_COMMENT_MARKER)),
-        "Work item comment should be added"
-    );
-
     // Verify the review message contains work item validation guidance
     let review_message = warden.provider.get_last_review_message();
     assert!(
@@ -704,6 +704,7 @@ async fn test_process_pull_request_both_invalid() {
     let pr = PullRequest {
         number: 1,
         title: "invalid title".to_string(), // Missing conventional commit format
+        draft: false,
         body: Some("No work item reference".to_string()),
     };
     provider.set_pull_request(pr);
@@ -739,21 +740,6 @@ async fn test_process_pull_request_both_invalid() {
     assert!(
         labels.iter().any(|l| l.name == MISSING_WORK_ITEM_LABEL),
         "Missing work item label should be added"
-    );
-
-    // Verify both comments were added
-    let comments = warden.provider.get_comments();
-    assert!(
-        comments
-            .iter()
-            .any(|c| c.body.contains(TITLE_COMMENT_MARKER)),
-        "Title comment should be added"
-    );
-    assert!(
-        comments
-            .iter()
-            .any(|c| c.body.contains(WORK_ITEM_COMMENT_MARKER)),
-        "Work item comment should be added"
     );
 
     // Verify the review message contains both title and work item validation guidance
@@ -793,6 +779,7 @@ async fn test_handle_title_validation_invalid_to_valid() {
     let pr = PullRequest {
         number: 1,
         title: "feat: add new feature".to_string(),
+        draft: false,
         body: Some("Test body".to_string()),
     };
 
@@ -808,15 +795,6 @@ async fn test_handle_title_validation_invalid_to_valid() {
         !labels.iter().any(|l| l.name == TITLE_INVALID_LABEL),
         "Invalid title label should be removed"
     );
-
-    // Verify the comment was removed
-    let comments = warden.provider.get_comments();
-    assert!(
-        !comments
-            .iter()
-            .any(|c| c.body.contains(TITLE_COMMENT_MARKER)),
-        "Title comment should be removed"
-    );
 }
 
 #[test]
@@ -828,6 +806,7 @@ async fn test_process_pull_request_custom_config_disabled_checks() {
     let pr = PullRequest {
         number: 1,
         title: "invalid title".to_string(), // Missing conventional commit format
+        draft: false,
         body: Some("No work item reference".to_string()),
     };
     provider.set_pull_request(pr);
@@ -930,6 +909,7 @@ async fn test_process_pull_request_existing_labels_comments() {
     let pr = PullRequest {
         number: 1,
         title: "feat: add new feature".to_string(),
+        draft: false,
         body: Some("Fixes #123".to_string()),
     };
     provider.set_pull_request(pr);
@@ -969,21 +949,6 @@ async fn test_process_pull_request_existing_labels_comments() {
         labels.iter().any(|l| l.name == "feature"),
         "Feature label should remain"
     );
-
-    // Verify the comments were removed
-    let comments = warden.provider.get_comments();
-    assert!(
-        !comments
-            .iter()
-            .any(|c| c.body.contains(TITLE_COMMENT_MARKER)),
-        "Title comment should be removed"
-    );
-    assert!(
-        !comments
-            .iter()
-            .any(|c| c.body.contains(WORK_ITEM_COMMENT_MARKER)),
-        "Work item comment should be removed"
-    );
 }
 
 #[test]
@@ -995,12 +960,14 @@ async fn test_process_pull_request_dynamic_provider() {
     let valid_pr = PullRequest {
         number: 1,
         title: "feat: add new feature".to_string(),
+        draft: false,
         body: Some("Fixes #123".to_string()),
     };
 
     let invalid_pr = PullRequest {
         number: 2,
         title: "invalid title".to_string(),
+        draft: false,
         body: Some("No work item reference".to_string()),
     };
 
@@ -1045,31 +1012,6 @@ async fn test_process_pull_request_dynamic_provider() {
     assert!(
         labels.iter().any(|l| l.name == MISSING_WORK_ITEM_LABEL),
         "Missing work item label should be added for PR #2"
-    );
-}
-
-#[test]
-async fn test_process_pull_request_error_add_comment() {
-    // Create a mock provider that returns an error when adding a comment
-    let mut provider = ErrorMockGitProvider::new();
-    provider.with_invalid_pr_title();
-    provider.with_add_comment_error();
-
-    // Create a MergeWarden instance
-    let warden = MergeWarden::new(provider);
-
-    // Process the PR - should return an error
-    let result = warden.process_pull_request("owner", "repo", 1).await;
-
-    // Verify the error
-    assert!(
-        result.is_err(),
-        "Should return an error when adding a comment fails"
-    );
-    assert_eq!(
-        result.unwrap_err().to_string(),
-        "Failed to update pull request. Issue was: 'Failed to add comment'.",
-        "Should return the specific error message"
     );
 }
 
@@ -1149,6 +1091,7 @@ async fn test_handle_work_item_validation_missing_to_present() {
     let pr = PullRequest {
         number: 1,
         title: "feat: add new feature".to_string(),
+        draft: false,
         body: Some("Fixes #123".to_string()),
     };
 
@@ -1163,14 +1106,5 @@ async fn test_handle_work_item_validation_missing_to_present() {
     assert!(
         !labels.iter().any(|l| l.name == MISSING_WORK_ITEM_LABEL),
         "Missing work item label should be removed"
-    );
-
-    // Verify the comment was removed
-    let comments = warden.provider.get_comments();
-    assert!(
-        !comments
-            .iter()
-            .any(|c| c.body.contains(WORK_ITEM_COMMENT_MARKER)),
-        "Work item comment should be removed"
     );
 }

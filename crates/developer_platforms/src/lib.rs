@@ -20,6 +20,7 @@ use models::{Comment, Label, PullRequest};
 /// use anyhow::Result;
 /// use async_trait::async_trait;
 ///
+/// #[derive(Debug)]
 /// struct GitHubProvider {
 ///     // Fields for authentication, etc.
 ///     token: String,
@@ -45,7 +46,7 @@ use models::{Comment, Label, PullRequest};
 ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
 ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
 ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
-///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: &str, _: bool) -> Result<(), Error> { unimplemented!() }
+///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: bool) -> Result<(), Error> { unimplemented!() }
 /// }
 /// ```
 #[async_trait]
@@ -203,6 +204,7 @@ pub trait PullRequestProvider {
         repo_name: &str,
         pr_number: u64,
         message: &str,
+        message_prefix: &str,
         is_approved: bool,
     ) -> Result<(), Error>;
 }

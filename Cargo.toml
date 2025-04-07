@@ -5,7 +5,7 @@ members = [
     "crates/developer_platforms",
     #"crates/aws-lambda",
     #"crates/azure-functions",
-    #"crates/cli"
+    "crates/cli",
 ]
 
 [workspace.package]
@@ -17,11 +17,13 @@ license-file = "LICENSE"
 [workspace.dependencies]
 anyhow = "1.0"
 async-trait = "0.1"
+axum = "0.8.3"
 clap = { version = "4.5", features = ["derive"] }
 dotenv = "0.15"
 hex = "0.4"
 hmac = "0.12"
 jsonwebtoken = "9.3"
+octocrab = "0.44"
 regex = "1.11"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -30,3 +32,4 @@ thiserror = "2.0"
 tokio = { version = "1", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = "0.3"
+tracing-opentelemetry = "0.30.0"
