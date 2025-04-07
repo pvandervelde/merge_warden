@@ -203,6 +203,7 @@ pub trait PullRequestProvider {
         repo_name: &str,
         pr_number: u64,
         message: &str,
+        message_prefix: &str,
         is_approved: bool,
     ) -> Result<(), Error>;
 }

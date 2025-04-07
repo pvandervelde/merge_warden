@@ -54,6 +54,7 @@
 //! }
 //! ```
 
+use config::review_message_prefix_from_values;
 use indoc::formatdoc;
 use merge_warden_developer_platforms::models::PullRequest;
 use merge_warden_developer_platforms::PullRequestProvider;
@@ -420,11 +421,16 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     }
 
     /// Generates a review message based on the validation status of PR title and body
-    fn generate_review_message(&self, title_valid: bool, body_valid: bool) -> String {
+    fn generate_review_message(
+        &self,
+        title_valid: bool,
+        body_valid: bool,
+        message_prefix: &str,
+    ) -> String {
         match (title_valid, body_valid) {
             // Both are incorrect
             (false, false) => formatdoc!(
-                "The pull request needs some improvements:
+                "{prefix}The pull request needs some improvements:
 
     1. Title Convention: Your PR title does not follow the [Conventional Commits](https://www.conventionalcommits.org/) message format.
     - Supported types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
@@ -445,12 +451,12 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
         * references GH-3456
         * relates to #7890
 
-    Please update both the title and body to meet these requirements."
-            ),
+    Please update both the title and body to meet these requirements.",
+            prefix = message_prefix),
 
             // Title is incorrect, body is valid
             (false, true) => formatdoc!(
-                "The pull request title needs correction:
+                "{prefix}The pull request title needs correction:
 
     1. Title Convention: Your PR title does not follow the [Conventional Commits](https://www.conventionalcommits.org/) message format.
     - Supported types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
@@ -460,12 +466,12 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
         * fix: resolve null pointer exception
     - For full details, see: https://www.conventionalcommits.org/
 
-    Please update the PR title to match the conventional commit message guidelines."
-            ),
+    Please update the PR title to match the conventional commit message guidelines.",
+            prefix = message_prefix),
 
             // Title is valid, body is incorrect
             (true, false) => formatdoc!(
-                "The pull request body needs improvement:
+                "{prefix}The pull request body needs improvement:
 
     1. Work Item Tracking: The PR body is missing a valid work item reference.
     - Supported formats:
@@ -478,8 +484,8 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
         * references GH-3456
         * relates to #7890
 
-    Please update the PR body to include a valid work item reference."
-            ),
+    Please update the PR body to include a valid work item reference.",
+            prefix = message_prefix),
 
             // Both are correct (this will return None, effectively removing the review)
             (true, true) => String::new(),
@@ -706,13 +712,20 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
         let labels = self.determine_labels(repo_owner, repo_name, &pr).await?;
 
         // Update PR mergeability
-        let review_message = self.generate_review_message(is_title_valid, is_work_item_referenced);
+        let message_prefix =
+            review_message_prefix_from_values(is_title_valid, is_work_item_referenced);
+        let review_message = self.generate_review_message(
+            is_title_valid,
+            is_work_item_referenced,
+            message_prefix.as_ref(),
+        );
         self.provider
             .update_pr_blocking_review(
                 repo_owner,
                 repo_name,
                 pr_number,
                 review_message.as_str(),
+                message_prefix.as_ref(),
                 is_title_valid && is_work_item_referenced,
             )
             .await

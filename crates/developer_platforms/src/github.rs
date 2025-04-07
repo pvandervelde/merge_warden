@@ -3,19 +3,16 @@ use jsonwebtoken::EncodingKey;
 use octocrab::{
     models::{
         pulls::{Review, ReviewState},
-        App, InstallationId, InstallationToken, ReviewId,
+        ReviewId,
     },
-    params::apps::CreateInstallationAccessToken,
-    Octocrab, Page,
+    Octocrab,
 };
-use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, USER_AGENT};
-use secrecy::ExposeSecret;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
     errors::Error,
-    models::{Comment, Installation, Label, PullRequest, User},
+    models::{Comment, Label, PullRequest, User},
     PullRequestProvider,
 };
 
@@ -91,10 +88,10 @@ pub async fn authenticate_with_access_token(
         "Finding installation"
     );
 
-    let (api_with_token, secret) = octocrab
+    let (api_with_token, _) = octocrab
         .installation_and_token(installation_id.into())
         .await
-        .map_err(|e| {
+        .map_err(|_| {
             error!(
                 repository_owner = repository_owner,
                 repository = source_repository,
@@ -344,7 +341,8 @@ impl GitHubProvider {
             repository_owner = repo_owner,
             repository = repo_name,
             pull_request = pr_number,
-            "Dismissing previous review ...",
+            review_id = review_id.into_inner(),
+            "Dismissing review ...",
         );
 
         self.client._put(route, Some(&request)).await.map_err(|e| {
@@ -399,55 +397,6 @@ impl GitHubProvider {
 
     pub fn new(client: Octocrab, user: User) -> Self {
         Self { client, user }
-    }
-
-    /// Updates an existing review for a pull request.
-    ///
-    /// Note: GitHub doesn't have a direct API for updating reviews, so we dismiss the old one
-    /// and create a new one.
-    ///
-    /// # Arguments
-    ///
-    /// * `repo_owner` - The owner of the repository
-    /// * `repo_name` - The name of the repository
-    /// * `pr_number` - The pull request number
-    /// * `review_id` - The ID of the review to update
-    /// * `body` - The updated review comment
-    ///
-    /// # Returns
-    ///
-    /// A `Result` indicating success or failure
-    #[instrument]
-    async fn update_review(
-        &self,
-        repo_owner: &str,
-        repo_name: &str,
-        pr_number: u64,
-        review_id: ReviewId,
-        body: &str,
-    ) -> Result<(), Error> {
-        // Dismiss the old review
-        self.dismiss_review(
-            repo_owner,
-            repo_name,
-            pr_number,
-            review_id,
-            "Updating review",
-        )
-        .await?;
-
-        info!(
-            repository_owner = repo_owner,
-            repository = repo_name,
-            pull_request = pr_number,
-            "Creating new review to replace the old review ...",
-        );
-
-        // Create a new review
-        self.create_review(repo_owner, repo_name, pr_number, body, "REQUEST_CHANGES")
-            .await?;
-
-        Ok(())
     }
 }
 
@@ -680,6 +629,7 @@ impl PullRequestProvider for GitHubProvider {
         repo_name: &str,
         pr_number: u64,
         message: &str,
+        message_prefix: &str,
         is_approved: bool,
     ) -> Result<(), Error> {
         let user = self.user.clone();
@@ -696,7 +646,7 @@ impl PullRequestProvider for GitHubProvider {
 
         // First, list existing reviews to check if we already have one
         let existing_reviews = self.list_reviews(repo_owner, repo_name, pr_number).await?;
-        let own_reviews: Vec<&Review> = existing_reviews
+        let mut own_reviews: Vec<&Review> = existing_reviews
             .iter()
             .filter(|r| {
                 let review_user = match &r.user {
@@ -715,6 +665,53 @@ impl PullRequestProvider for GitHubProvider {
             "Searched for existing reviews",
         );
 
+        own_reviews.sort_by(|a, b| {
+            let a_time = a.submitted_at.unwrap_or_default();
+            let b_time = b.submitted_at.unwrap_or_default();
+            b_time.cmp(&a_time)
+        });
+
+        // Dismiss every review except the most recent one
+        if !own_reviews.is_empty() {
+            let size = own_reviews.len() - 1;
+            for review in own_reviews.iter().take(size).skip(1) {
+                if review.state != Some(ReviewState::Dismissed) {
+                    match self
+                        .dismiss_review(
+                            repo_owner,
+                            repo_name,
+                            pr_number,
+                            review.id,
+                            "Issues resolved",
+                        )
+                        .await
+                    {
+                        Ok(()) => {
+                            debug!(
+                                repository_owner = repo_owner,
+                                repository = repo_name,
+                                pull_request = pr_number,
+                                review_id = review.id.into_inner(),
+                                "Review removed"
+                            )
+                        }
+                        Err(_) => {
+                            warn!(
+                                repository_owner = repo_owner,
+                                repository = repo_name,
+                                pull_request = pr_number,
+                                review_id = review.id.into_inner(),
+                                "Failed to remove review"
+                            )
+                        }
+                    };
+                }
+            }
+        }
+
+        // Get the most recent review
+        let most_recent_review = own_reviews.first();
+
         if is_approved {
             info!(
                 repository_owner = repo_owner,
@@ -723,75 +720,72 @@ impl PullRequestProvider for GitHubProvider {
                 "Pull request approved, removing reviews ...",
             );
 
-            // If PR should be approved, dismiss any existing blocking reviews
-            for review in own_reviews {
-                self.dismiss_review(
-                    repo_owner,
-                    repo_name,
-                    pr_number,
-                    review.id,
-                    "Issues resolved",
-                )
-                .await?;
+            if let Some(review) = most_recent_review {
+                match self
+                    .dismiss_review(
+                        repo_owner,
+                        repo_name,
+                        pr_number,
+                        review.id,
+                        "Issues resolved",
+                    )
+                    .await
+                {
+                    Ok(_) => {
+                        debug!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr_number,
+                            review_id = review.id.into_inner(),
+                            "Review removed"
+                        )
+                    }
+                    Err(_) => {
+                        warn!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr_number,
+                            review_id = review.id.into_inner(),
+                            "Failed to remove review"
+                        )
+                    }
+                };
             }
         } else {
             info!(
                 repository_owner = repo_owner,
                 repository = repo_name,
                 pull_request = pr_number,
-                "Pull request not approved, adding or updating reviews ...",
+                "Pull request not approved, adding or updating review ...",
             );
 
-            // If PR should be blocked, create or update a review requesting changes
+            // If the last review is the same as the current one then we don't make changes
             let mut found_match = false;
-            for review in existing_reviews {
+            if let Some(review) = most_recent_review {
                 debug!(
                     repository_owner = repo_owner,
                     repository = repo_name,
                     pull_request = pr_number,
                     review_id = review.id.into_inner(),
+                    review_date = review.submitted_at.unwrap_or_default().to_string(),
                     "Processing review",
                 );
 
-                if !found_match {
-                    let review_message = review.body_text.unwrap_or(String::new());
-                    if message == review_message {
-                        found_match = true;
-                    } else {
-                        match self
-                            .dismiss_review(
-                                repo_owner,
-                                repo_name,
-                                pr_number,
-                                review.id,
-                                "Pull request changed. Review invalid.",
-                            )
-                            .await
-                        {
-                            Ok(_) => {
-                                debug!(
-                                    repository_owner = repo_owner,
-                                    repository = repo_name,
-                                    pull_request = pr_number,
-                                    review_id = review.id.into_inner(),
-                                    "Review removed"
-                                )
-                            }
-                            Err(e) => {
-                                warn!(
-                                    repository_owner = repo_owner,
-                                    repository = repo_name,
-                                    pull_request = pr_number,
-                                    review_id = review.id.into_inner(),
-                                    "Failed to remove review"
-                                )
-                            }
-                        }
-                    }
+                let review_message_option = review.body.clone();
+                let review_message = review_message_option.unwrap_or_default();
+                if review_message.starts_with(message_prefix) {
+                    found_match = true;
                 }
             }
 
-            if !found_match {
+            if found_match {
+                info!(
+                    repository_owner = repo_owner,
+                    repository = repo_name,
+                    pull_request = pr_number,
+                    "Current review is the same as the new one. Will not be creating a new one.",
+                );
+            } else {
                 debug!(
                     repository_owner = repo_owner,
                     repository = repo_name,
@@ -799,9 +793,41 @@ impl PullRequestProvider for GitHubProvider {
                     "Didn't find existing matching review, creating new one",
                 );
 
+                if let Some(review) = most_recent_review {
+                    match self
+                        .dismiss_review(
+                            repo_owner,
+                            repo_name,
+                            pr_number,
+                            review.id,
+                            "Review no longer valid. Will be creating a new one.",
+                        )
+                        .await
+                    {
+                        Ok(_) => {
+                            debug!(
+                                repository_owner = repo_owner,
+                                repository = repo_name,
+                                pull_request = pr_number,
+                                review_id = review.id.into_inner(),
+                                "Review removed"
+                            )
+                        }
+                        Err(_) => {
+                            warn!(
+                                repository_owner = repo_owner,
+                                repository = repo_name,
+                                pull_request = pr_number,
+                                review_id = review.id.into_inner(),
+                                "Failed to remove review"
+                            )
+                        }
+                    };
+                }
+
                 // Create new review requesting changes
                 self.create_review(repo_owner, repo_name, pr_number, message, "REQUEST_CHANGES")
-                    .await?;
+                    .await?
             }
         }
 
