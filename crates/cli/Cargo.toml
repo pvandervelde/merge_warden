@@ -17,7 +17,7 @@ merge_warden_developer_platforms = { path = "../developer_platforms" }
 anyhow = { workspace = true }
 axum = { workspace = true }
 clap = { workspace = true }
-dirs = "5.0"
+dirs = "6.0"
 hex.workspace = true
 hmac.workspace = true
 jsonwebtoken.workspace = true
