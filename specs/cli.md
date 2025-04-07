@@ -50,7 +50,7 @@ provider = "github"  # Default Git provider
 
 [rules]
 require_work_items = true
-enforce_title_convention = "conventional"
+enforce_title_convention = true
 min_approvals = 1
 
 [authentication]
