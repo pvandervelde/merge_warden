@@ -23,4 +23,4 @@ add screenshots.
 
 ## Additional information
 
-Add any other iunformation or screenshots about the pull request here.
+Add any other information or screenshots about the pull request here.
