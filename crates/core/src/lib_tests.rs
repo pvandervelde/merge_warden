@@ -618,6 +618,15 @@ async fn test_process_pull_request_invalid_title() {
         labels.iter().any(|l| l.name == TITLE_INVALID_LABEL),
         "Invalid title label should be added"
     );
+
+    // Verify the title comment was added
+    let comments = warden.provider.get_comments();
+    assert!(
+        comments
+            .iter()
+            .any(|c| c.body.contains(TITLE_COMMENT_MARKER)),
+        "Title comment should be added"
+    );
 }
 
 #[test]
@@ -661,6 +670,15 @@ async fn test_process_pull_request_missing_work_item() {
     assert!(
         labels.iter().any(|l| l.name == MISSING_WORK_ITEM_LABEL),
         "Missing work item label should be added"
+    );
+
+    // Verify the work item comment was added
+    let comments = warden.provider.get_comments();
+    assert!(
+        comments
+            .iter()
+            .any(|c| c.body.contains(WORK_ITEM_COMMENT_MARKER)),
+        "Work item comment should be added"
     );
 }
 
@@ -710,6 +728,21 @@ async fn test_process_pull_request_both_invalid() {
         labels.iter().any(|l| l.name == MISSING_WORK_ITEM_LABEL),
         "Missing work item label should be added"
     );
+
+    // Verify both comments were added
+    let comments = warden.provider.get_comments();
+    assert!(
+        comments
+            .iter()
+            .any(|c| c.body.contains(TITLE_COMMENT_MARKER)),
+        "Title comment should be added"
+    );
+    assert!(
+        comments
+            .iter()
+            .any(|c| c.body.contains(WORK_ITEM_COMMENT_MARKER)),
+        "Work item comment should be added"
+    );
 }
 
 #[test]
@@ -755,6 +788,15 @@ async fn test_handle_title_validation_invalid_to_valid() {
     assert!(
         !labels.iter().any(|l| l.name == TITLE_INVALID_LABEL),
         "Invalid title label should be removed"
+    );
+
+    // Verify the comment was removed
+    let comments = warden.provider.get_comments();
+    assert!(
+        !comments
+            .iter()
+            .any(|c| c.body.contains(TITLE_COMMENT_MARKER)),
+        "Title comment should be removed"
     );
 }
 
@@ -910,6 +952,21 @@ async fn test_process_pull_request_existing_labels_comments() {
         labels.iter().any(|l| l.name == "feature"),
         "Feature label should remain"
     );
+
+    // Verify the comments were removed
+    let comments = warden.provider.get_comments();
+    assert!(
+        !comments
+            .iter()
+            .any(|c| c.body.contains(TITLE_COMMENT_MARKER)),
+        "Title comment should be removed"
+    );
+    assert!(
+        !comments
+            .iter()
+            .any(|c| c.body.contains(WORK_ITEM_COMMENT_MARKER)),
+        "Work item comment should be removed"
+    );
 }
 
 #[test]
@@ -973,6 +1030,31 @@ async fn test_process_pull_request_dynamic_provider() {
     assert!(
         labels.iter().any(|l| l.name == MISSING_WORK_ITEM_LABEL),
         "Missing work item label should be added for PR #2"
+    );
+}
+
+#[test]
+async fn test_process_pull_request_error_add_comment() {
+    // Create a mock provider that returns an error when adding a comment
+    let mut provider = ErrorMockGitProvider::new();
+    provider.with_invalid_pr_title();
+    provider.with_add_comment_error();
+
+    // Create a MergeWarden instance
+    let warden = MergeWarden::new(provider);
+
+    // Process the PR - should return an error
+    let result = warden.process_pull_request("owner", "repo", 1).await;
+
+    // Verify the error
+    assert!(
+        result.is_err(),
+        "Should return an error when adding a comment fails"
+    );
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        "Failed to update pull request. Issue was: 'Failed to add comment'.",
+        "Should return the specific error message"
     );
 }
 
@@ -1067,5 +1149,14 @@ async fn test_handle_work_item_validation_missing_to_present() {
     assert!(
         !labels.iter().any(|l| l.name == MISSING_WORK_ITEM_LABEL),
         "Missing work item label should be removed"
+    );
+
+    // Verify the comment was removed
+    let comments = warden.provider.get_comments();
+    assert!(
+        !comments
+            .iter()
+            .any(|c| c.body.contains(WORK_ITEM_COMMENT_MARKER)),
+        "Work item comment should be removed"
     );
 }
