@@ -166,8 +166,6 @@ impl PullRequestProvider for ErrorMockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-        _message: &str,
-        _message_prefix: &str,
         _is_approved: bool,
     ) -> Result<(), Error> {
         Ok(())
@@ -310,8 +308,6 @@ impl PullRequestProvider for DynamicMockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-        _message: &str,
-        _message_prefix: &str,
         is_approved: bool,
     ) -> Result<(), Error> {
         let mut pr_mergeable = self.pr_mergeable.lock().unwrap();
@@ -327,7 +323,6 @@ struct MockGitProvider {
     labels: Arc<Mutex<Vec<Label>>>,
     comments: Arc<Mutex<Vec<Comment>>>,
     pr_mergeable: Arc<Mutex<bool>>,
-    last_review_message: Arc<Mutex<String>>,
 }
 
 impl MockGitProvider {
@@ -337,7 +332,6 @@ impl MockGitProvider {
             labels: Arc::new(Mutex::new(Vec::new())),
             comments: Arc::new(Mutex::new(Vec::new())),
             pr_mergeable: Arc::new(Mutex::new(true)),
-            last_review_message: Arc::new(Mutex::new(String::new())),
         }
     }
 
@@ -358,11 +352,6 @@ impl MockGitProvider {
 
     fn is_mergeable(&self) -> bool {
         *self.pr_mergeable.lock().unwrap()
-    }
-
-    fn get_last_review_message(&self) -> String {
-        let message = self.last_review_message.lock().unwrap().clone();
-        message
     }
 }
 
@@ -465,16 +454,10 @@ impl PullRequestProvider for MockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-        message: &str,
-        _message_prefix: &str,
         is_approved: bool,
     ) -> Result<(), Error> {
         let mut pr_mergeable = self.pr_mergeable.lock().unwrap();
         *pr_mergeable = is_approved;
-
-        // Store the review message for testing
-        let mut last_message = self.last_review_message.lock().unwrap();
-        *last_message = message.to_string();
 
         Ok(())
     }
@@ -636,11 +619,13 @@ async fn test_process_pull_request_invalid_title() {
         "Invalid title label should be added"
     );
 
-    // Verify the review message contains title validation guidance
-    let review_message = warden.provider.get_last_review_message();
+    // Verify the title comment was added
+    let comments = warden.provider.get_comments();
     assert!(
-        review_message.contains("Title Convention"),
-        "Review message should contain title validation guidance"
+        comments
+            .iter()
+            .any(|c| c.body.contains(TITLE_COMMENT_MARKER)),
+        "Title comment should be added"
     );
 }
 
@@ -687,11 +672,13 @@ async fn test_process_pull_request_missing_work_item() {
         "Missing work item label should be added"
     );
 
-    // Verify the review message contains work item validation guidance
-    let review_message = warden.provider.get_last_review_message();
+    // Verify the work item comment was added
+    let comments = warden.provider.get_comments();
     assert!(
-        review_message.contains("Work Item Tracking"),
-        "Review message should contain work item validation guidance"
+        comments
+            .iter()
+            .any(|c| c.body.contains(WORK_ITEM_COMMENT_MARKER)),
+        "Work item comment should be added"
     );
 }
 
@@ -742,12 +729,19 @@ async fn test_process_pull_request_both_invalid() {
         "Missing work item label should be added"
     );
 
-    // Verify the review message contains both title and work item validation guidance
-    let review_message = warden.provider.get_last_review_message();
+    // Verify both comments were added
+    let comments = warden.provider.get_comments();
     assert!(
-        review_message.contains("Title Convention")
-            && review_message.contains("Work Item Tracking"),
-        "Review message should contain both title and work item validation guidance"
+        comments
+            .iter()
+            .any(|c| c.body.contains(TITLE_COMMENT_MARKER)),
+        "Title comment should be added"
+    );
+    assert!(
+        comments
+            .iter()
+            .any(|c| c.body.contains(WORK_ITEM_COMMENT_MARKER)),
+        "Work item comment should be added"
     );
 }
 
@@ -794,6 +788,15 @@ async fn test_handle_title_validation_invalid_to_valid() {
     assert!(
         !labels.iter().any(|l| l.name == TITLE_INVALID_LABEL),
         "Invalid title label should be removed"
+    );
+
+    // Verify the comment was removed
+    let comments = warden.provider.get_comments();
+    assert!(
+        !comments
+            .iter()
+            .any(|c| c.body.contains(TITLE_COMMENT_MARKER)),
+        "Title comment should be removed"
     );
 }
 
@@ -949,6 +952,21 @@ async fn test_process_pull_request_existing_labels_comments() {
         labels.iter().any(|l| l.name == "feature"),
         "Feature label should remain"
     );
+
+    // Verify the comments were removed
+    let comments = warden.provider.get_comments();
+    assert!(
+        !comments
+            .iter()
+            .any(|c| c.body.contains(TITLE_COMMENT_MARKER)),
+        "Title comment should be removed"
+    );
+    assert!(
+        !comments
+            .iter()
+            .any(|c| c.body.contains(WORK_ITEM_COMMENT_MARKER)),
+        "Work item comment should be removed"
+    );
 }
 
 #[test]
@@ -1012,6 +1030,31 @@ async fn test_process_pull_request_dynamic_provider() {
     assert!(
         labels.iter().any(|l| l.name == MISSING_WORK_ITEM_LABEL),
         "Missing work item label should be added for PR #2"
+    );
+}
+
+#[test]
+async fn test_process_pull_request_error_add_comment() {
+    // Create a mock provider that returns an error when adding a comment
+    let mut provider = ErrorMockGitProvider::new();
+    provider.with_invalid_pr_title();
+    provider.with_add_comment_error();
+
+    // Create a MergeWarden instance
+    let warden = MergeWarden::new(provider);
+
+    // Process the PR - should return an error
+    let result = warden.process_pull_request("owner", "repo", 1).await;
+
+    // Verify the error
+    assert!(
+        result.is_err(),
+        "Should return an error when adding a comment fails"
+    );
+    assert_eq!(
+        result.unwrap_err().to_string(),
+        "Failed to update pull request. Issue was: 'Failed to add comment'.",
+        "Should return the specific error message"
     );
 }
 
@@ -1106,5 +1149,14 @@ async fn test_handle_work_item_validation_missing_to_present() {
     assert!(
         !labels.iter().any(|l| l.name == MISSING_WORK_ITEM_LABEL),
         "Missing work item label should be removed"
+    );
+
+    // Verify the comment was removed
+    let comments = warden.provider.get_comments();
+    assert!(
+        !comments
+            .iter()
+            .any(|c| c.body.contains(WORK_ITEM_COMMENT_MARKER)),
+        "Work item comment should be removed"
     );
 }

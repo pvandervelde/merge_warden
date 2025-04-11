@@ -46,7 +46,7 @@ use models::{Comment, Label, PullRequest};
 ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
 ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
 ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
-///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: bool) -> Result<(), Error> { unimplemented!() }
+///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: bool) -> Result<(), Error> { unimplemented!() }
 /// }
 /// ```
 #[async_trait]
@@ -192,7 +192,6 @@ pub trait PullRequestProvider {
     /// * `repo_owner` - The owner of the repository.
     /// * `repo_name` - The name of the repository.
     /// * `pr_number` - The pull request number.
-    /// * `message` - The review message that is applied.
     /// * `is_approved` - Whether the PR should be approved or 'rejected'.
     ///
     /// # Returns
@@ -203,8 +202,6 @@ pub trait PullRequestProvider {
         repo_owner: &str,
         repo_name: &str,
         pr_number: u64,
-        message: &str,
-        message_prefix: &str,
         is_approved: bool,
     ) -> Result<(), Error>;
 }

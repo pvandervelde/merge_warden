@@ -236,7 +236,7 @@ fn log_octocrab_error(message: &str, e: octocrab::Error) {
             "{}. The message wasn't valid UTF-8.",
             message,
         ),
-        _ => error!(message,),
+        _ => error!(error_message = e.to_string(), message),
     };
 }
 
@@ -266,7 +266,6 @@ impl GitHubProvider {
         repo_owner: &str,
         repo_name: &str,
         pr_number: u64,
-        body: &str,
         event: &str,
     ) -> Result<(), Error> {
         // The app should never approve a PR
@@ -284,7 +283,11 @@ impl GitHubProvider {
             "/repos/{}/{}/pulls/{}/reviews",
             repo_owner, repo_name, pr_number
         );
-        let request = CreateReviewRequest { body, event };
+
+        let request = CreateReviewRequest {
+            body: "Requirements for Pull Requests not met. Please review comments and update Pull Request.",
+            event,
+        };
 
         debug!(
             repository_owner = repo_owner,
@@ -605,7 +608,6 @@ impl PullRequestProvider for GitHubProvider {
     /// - `repo_owner`: The owner of the repository.
     /// - `repo_name`: The name of the repository.
     /// - `pr_number`: The number of the pull request to update.
-    /// - `message`: A message describing the reason for the update.
     /// - `is_approved`: A boolean indicating whether the pull request should be approved for merging.
     ///
     /// # Behavior
@@ -628,8 +630,6 @@ impl PullRequestProvider for GitHubProvider {
         repo_owner: &str,
         repo_name: &str,
         pr_number: u64,
-        message: &str,
-        message_prefix: &str,
         is_approved: bool,
     ) -> Result<(), Error> {
         let user = self.user.clone();
@@ -771,11 +771,7 @@ impl PullRequestProvider for GitHubProvider {
                     "Processing review",
                 );
 
-                let review_message_option = review.body.clone();
-                let review_message = review_message_option.unwrap_or_default();
-                if review_message.starts_with(message_prefix) {
-                    found_match = true;
-                }
+                found_match = true;
             }
 
             if found_match {
@@ -793,40 +789,8 @@ impl PullRequestProvider for GitHubProvider {
                     "Didn't find existing matching review, creating new one",
                 );
 
-                if let Some(review) = most_recent_review {
-                    match self
-                        .dismiss_review(
-                            repo_owner,
-                            repo_name,
-                            pr_number,
-                            review.id,
-                            "Review no longer valid. Will be creating a new one.",
-                        )
-                        .await
-                    {
-                        Ok(_) => {
-                            debug!(
-                                repository_owner = repo_owner,
-                                repository = repo_name,
-                                pull_request = pr_number,
-                                review_id = review.id.into_inner(),
-                                "Review removed"
-                            )
-                        }
-                        Err(_) => {
-                            warn!(
-                                repository_owner = repo_owner,
-                                repository = repo_name,
-                                pull_request = pr_number,
-                                review_id = review.id.into_inner(),
-                                "Failed to remove review"
-                            )
-                        }
-                    };
-                }
-
                 // Create new review requesting changes
-                self.create_review(repo_owner, repo_name, pr_number, message, "REQUEST_CHANGES")
+                self.create_review(repo_owner, repo_name, pr_number, "REQUEST_CHANGES")
                     .await?
             }
         }
