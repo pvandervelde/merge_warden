@@ -61,17 +61,3 @@ impl Default for ValidationConfig {
         }
     }
 }
-
-pub fn review_message_prefix_from_values(
-    is_title_conventional: bool,
-    has_work_item: bool,
-) -> String {
-    match (is_title_conventional, has_work_item) {
-        (true, true) => "<!-- MERGE_WARDEN_VALID -->".to_string(),
-        (true, false) => "<!-- MERGE_WARDEN_MISSING_WORK_ITEM -->".to_string(),
-        (false, true) => "<!-- MERGE_WARDEN_TITLE_IS_NOT_CONVENTIONAL -->".to_string(),
-        (false, false) => {
-            "<!-- MERGE_WARDEN_TITLE_IS_NOT_CONVENTIONAL_MISSING_WORK_ITEM -->".to_string()
-        }
-    }
-}

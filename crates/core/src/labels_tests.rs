@@ -112,12 +112,10 @@ impl PullRequestProvider for MockGitProvider {
 
     async fn update_pr_blocking_review(
         &self,
-        repo_owner: &str,
-        repo_name: &str,
-        pr_number: u64,
-        message: &str,
-        message_prefix: &str,
-        is_approved: bool,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _pr_number: u64,
+        _is_approved: bool,
     ) -> Result<(), Error> {
         unimplemented!("Not needed for this test")
     }
@@ -193,12 +191,10 @@ impl PullRequestProvider for ErrorMockGitProvider {
 
     async fn update_pr_blocking_review(
         &self,
-        repo_owner: &str,
-        repo_name: &str,
-        pr_number: u64,
-        message: &str,
-        message_prefix: &str,
-        is_approved: bool,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _pr_number: u64,
+        _is_approved: bool,
     ) -> Result<(), Error> {
         unimplemented!("Not needed for this test")
     }
@@ -400,7 +396,7 @@ async fn test_determine_labels_invalid_type_in_pr_title() {
         .await
         .unwrap();
     assert!(
-        labels.len() == 0,
+        labels.is_empty(),
         "Expected no labels for title with a missing type"
     );
 }
@@ -448,7 +444,7 @@ async fn test_determine_labels_missing_type_in_pr_title() {
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
         .await
         .unwrap();
-    assert!(labels.len() == 0, "Expected no labels for missing type");
+    assert!(labels.is_empty(), "Expected no labels for missing type");
 }
 
 #[test]

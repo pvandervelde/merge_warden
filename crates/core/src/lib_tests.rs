@@ -166,8 +166,6 @@ impl PullRequestProvider for ErrorMockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-        _message: &str,
-        _message_prefix: &str,
         _is_approved: bool,
     ) -> Result<(), Error> {
         Ok(())
@@ -310,8 +308,6 @@ impl PullRequestProvider for DynamicMockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-        _message: &str,
-        _message_prefix: &str,
         is_approved: bool,
     ) -> Result<(), Error> {
         let mut pr_mergeable = self.pr_mergeable.lock().unwrap();
@@ -327,7 +323,6 @@ struct MockGitProvider {
     labels: Arc<Mutex<Vec<Label>>>,
     comments: Arc<Mutex<Vec<Comment>>>,
     pr_mergeable: Arc<Mutex<bool>>,
-    last_review_message: Arc<Mutex<String>>,
 }
 
 impl MockGitProvider {
@@ -337,7 +332,6 @@ impl MockGitProvider {
             labels: Arc::new(Mutex::new(Vec::new())),
             comments: Arc::new(Mutex::new(Vec::new())),
             pr_mergeable: Arc::new(Mutex::new(true)),
-            last_review_message: Arc::new(Mutex::new(String::new())),
         }
     }
 
@@ -358,11 +352,6 @@ impl MockGitProvider {
 
     fn is_mergeable(&self) -> bool {
         *self.pr_mergeable.lock().unwrap()
-    }
-
-    fn get_last_review_message(&self) -> String {
-        let message = self.last_review_message.lock().unwrap().clone();
-        message
     }
 }
 
@@ -465,16 +454,10 @@ impl PullRequestProvider for MockGitProvider {
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-        message: &str,
-        _message_prefix: &str,
         is_approved: bool,
     ) -> Result<(), Error> {
         let mut pr_mergeable = self.pr_mergeable.lock().unwrap();
         *pr_mergeable = is_approved;
-
-        // Store the review message for testing
-        let mut last_message = self.last_review_message.lock().unwrap();
-        *last_message = message.to_string();
 
         Ok(())
     }
@@ -635,13 +618,6 @@ async fn test_process_pull_request_invalid_title() {
         labels.iter().any(|l| l.name == TITLE_INVALID_LABEL),
         "Invalid title label should be added"
     );
-
-    // Verify the review message contains title validation guidance
-    let review_message = warden.provider.get_last_review_message();
-    assert!(
-        review_message.contains("Title Convention"),
-        "Review message should contain title validation guidance"
-    );
 }
 
 #[test]
@@ -685,13 +661,6 @@ async fn test_process_pull_request_missing_work_item() {
     assert!(
         labels.iter().any(|l| l.name == MISSING_WORK_ITEM_LABEL),
         "Missing work item label should be added"
-    );
-
-    // Verify the review message contains work item validation guidance
-    let review_message = warden.provider.get_last_review_message();
-    assert!(
-        review_message.contains("Work Item Tracking"),
-        "Review message should contain work item validation guidance"
     );
 }
 
@@ -740,14 +709,6 @@ async fn test_process_pull_request_both_invalid() {
     assert!(
         labels.iter().any(|l| l.name == MISSING_WORK_ITEM_LABEL),
         "Missing work item label should be added"
-    );
-
-    // Verify the review message contains both title and work item validation guidance
-    let review_message = warden.provider.get_last_review_message();
-    assert!(
-        review_message.contains("Title Convention")
-            && review_message.contains("Work Item Tracking"),
-        "Review message should contain both title and work item validation guidance"
     );
 }
 
