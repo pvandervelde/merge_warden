@@ -46,7 +46,9 @@ async fn auth_github(method: &str) -> Result<(), CliError> {
         Ok(c) => c,
         Err(e) => {
             error!(message = "Failed to load configuration", path = ?config_path, error = ?e);
-            return Err(e);
+            return Err(CliError::ConfigError(
+                "Failed to load configuration".to_string(),
+            ));
         }
     };
 
@@ -132,7 +134,10 @@ async fn auth_github(method: &str) -> Result<(), CliError> {
             debug!(message = "Saved webhook secret to keyring");
 
             config.authentication.auth_method = "app".to_string();
-            config.save(&config_path)?;
+            config.save(&config_path).map_err(|e| {
+                error!(error = e.to_string(), "Failed to save the configuration");
+                CliError::ConfigError("Failed to save the configuration.".to_string())
+            })?;
             info!(
                 message = "Updated configuration with auth method",
                 auth_method = "app"
@@ -171,7 +176,10 @@ async fn auth_github(method: &str) -> Result<(), CliError> {
             debug!(message = "Saved token to keyring");
 
             config.authentication.auth_method = "token".to_string();
-            config.save(&config_path)?;
+            config.save(&config_path).map_err(|e| {
+                error!(error = e.to_string(), "Failed to save the configuration");
+                CliError::ConfigError("Failed to save the configuration.".to_string())
+            })?;
             info!(
                 message = "Updated configuration with auth method",
                 auth_method = "token"

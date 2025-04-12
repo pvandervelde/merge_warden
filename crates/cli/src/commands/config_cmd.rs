@@ -79,7 +79,9 @@ fn init_config(path: Option<&str>) -> Result<(), CliError> {
     let config = Config::default();
     if let Err(e) = config.save(&config_path) {
         error!(message = "Failed to save configuration", path = ?config_path, error = ?e);
-        return Err(e);
+        return Err(CliError::ConfigError(
+            "Failed to save configuration".to_string(),
+        ));
     }
 
     info!(message = "Configuration initialized", path = ?config_path);
@@ -105,7 +107,9 @@ fn validate_config(path: Option<&str>) -> Result<(), CliError> {
                 path = ?config_path,
                 error = ?e
             );
-            Err(e)
+            Err(CliError::ConfigError(
+                "The configuration is invalid".to_string(),
+            ))
         }
     }
 }
@@ -120,7 +124,9 @@ fn get_config(path: Option<&str>, key: Option<&str>) -> Result<(), CliError> {
         Ok(c) => c,
         Err(e) => {
             error!(message = "Failed to load configuration", path = ?config_path, error = ?e);
-            return Err(e);
+            return Err(CliError::ConfigError(
+                "Failed to load the configuration".to_string(),
+            ));
         }
     };
 
@@ -159,7 +165,9 @@ fn set_config(path: Option<&str>, key: &str, value: &str) -> Result<(), CliError
         Ok(c) => c,
         Err(e) => {
             error!(message = "Failed to load configuration", path = ?config_path, error = ?e);
-            return Err(e);
+            return Err(CliError::ConfigError(
+                "Failed to load the configuration".to_string(),
+            ));
         }
     };
 
@@ -172,7 +180,9 @@ fn set_config(path: Option<&str>, key: &str, value: &str) -> Result<(), CliError
     // Save the updated config
     if let Err(e) = config.save(&config_path) {
         error!(message = "Failed to save configuration", path = ?config_path, error = ?e);
-        return Err(e);
+        return Err(CliError::ConfigError(
+            "Failed to save configuration".to_string(),
+        ));
     }
 
     info!(message = "Configuration updated", key = key, value = value);

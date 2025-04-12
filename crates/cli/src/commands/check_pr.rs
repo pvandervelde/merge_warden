@@ -7,13 +7,13 @@ use clap::Args;
 use hmac::{Hmac, Mac};
 use keyring::Entry;
 use merge_warden_core::config::ValidationConfig;
-use merge_warden_core::MergeWarden;
+use merge_warden_core::{MergeWarden, WebhookPayload};
 use merge_warden_developer_platforms::github::{
     authenticate_with_access_token, create_app_client, GitHubProvider,
 };
-use merge_warden_developer_platforms::models::{Installation, PullRequest, Repository, User};
+use merge_warden_developer_platforms::models::User;
 use octocrab::Octocrab;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use sha2::Sha256;
 use std::fs;
 use std::sync::Arc;
@@ -27,11 +27,11 @@ use crate::errors::CliError;
 
 use super::auth::KEY_RING_WEB_HOOK_SECRET;
 
-struct AppState {
-    octocrab: Octocrab,
-    user: User,
-    config: Config,
-    webhook_secret: String,
+pub struct AppState {
+    pub octocrab: Octocrab,
+    pub user: User,
+    pub config: Config,
+    pub webhook_secret: String,
 }
 
 /// Arguments for the check-pr command
@@ -54,14 +54,6 @@ pub struct ValidationResult {
 
     /// List of validation failures
     pub failures: Vec<String>,
-}
-
-#[derive(Deserialize)]
-struct WebhookPayload {
-    action: String,
-    pull_request: Option<PullRequest>,
-    repository: Option<Repository>,
-    installation: Option<Installation>,
 }
 
 /// Creates a GitHub application client based on the provided configuration.

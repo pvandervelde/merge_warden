@@ -2,9 +2,9 @@
 //!
 //! This module centralizes configuration constants and settings used throughout
 //! the crate, making it easier to modify behavior in one place.
-
 use lazy_static::lazy_static;
 use regex::Regex;
+use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
 #[path = "config_tests.rs"]
@@ -39,6 +39,62 @@ lazy_static! {
     ).expect("Failed to compile work item regex");
 }
 
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct AuthenticationConfig {
+    #[serde(default = "default_auth_method")]
+    pub auth_method: String,
+}
+
+impl AuthenticationConfig {
+    pub fn new() -> Self {
+        AuthenticationConfig {
+            auth_method: default_auth_method(),
+        }
+    }
+}
+
+/// Default configuration settings
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct DefaultConfig {
+    /// Default Git provider
+    #[serde(default = "default_provider")]
+    pub provider: String,
+}
+
+impl DefaultConfig {
+    pub fn new() -> Self {
+        DefaultConfig {
+            provider: default_provider(),
+        }
+    }
+}
+
+/// Rules configuration
+#[derive(Debug, Serialize, Deserialize, Default)]
+pub struct RulesConfig {
+    /// Require work items to be linked
+    #[serde(default)]
+    pub require_work_items: bool,
+
+    /// Enforce title convention
+    #[serde(default)]
+    pub enforce_title_convention: Option<bool>,
+
+    /// Minimum number of approvals required
+    #[serde(default)]
+    pub min_approvals: Option<u32>,
+}
+
+impl RulesConfig {
+    pub fn new() -> Self {
+        RulesConfig {
+            require_work_items: false,
+            enforce_title_convention: Some(false),
+            min_approvals: Some(1),
+        }
+    }
+}
+
 /// Configuration for PR validation
 #[derive(Debug, Clone)]
 pub struct ValidationConfig {
@@ -60,4 +116,12 @@ impl Default for ValidationConfig {
             auto_label: true,
         }
     }
+}
+
+fn default_auth_method() -> String {
+    "token".to_string()
+}
+
+fn default_provider() -> String {
+    "github".to_string()
 }
