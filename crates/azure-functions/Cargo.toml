@@ -1,0 +1,31 @@
+[package]
+authors.workspace = true
+description = "A github bot that validates pull requests against configured rules"
+edition = "2021"
+license-file.workspace = true
+name = "handler"
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+merge_warden_core = { path = "../core" }
+merge_warden_developer_platforms = { path = "../developer_platforms" }
+axum = { workspace = true }
+azure_identity = "0.20.0"
+azure_security_keyvault = "0.20.0"
+hex.workspace = true
+hmac.workspace = true
+octocrab = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-application-insights = "0.40.0"
+opentelemetry-otlp = { workspace = true }
+reqwest = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2.workspace = true
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true, features = ["log"] }
+tracing-opentelemetry = { workspace = true, features = ["thiserror"] }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
