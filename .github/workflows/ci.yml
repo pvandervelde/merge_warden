@@ -64,6 +64,11 @@ jobs:
   tf-test:
     name: Terraform Test
     runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
     if: ${{ github.event_name == 'pull_request' }}
     steps:
     - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
