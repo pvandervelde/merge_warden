@@ -30,7 +30,7 @@ jobs:
         versionSpec: '6.0.0'
 
     - name: Determine Version
-      id: version_step # step id used as reference for output values
+      id: get-version # step id used as reference for output values
       uses: gittools/actions/gitversion/execute@a94a3b62ee018ef5346cb08fd0d63d93811fe691 # v3.0.0
       with:
         useConfigFile: true
@@ -101,7 +101,7 @@ jobs:
           -var="github_app_private_key=${{ secrets.GH_APP_PRIVATE_KEY }}" \
           -var="github_webhook_secret=${{ secrets.GH_WEBHOOK_SECRET }}" \
           -var="meta_git_sha=${{ github.sha }}" \
-          -var="meta_version=${{ env.majorMinorPatch }}"
+          -var="meta_version=${{ steps.get-version.majorMinorPatch }}"
       env:
         ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
         ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
