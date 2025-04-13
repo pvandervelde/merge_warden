@@ -1,5 +1,4 @@
 use opentelemetry::trace::TracerProvider;
-use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::trace::BatchConfigBuilder;
 use opentelemetry_sdk::trace::BatchSpanProcessor;
 use opentelemetry_sdk::Resource;

@@ -1,5 +1,5 @@
 use axum::{extract::State, routing::post, Router};
-use azure_security_keyvault::KeyvaultClient;
+use azure_security_keyvault_secrets::SecretClient;
 use hmac::{Hmac, Mac};
 use merge_warden_core::{
     config::{RulesConfig, ValidationConfig},
@@ -19,6 +19,10 @@ mod errors;
 use errors::AzureFunctionsError;
 
 mod telemetry;
+
+#[cfg(test)]
+#[path = "main_tests.rs"]
+mod tests;
 
 struct AppConfig {
     app_id: u64,
@@ -149,7 +153,7 @@ async fn get_azure_config() -> Result<AppConfig, AzureFunctionsError> {
     let enforce_title_convention = match env::var(enforce_title_convention_key) {
         Ok(val) => match val.parse() {
             Ok(b) => b,
-            Err(e) => {
+            Err(_) => {
                 error!(
                     input = val,
                     "Failed to parse the {} key", enforce_title_convention_key
@@ -170,7 +174,7 @@ async fn get_azure_config() -> Result<AppConfig, AzureFunctionsError> {
     let require_work_items = match env::var(require_work_items_key) {
         Ok(val) => match val.parse() {
             Ok(b) => b,
-            Err(e) => {
+            Err(_) => {
                 error!(
                     input = val,
                     "Failed to parse the {} key", require_work_items_key
@@ -203,14 +207,14 @@ async fn get_secret_from_keyvault(
     key_vault_url: &str,
     secret_name: &str,
 ) -> Result<String, AzureFunctionsError> {
-    let credential = azure_identity::create_credential().map_err(|e| {
+    let credential = azure_identity::DefaultAzureCredential::new().map_err(|e| {
         error!(
             error = e.to_string(),
             "Failed to create an Azure Identity credential."
         );
         AzureFunctionsError::AuthError("Failed to create an Azure Identity credential.".to_string())
     })?;
-    let client = KeyvaultClient::new(key_vault_url, credential).map_err(|e| {
+    let client = SecretClient::new(key_vault_url, credential, None).map_err(|e| {
         error!(
             error = e.to_string(),
             "Failed to create an Azure KeyVault client."
@@ -218,14 +222,24 @@ async fn get_secret_from_keyvault(
         AzureFunctionsError::AuthError("Failed to create an Azure KeyVault client.".to_string())
     })?;
 
-    let secret = client.secret_client().get(secret_name).await.map_err(|e| {
+    let secret = client
+        .get_secret(secret_name, "", None)
+        .await
+        .map_err(|e| {
+            error!(
+                error = e.to_string(),
+                "Failed to get a secret from the KeyVault."
+            );
+            AzureFunctionsError::AuthError("Failed to get a secret from the KeyVault.".to_string())
+        })?;
+    let value = secret.into_body().await.map_err(|e| {
         error!(
             error = e.to_string(),
             "Failed to get a secret from the KeyVault."
         );
         AzureFunctionsError::AuthError("Failed to get a secret from the KeyVault.".to_string())
     })?;
-    Ok(secret.value)
+    Ok(value.value.unwrap_or_default())
 }
 
 #[instrument(skip(state, headers, body))]
