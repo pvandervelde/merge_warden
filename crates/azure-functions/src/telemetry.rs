@@ -36,7 +36,7 @@ pub async fn init_telemetry(
         .with_span_processor(azure_monitor_processor)
         .build();
 
-    let tracer = provider.tracer("thing");
+    let tracer = provider.tracer("merge_warden");
 
     // Create a tracing layer with the configured tracer
     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
