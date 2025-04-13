@@ -3,13 +3,19 @@ use super::AzureFunctionsError;
 #[test]
 fn test_config_error_display() {
     let error = AzureFunctionsError::ConfigError("Invalid configuration".to_string());
-    assert_eq!(format!("{}", error), "Configuration error: Invalid configuration");
+    assert_eq!(
+        format!("{}", error),
+        "Configuration error: Invalid configuration"
+    );
 }
 
 #[test]
 fn test_auth_error_display() {
     let error = AzureFunctionsError::AuthError("Authentication failed".to_string());
-    assert_eq!(format!("{}", error), "Authentication error: Authentication failed");
+    assert_eq!(
+        format!("{}", error),
+        "Authentication error: Authentication failed"
+    );
 }
 
 #[test]
