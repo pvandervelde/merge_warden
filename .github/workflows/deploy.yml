@@ -49,7 +49,7 @@ jobs:
 
     - name: Build xtask
       run: |
-        cargo build --release --package azure-functions --target x86_64-unknown-linux-musl --target-dir target/func
+        cargo build --release --package handler --target x86_64-unknown-linux-musl --target-dir target/func
 
     # Copy the files for the azure function into a single directory
     #
