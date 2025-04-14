@@ -34,7 +34,7 @@ changelog_path = "./CHANGELOG.md"
 
 # Options for the package I care the most, e.g. `my_main_package`.
 [[package]]
-name = "azure_functions"
+name = "handler"
 
 # Enable git tags for this package
 git_tag_enable = true
