@@ -38,6 +38,8 @@ changelog_path = "./CHANGELOG.md"
 
 pr_name = "chore: release {{ version }}"
 
+release_always = false
+
 # Options for the package I care the most, e.g. `my_main_package`.
 [[package]]
 name = "handler"
