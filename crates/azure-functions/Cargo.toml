@@ -1,38 +1,31 @@
 [package]
 authors.workspace = true
-description = "Command-line interface for validating pull requests against configured rules"
+description = "A github bot that validates pull requests against configured rules"
 edition = "2021"
 license-file.workspace = true
-name = "merge_warden_cli"
+name = "handler"
 repository.workspace = true
 version.workspace = true
-
-[[bin]]
-name = "merge-warden"
-path = "src/main.rs"
 
 [dependencies]
 merge_warden_core = { path = "../core" }
 merge_warden_developer_platforms = { path = "../developer_platforms" }
-anyhow = { workspace = true }
 axum = { workspace = true }
-clap = { workspace = true }
-dirs = "6.0"
+azure_identity = "0.23.0"
+azure_security_keyvault_secrets = "0.2.0"
 hex.workspace = true
 hmac.workspace = true
-jsonwebtoken.workspace = true
-keyring = { version = "3.6.2", features = [
-    "apple-native",
-    "linux-native",
-    "windows-native",
-] }
 octocrab = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-application-insights = "0.40.0"
+opentelemetry-otlp = { workspace = true }
+reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2.workspace = true
 thiserror = { workspace = true }
 tokio = { workspace = true }
-toml = { workspace = true }
 tracing = { workspace = true, features = ["log"] }
 tracing-opentelemetry = { workspace = true, features = ["thiserror"] }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }

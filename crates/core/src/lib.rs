@@ -55,7 +55,7 @@
 //! ```
 
 use indoc::formatdoc;
-use merge_warden_developer_platforms::models::PullRequest;
+use merge_warden_developer_platforms::models::{Installation, PullRequest, Repository};
 use merge_warden_developer_platforms::PullRequestProvider;
 
 pub mod checks;
@@ -66,6 +66,7 @@ use config::{TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL};
 
 pub mod errors;
 use errors::MergeWardenError;
+use serde::Deserialize;
 use tracing::{debug, error, info, instrument};
 
 pub mod labels;
@@ -87,6 +88,14 @@ pub struct CheckResult {
 
     /// Labels that were added to the PR based on its content
     pub labels: Vec<String>,
+}
+
+#[derive(Deserialize)]
+pub struct WebhookPayload {
+    pub action: String,
+    pub pull_request: Option<PullRequest>,
+    pub repository: Option<Repository>,
+    pub installation: Option<Installation>,
 }
 
 /// Main struct for validating and managing pull requests.

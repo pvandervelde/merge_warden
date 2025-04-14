@@ -59,3 +59,62 @@ jobs:
 
   #     - name: Run bench-tests
   #       run: cargo test --benches
+
+  # Can only run this in PRs because the Azure OIDC is linked to PRs and building on the 'master' branch
+  tf-test:
+    name: Terraform Test
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      id-token: write
+
+    if: ${{ github.event_name == 'pull_request' }}
+    steps:
+    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+      with:
+        fetch-depth: 0  # Fetch all history for all tags and branches
+    - name: Install GitVersion
+      uses: gittools/actions/gitversion/setup@a94a3b62ee018ef5346cb08fd0d63d93811fe691 # v3.0.0
+      with:
+        versionSpec: '6.0.0'
+
+    - name: Determine Version
+      id: get-version
+      uses: gittools/actions/gitversion/execute@a94a3b62ee018ef5346cb08fd0d63d93811fe691 # v3.0.0
+      with:
+        useConfigFile: true
+
+    - name: Setup Terraform
+      uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+
+    - name: Azure Login
+      uses: azure/login@6c251865b4e6290e7b78be643ea2d005bc51f69a # v2
+      with:
+        client-id: ${{ secrets.ARM_CLIENT_ID }}
+        tenant-id: ${{ secrets.ARM_TENANT_ID }}
+        subscription-id: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+
+    - name: Terraform Init
+      working-directory: ops/azure
+      run: terraform init
+      env:
+        ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+        ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+        ARM_USE_OIDC: true
+
+    - name: Terraform Plan
+      working-directory: ops/azure
+      run: |
+        terraform plan -no-color \
+          -var="github_app_id=${{ secrets.GH_APP_ID }}" \
+          -var="github_app_private_key=${{ secrets.GH_APP_PRIVATE_KEY }}" \
+          -var="github_webhook_secret=${{ secrets.GH_WEBHOOK_SECRET }}" \
+          -var="meta_git_sha=${{ github.sha }}" \
+          -var="meta_version=${{ steps.get-version.majorMinorPatch }}"
+      env:
+        ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
+        ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
+        ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
+        ARM_USE_OIDC: true
