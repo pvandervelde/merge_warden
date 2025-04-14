@@ -10,7 +10,7 @@ terraform {
     resource_group_name  = "p-aue-tf-tfstate-rg"
     storage_account_name = "paueterraformstate"
     container_name       = "p-aue-tf-tfstate-sc"
-    key                  = "prod.glitchg.tfstate"
+    key                  = "prod.mergew.tfstate"
   }
 }
 
