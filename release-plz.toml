@@ -12,10 +12,10 @@ changelog_update = true
 dependencies_update = false
 
 # disable GitHub releases
-git_release_enable = true
+git_release_enable = false
 
 # create tags for the releases
-git_tag_enable = true
+git_tag_enable = false
 
 # labels for the release PR
 pr_labels = ["release"]
@@ -28,3 +28,33 @@ publish_allow_dirty = false
 
 # disable running `cargo-semver-checks`
 semver_check = true
+
+# set the path of all the crates to the changelog to the root of the repository
+changelog_path = "./CHANGELOG.md"
+
+[changelog]
+body = """
+
+## `{{ package }}` - [{{ version | trim_start_matches(pat="v") }}]{%- if release_link -%}({{ release_link }}){% endif %} - {{ timestamp | date(format="%Y-%m-%d") }}
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | upper_first }}
+{% for commit in commits %}
+{%- if commit.scope -%}
+- *({{commit.scope}})* {% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message }}{%- if commit.links %} ({% for link in commit.links %}[{{link.text}}]({{link.href}}) {% endfor -%}){% endif %}
+{% else -%}
+- {% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message }}
+{% endif -%}
+{% endfor -%}
+{% endfor -%}
+"""
+
+
+# Options for the package I care the most, e.g. `my_main_package`.
+[[package]]
+name = "azure_functions"
+
+# Enable git tags for this package
+git_tag_enable = true
+
+# Enable git releases for this package
+git_release_enable = true
