@@ -6,7 +6,7 @@ allow_dirty = false
 changelog_config = "cliff.toml"
 
 # enable changelog updates
-changelog_update = true
+changelog_update = false
 
 # update dependencies with `cargo update`
 dependencies_update = false
@@ -14,8 +14,12 @@ dependencies_update = false
 # disable GitHub releases
 git_release_enable = false
 
+git_release_name = "{{ version }}"
+
 # create tags for the releases
 git_tag_enable = false
+
+git_tag_name = "{{ version }}"
 
 # labels for the release PR
 pr_labels = ["release"]
@@ -32,6 +36,8 @@ semver_check = true
 # set the path of all the crates to the changelog to the root of the repository
 changelog_path = "./CHANGELOG.md"
 
+pr_name = "chore: release {{ version }}"
+
 # Options for the package I care the most, e.g. `my_main_package`.
 [[package]]
 name = "handler"
@@ -41,3 +47,9 @@ git_tag_enable = true
 
 # Enable git releases for this package
 git_release_enable = true
+
+# enable the changelog for this package
+changelog_update = true
+
+# set the path of the changelog to the root of the repository
+changelog_path = "./CHANGELOG.md"
