@@ -11,7 +11,7 @@ changelog_update = true
 # update dependencies with `cargo update`
 dependencies_update = false
 
-# Disable github releases for this repository, but enable it for the `handler` package
+# Disable GitHub releases for this repository, but enable it for the `handler` package
 git_release_enable = false
 
 # Disable git tags for this repository, but enable it for the `handler` package
