@@ -6,20 +6,16 @@ allow_dirty = false
 changelog_config = "cliff.toml"
 
 # enable changelog updates
-changelog_update = false
+changelog_update = true
 
 # update dependencies with `cargo update`
 dependencies_update = false
 
-# disable GitHub releases
+# Disable GitHub releases for this repository, but enable it for the `handler` package
 git_release_enable = false
 
-git_release_name = "{{ version }}"
-
-# create tags for the releases
+# Disable git tags for this repository, but enable it for the `handler` package
 git_tag_enable = false
-
-git_tag_name = "{{ version }}"
 
 # labels for the release PR
 pr_labels = ["release"]
@@ -38,7 +34,7 @@ changelog_path = "./CHANGELOG.md"
 
 pr_name = "chore: release {{ version }}"
 
-release_always = false
+release_always = true
 
 # Options for the package I care the most, e.g. `my_main_package`.
 [[package]]
@@ -49,6 +45,10 @@ git_tag_enable = true
 
 # Enable git releases for this package
 git_release_enable = true
+
+git_release_name = "{{ version }}"
+
+git_tag_name = "{{ version }}"
 
 # enable the changelog for this package
 changelog_update = true
