@@ -1,57 +1,27 @@
 [workspace]
-# disallow updating repositories with uncommitted changes
 allow_dirty = false
-
-# path of the git-cliff configuration
 changelog_config = "cliff.toml"
-
-# enable changelog updates
-changelog_update = true
-
-# update dependencies with `cargo update`
+changelog_update = false
 dependencies_update = false
-
-# Disable GitHub releases for this repository, but enable it for the `handler` package
 git_release_enable = false
-
-# Disable git tags for this repository, but enable it for the `handler` package
 git_tag_enable = false
-
-# labels for the release PR
-pr_labels = ["release"]
-
-# enable publishing to crates.io
 publish = false
-
-# disallow packaging with uncommitted changes
 publish_allow_dirty = false
-
-# disable running `cargo-semver-checks`
+release_always = true
 semver_check = true
 
-# set the path of all the crates to the changelog to the root of the repository
-changelog_path = "./CHANGELOG.md"
-
-pr_name = "chore: release {{ version }}"
-
-release_always = true
-
-# Options for the package I care the most, e.g. `my_main_package`.
 [[package]]
 name = "handler"
-
-# Enable git tags for this package
-git_tag_enable = true
-
-# Enable git releases for this package
-git_release_enable = true
-
-git_release_name = "{{ version }}"
-
-git_tag_name = "{{ version }}"
-
-# enable the changelog for this package
-changelog_update = true
-
-# set the path of the changelog to the root of the repository
+changelog_include = [
+    "merge_warden_developer_platforms",
+    "merge_warden_core",
+    "merge_warden_cli",
+]
 changelog_path = "./CHANGELOG.md"
+changelog_update = true
+git_release_enable = true
+git_release_name = "{{ version }}"
+git_tag_enable = true
+git_tag_name = "{{ version }}"
+pr_labels = ["release"]
+pr_name = "chore: release {{ version }}"
