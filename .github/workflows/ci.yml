@@ -60,6 +60,77 @@ jobs:
   #     - name: Run bench-tests
   #       run: cargo test --benches
 
+  build-function:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+      with:
+        fetch-depth: 0  # Fetch all history for all tags and branches
+
+    - name: Install GitVersion
+      uses: gittools/actions/gitversion/setup@a94a3b62ee018ef5346cb08fd0d63d93811fe691 # v3.0.0
+      with:
+        versionSpec: '6.0.0'
+
+    - name: Determine Version
+      id: get-version # step id used as reference for output values
+      uses: gittools/actions/gitversion/execute@a94a3b62ee018ef5346cb08fd0d63d93811fe691 # v3.0.0
+      with:
+        useConfigFile: true
+
+    - name: Set up Rust
+      uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af # v1
+      with:
+        target: x86_64-unknown-linux-musl
+        toolchain: stable
+
+    - name: Install cargo binstall
+      uses: cargo-bins/cargo-binstall@main
+
+    - name: Install cross
+      run: cargo binstall cross --no-confirm --no-track
+
+    - name: Install OpenSSL for musl
+      run: |
+        sudo apt-get update && sudo apt-get install -y musl-tools libssl-dev
+        wget https://www.openssl.org/source/openssl-1.1.1u.tar.gz
+        tar -xzf openssl-1.1.1u.tar.gz
+        cd openssl-1.1.1u
+        CC=musl-gcc ./Configure linux-x86_64 --prefix=/usr/local/musl
+        make && sudo make install
+      env:
+        OPENSSL_DIR: /usr/local/musl
+
+    - name: Build xtask
+      run: |
+        cargo build --release --package handler --target x86_64-unknown-linux-musl --target-dir target/func
+      env:
+        OPENSSL_DIR: /usr/local/musl
+
+    # Copy the files for the azure function into a single directory
+    #
+    # For the azure function we need the following directories and files in the following layout.
+    # Where [D] means directory and [F] means file
+    #
+    # [D] <function_name>       --> <target>/<function_name>
+    #     [F] function.json     --> <target>/<function_name>/function.json
+    # [F] host.json             --> <target>/host.json
+    # [F] local.settings.json   --> <target>/local.settings.json
+    # [F] handler               --> <target>/handler
+    - name: Copy Azure functions configs
+      run: |
+        mkdir -p target/func/merge_warden
+        cp -r ./config/az_func/merge_warden/* target/func/merge_warden
+        cp -r ./config/az_func/host.json target/func
+        cp -r ./config/az_func/local.settings.json target/func
+
+    - name: show directories
+      run: |
+        ls -la
+        ls -la target
+        ls -la target/func
+        ls -la target/func/merge_warden
+
   # Can only run this in PRs because the Azure OIDC is linked to PRs and building on the 'master' branch
   tf-test:
     name: Terraform Test
