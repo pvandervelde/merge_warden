@@ -20,11 +20,15 @@
 - **general-tool-use-file-search**: When searching for files in the workspace make sure to also
   search hidden directories (e.g. `./.github`, `./.vscode`, etc.). But skip the `.git` directory.
 
-- **scm-git-pull-request-template**: Use the pull request template if there is one. The pull request
-  template can be found in the `./.github/PULL_REQUEST_TEMPLATE` directory.
+- **scm-git-pull-request-title**: The pull request title should follow the conventional commit format.
+  `<type>(<scope>): <subject>` where `type` is one of the following: `feat`, `fix`, `chore`, `docs`,
+  `style`, `refactor`, `perf`, `test`.
 
-- **scm-git-pull-request-review**: All pull requests should be reviewed by at least one other developer
-  before being merged into the main branch.
+- **scm-git-pull-request-template**: Use the pull request template if there is one. The pull request
+  template can be found in the `./.github/PULL_REQUEST_TEMPLATE.md` file.
+
+- **scm-git-pull-request-review**: All pull requests should be reviewed by at least one other developer and
+  GitHub copilot before being merged into the main branch.
 
 - **scm-branch-naming**: The branch name should be a brief summary of the changes being made. Branch
   names should be in lowercase and use hyphens to separate words. For example, `fix-bug-in-login-page`
@@ -34,7 +38,7 @@
   type should be one of the following: `feat`, `fix`, `chore`, `docs`, `style`, `refactor`, `perf`,
   `test`. The scope should be the name of the module or component being changed. The subject should
   be a short description of the change. The `work_item_ref` is one of the following issue references:
-  `fixes`, `closes`, `resolves`, `references` or `related to` followed by the issue number.
+  `references` or `related to` followed by the issue number.
   Finally those parts make the following format for commit messages:
 
   ```text
@@ -59,8 +63,7 @@
 
 - **wf-issue-creation**: All issues should be created in the repository. This includes bugs, new features,
   and any other changes to the codebase. Issues should be created for all tasks, even if they are small.
-  This includes creating an issue for the creation of a design document, implementation issues, and any other
-  tasks that need to be completed. Issues should be linked together to show the relationship between them.
+  Issues should be linked together to show the relationship between them.
 
 - **wf-branch-selection**: Each task is done on its own branch. Before you start a task check that you are on the
   correct branch. Code is *never* directly committed to the `main` or `master` branches. If no
@@ -85,6 +88,7 @@
   - Design
     - Architecture
     - Data flow
+    - Module breakdown
     - Other relevant details
   - Conclusion
 
@@ -100,6 +104,11 @@
   all input and output paths of the code. This includes edge cases and error handling. Use coverage
   tools to measure the test coverage and use mutation testing to ensure that the tests are
   effective.
+
+- **wf-test-methods**: Employ different test approaches to get good coverage of both happy path
+  and error handling. Consider approaches like unit tests, property based testing, fuzz testing,
+  integration tests, end-to-end tests, and performance tests. Use the appropriate testing
+  frameworks and tools for the programming language being used.
 
 - **wf-documentation**: The coding task is not complete without documentation. All code should be
   well-documented. Use comments to explain the purpose of complex code and to provide context for
