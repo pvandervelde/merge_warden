@@ -48,22 +48,9 @@ jobs:
     - name: Install cross
       run: cargo binstall cross --no-confirm --no-track
 
-    - name: Install OpenSSL for musl
-      run: |
-        sudo apt-get update && sudo apt-get install -y musl-tools libssl-dev
-        wget https://www.openssl.org/source/openssl-1.1.1u.tar.gz
-        tar -xzf openssl-1.1.1u.tar.gz
-        cd openssl-1.1.1u
-        CC=musl-gcc ./Configure linux-x86_64 --prefix=/usr/local/musl
-        make && sudo make install
-      env:
-        OPENSSL_DIR: /usr/local/musl
-
     - name: Build xtask
       run: |
         cargo build --release --package handler --target x86_64-unknown-linux-musl --target-dir target/func
-      env:
-        OPENSSL_DIR: /usr/local/musl
 
     # Copy the files for the azure function into a single directory
     #

@@ -29,3 +29,8 @@ tokio = { workspace = true }
 tracing = { workspace = true, features = ["log"] }
 tracing-opentelemetry = { workspace = true, features = ["thiserror"] }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+
+# See https://github.com/sfackler/rust-openssl/issues/1627
+# and https://docs.rs/openssl/latest/openssl/#vendored
+[target.x86_64-unknown-linux-musl.dependencies]
+openssl = { version = "0.10.72", features = ["vendored"] }
