@@ -48,9 +48,15 @@ jobs:
     - name: Install cross
       run: cargo binstall cross --no-confirm --no-track
 
-    - name: Build xtask
+    - name: Build handler
       run: |
-        cargo build --release --package handler --target x86_64-unknown-linux-musl --target-dir target/func
+        cross build --release --package handler --target x86_64-unknown-linux-musl --target-dir target/func
+
+    - name: show directories after compile
+      run: |
+        ls -la
+        ls -la target
+        ls -la target/func
 
     # Copy the files for the azure function into a single directory
     #
@@ -65,11 +71,11 @@ jobs:
     - name: Copy Azure functions configs
       run: |
         mkdir -p target/func/merge_warden
-        cp -r ./config/az_func/merge_warden/* target/func/merge_warden
-        cp -r ./config/az_func/host.json target/func
-        cp -r ./config/az_func/local.settings.json target/func
+        cp -r ./configs/az_func/merge_warden/* target/func/merge_warden
+        cp -r ./configs/az_func/host.json target/func
+        cp -r ./configs/az_func/local.settings.json target/func
 
-    - name: show directories
+    - name: show directories after assemble
       run: |
         ls -la
         ls -la target
