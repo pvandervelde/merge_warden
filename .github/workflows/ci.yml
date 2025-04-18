@@ -177,17 +177,26 @@ jobs:
         ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
         ARM_USE_OIDC: true
 
+    - name: Create GitHub App Key File
+      run: printf '%s\n' "${{ secrets.GH_APP_PRIVATE_KEY }}" > ops/azure/gh_app_key.pem
+      shell: bash # Explicitly use bash for redirection
+
     - name: Terraform Plan
       working-directory: ops/azure
       run: |
-        terraform plan -no-color \
-          -var="github_app_id=${{ secrets.GH_APP_ID }}" \
-          -var="github_app_private_key=${{ secrets.GH_APP_PRIVATE_KEY }}" \
-          -var="github_webhook_secret=${{ secrets.GH_WEBHOOK_SECRET }}" \
-          -var="meta_git_sha=${{ github.sha }}" \
-          -var="meta_version=${{ steps.get-version.majorMinorPatch }}"
+        terraform plan -auto-approve
       env:
         ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
         ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
         ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
         ARM_USE_OIDC: true
+        TF_VAR_GITHUB_APP_ID: ${{ secrets.GH_APP_ID }}
+        TF_VAR_GITHUB_APP_PRIVATE_KEY_PATH: ops/azure/gh_app_key.pem
+        TF_VAR_GITHUB_WEBHOOK_SECRET: ${{ secrets.GH_WEBHOOK_SECRET }}
+        TF_VAR_META_GIT_SHA: ${{ github.sha }}
+        TF_VAR_META_VERSION: ${{ steps.get-version.outputs.majorMinorPatch }}
+
+    - name: Remove GitHub App Key File
+      if: always()
+      run: rm ops/azure/gh_app_key.pem
+      shell: bash
