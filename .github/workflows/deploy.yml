@@ -182,7 +182,7 @@ jobs:
 
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
-          bin: merge_warden_cli
+          bin: merge-warden
           target: ${{ matrix.target }}
           tar: unix
           zip: windows
