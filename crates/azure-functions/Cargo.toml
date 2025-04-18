@@ -3,7 +3,7 @@ authors.workspace = true
 description = "A github bot that validates pull requests against configured rules"
 edition = "2021"
 license-file.workspace = true
-name = "handler"
+name = "az_handler"
 repository.workspace = true
 version.workspace = true
 
