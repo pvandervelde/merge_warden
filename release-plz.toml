@@ -1,6 +1,5 @@
 [workspace]
 allow_dirty = false
-changelog_config = "cliff.toml"
 changelog_update = false
 dependencies_update = false
 git_release_enable = false
@@ -11,9 +10,18 @@ publish = false
 publish_allow_dirty = false
 release_always = true
 semver_check = true
+git_release_body = """
+{{ changelog }}
+{% if remote.contributors %}
+### Contributors
+{% for contributor in remote.contributors %}
+* @{{ contributor.username }}
+{% endfor %}
+{% endif %}
+"""
 
 [[package]]
-name = "handler"
+name = "az_handler"
 changelog_include = [
     "merge_warden_developer_platforms",
     "merge_warden_core",

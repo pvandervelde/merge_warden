@@ -248,7 +248,7 @@ resource "azurerm_linux_function_app" "main" {
 
   site_config {
     application_stack {
-      # Configure for custom Rust handler
+      # Configure for custom Rust az_handler
       custom_handler {
         # Details depend on deployment method
       }
