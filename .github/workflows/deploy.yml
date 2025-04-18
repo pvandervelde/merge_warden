@@ -119,11 +119,11 @@ jobs:
         ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
         ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
         ARM_USE_OIDC: true
-        TF_VAR_GITHUB_APP_ID: ${{ secrets.GH_APP_ID }}
-        TF_VAR_GITHUB_APP_PRIVATE_KEY_PATH: ops/azure/gh_app_key.pem
-        TF_VAR_GITHUB_WEBHOOK_SECRET: ${{ secrets.GH_WEBHOOK_SECRET }}
-        TF_VAR_META_GIT_SHA: ${{ github.sha }}
-        TF_VAR_META_VERSION: ${{ steps.get-version.outputs.majorMinorPatch }}
+        TF_VAR_github_app_id: ${{ secrets.GH_APP_ID }}
+        TF_VAR_github_app_private_key_path: ops/azure/gh_app_key.pem
+        TF_VAR_github_webhook_secret: ${{ secrets.GH_WEBHOOK_SECRET }}
+        TF_VAR_meta_git_sha: ${{ github.sha }}
+        TF_VAR_meta_version: ${{ steps.get-version.outputs.majorMinorPatch }}
 
     - name: Remove GitHub App Key File
       if: always()
