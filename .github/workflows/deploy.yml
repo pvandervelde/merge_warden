@@ -162,18 +162,6 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-
-      - name: Install GitVersion
-        uses: gittools/actions/gitversion/setup@a94a3b62ee018ef5346cb08fd0d63d93811fe691 # v3.0.0
-        with:
-          versionSpec: '6.0.0'
-
-      - name: Determine Version
-        id: get-version # step id used as reference for output values
-        uses: gittools/actions/gitversion/execute@a94a3b62ee018ef5346cb08fd0d63d93811fe691 # v3.0.0
-        with:
-          useConfigFile: true
-
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
         with:
