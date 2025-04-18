@@ -113,17 +113,17 @@ jobs:
     - name: Terraform Apply
       working-directory: ops/azure
       run: |
-        terraform apply -auto-approve \
-          -var="github_app_id=${{ secrets.GH_APP_ID }}" \
-          -var="github_app_private_key_path=gh_app_key.pem" \
-          -var="github_webhook_secret=${{ secrets.GH_WEBHOOK_SECRET }}" \
-          -var="meta_git_sha=${{ github.sha }}" \
-          -var="meta_version=${{ steps.get-version.outputs.majorMinorPatch }}"
+        terraform apply -auto-approve
       env:
         ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
         ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
         ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
         ARM_USE_OIDC: true
+        TF_VAR_GITHUB_APP_ID: ${{ secrets.GH_APP_ID }}
+        TF_VAR_GITHUB_APP_PRIVATE_KEY_PATH: ops/azure/gh_app_key.pem
+        TF_VAR_GITHUB_WEBHOOK_SECRET: ${{ secrets.GH_WEBHOOK_SECRET }}
+        TF_VAR_META_GIT_SHA: ${{ github.sha }}
+        TF_VAR_META_VERSION: ${{ steps.get-version.outputs.majorMinorPatch }}
 
     - name: Remove GitHub App Key File
       if: always()
@@ -161,18 +161,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
-
-      - name: Install GitVersion
-        uses: gittools/actions/gitversion/setup@a94a3b62ee018ef5346cb08fd0d63d93811fe691 # v3.0.0
-        with:
-          versionSpec: '6.0.0'
-
-      - name: Determine Version
-        id: get-version # step id used as reference for output values
-        uses: gittools/actions/gitversion/execute@a94a3b62ee018ef5346cb08fd0d63d93811fe691 # v3.0.0
-        with:
-          useConfigFile: true
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
