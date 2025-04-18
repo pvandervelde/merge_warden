@@ -107,7 +107,7 @@ jobs:
         ARM_USE_OIDC: true
 
     - name: Create GitHub App Key File
-      run: echo "${{ secrets.GH_APP_PRIVATE_KEY }}" > ops/azure/gh_app_key.pem
+      run: printf '%s\n' "${{ secrets.GH_APP_PRIVATE_KEY }}" > ops/azure/gh_app_key.pem
       shell: bash # Explicitly use bash for redirection
 
     - name: Terraform Apply
