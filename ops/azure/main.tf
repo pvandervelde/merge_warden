@@ -195,7 +195,7 @@ resource "azurerm_key_vault_secret" "github_app_id" {
 
 resource "azurerm_key_vault_secret" "github_app_private_key" {
   name         = "GithubAppPrivateKey"
-  value        = var.github_app_private_key
+  value        = file(var.github_app_private_key_path)
   key_vault_id = azurerm_key_vault.kv.id
 }
 
