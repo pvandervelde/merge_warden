@@ -37,7 +37,7 @@ jobs:
         useConfigFile: true
 
     - name: Set up Rust
-      uses: actions-rs/toolchain@16499b5e05bf2e26879000db0c1d13f7e13fa3af # v1
+      uses: dtolnay/rust-toolchain@stable # v1
       with:
         target: x86_64-unknown-linux-musl
         toolchain: stable
@@ -47,6 +47,8 @@ jobs:
 
     - name: Install cross
       run: cargo binstall cross --no-confirm --no-track
+
+    - uses: Swatinem/rust-cache@23bce251a8cd2ffc3c1075eaa2367cf899916d84 # v2
 
     - name: Build handler
       run: |
@@ -97,7 +99,7 @@ jobs:
 
     - name: Terraform Init
       run: terraform init
-      working-directory: enops/azurev
+      working-directory: ops/azure
       env:
         ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
         ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
@@ -128,7 +130,6 @@ jobs:
 
   publish-cli:
     name: ${{ matrix.target }}
-    if: github.repository_owner == 'MyOwner' && startsWith(github.event.release.name, 'my-bin-v')
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -151,18 +152,37 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+
+      - name: Install GitVersion
+        uses: gittools/actions/gitversion/setup@a94a3b62ee018ef5346cb08fd0d63d93811fe691 # v3.0.0
+        with:
+          versionSpec: '6.0.0'
+
+      - name: Determine Version
+        id: get-version # step id used as reference for output values
+        uses: gittools/actions/gitversion/execute@a94a3b62ee018ef5346cb08fd0d63d93811fe691 # v3.0.0
+        with:
+          useConfigFile: true
+
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
       - uses: taiki-e/setup-cross-toolchain-action@v1
         with:
           target: ${{ matrix.target }}
         if: startsWith(matrix.os, 'ubuntu') && !contains(matrix.target, '-musl')
+
       - uses: taiki-e/install-action@v2
         with:
           tool: cross
         if: contains(matrix.target, '-musl')
+
       - run: echo "RUSTFLAGS=${RUSTFLAGS} -C target-feature=+crt-static" >> "${GITHUB_ENV}"
         if: endsWith(matrix.target, 'windows-msvc')
+
       - uses: taiki-e/upload-rust-binary-action@v1
         with:
           bin: merge_warden_cli
