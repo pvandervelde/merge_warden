@@ -184,7 +184,7 @@ jobs:
     - name: Terraform Plan
       working-directory: ops/azure
       run: |
-        terraform plan -auto-approve
+        terraform plan
       env:
         ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
         ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
