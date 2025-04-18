@@ -21,9 +21,10 @@ variable "github_app_id" {
   type        = string
 }
 
-variable "github_app_private_key" {
-  description = "Github App Private Key"
+variable "github_app_private_key_path" {
+  description = "Path to the file containing the Github App Private Key."
   type        = string
+  sensitive   = true # Mark the path itself potentially sensitive, though the content is the real secret
 }
 
 variable "github_webhook_secret" {
