@@ -146,7 +146,14 @@ jobs:
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
       with:
+        ref: ${{ github.event.pull_request.head.ref }}
         fetch-depth: 0  # Fetch all history for all tags and branches
+
+    - name: Fetch all history for all tags and branches
+      run: |
+        git fetch --prune --tags
+        git branch
+
     - name: Install GitVersion
       uses: gittools/actions/gitversion/setup@441c43ddefe9c8f5b8e8cee0257bcf06d518d2d3 # v3.2.0
       with:
