@@ -26,13 +26,13 @@ jobs:
         fetch-depth: 0  # Fetch all history for all tags and branches
 
     - name: Install GitVersion
-      uses: gittools/actions/gitversion/setup@a94a3b62ee018ef5346cb08fd0d63d93811fe691 # v3.0.0
+      uses: gittools/actions/gitversion/setup@441c43ddefe9c8f5b8e8cee0257bcf06d518d2d3 # v3.2.0
       with:
         versionSpec: '6.0.0'
 
     - name: Determine Version
       id: get-version # step id used as reference for output values
-      uses: gittools/actions/gitversion/execute@a94a3b62ee018ef5346cb08fd0d63d93811fe691 # v3.0.0
+      uses: gittools/actions/gitversion/execute@441c43ddefe9c8f5b8e8cee0257bcf06d518d2d3 # v3.2.0
       with:
         useConfigFile: true
 
