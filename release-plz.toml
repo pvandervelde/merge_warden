@@ -8,7 +8,7 @@ pr_labels = ["release"]
 pr_name = "chore: release {{ version }}"
 publish = false
 publish_allow_dirty = false
-release_always = true
+release_always = false
 semver_check = true
 git_release_body = """
 {{ changelog }}
