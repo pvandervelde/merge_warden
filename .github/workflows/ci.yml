@@ -29,10 +29,7 @@ jobs:
 
       - name: Run release-please dry-run
         run: |
-          release-please release-pr \
-            --dry-run \
-            --config-file release-please-config.json \
-            --manifest-file .release-please-manifest.json
+          release-please release-pr --dry-run --config-file release-please-config.json --manifest-file .release-please-manifest.json --repo-url ${{ github.repositoryUrl }} --token ${{ github.token }}
 
   test:
     name: unit-tests
