@@ -20,3 +20,9 @@ mutants.out.old/
 .env.test
 .merge-warden.toml
 *.pem
+
+# Hide the LLM memory bank
+memory-bank/
+
+# Hide the roo code prompts
+.roo/system-prompt-*
