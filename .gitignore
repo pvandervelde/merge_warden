@@ -26,3 +26,4 @@ memory-bank/
 
 # Hide the roo code prompts
 .roo/system-prompt-*
+.roomodes
