@@ -32,7 +32,7 @@ jobs:
 
       - name: Run release-please dry-run
         run: |
-          release-please release-pr --dry-run --config-file release-please-config.json --manifest-file .release-please-manifest.json --target-branch ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }} --repo-url ${{ github.repositoryUrl }} --token ${{ github.token }}
+          release-please release-pr --dry-run --config-file release-please-config.json --manifest-file .release-please-manifest.json --trace --target-branch ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }} --repo-url ${{ github.repositoryUrl }} --token ${{ github.token }}
 
   test:
     name: unit-tests
