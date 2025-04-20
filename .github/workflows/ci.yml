@@ -16,6 +16,9 @@ jobs:
   release-please-dry-run:
     name: release-please dry-run
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
 
