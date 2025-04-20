@@ -5,7 +5,7 @@ edition = "2021"
 license-file.workspace = true
 name = "az_handler"
 repository.workspace = true
-version.workspace = true
+version = "0.1.0"
 
 [dependencies]
 merge_warden_core = { path = "../core" }
