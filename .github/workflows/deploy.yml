@@ -23,7 +23,7 @@ jobs:
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
       with:
-        ref: ${{ github.event.release.tag_name }}
+        ref: ${{ github.event.release.tag_name }} # Use tag from release event
         fetch-tags: true
         fetch-depth: 0  # Fetch all history for all tags and branches
 
@@ -31,16 +31,7 @@ jobs:
       run: |
         git fetch --prune --tags
 
-    - name: Install GitVersion
-      uses: gittools/actions/gitversion/setup@441c43ddefe9c8f5b8e8cee0257bcf06d518d2d3 # v3.2.0
-      with:
-        versionSpec: '6.0.0'
-
-    - name: Determine Version
-      id: get-version # step id used as reference for output values
-      uses: gittools/actions/gitversion/execute@441c43ddefe9c8f5b8e8cee0257bcf06d518d2d3 # v3.2.0
-      with:
-        useConfigFile: true
+# GitVersion steps removed - version comes from the release tag
 
     - name: Set up Rust
       uses: dtolnay/rust-toolchain@stable # v1
@@ -136,7 +127,7 @@ jobs:
         TF_VAR_github_app_private_key_path: "${{ github.workspace }}/ops/azure/gh_app_key.pem"
         TF_VAR_github_webhook_secret: ${{ secrets.GH_WEBHOOK_SECRET }}
         TF_VAR_meta_git_sha: ${{ github.sha }}
-        TF_VAR_meta_version: ${{ steps.get-version.outputs.majorMinorPatch }}
+        TF_VAR_meta_version: ${{ github.event.release.tag_name }} # Use the release tag name
 
     - name: Remove GitHub App Key File
       if: always()
@@ -176,6 +167,7 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        # No need to specify ref here, it checks out the commit associated with the release tag by default
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
