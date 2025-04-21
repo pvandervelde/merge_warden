@@ -53,7 +53,8 @@
             "hidden": true
         }
     ],
-    "include-component-in-tag": false,
+    "include-component-in-tag": true,
+    "group-pull-request-title-pattern": "chore: release ${version}",
     "packages": {
         "crates/azure-functions": {
             "component": "az_handler"
