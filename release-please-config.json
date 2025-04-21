@@ -59,12 +59,6 @@
         },
         "crates/cli": {
             "component": "cli"
-        },
-        "crates/core": {
-            "component": "core"
-        },
-        "crates/developer_platforms": {
-            "component": "developer_platforms"
         }
     },
     "plugins": [
@@ -77,9 +71,7 @@
             "groupName": "merge-warden",
             "components": [
                 "az_handler",
-                "cli",
-                "core",
-                "developer_platforms"
+                "cli"
             ]
         }
     ],
