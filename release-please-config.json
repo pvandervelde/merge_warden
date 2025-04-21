@@ -53,12 +53,19 @@
             "hidden": true
         }
     ],
+    "include-component-in-tag": false,
     "packages": {
         "crates/azure-functions": {
             "component": "az_handler"
         },
         "crates/cli": {
             "component": "cli"
+        },
+        "crates/core": {
+            "component": "core"
+        },
+        "crates/developer_platforms": {
+            "component": "developer_platforms"
         }
     },
     "plugins": [
@@ -71,7 +78,9 @@
             "groupName": "merge-warden",
             "components": [
                 "az_handler",
-                "cli"
+                "cli",
+                "core",
+                "developer_platforms"
             ]
         }
     ],
