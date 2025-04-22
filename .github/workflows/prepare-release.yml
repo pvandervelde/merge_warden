@@ -122,7 +122,16 @@ jobs:
           # Create CHANGELOG.md if it doesn't exist, preserving header if it does
           if [[ -f CHANGELOG.md ]]; then
             # Use awk to insert notes after the header (assuming header ends before first '##')
-            awk '/^## / && !inserted {print notes; inserted=1} 1' notes="$(cat release_notes.md)" CHANGELOG.md > CHANGELOG.md.tmp && mv CHANGELOG.md.tmp CHANGELOG.md
+            {
+              if grep -q '^## ' CHANGELOG.md; then
+                # Insert notes after the first header line
+                awk '/^## / && !inserted {print notes; inserted=1} 1' notes="$(cat release_notes.md)" CHANGELOG.md > CHANGELOG.md.tmp
+              else
+                # Add a default header and prepend notes
+                echo -e "## Changelog\n\n$(cat release_notes.md)\n$(cat CHANGELOG.md)" > CHANGELOG.md.tmp
+              fi
+              mv CHANGELOG.md.tmp CHANGELOG.md
+            }
           else
             # If no CHANGELOG.md, create it with header and notes
             echo -e "$(git cliff --strip body --strip footer)\n$(cat release_notes.md)" > CHANGELOG.md
