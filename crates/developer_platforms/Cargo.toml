@@ -5,7 +5,7 @@ edition = "2021"
 license-file.workspace = true
 name = "merge_warden_developer_platforms"
 repository.workspace = true
-version = "0.1.0"
+version.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }

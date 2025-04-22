@@ -1,0 +1,79 @@
+# Workflow to publish a release (tag and GitHub Release)
+name: Publish Release
+
+on:
+  pull_request:
+    types:
+      - closed
+    branches:
+      - 'release/*' # Only run for branches matching release/*
+
+permissions:
+  contents: write # To push tags and to create GitHub Releases
+
+jobs:
+  publish-release:
+    name: Publish Release
+    # Only run if the PR was merged and the head branch matches release/*
+    if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Checkout the base branch (master) after the merge
+          ref: ${{ github.event.pull_request.base.ref }}
+          # Fetch all history needed for git-cliff
+          fetch-depth: 0
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install knope
+        run: cargo install knope --locked
+
+      - name: Install git-cliff
+        run: cargo install git-cliff --locked
+
+      # Recommended as per: https://github.com/actions/checkout?tab=readme-ov-file#push-a-commit-using-the-built-in-token
+      - name: Configure Git user
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Get release version from Cargo.toml
+        id: get_version
+        run: |
+          RELEASE_VERSION=$(knope get-version)
+          echo "RELEASE_VERSION=${RELEASE_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Create and Push Git Tag
+        run: |
+          RELEASE_VERSION="${{ steps.get_version.outputs.RELEASE_VERSION }}"
+          echo "Creating tag ${RELEASE_VERSION}"
+          git tag -a "${RELEASE_VERSION}" -m "Release ${RELEASE_VERSION}"
+          echo "Pushing tag ${RELEASE_VERSION}"
+          git push origin "${RELEASE_VERSION}"
+
+      - name: Extract Release Notes
+        id: extract_notes
+        run: |
+          RELEASE_VERSION="${{ steps.get_version.outputs.RELEASE_VERSION }}"
+          echo "Extracting notes for tag ${RELEASE_VERSION}"
+          # Use git-cliff to get notes for the specific tag, stripping headers/footers
+          # Use a delimiter for multiline output handling in GitHub Actions
+          delimiter="$(openssl rand -hex 8)"
+          echo "notes<<${delimiter}" >> $GITHUB_OUTPUT
+          git cliff --tag "${RELEASE_VERSION}" --strip all >> $GITHUB_OUTPUT
+          echo "${delimiter}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          RELEASE_VERSION="${{ steps.get_version.outputs.RELEASE_VERSION }}"
+          echo "Creating GitHub Release for ${RELEASE_VERSION}"
+          gh release create "${RELEASE_VERSION}" \
+            --title "Release ${RELEASE_VERSION}" \
+            --notes "${{ steps.extract_notes.outputs.notes }}"

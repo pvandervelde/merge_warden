@@ -13,27 +13,6 @@ permissions:
   contents: read
 
 jobs:
-  release-please-dry-run:
-    name: release-please dry-run
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: read
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-
-      - name: Install release-please
-        run: npm install --global release-please
-
-      - name: Run release-please dry-run
-        run: |
-          release-please release-pr --dry-run --config-file release-please-config.json --manifest-file .release-please-manifest.json --trace --target-branch ${{ github.event_name == 'pull_request' && github.event.pull_request.head.ref || github.ref_name }} --repo-url ${{ github.repositoryUrl }} --token ${{ github.token }}
-
   test:
     name: unit-tests
     runs-on: ubuntu-latest
