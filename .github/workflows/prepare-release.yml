@@ -1,0 +1,168 @@
+# Workflow to prepare a release pull request
+name: Prepare Release PR
+
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: write # To push branches, commit changes
+  pull-requests: write # To create/close PRs
+
+jobs:
+  prepare-release:
+    name: Prepare Release PR
+    runs-on: ubuntu-latest
+    # Skip if the commit message indicates it's from merging a release PR
+    if: ${{ !contains(github.event.head_commit.message, 'chore(release):') }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Fetch all history for version calculation and changelog generation
+          fetch-depth: 0
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install knope
+        run: cargo install knope --locked
+
+      - name: Install git-cliff
+        run: cargo install git-cliff --locked
+
+      - name: Configure Git user
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Calculate next version
+        id: calc_version
+        run: |
+          # Use knope to suggest the next version based on conventional commits
+          # Assuming knope outputs the version string directly or we can parse it
+          NEXT_VERSION=$(knope suggest-version)
+          echo "NEXT_VERSION=${NEXT_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Handle stale release branches
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NEXT_VERSION="${{ steps.calc_version.outputs.NEXT_VERSION }}"
+          echo "Next calculated version: ${NEXT_VERSION}"
+          # List all remote release branches
+          git fetch origin 'refs/heads/release/*:refs/remotes/origin/release/*'
+          for branch in $(git branch -r --list 'origin/release/*' | sed 's|origin/||'); do
+            # Extract version from branch name (e.g., release/1.2.3 -> 1.2.3)
+            branch_version=$(echo "$branch" | sed 's|release/||')
+            echo "Found existing release branch: ${branch} (version: ${branch_version})"
+
+            if [[ "$branch_version" != "$NEXT_VERSION" ]]; then
+              echo "Branch ${branch} is stale (version ${branch_version} != ${NEXT_VERSION}). Cleaning up..."
+              # Find PR associated with the stale branch
+              PR_NUMBER=$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')
+              if [[ -n "$PR_NUMBER" ]]; then
+                echo "Closing PR #${PR_NUMBER} for stale branch ${branch}..."
+                gh pr close "$PR_NUMBER" --comment "Closing stale release PR as version ${NEXT_VERSION} is now being prepared."
+              else
+                echo "No open PR found for stale branch ${branch}."
+              fi
+              # Delete the stale remote branch
+              echo "Deleting stale remote branch ${branch}..."
+              git push origin --delete "$branch"
+            fi
+          done
+
+      - name: Check if release branch already exists
+        id: check_branch
+        run: |
+          NEXT_VERSION="${{ steps.calc_version.outputs.NEXT_VERSION }}"
+          BRANCH_NAME="release/${NEXT_VERSION}"
+          if git rev-parse --verify --quiet "origin/${BRANCH_NAME}"; then
+            echo "Branch ${BRANCH_NAME} already exists."
+            echo "exists=true" >> $GITHUB_OUTPUT
+          else
+            echo "Branch ${BRANCH_NAME} does not exist."
+            echo "exists=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Generate Changelog Section
+        id: generate_changelog
+        run: |
+          NEXT_VERSION="${{ steps.calc_version.outputs.NEXT_VERSION }}"
+          # Generate notes for the upcoming version
+          # Use the tag format decided earlier (no 'v' prefix)
+          git cliff --tag "${NEXT_VERSION}" --unreleased --strip header --strip footer > release_notes.md
+          echo "Generated release notes for ${NEXT_VERSION}"
+          # Check if notes were actually generated (might be empty if no relevant commits)
+          if [ -s release_notes.md ]; then
+            echo "has_notes=true" >> $GITHUB_OUTPUT
+          else
+            echo "No relevant commits found for changelog."
+            echo "has_notes=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Update CHANGELOG.md and Cargo.toml
+        if: steps.generate_changelog.outputs.has_notes == 'true' # Only proceed if there are changes
+        run: |
+          NEXT_VERSION="${{ steps.calc_version.outputs.NEXT_VERSION }}"
+          BRANCH_NAME="release/${NEXT_VERSION}"
+
+          # Create or switch to the release branch
+          if [[ "${{ steps.check_branch.outputs.exists }}" == "true" ]]; then
+            # If branch exists, check it out from origin to ensure we have latest
+            git checkout "origin/${BRANCH_NAME}" -b "${BRANCH_NAME}" || git checkout "${BRANCH_NAME}"
+          else
+            git checkout -b "${BRANCH_NAME}"
+          fi
+
+          # Prepend new release notes to CHANGELOG.md
+          # Create CHANGELOG.md if it doesn't exist, preserving header if it does
+          if [[ -f CHANGELOG.md ]]; then
+            # Use awk to insert notes after the header (assuming header ends before first '##')
+            {
+              if grep -q '^## ' CHANGELOG.md; then
+                # Insert notes after the first header line
+                awk '/^## / && !inserted {print notes; inserted=1} 1' notes="$(cat release_notes.md)" CHANGELOG.md > CHANGELOG.md.tmp
+              else
+                # Add a default header and prepend notes
+                echo -e "## Changelog\n\n$(cat release_notes.md)\n$(cat CHANGELOG.md)" > CHANGELOG.md.tmp
+              fi
+              mv CHANGELOG.md.tmp CHANGELOG.md
+            }
+          else
+            # If no CHANGELOG.md, create it with header and notes
+            echo -e "$(git cliff --strip body --strip footer)\n$(cat release_notes.md)" > CHANGELOG.md
+          fi
+          rm release_notes.md
+
+          # Run knope to update version in Cargo.toml
+          # Use --set-version as knope might not automatically bump if only chore/docs commits exist
+          knope --set-version "${NEXT_VERSION}"
+
+          # Commit changes
+          git add CHANGELOG.md Cargo.toml Cargo.lock # Include lock file
+          git commit -m "chore(release): prepare for ${NEXT_VERSION}" -m "Generated by GitHub Actions."
+
+      - name: Push changes
+        if: steps.generate_changelog.outputs.has_notes == 'true'
+        run: |
+          NEXT_VERSION="${{ steps.calc_version.outputs.NEXT_VERSION }}"
+          BRANCH_NAME="release/${NEXT_VERSION}"
+          # Force push recommended if branch might exist and need updating
+          git push --force origin "${BRANCH_NAME}"
+
+      - name: Create Pull Request
+        if: steps.check_branch.outputs.exists == 'false' && steps.generate_changelog.outputs.has_notes == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          NEXT_VERSION="${{ steps.calc_version.outputs.NEXT_VERSION }}"
+          BRANCH_NAME="release/${NEXT_VERSION}"
+          gh pr create \
+            --base master \
+            --head "${BRANCH_NAME}" \
+            --title "chore(release): ${NEXT_VERSION}" \
+            --body "Prepare release ${NEXT_VERSION}. Please review the changes and merge to trigger the release."

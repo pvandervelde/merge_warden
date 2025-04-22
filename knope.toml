@@ -1,0 +1,29 @@
+# Configures knope for versioning based on conventional commits.
+# See https://knope.tech/reference/config-file/
+
+# Define which commits bump which part of the version according to Conventional Commits spec.
+[commit_conventions]
+# Features bump minor
+feat = "minor"
+# Fixes bump patch
+fix = "patch"
+# Breaking changes (indicated by `!` after type or `BREAKING CHANGE:` footer) bump major.
+# This is typically handled automatically by knope based on commit analysis.
+
+# Chores, docs, etc., don't bump the version by default.
+# Add other types like 'refactor', 'perf', 'test', 'build', 'ci', 'style' if they should bump patch.
+# Example:
+# refactor = "patch"
+# perf = "patch"
+
+# Specify the package(s) to manage.
+[[package]]
+# Path to the Cargo.toml file for the workspace root.
+path = "Cargo.toml"
+
+# Optional: Define how tags are formatted (defaults to v{version}, which is fine)
+# [tag]
+# format = "{version}"
+
+# Note: We are using git-cliff for the final CHANGELOG.md generation,
+# so no [changelog] section is needed here for knope itself.
