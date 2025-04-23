@@ -48,7 +48,7 @@ jobs:
       - name: Get release version from Cargo.toml
         id: get_version
         run: |
-          RELEASE_VERSION=$(conventional_commits_next_version --from-reference $(git describe --tags --abbrev=0) --from-version $(git describe --tags --abbrev=0))
+          NEXT_VERSION=$(conventional_commits_next_version --from-commit-hash $(git rev-parse $(git describe --tags --abbrev=0)) --from-version $(git describe --tags --abbrev=0)) --calculation-mode "Batch"
           echo "RELEASE_VERSION=${RELEASE_VERSION}" >> $GITHUB_OUTPUT
 
       - name: Create and Push Git Tag
