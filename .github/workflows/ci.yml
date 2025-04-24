@@ -35,6 +35,9 @@ jobs:
       - name: Install git-cliff
         run: cargo install git-cliff
 
+      - name: Install cargo typos
+        run: cargo install typos-cli
+
       - name: Calculate next version
         id: calc_version
         run: |

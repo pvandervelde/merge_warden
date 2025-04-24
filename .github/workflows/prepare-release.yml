@@ -36,6 +36,9 @@ jobs:
       - name: Install git-cliff
         run: cargo install git-cliff
 
+      - name: Install cargo typos
+        run: cargo install typos-cli
+
       - name: Configure Git user
         run: |
           git config user.name "github-actions[bot]"

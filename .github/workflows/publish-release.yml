@@ -39,6 +39,9 @@ jobs:
       - name: Install git-cliff
         run: cargo install git-cliff
 
+      - name: Install cargo typos
+        run: cargo install typos-cli
+
       # Recommended as per: https://github.com/actions/checkout?tab=readme-ov-file#push-a-commit-using-the-built-in-token
       - name: Configure Git user
         run: |
