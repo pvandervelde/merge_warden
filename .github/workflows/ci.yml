@@ -39,7 +39,7 @@ jobs:
         id: calc_version
         run: |
           # Use Conventional Commits Next Version to calculate the next version
-          NEXT_VERSION=$(conventional_commits_next_version --from-commit-hash $(git rev-parse $(git describe --tags --abbrev=0)) --from-version $(git describe --tags --abbrev=0) --calculation-mode "Batch"
+          NEXT_VERSION=$(conventional_commits_next_version --from-commit-hash $(git rev-parse $(git describe --tags --abbrev=0)) --from-version $(git describe --tags --abbrev=0) --calculation-mode "Batch")
           echo "NEXT_VERSION=${NEXT_VERSION}" >> $GITHUB_OUTPUT
       - name: Show stale release branches
         env:
