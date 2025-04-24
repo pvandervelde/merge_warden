@@ -133,7 +133,7 @@ jobs:
           rm release_notes.md
 
           # Update version in Cargo.toml
-          conventional_commits_next_version --set-version "${NEXT_VERSION}"
+          sed -i "s/^version = \".*\"/version = \"${NEXT_VERSION}\"/" Cargo.toml
 
           # Commit changes
           git add CHANGELOG.md Cargo.toml Cargo.lock
