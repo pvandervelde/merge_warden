@@ -3,9 +3,9 @@ name: Test Prepare Release Script
 on:
   workflow_dispatch:
   # Optionally, run on push to a test branch
-  # push:
-  #   branches:
-  #     - test-prepare-release-script
+  push:
+    branches:
+      - "**"
 
 permissions:
   contents: write
