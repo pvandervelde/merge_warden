@@ -176,7 +176,14 @@ async function main() {
       process.exit(1);
     }
     // Insert release notes before first "## " header
-    changelogContent = orig.replace(/^## /m, `${releaseNotes}\n\n## `);
+    // Check if the "## " header exists and insert release notes accordingly
+    if (/^## /m.test(orig)) {
+      // Insert release notes before the first "## " header
+      changelogContent = orig.replace(/^## /m, `${releaseNotes}\n\n## `);
+    } else {
+      // Prepend release notes to the beginning of the file
+      changelogContent = `${orig}\n\n${releaseNotes}\n`;
+    }
   } catch {
     // File does not exist, create new
     try {
