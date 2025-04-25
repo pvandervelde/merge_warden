@@ -55,9 +55,14 @@ jobs:
           app-id: ${{ secrets.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 
-      - name: Run prepare-release.sh (test)
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run prepare-release.js (test)
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
-          bash .github/scripts/prepare-release.sh "${{ steps.test_version.outputs.TEST_VERSION }}" test_release_notes.md
+          node .github/scripts/prepare-release.js "${{ steps.test_version.outputs.TEST_VERSION }}" test_release_notes.md
