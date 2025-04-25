@@ -6,7 +6,7 @@ on:
     types:
       - closed
     branches:
-      - 'release/*' # Only run for branches matching release/*
+      - 'master' # Only run for pull requests targeting the master branch
 
 permissions:
   contents: write # To push tags and to create GitHub Releases
