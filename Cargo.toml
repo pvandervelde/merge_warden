@@ -11,7 +11,7 @@ members = [
 [workspace.package]
 authors = ["Patrick van der Velde"]
 repository = "https://github.com/pvandervelde/merge_warden"
-version = "0.0.0"
+version = "0.0.1745557893"
 license-file = "LICENSE"
 
 [workspace.dependencies]
