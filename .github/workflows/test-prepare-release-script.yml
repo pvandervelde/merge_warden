@@ -1,0 +1,68 @@
+name: Test Prepare Release Script
+
+on:
+  workflow_dispatch:
+  # Optionally, run on push to a test branch
+  # push:
+  #   branches:
+  #     - "**"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  test-prepare-release:
+    name: Test Prepare Release Script
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up GH CLI
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gh
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
+
+      - name: Install cargo binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install git-cliff
+        run: cargo install git-cliff
+
+      - name: Install conventional_commits_next_version
+        run: cargo install conventional_commits_next_version
+
+      - name: Generate test version and release notes
+        id: test_version
+        run: |
+          TEST_VERSION="0.0.$(date +%s)"
+          echo "TEST_VERSION=${TEST_VERSION}" >> $GITHUB_OUTPUT
+          echo "Test release notes for version ${TEST_VERSION}" > test_release_notes.md
+
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Run prepare-release.js (test)
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          node .github/scripts/prepare-release.js "${{ steps.test_version.outputs.TEST_VERSION }}" test_release_notes.md
