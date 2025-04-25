@@ -168,12 +168,23 @@ async function main() {
   try {
     const changelogResp = await githubRest(`/repos/${OWNER}/${REPO}/contents/${CHANGELOG_PATH}?ref=${BRANCH_NAME}`);
     const orig = Buffer.from(changelogResp.content, 'base64').toString('utf8');
-    const releaseNotes = fs.readFileSync(RELEASE_NOTES_FILE, 'utf8');
+    let releaseNotes = '';
+    try {
+      releaseNotes = fs.readFileSync(RELEASE_NOTES_FILE, 'utf8');
+    } catch (err) {
+      console.error(`Error reading release notes file "${RELEASE_NOTES_FILE}": ${err.message}`);
+      process.exit(1);
+    }
     // Insert release notes before first "## " header
     changelogContent = orig.replace(/^## /m, `${releaseNotes}\n\n## `);
   } catch {
     // File does not exist, create new
-    changelogContent = `## Changelog\n\n${fs.readFileSync(RELEASE_NOTES_FILE, 'utf8')}\n`;
+    try {
+      changelogContent = `## Changelog\n\n${fs.readFileSync(RELEASE_NOTES_FILE, 'utf8')}\n`;
+    } catch (err) {
+      console.error(`Error reading release notes file "${RELEASE_NOTES_FILE}": ${err.message}`);
+      process.exit(1);
+    }
   }
 
   // Cargo.toml: Update the version field
