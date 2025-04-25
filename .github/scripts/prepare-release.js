@@ -255,15 +255,34 @@ async function main() {
         }
       }
     `;
+    // We need the repositoryId for the mutation
+    const repoIdInfo = await githubGraphQL(`
+      query($owner: String!, $repo: String!) {
+        repository(owner: $owner, name: $repo) {
+          id
+        }
+      }
+    `, { owner: OWNER, repo: REPO });
+    const repositoryId = repoIdInfo.data.repository.id;
     const prInput = {
-      repositoryId: null, // Not required if using repo name/owner
+      repositoryId: repositoryId,
       baseRefName: DEFAULT_BRANCH,
       headRefName: BRANCH_NAME,
       title: `chore(release): ${NEXT_VERSION}`,
       body: `Prepare release ${NEXT_VERSION}. Please review the changes and merge to trigger the release.`
     };
     const prResp = await githubGraphQL(prMutation, { input: prInput });
-    console.log(`Created PR: ${prResp.data.createPullRequest.pullRequest.url}`);
+    if (
+      prResp &&
+      prResp.data &&
+      prResp.data.createPullRequest &&
+      prResp.data.createPullRequest.pullRequest &&
+      prResp.data.createPullRequest.pullRequest.url
+    ) {
+      console.log(`Created PR: ${prResp.data.createPullRequest.pullRequest.url}`);
+    } else {
+      console.error('Failed to create PR. Response:', JSON.stringify(prResp, null, 2));
+    }
   } else {
     // PR already exists
     console.log(`PR already exists: ${prs.data.repository.pullRequests.nodes[0].url}`);
