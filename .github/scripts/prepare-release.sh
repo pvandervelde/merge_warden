@@ -39,7 +39,7 @@ CARGO_PATH="Cargo.toml"
 gh api \
   -H "Accept: application/vnd.github+json" \
   "/repos/${OWNER}/${REPO_NAME}/contents/${CHANGELOG_PATH}?ref=${BRANCH_NAME}" \
-  --output "${CHANGELOG_PATH}.orig" || touch "${CHANGELOG_PATH}.orig"
+  -q '.content' | base64 -d > "${CHANGELOG_PATH}.orig" 2>/dev/null || touch "${CHANGELOG_PATH}.orig"
 
 if [ -s "${CHANGELOG_PATH}.orig" ]; then
     awk '/^## / && !inserted {print notes; inserted=1} 1' notes="$RELEASE_NOTES" "${CHANGELOG_PATH}.orig" > "${CHANGELOG_PATH}"
@@ -51,7 +51,7 @@ fi
 gh api \
   -H "Accept: application/vnd.github+json" \
   "/repos/${OWNER}/${REPO_NAME}/contents/${CARGO_PATH}?ref=${BRANCH_NAME}" \
-  --output "${CARGO_PATH}.orig"
+  -q '.content' | base64 -d > "${CARGO_PATH}.orig" 2>/dev/null || touch "${CARGO_PATH}.orig"
 
 cp "${CARGO_PATH}.orig" "${CARGO_PATH}"
 sed -i "s/^version = \".*\"/version = \"${NEXT_VERSION}\"/" "${CARGO_PATH}"
