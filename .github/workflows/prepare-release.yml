@@ -18,6 +18,13 @@ jobs:
     if: ${{ !contains(github.event.head_commit.message, 'chore(release):') }}
 
     steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
       - name: Checkout code
         uses: actions/checkout@v4
         with:
@@ -26,6 +33,8 @@ jobs:
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@9d47c6ad4b02e050fd481d890b2ea34778fd09d6 # v2
 
       - name: Install cargo binstall
         uses: cargo-bins/cargo-binstall@main
@@ -41,8 +50,8 @@ jobs:
 
       - name: Configure Git user
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "releaser[bot]"
+          git config user.email "releaser[bot]@users.noreply.github.com"
 
       - name: Calculate next version
         id: calc_version
@@ -51,48 +60,6 @@ jobs:
           NEXT_VERSION=$(conventional_commits_next_version --from-commit-hash $(git rev-parse $(git describe --tags --abbrev=0)) --from-version $(git describe --tags --abbrev=0) --calculation-mode "Batch")
           echo "NEXT_VERSION=${NEXT_VERSION}" >> $GITHUB_OUTPUT
           echo "The next version is: ${NEXT_VERSION}"
-
-      - name: Handle stale release branches
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          NEXT_VERSION="${{ steps.calc_version.outputs.NEXT_VERSION }}"
-          echo "Next calculated version: ${NEXT_VERSION}"
-          # List all remote release branches
-          git fetch origin 'refs/heads/release/*:refs/remotes/origin/release/*'
-          for branch in $(git branch -r --list 'origin/release/*' | sed 's|origin/||'); do
-            # Extract version from branch name (e.g., release/1.2.3 -> 1.2.3)
-            branch_version=$(echo "$branch" | sed 's|release/||')
-            echo "Found existing release branch: ${branch} (version: ${branch_version})"
-
-            if [[ "$branch_version" != "$NEXT_VERSION" ]]; then
-              echo "Branch ${branch} is stale (version ${branch_version} != ${NEXT_VERSION}). Cleaning up..."
-              # Find PR associated with the stale branch
-              PR_NUMBER=$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty')
-              if [[ -n "$PR_NUMBER" ]]; then
-                echo "Closing PR #${PR_NUMBER} for stale branch ${branch}..."
-                gh pr close "$PR_NUMBER" --comment "Closing stale release PR as version ${NEXT_VERSION} is now being prepared."
-              else
-                echo "No open PR found for stale branch ${branch}."
-              fi
-              # Delete the stale remote branch
-              echo "Deleting stale remote branch ${branch}..."
-              git push origin --delete "$branch"
-            fi
-          done
-
-      - name: Check if release branch already exists
-        id: check_branch
-        run: |
-          NEXT_VERSION="${{ steps.calc_version.outputs.NEXT_VERSION }}"
-          BRANCH_NAME="release/${NEXT_VERSION}"
-          if git rev-parse --verify --quiet "origin/${BRANCH_NAME}"; then
-            echo "Branch ${BRANCH_NAME} already exists."
-            echo "exists=true" >> $GITHUB_OUTPUT
-          else
-            echo "Branch ${BRANCH_NAME} does not exist."
-            echo "exists=false" >> $GITHUB_OUTPUT
-          fi
 
       - name: Generate Changelog Section
         id: generate_changelog
@@ -116,13 +83,10 @@ jobs:
         with:
           node-version: 20
 
-      - name: Generate GitHub App token
+      - name: Set up git remote to use app token
         if: steps.generate_changelog.outputs.has_notes == 'true'
-        id: app-token
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ secrets.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+        run: |
+          git remote set-url origin "https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/${{ github.repository }}.git"
 
       - name: Prepare release with verified commit and PR
         if: steps.generate_changelog.outputs.has_notes == 'true'
