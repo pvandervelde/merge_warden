@@ -126,6 +126,7 @@ function githubRest(path, method = 'GET', body = null) {
 async function main() {
   // 1. Get the default branch name (e.g., "main" or "master")
   // This is needed to know which branch to base the release branch on.
+  console.log(`[INFO] Fetching default branch for ${OWNER}/${REPO}...`);
   const repoInfo = await githubGraphQL(`
     query($owner: String!, $repo: String!) {
       repository(owner: $owner, name: $repo) {
@@ -134,9 +135,11 @@ async function main() {
     }
   `, { owner: OWNER, repo: REPO });
   const DEFAULT_BRANCH = repoInfo.data.repository.defaultBranchRef.name;
+  console.log(`[INFO] Default branch is: ${DEFAULT_BRANCH}`);
 
   // 2. Get the latest commit OID (object ID) on the default branch
   // This is needed to create the release branch if it doesn't exist.
+  console.log(`[INFO] Fetching latest commit OID for default branch (${DEFAULT_BRANCH})...`);
   const branchInfo = await githubGraphQL(`
     query($owner: String!, $repo: String!, $branch: String!) {
       repository(owner: $owner, name: $repo) {
@@ -147,21 +150,46 @@ async function main() {
     }
   `, { owner: OWNER, repo: REPO, branch: `refs/heads/${DEFAULT_BRANCH}` });
   const baseCommitOid = branchInfo.data.repository.ref.target.oid;
+  console.log(`[INFO] Latest commit OID on ${DEFAULT_BRANCH}: ${baseCommitOid}`);
 
-  // 3. Ensure the release branch exists (create if missing)
-  // If the branch does not exist, create it from the default branch's latest commit.
+  // 3. Check if the release branch exists
+  let branchExists = false;
   try {
     await githubRest(`/repos/${OWNER}/${REPO}/git/refs/heads/${BRANCH_NAME}`);
-    // Branch exists, nothing to do
+    branchExists = true;
+    console.log(`[INFO] Release branch "${BRANCH_NAME}" already exists.`);
   } catch {
+    branchExists = false;
+    console.log(`[INFO] Release branch "${BRANCH_NAME}" does not exist. Will create it.`);
     // Branch does not exist, create it from the default branch's latest commit
     await githubRest(`/repos/${OWNER}/${REPO}/git/refs`, 'POST', {
       ref: `refs/heads/${BRANCH_NAME}`,
       sha: baseCommitOid
     });
+    console.log(`[INFO] Created release branch "${BRANCH_NAME}" from ${DEFAULT_BRANCH} (${baseCommitOid}).`);
   }
 
-  // 4. Prepare updated file contents for CHANGELOG.md and Cargo.toml
+  // 4. Check if an open PR already exists for this release branch
+  console.log(`[INFO] Checking for existing open PRs for branch "${BRANCH_NAME}"...`);
+  const prs = await githubGraphQL(`
+    query($owner: String!, $repo: String!, $head: String!) {
+      repository(owner: $owner, name: $repo) {
+        pullRequests(headRefName: $head, states: OPEN, first: 1) {
+          nodes { number url }
+        }
+      }
+    }
+  `, { owner: OWNER, repo: REPO, head: BRANCH_NAME });
+
+  if (branchExists && prs.data.repository.pullRequests.nodes.length > 0) {
+    // Both branch and PR exist, do not proceed
+    console.log(`[INFO] Both release branch "${BRANCH_NAME}" and an open PR already exist.`);
+    console.log(`[INFO] Existing PR: ${prs.data.repository.pullRequests.nodes[0].url}`);
+    console.log(`[INFO] Exiting without making changes.`);
+    return;
+  }
+
+  // 5. Prepare updated file contents for CHANGELOG.md and Cargo.toml
 
   // CHANGELOG.md: Prepend release notes before the first "## " header, or create if missing
   let changelogContent = '';
@@ -172,7 +200,7 @@ async function main() {
     try {
       releaseNotes = fs.readFileSync(RELEASE_NOTES_FILE, 'utf8');
     } catch (err) {
-      console.error(`Error reading release notes file "${RELEASE_NOTES_FILE}": ${err.message}`);
+      console.error(`[ERROR] Error reading release notes file "${RELEASE_NOTES_FILE}": ${err.message}`);
       process.exit(1);
     }
     // Insert release notes before first "## " header
@@ -184,12 +212,14 @@ async function main() {
       // Prepend release notes to the beginning of the file
       changelogContent = `${orig}\n\n${releaseNotes}\n`;
     }
+    console.log(`[INFO] Prepared updated CHANGELOG.md content.`);
   } catch {
     // File does not exist, create new
     try {
       changelogContent = `## Changelog\n\n${fs.readFileSync(RELEASE_NOTES_FILE, 'utf8')}\n`;
+      console.log(`[INFO] CHANGELOG.md did not exist on branch, created new content.`);
     } catch (err) {
-      console.error(`Error reading release notes file "${RELEASE_NOTES_FILE}": ${err.message}`);
+      console.error(`[ERROR] Error reading release notes file "${RELEASE_NOTES_FILE}": ${err.message}`);
       process.exit(1);
     }
   }
@@ -200,11 +230,14 @@ async function main() {
     const cargoResp = await githubRest(`/repos/${OWNER}/${REPO}/contents/${CARGO_PATH}?ref=${BRANCH_NAME}`);
     const orig = Buffer.from(cargoResp.content, 'base64').toString('utf8');
     cargoContent = orig.replace(/^version = ".*"$/m, `version = "${NEXT_VERSION}"`);
+    console.log(`[INFO] Prepared updated Cargo.toml content with version ${NEXT_VERSION}.`);
   } catch {
+    console.error(`[ERROR] Cargo.toml must exist on the branch "${BRANCH_NAME}".`);
     throw new Error('Cargo.toml must exist on the branch');
   }
 
-  // 5. Get the latest commit OID on the release branch (for optimistic concurrency)
+  // 6. Get the latest commit OID on the release branch (for optimistic concurrency)
+  console.log(`[INFO] Fetching latest commit OID for release branch "${BRANCH_NAME}"...`);
   const relBranchInfo = await githubGraphQL(`
     query($owner: String!, $repo: String!, $branch: String!) {
       repository(owner: $owner, name: $repo) {
@@ -215,8 +248,9 @@ async function main() {
     }
   `, { owner: OWNER, repo: REPO, branch: `refs/heads/${BRANCH_NAME}` });
   const releaseBranchOid = relBranchInfo.data.repository.ref.target.oid;
+  console.log(`[INFO] Latest commit OID on "${BRANCH_NAME}": ${releaseBranchOid}`);
 
-  // 6. Create a "Verified" commit on the release branch using the GraphQL API
+  // 7. Create a "Verified" commit on the release branch using the GraphQL API
   // This will update both files in a single commit
   const commitMutation = `
     mutation($input: CreateCommitOnBranchInput!) {
@@ -250,22 +284,15 @@ async function main() {
   };
 
   // Perform the commit
+  console.log(`[INFO] Creating verified commit on branch "${BRANCH_NAME}"...`);
   const commitResp = await githubGraphQL(commitMutation, { input });
   const commitUrl = commitResp.data.createCommitOnBranch.commit.url;
-  console.log(`Created verified commit: ${commitUrl}`);
+  console.log(`[INFO] Created verified commit: ${commitUrl}`);
 
-  // 7. Create a pull request if one does not already exist for this branch
-  const prs = await githubGraphQL(`
-    query($owner: String!, $repo: String!, $head: String!) {
-      repository(owner: $owner, name: $repo) {
-        pullRequests(headRefName: $head, states: OPEN, first: 1) {
-          nodes { number url }
-        }
-      }
-    }
-  `, { owner: OWNER, repo: REPO, head: BRANCH_NAME });
+  // 8. Create a pull request if one does not already exist for this branch
   if (prs.data.repository.pullRequests.nodes.length === 0) {
     // No open PR, create one
+    console.log(`[INFO] No open PR found for branch "${BRANCH_NAME}". Creating new PR...`);
     const prMutation = `
       mutation($input: CreatePullRequestInput!) {
         createPullRequest(input: $input) {
@@ -297,13 +324,13 @@ async function main() {
       prResp.data.createPullRequest.pullRequest &&
       prResp.data.createPullRequest.pullRequest.url
     ) {
-      console.log(`Created PR: ${prResp.data.createPullRequest.pullRequest.url}`);
+      console.log(`[INFO] Created PR: ${prResp.data.createPullRequest.pullRequest.url}`);
     } else {
-      console.error('Failed to create PR. Response:', JSON.stringify(prResp, null, 2));
+      console.error('[ERROR] Failed to create PR. Response:', JSON.stringify(prResp, null, 2));
     }
   } else {
     // PR already exists
-    console.log(`PR already exists: ${prs.data.repository.pullRequests.nodes[0].url}`);
+    console.log(`[INFO] PR already exists: ${prs.data.repository.pullRequests.nodes[0].url}`);
   }
 }
 
