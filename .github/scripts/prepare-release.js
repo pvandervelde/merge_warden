@@ -124,6 +124,38 @@ function githubRest(path, method = 'GET', body = null) {
 }
 
 async function main() {
+  // --- Handle stale release branches and PRs ---
+  console.log(`[INFO] Checking for stale release branches...`);
+  // List all remote branches matching release/*
+  const branchesResp = await githubRest(`/repos/${OWNER}/${REPO}/branches?per_page=100`);
+  const releaseBranches = branchesResp.filter(b => b.name.startsWith('release/'));
+  for (const branch of releaseBranches) {
+    const branchVersion = branch.name.replace('release/', '');
+    if (branch.name !== BRANCH_NAME) {
+      console.log(`[INFO] Found stale release branch: ${branch.name} (version: ${branchVersion})`);
+      // Find open PRs for this branch
+      const prsResp = await githubGraphQL(`
+        query($owner: String!, $repo: String!, $head: String!) {
+          repository(owner: $owner, name: $repo) {
+            pullRequests(headRefName: $head, states: OPEN, first: 1) {
+              nodes { number url }
+            }
+          }
+        }
+      `, { owner: OWNER, repo: REPO, head: branch.name });
+      if (prsResp.data.repository.pullRequests.nodes.length > 0) {
+        const pr = prsResp.data.repository.pullRequests.nodes[0];
+        console.log(`[INFO] Closing PR #${pr.number} for stale branch ${branch.name}...`);
+        // Close the PR
+        await githubRest(`/repos/${OWNER}/${REPO}/pulls/${pr.number}`, 'PATCH', { state: 'closed' });
+      } else {
+        console.log(`[INFO] No open PR found for stale branch ${branch.name}.`);
+      }
+      // Delete the remote branch
+      console.log(`[INFO] Deleting stale remote branch ${branch.name}...`);
+      await githubRest(`/repos/${OWNER}/${REPO}/git/refs/heads/${branch.name}`, 'DELETE');
+    }
+  }
   // 1. Get the default branch name (e.g., "main" or "master")
   // This is needed to know which branch to base the release branch on.
   console.log(`[INFO] Fetching default branch for ${OWNER}/${REPO}...`);
