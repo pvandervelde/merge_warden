@@ -50,8 +50,8 @@ jobs:
 
       - name: Configure Git user
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git config user.name "releaser[bot]"
+          git config user.email "releaser[bot]@users.noreply.github.com"
 
       - name: Calculate next version
         id: calc_version
@@ -82,6 +82,11 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
+
+      - name: Set up git remote to use app token
+        if: steps.generate_changelog.outputs.has_notes == 'true'
+        run: |
+          git remote set-url origin "https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/${{ github.repository }}.git"
 
       - name: Prepare release with verified commit and PR
         if: steps.generate_changelog.outputs.has_notes == 'true'
