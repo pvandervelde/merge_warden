@@ -153,7 +153,12 @@ async function main() {
       }
       // Delete the remote branch
       console.log(`[INFO] Deleting stale remote branch ${branch.name}...`);
-      await githubRest(`/repos/${OWNER}/${REPO}/git/refs/heads/${branch.name}`, 'DELETE');
+      try {
+        await githubRest(`/repos/${OWNER}/${REPO}/git/refs/heads/${branch.name}`, 'DELETE');
+        console.log(`[INFO] Successfully deleted branch ${branch.name}.`);
+      } catch (error) {
+        console.error(`[ERROR] Failed to delete branch ${branch.name}:`, error.message || error);
+      }
     }
   }
   // 1. Get the default branch name (e.g., "main" or "master")
