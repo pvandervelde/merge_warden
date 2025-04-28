@@ -301,6 +301,7 @@ async function main() {
     console.error(`[ERROR] Could not find ref for branch "${BRANCH_NAME}" after ${retries} attempts.`);
     throw new Error(`Could not find ref for branch "${BRANCH_NAME}" after ${retries} attempts.`);
   }
+  const releaseBranchOid = relBranchInfo.data.repository.ref.target.oid;
   console.log(`[INFO] Latest commit OID on "${BRANCH_NAME}": ${releaseBranchOid}`);
 
   // 7. Create a "Verified" commit on the release branch using the GraphQL API
