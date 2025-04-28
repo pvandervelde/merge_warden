@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.2] - 2025-04-28
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- Set the workspace_id for the AppInsights workspace ([#109](https://github.com/pvandervelde/merge_warden/issues/109))
+
+### <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Actually create the variable before using it ([#111](https://github.com/pvandervelde/merge_warden/issues/111))
+- Update the release pr script to wait for the creation of the release branch ([#110](https://github.com/pvandervelde/merge_warden/issues/110))
+
+
+
 ## [0.1.1] - 2025-04-27
 
 ### <!-- 1 -->🐛 Bug Fixes
