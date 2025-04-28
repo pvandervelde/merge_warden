@@ -274,17 +274,33 @@ async function main() {
   }
 
   // 6. Get the latest commit OID on the release branch (for optimistic concurrency)
-  console.log(`[INFO] Fetching latest commit OID for release branch "${BRANCH_NAME}"...`);
-  const relBranchInfo = await githubGraphQL(`
-    query($owner: String!, $repo: String!, $branch: String!) {
-      repository(owner: $owner, name: $repo) {
-        ref(qualifiedName: $branch) {
-          target { ... on Commit { oid } }
+  // Retry logic for fetching the latest commit OID on the release branch
+  console.log(`[INFO] Fetching latest commit OID for release branch "${BRANCH_NAME}" with retry...`);
+  let relBranchInfo = null;
+  let retries = 5;
+  let delayMs = 2000;
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    relBranchInfo = await githubGraphQL(`
+      query($owner: String!, $repo: String!, $branch: String!) {
+        repository(owner: $owner, name: $repo) {
+          ref(qualifiedName: $branch) {
+            target { ... on Commit { oid } }
+          }
         }
       }
+    `, { owner: OWNER, repo: REPO, branch: `refs/heads/${BRANCH_NAME}` });
+    if (relBranchInfo.data.repository.ref) {
+      break;
     }
-  `, { owner: OWNER, repo: REPO, branch: `refs/heads/${BRANCH_NAME}` });
-  const releaseBranchOid = relBranchInfo.data.repository.ref.target.oid;
+    if (attempt < retries) {
+      console.warn(`[WARN] Could not find ref for branch "${BRANCH_NAME}" (attempt ${attempt}/${retries}). Retrying in ${delayMs}ms...`);
+      await new Promise(res => setTimeout(res, delayMs));
+    }
+  }
+  if (!relBranchInfo || !relBranchInfo.data.repository.ref) {
+    console.error(`[ERROR] Could not find ref for branch "${BRANCH_NAME}" after ${retries} attempts.`);
+    throw new Error(`Could not find ref for branch "${BRANCH_NAME}" after ${retries} attempts.`);
+  }
   console.log(`[INFO] Latest commit OID on "${BRANCH_NAME}": ${releaseBranchOid}`);
 
   // 7. Create a "Verified" commit on the release branch using the GraphQL API
