@@ -214,6 +214,11 @@ resource "azurerm_application_insights" "appinsights" {
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
   application_type    = "web"
+  # Once set the workspace_id cannot be changed. Given that we didn't originally set it, we need
+  # to set it to the value that Azure gave it. Otherwise terraform will try to set it to null,
+  # which will result in an error.
+  # see: https://registry.terraform.io/providers/hashicorp/azurerm/latest/docs/resources/application_insights#workspace_id-1
+  workspace_id = "/subscriptions/c3420a9b-5638-4c5e-9f3a-b54263bd3662/resourceGroups/ai_p-aue-tf-mergew-insights_0f848fbd-11b2-44f3-8eea-4dccb8585e69_managed/providers/Microsoft.OperationalInsights/workspaces/managed-p-aue-tf-mergew-insights-ws"
 
   tags = merge(
     local.common_tags,
