@@ -44,10 +44,21 @@ $labelUpdates = @(
 )
 
 # Get all current labels in the repo
-$currentLabels = gh label list | ForEach-Object {
-    # Each line: "label-name    color    description"
-    ($_ -split "`t")[0].Trim()
+function Get-AllLabels
+{
+    $perPage = 100
+    $labels = gh label list --json name --limit $perPage | ConvertFrom-Json
+    if ($labels.Count -eq 0)
+    {
+        break
+    }
+
+    $allLabels = @()
+    $allLabels += $labels
+
+    return $allLabels | ForEach-Object { $_.name }
 }
+$currentLabels = Get-AllLabels
 
 # Build a hashtable of label names for quick lookup
 $labelNames = $labelUpdates | ForEach-Object { $_.Name }
