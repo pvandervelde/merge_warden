@@ -5,6 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.3] - 2025-04-29
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- Use ManagedIdentityCredential for Key Vault access in Azure Functions ([#114](https://github.com/pvandervelde/merge_warden/issues/114))
+- Use ManagedIdentityCredential for Key Vault access in Azure Functions
+
+
+
 ## [0.1.2] - 2025-04-28
 
 ### <!-- 1 -->🐛 Bug Fixes
