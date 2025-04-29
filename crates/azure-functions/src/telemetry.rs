@@ -41,6 +41,9 @@ pub async fn init_telemetry(
     // Create a tracing layer with the configured tracer
     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
+    // Bridge log crate events to tracing
+    tracing_log::LogTracer::init().expect("Failed to set log tracer");
+
     // Use the tracing subscriber `Registry`, or any other subscriber
     // that impls `LookupSpan`
     tracing_subscriber::registry()
