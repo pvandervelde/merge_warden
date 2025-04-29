@@ -208,7 +208,13 @@ async fn get_secret_from_keyvault(
     secret_name: &str,
 ) -> Result<String, AzureFunctionsError> {
     // Use ManagedIdentityCredential for Azure Functions in production
-    let credential = azure_identity::ManagedIdentityCredential::default();
+    let credential = azure_identity::ManagedIdentityCredential::new(None).map_err(|e| {
+        error!(
+            error = e.to_string(),
+            "Failed create the managed credential."
+        );
+        AzureFunctionsError::AuthError("Failed to create the managed credential.".to_string())
+    })?;
     let client = SecretClient::new(key_vault_url, credential, None).map_err(|e| {
         error!(
             error = e.to_string(),
