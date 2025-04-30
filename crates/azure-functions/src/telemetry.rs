@@ -20,7 +20,9 @@ fn init_logs(exporter: Exporter<Client>) -> Result<(), AzureFunctionsError> {
         .with_batch_exporter(exporter)
         .build();
     let otel_log_appender = OpenTelemetryLogBridge::new(&logger_provider);
-    log::set_boxed_logger(Box::new(otel_log_appender)).unwrap();
+    log::set_boxed_logger(Box::new(otel_log_appender)).map_err(|e| {
+        AzureFunctionsError::ConfigError("Failed to set the log provider.".to_string())
+    })?;
     log::set_max_level(Level::Trace.to_level_filter());
 
     Ok(())
@@ -60,7 +62,8 @@ fn init_tracing(azure_monitor_exporter: Exporter<Client>) -> Result<(), AzureFun
     let telemetry = tracing_opentelemetry::layer().with_tracer(tracer);
 
     // Bridge log crate events to tracing
-    tracing_log::LogTracer::init().expect("Failed to set log tracer");
+    tracing_log::LogTracer::init()
+        .map_err(|e| AzureFunctionsError::ConfigError("Failed to set log tracer".to_string()))?;
 
     // Use the tracing subscriber `Registry`, or any other subscriber
     // that impls `LookupSpan`
@@ -81,7 +84,7 @@ pub async fn init_telemetry(
             app_insights_connection_string,
             reqwest::Client::new(),
         )
-        .expect("valid connection string");
+        .map_err(|e| AzureFunctionsError::ConfigError("Invalid connection string".to_string()))?;
 
     init_logs(azure_monitor_exporter.clone())?;
     init_metrics(azure_monitor_exporter.clone())?;
