@@ -18,7 +18,7 @@ hmac.workspace = true
 octocrab = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
-opentelemetry-application-insights = "0.40.0"
+opentelemetry-application-insights = { version = "0.40.0", features = ["reqwest", "tracing"] }
 opentelemetry-otlp = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
@@ -29,6 +29,9 @@ tokio = { workspace = true }
 tracing = { workspace = true, features = ["log"] }
 tracing-opentelemetry = { workspace = true, features = ["thiserror"] }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+tracing-log = "0.2"
+log = "0.4.27"
+opentelemetry-appender-log = "0.29.0"
 
 # See https://github.com/sfackler/rust-openssl/issues/1627
 # and https://docs.rs/openssl/latest/openssl/#vendored
