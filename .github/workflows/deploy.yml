@@ -140,6 +140,7 @@ jobs:
         package: ${{ github.workspace }}/target/func
 
   publish-cli:
+    if: ${{ github.event_name }} != 'workflow_dispatch'
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     permissions:
