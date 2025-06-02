@@ -86,7 +86,7 @@ pub async fn init_telemetry(
         )
         .map_err(|e| AzureFunctionsError::ConfigError("Invalid connection string".to_string()))?;
 
-    init_logs(azure_monitor_exporter.clone())?;
+    //init_logs(azure_monitor_exporter.clone())?;
     init_metrics(azure_monitor_exporter.clone())?;
     init_tracing(azure_monitor_exporter)?;
 
