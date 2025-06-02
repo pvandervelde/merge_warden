@@ -27,3 +27,6 @@ memory-bank/
 # Hide the roo code prompts
 .roo/system-prompt-*
 .roomodes
+ops/azure/.terraform.lock.hcl
+ops/azure/.terraform/terraform.tfstate
+ops/azure/.terraform/
