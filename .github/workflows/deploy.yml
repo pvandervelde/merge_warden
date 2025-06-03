@@ -65,7 +65,6 @@ jobs:
     # [D] <function_name>       --> <target>/<function_name>
     #     [F] function.json     --> <target>/<function_name>/function.json
     # [F] host.json             --> <target>/host.json
-    # [F] local.settings.json   --> <target>/local.settings.json
     # [F] az_handler               --> <target>/az_handler
     - name: Copy Azure functions configs
       run: |
@@ -73,7 +72,6 @@ jobs:
         cp -r ./target/temp/x86_64-unknown-linux-musl/release/az_handler target/func
         cp -r ./configs/az_func/merge_warden/* target/func/merge_warden
         cp -r ./configs/az_func/host.json target/func
-        cp -r ./configs/az_func/local.settings.json target/func
 
     - name: show directories after assemble
       run: |
