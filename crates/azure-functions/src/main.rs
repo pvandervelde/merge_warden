@@ -238,7 +238,9 @@ async fn get_secret_from_keyvault(
             error = e.to_string(),
             "Failed to get a secret from the KeyVault."
         );
-        AzureFunctionsError::AuthError("Failed to get a secret from the KeyVault.".to_string())
+        AzureFunctionsError::AuthError(
+            "Failed to extract the secret from the data obtained from the KeyVault.".to_string(),
+        )
     })?;
     Ok(value.value.unwrap_or_default())
 }
