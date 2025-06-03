@@ -16,6 +16,9 @@ terraform {
 
 provider "azurerm" {
   features {}
+
+  subscription_id = "c3420a9b-5638-4c5e-9f3a-b54263bd3662"
+
 }
 
 #
@@ -264,6 +267,9 @@ resource "azurerm_linux_function_app" "fa" {
     "KEY_VAULT_NAME"           = azurerm_key_vault.kv.name
     "ENFORCE_TITLE_CONVENTION" = "true"
     "REQUIRE_WORK_ITEMS"       = "true"
+
+    # Log settings
+    "LOG_LEVEL" = "debug"
 
     # App insight environment variables
     "APPINSIGHTS_INSTRUMENTATIONKEY"        = azurerm_application_insights.appinsights.instrumentation_key
