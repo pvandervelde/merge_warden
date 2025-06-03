@@ -1,4 +1,4 @@
-use axum::{extract::State, routing::post, Router};
+use axum::{extract::State, routing::get, routing::post, Router};
 use azure_security_keyvault_secrets::SecretClient;
 use hmac::{Hmac, Mac};
 use merge_warden_core::{
@@ -244,12 +244,23 @@ async fn get_secret_from_keyvault(
 }
 
 #[instrument(skip(state, headers, body))]
-async fn handle_webhook(
+async fn handle_get_request(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     body: String,
 ) -> Result<StatusCode, StatusCode> {
-    info!("Received webhook call from Github");
+    info!("Received get request ...");
+
+    Ok(StatusCode::OK)
+}
+
+#[instrument(skip(state, headers, body))]
+async fn handle_post_request(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: String,
+) -> Result<StatusCode, StatusCode> {
+    info!("Received post request ...");
 
     if !verify_github_signature(&state.webhook_secret, &headers, &body) {
         warn!("Webhook did not have valid signature");
@@ -425,7 +436,8 @@ async fn main() -> Result<(), AzureFunctionsError> {
     });
 
     let app = Router::new()
-        .route("/webhook", post(handle_webhook))
+        .route("/api/merge_warden", get(handle_get_request))
+        .route("/api/merge_warden", post(handle_post_request))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(addr.clone()).await.unwrap();
 

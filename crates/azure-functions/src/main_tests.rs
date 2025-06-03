@@ -1,6 +1,6 @@
 use crate::{AppConfig, AppState};
 
-use super::{create_github_app, get_azure_config, handle_webhook, verify_github_signature};
+use super::{create_github_app, get_azure_config, handle_post_request, verify_github_signature};
 use axum::{extract::State, http::HeaderMap};
 use hmac::{Hmac, Mac};
 use merge_warden_core::config::RulesConfig;
@@ -29,7 +29,7 @@ async fn test_handle_webhook() {
     let headers = HeaderMap::new();
     let body = "{}".to_string();
 
-    let result = handle_webhook(State(state), headers, body).await;
+    let result = handle_post_request(State(state), headers, body).await;
     assert!(
         result.is_err(),
         "Webhook handling should fail with invalid data"
