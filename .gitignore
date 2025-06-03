@@ -30,3 +30,4 @@ memory-bank/
 ops/azure/.terraform.lock.hcl
 ops/azure/.terraform/terraform.tfstate
 ops/azure/.terraform/
+configs/az_func/local.settings.json
