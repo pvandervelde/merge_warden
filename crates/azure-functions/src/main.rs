@@ -408,6 +408,10 @@ fn verify_github_signature(secret: &str, headers: &HeaderMap, body: &str) -> boo
     mac.update(body.as_bytes());
     let result = mac.finalize();
     let computed_signature = format!("sha256={}", hex::encode(result.into_bytes()));
+    debug!(
+        github_signature = signature,
+        computed_signature, "Comparing the GitHub signature with the computed signature"
+    );
 
     signature == computed_signature
 }
