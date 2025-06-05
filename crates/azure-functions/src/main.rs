@@ -1,4 +1,5 @@
 use axum::{extract::State, routing::get, routing::post, Router};
+use azure_core::credentials::TokenCredential;
 use azure_identity::ManagedIdentityCredentialOptions;
 use azure_security_keyvault_secrets::SecretClient;
 use hmac::{Hmac, Mac};
@@ -222,6 +223,20 @@ async fn get_secret_from_keyvault(
         );
         AzureFunctionsError::AuthError("Failed to create the managed credential.".to_string())
     })?;
+
+    // Ask for a token for Key Vault
+    let token_response = credential
+        .get_token(&["https://vault.azure.net/.default"])
+        .await
+        .map_err(|e| {
+            error!("Failed to get token: {}", e);
+            AzureFunctionsError::Other(format!("token error: {}", e))
+        })?;
+
+    debug!("Access Token acquired:");
+    debug!("Token: {}", token_response.token.secret());
+    debug!("Expires on: {:?}", token_response.expires_on);
+
     let client = SecretClient::new(key_vault_url, credential, None).map_err(|e| {
         error!(
             error = e.to_string(),
