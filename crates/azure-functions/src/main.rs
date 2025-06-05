@@ -1,4 +1,5 @@
 use axum::{extract::State, routing::get, routing::post, Router};
+use azure_identity::ManagedIdentityCredentialOptions;
 use azure_security_keyvault_secrets::SecretClient;
 use hmac::{Hmac, Mac};
 use merge_warden_core::{
@@ -211,7 +212,10 @@ async fn get_secret_from_keyvault(
 ) -> Result<String, AzureFunctionsError> {
     // Use ManagedIdentityCredential for Azure Functions in production
     // correct resource for Key Vault
-    let credential = azure_identity::DefaultAzureCredential::new().map_err(|e| {
+    let credential = azure_identity::ManagedIdentityCredential::new(Some(
+        ManagedIdentityCredentialOptions::default(),
+    ))
+    .map_err(|e| {
         error!(
             error = e.to_string(),
             "Failed to create the managed credential."
