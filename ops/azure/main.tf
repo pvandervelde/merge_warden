@@ -270,6 +270,7 @@ resource "azurerm_linux_function_app" "fa" {
 
     # Log settings
     "LOG_LEVEL" = "debug"
+    "RUST_LOG"  = "debug"
 
     # App insight environment variables
     "APPINSIGHTS_INSTRUMENTATIONKEY"        = azurerm_application_insights.appinsights.instrumentation_key
