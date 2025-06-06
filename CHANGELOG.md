@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2025-06-06
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- Azure function unable to start and connect to Key Vault ([#130](https://github.com/pvandervelde/merge_warden/issues/130))
+- Remove the reference to the local function config file
+- Write debug logs in Azure
+- Don't initialize the logs twice
+
+### <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Remove copying files that no longer exist
+- Trying to get better error messages
+- Ignore the terraform state files
+- Allow manual deploys for testing
+
+
+
 ## [0.1.4] - 2025-04-30
 
 ### <!-- 1 -->🐛 Bug Fixes
