@@ -65,12 +65,13 @@ fn init_tracing(azure_monitor_exporter: Exporter<Client>) -> Result<(), AzureFun
     tracing_log::LogTracer::init()
         .map_err(|e| AzureFunctionsError::ConfigError("Failed to set log tracer".to_string()))?;
 
-    // Use the tracing subscriber `Registry`, or any other subscriber
-    // that impls `LookupSpan`
-    tracing_subscriber::registry()
+    // Add a console logging layer so logs are streamed to the console
+    let fmt_layer = tracing_subscriber::fmt::layer().with_ansi(true);
+    let _ = tracing_subscriber::registry()
+        .with(fmt_layer)
         .with(telemetry)
         .with(EnvFilter::from_default_env())
-        .init();
+        .try_init();
 
     Ok(())
 }
@@ -86,7 +87,7 @@ pub async fn init_telemetry(
         )
         .map_err(|e| AzureFunctionsError::ConfigError("Invalid connection string".to_string()))?;
 
-    init_logs(azure_monitor_exporter.clone())?;
+    //init_logs(azure_monitor_exporter.clone())?;
     init_metrics(azure_monitor_exporter.clone())?;
     init_tracing(azure_monitor_exporter)?;
 

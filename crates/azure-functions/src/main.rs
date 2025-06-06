@@ -1,4 +1,6 @@
-use axum::{extract::State, routing::post, Router};
+use axum::{extract::State, routing::get, routing::post, Router};
+use azure_core::credentials::TokenCredential;
+use azure_identity::ManagedIdentityCredentialOptions;
 use azure_security_keyvault_secrets::SecretClient;
 use hmac::{Hmac, Mac};
 use merge_warden_core::{
@@ -132,6 +134,7 @@ async fn get_azure_config() -> Result<AppConfig, AzureFunctionsError> {
     })?;
     debug!(
         keyvault = key_vault_url.as_str(),
+        app_id = app_id_to_number,
         "Got app key from Azure Key Vault",
     );
 
@@ -208,13 +211,31 @@ async fn get_secret_from_keyvault(
     secret_name: &str,
 ) -> Result<String, AzureFunctionsError> {
     // Use ManagedIdentityCredential for Azure Functions in production
-    let credential = azure_identity::ManagedIdentityCredential::new(None).map_err(|e| {
+    // correct resource for Key Vault
+    let credential = azure_identity::ManagedIdentityCredential::new(Some(
+        ManagedIdentityCredentialOptions::default(),
+    ))
+    .map_err(|e| {
         error!(
             error = e.to_string(),
             "Failed to create the managed credential."
         );
         AzureFunctionsError::AuthError("Failed to create the managed credential.".to_string())
     })?;
+
+    // Ask for a token for Key Vault
+    let token_response = credential
+        .get_token(&["https://vault.azure.net/.default"])
+        .await
+        .map_err(|e| {
+            error!("Failed to get token: {}", e);
+            AzureFunctionsError::Other(format!("token error: {}", e))
+        })?;
+
+    debug!("Access Token acquired:");
+    debug!("Token: {}", token_response.token.secret());
+    debug!("Expires on: {:?}", token_response.expires_on);
+
     let client = SecretClient::new(key_vault_url, credential, None).map_err(|e| {
         error!(
             error = e.to_string(),
@@ -238,18 +259,31 @@ async fn get_secret_from_keyvault(
             error = e.to_string(),
             "Failed to get a secret from the KeyVault."
         );
-        AzureFunctionsError::AuthError("Failed to get a secret from the KeyVault.".to_string())
+        AzureFunctionsError::AuthError(
+            "Failed to extract the secret from the data obtained from the KeyVault.".to_string(),
+        )
     })?;
     Ok(value.value.unwrap_or_default())
 }
 
 #[instrument(skip(state, headers, body))]
-async fn handle_webhook(
+async fn handle_get_request(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
     body: String,
 ) -> Result<StatusCode, StatusCode> {
-    info!("Received webhook call from Github");
+    info!("Received get request ...");
+
+    Ok(StatusCode::OK)
+}
+
+#[instrument(skip(state, headers, body))]
+async fn handle_post_request(
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: String,
+) -> Result<StatusCode, StatusCode> {
+    info!("Received post request ...");
 
     if !verify_github_signature(&state.webhook_secret, &headers, &body) {
         warn!("Webhook did not have valid signature");
@@ -394,6 +428,10 @@ fn verify_github_signature(secret: &str, headers: &HeaderMap, body: &str) -> boo
     mac.update(body.as_bytes());
     let result = mac.finalize();
     let computed_signature = format!("sha256={}", hex::encode(result.into_bytes()));
+    debug!(
+        github_signature = signature,
+        computed_signature, "Comparing the GitHub signature with the computed signature"
+    );
 
     signature == computed_signature
 }
@@ -425,7 +463,8 @@ async fn main() -> Result<(), AzureFunctionsError> {
     });
 
     let app = Router::new()
-        .route("/webhook", post(handle_webhook))
+        .route("/api/merge_warden", get(handle_get_request))
+        .route("/api/merge_warden", post(handle_post_request))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(addr.clone()).await.unwrap();
 

@@ -32,6 +32,7 @@ tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 tracing-log = "0.2"
 log = "0.4.27"
 opentelemetry-appender-log = "0.29.0"
+azure_core = "0.23"
 
 # See https://github.com/sfackler/rust-openssl/issues/1627
 # and https://docs.rs/openssl/latest/openssl/#vendored
