@@ -142,7 +142,6 @@ async fn get_azure_config() -> Result<AppConfig, AzureFunctionsError> {
         get_secret_from_keyvault(key_vault_url.as_str(), "GithubWebhookSecret").await?;
     debug!(
         keyvault = key_vault_url.as_str(),
-        webhook_secret = webhook_secret.as_str(),
         "Got webhook secret from Azure Key Vault",
     );
 
