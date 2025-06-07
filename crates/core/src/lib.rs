@@ -592,7 +592,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
     ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
-    ///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: bool) -> Result<(), Error> { unimplemented!() }
+    ///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
     /// }
     ///
     /// fn example() {
@@ -615,7 +615,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     /// 1. Validates the PR title against the Conventional Commits format (if enabled)
     /// 2. Checks if the PR description references a work item or issue (if enabled)
     /// 3. Adds or removes labels and comments based on validation results
-    /// 4. Updates the PR's mergeable state
+    /// 4. Updates the PR's check run status (GitHub status check)
     /// 5. Adds automatic labels based on PR content (if enabled)
     ///
     /// # Arguments
@@ -661,7 +661,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
     ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
-    ///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: bool) -> Result<(), Error> { unimplemented!() }
+    ///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
     /// }
     ///
     /// async fn example() -> Result<()> {
@@ -770,13 +770,32 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
         // Determine labels
         let labels = self.determine_labels(repo_owner, repo_name, &pr).await?;
 
-        // Update PR mergeability
+        // Update PR mergeability (legacy, for compatibility)
+
+        // New: Update GitHub check run status
+        let check_conclusion = if is_title_valid && is_work_item_referenced {
+            "success"
+        } else {
+            "failure"
+        };
+        let check_title = "MergeWarden PR Validation";
+        let check_summary = if is_title_valid && is_work_item_referenced {
+            "All PR requirements satisfied."
+        } else if !is_title_valid && !is_work_item_referenced {
+            "PR title is invalid and work item reference is missing."
+        } else if !is_title_valid {
+            "PR title is invalid."
+        } else {
+            "Work item reference is missing."
+        };
         self.provider
-            .update_pr_blocking_review(
+            .update_pr_check_status(
                 repo_owner,
                 repo_name,
                 pr_number,
-                is_title_valid && is_work_item_referenced,
+                check_conclusion,
+                check_title,
+                check_summary,
             )
             .await
             .map_err(|e| {
@@ -785,13 +804,12 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
                     repository = repo_name,
                     pull_request = pr_number,
                     error = e.to_string(),
-                    "Failed to add or update the review"
+                    "Failed to add or update GitHub check run"
                 );
                 MergeWardenError::FailedToUpdatePullRequest(
-                    "Failed to add or update review".to_string(),
+                    "Failed to add or update GitHub check run".to_string(),
                 )
             })?;
-
         Ok(CheckResult {
             title_valid: is_title_valid,
             work_item_referenced: is_work_item_referenced,
@@ -843,7 +861,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
     ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
-    ///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: bool) -> Result<(), Error> { unimplemented!() }
+    ///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
     /// }
     ///
     /// fn example() {

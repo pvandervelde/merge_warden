@@ -8,6 +8,7 @@ use octocrab::{
     Octocrab,
 };
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
@@ -601,200 +602,47 @@ impl PullRequestProvider for GitHubProvider {
         Ok(result)
     }
 
-    /// Updates the blocking review status of a pull request adding a review that blocks the PR from
-    /// being merged.
-    ///
-    /// # Parameters
-    /// - `repo_owner`: The owner of the repository.
-    /// - `repo_name`: The name of the repository.
-    /// - `pr_number`: The number of the pull request to update.
-    /// - `is_approved`: A boolean indicating whether the pull request should be approved for merging.
-    ///
-    /// # Behavior
-    /// - If `is_approved` is `false`, a review requesting changes is added to the PR.
-    /// - If `is_approved` is `true`, any reviews requesting changes made by the current application are removed.
-    ///
-    /// # Returns
-    /// - `Ok(())` if the operation succeeds.
-    /// - `Err(Error)` if the operation fails, with an error message indicating the failure reason.
-    ///
-    /// # Notes
-    /// - https://docs.github.com/en/rest/pulls/reviews?apiVersion=2022-11-28#create-a-review-for-a-pull-request
-    /// - This function never approves a PR. It only blocks the PR or provides no review
-    ///
-    /// # Errors
-    /// - Returns an error if the API call to update the pull request fails.
     #[instrument]
-    async fn update_pr_blocking_review(
+    async fn update_pr_check_status(
         &self,
         repo_owner: &str,
         repo_name: &str,
         pr_number: u64,
-        is_approved: bool,
+        conclusion: &str,
+        output_title: &str,
+        output_summary: &str,
     ) -> Result<(), Error> {
-        let user = self.user.clone();
-        let expected_user_name_on_reviews = format!("{}[bot]", user.login);
+        // Get the commit SHA for the PR head
+        let pr_data = self
+            .client
+            .pulls(repo_owner, repo_name)
+            .get(pr_number)
+            .await
+            .map_err(|e| {
+                log_octocrab_error("Failed to get PR for check run", e);
+                Error::InvalidResponse
+            })?;
+        let head_sha = pr_data.head.sha;
 
-        info!(
-            repository_owner = repo_owner,
-            repository = repo_name,
-            pull_request = pr_number,
-            user_id = user.id,
-            user_name = user.login,
-            "Updating pull request review status ...",
-        );
-
-        // First, list existing reviews to check if we already have one
-        let existing_reviews = self.list_reviews(repo_owner, repo_name, pr_number).await?;
-        let mut own_reviews: Vec<&Review> = existing_reviews
-            .iter()
-            .filter(|r| {
-                let review_user = match &r.user {
-                    Some(u) => u,
-                    None => return false,
-                };
-
-                expected_user_name_on_reviews == review_user.login
-            })
-            .collect();
-        debug!(
-            repository_owner = repo_owner,
-            repository = repo_name,
-            pull_request = pr_number,
-            count = existing_reviews.len(),
-            "Searched for existing reviews",
-        );
-
-        own_reviews.sort_by(|a, b| {
-            let a_time = a.submitted_at.unwrap_or_default();
-            let b_time = b.submitted_at.unwrap_or_default();
-            b_time.cmp(&a_time)
+        // Prepare the check run payload
+        let check_name = "MergeWarden";
+        let url = format!("/repos/{}/{}/check-runs", repo_owner, repo_name);
+        let payload = json!({
+            "name": check_name,
+            "head_sha": head_sha,
+            "status": "completed",
+            "conclusion": conclusion,
+            "output": {
+                "title": output_title,
+                "summary": output_summary
+            }
         });
 
-        // Dismiss every review except the most recent one
-        if !own_reviews.is_empty() {
-            let size = own_reviews.len() - 1;
-            for review in own_reviews.iter().take(size).skip(1) {
-                if review.state != Some(ReviewState::Dismissed) {
-                    match self
-                        .dismiss_review(
-                            repo_owner,
-                            repo_name,
-                            pr_number,
-                            review.id,
-                            "Issues resolved",
-                        )
-                        .await
-                    {
-                        Ok(()) => {
-                            debug!(
-                                repository_owner = repo_owner,
-                                repository = repo_name,
-                                pull_request = pr_number,
-                                review_id = review.id.into_inner(),
-                                "Review removed"
-                            )
-                        }
-                        Err(_) => {
-                            warn!(
-                                repository_owner = repo_owner,
-                                repository = repo_name,
-                                pull_request = pr_number,
-                                review_id = review.id.into_inner(),
-                                "Failed to remove review"
-                            )
-                        }
-                    };
-                }
-            }
-        }
-
-        // Get the most recent review
-        let most_recent_review = own_reviews.first();
-
-        if is_approved {
-            info!(
-                repository_owner = repo_owner,
-                repository = repo_name,
-                pull_request = pr_number,
-                "Pull request approved, removing reviews ...",
-            );
-
-            if let Some(review) = most_recent_review {
-                match self
-                    .dismiss_review(
-                        repo_owner,
-                        repo_name,
-                        pr_number,
-                        review.id,
-                        "Issues resolved",
-                    )
-                    .await
-                {
-                    Ok(_) => {
-                        debug!(
-                            repository_owner = repo_owner,
-                            repository = repo_name,
-                            pull_request = pr_number,
-                            review_id = review.id.into_inner(),
-                            "Review removed"
-                        )
-                    }
-                    Err(_) => {
-                        warn!(
-                            repository_owner = repo_owner,
-                            repository = repo_name,
-                            pull_request = pr_number,
-                            review_id = review.id.into_inner(),
-                            "Failed to remove review"
-                        )
-                    }
-                };
-            }
-        } else {
-            info!(
-                repository_owner = repo_owner,
-                repository = repo_name,
-                pull_request = pr_number,
-                "Pull request not approved, adding or updating review ...",
-            );
-
-            // If the last review is the same as the current one then we don't make changes
-            let mut found_match = false;
-            if let Some(review) = most_recent_review {
-                debug!(
-                    repository_owner = repo_owner,
-                    repository = repo_name,
-                    pull_request = pr_number,
-                    review_id = review.id.into_inner(),
-                    review_date = review.submitted_at.unwrap_or_default().to_string(),
-                    "Processing review",
-                );
-
-                found_match = true;
-            }
-
-            if found_match {
-                info!(
-                    repository_owner = repo_owner,
-                    repository = repo_name,
-                    pull_request = pr_number,
-                    "Current review is the same as the new one. Will not be creating a new one.",
-                );
-            } else {
-                debug!(
-                    repository_owner = repo_owner,
-                    repository = repo_name,
-                    pull_request = pr_number,
-                    "Didn't find existing matching review, creating new one",
-                );
-
-                // Create new review requesting changes
-                self.create_review(repo_owner, repo_name, pr_number, "REQUEST_CHANGES")
-                    .await?
-            }
-        }
-
+        // POST the check run
+        self.client._post(url, Some(&payload)).await.map_err(|e| {
+            log_octocrab_error("Failed to create/update check run", e);
+            Error::FailedToUpdatePullRequest("Failed to create/update check run".to_string())
+        })?;
         Ok(())
     }
 }

@@ -110,12 +110,14 @@ impl PullRequestProvider for MockGitProvider {
         Ok(labels.clone())
     }
 
-    async fn update_pr_blocking_review(
+    async fn update_pr_check_status(
         &self,
-        _repo_owner: &str,
-        _repo_name: &str,
-        _pr_number: u64,
-        _is_approved: bool,
+        repo_owner: &str,
+        repo_name: &str,
+        pr_number: u64,
+        conclusion: &str,
+        output_title: &str,
+        output_summary: &str,
     ) -> Result<(), Error> {
         unimplemented!("Not needed for this test")
     }
@@ -189,12 +191,14 @@ impl PullRequestProvider for ErrorMockGitProvider {
         Ok(Vec::new())
     }
 
-    async fn update_pr_blocking_review(
+    async fn update_pr_check_status(
         &self,
-        _repo_owner: &str,
-        _repo_name: &str,
-        _pr_number: u64,
-        _is_approved: bool,
+        repo_owner: &str,
+        repo_name: &str,
+        pr_number: u64,
+        conclusion: &str,
+        output_title: &str,
+        output_summary: &str,
     ) -> Result<(), Error> {
         unimplemented!("Not needed for this test")
     }
