@@ -15,6 +15,10 @@ use tracing_subscriber::EnvFilter;
 
 use crate::errors::AzureFunctionsError;
 
+#[cfg(test)]
+#[path = "telemetry_tests.rs"]
+mod tests;
+
 fn init_logs(exporter: Exporter<Client>) -> Result<(), AzureFunctionsError> {
     let logger_provider = SdkLoggerProvider::builder()
         .with_batch_exporter(exporter)

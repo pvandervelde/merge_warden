@@ -13,6 +13,10 @@ use tracing::{debug, info};
 /// Default configuration file name
 pub const DEFAULT_CONFIG_FILENAME: &str = ".merge-warden.toml";
 
+#[cfg(test)]
+#[path = "config_tests.rs"]
+mod tests;
+
 /// Configuration for Merge Warden CLI
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Config {

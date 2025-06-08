@@ -17,6 +17,10 @@ use crate::{
     PullRequestProvider,
 };
 
+#[cfg(test)]
+#[path = "github_tests.rs"]
+mod tests;
+
 #[derive(Debug, Serialize, Deserialize)]
 struct JWTClaims {
     iat: u64,
@@ -241,7 +245,7 @@ fn log_octocrab_error(message: &str, e: octocrab::Error) {
     };
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct GitHubProvider {
     client: Octocrab,
     user: User,
