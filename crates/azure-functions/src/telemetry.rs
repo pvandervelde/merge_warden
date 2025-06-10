@@ -89,7 +89,7 @@ pub async fn init_telemetry(
             app_insights_connection_string,
             reqwest::Client::new(),
         )
-        .map_err(|e| AzureFunctionsError::ConfigError("Invalid connection string".to_string()))?;
+        .map_err(|e| AzureFunctionsError::ConfigError(e.to_string()))?;
 
     //init_logs(azure_monitor_exporter.clone())?;
     init_metrics(azure_monitor_exporter.clone())?;
