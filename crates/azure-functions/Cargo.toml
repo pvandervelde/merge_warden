@@ -18,7 +18,7 @@ hmac.workspace = true
 octocrab = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
-opentelemetry-application-insights = { version = "0.40.0", features = ["reqwest", "tracing"] }
+opentelemetry-application-insights = { version = "0.41.0", features = ["reqwest", "tracing"] }
 opentelemetry-otlp = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
