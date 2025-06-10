@@ -140,7 +140,7 @@ pub struct Review {
     pub user: User,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct User {
     pub id: u64,
     pub login: String,

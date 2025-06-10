@@ -46,7 +46,7 @@ use models::{Comment, Label, PullRequest};
 ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
 ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
 ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
-///     # async fn update_pr_blocking_review(&self, _: &str, _: &str, _: u64, _: bool) -> Result<(), Error> { unimplemented!() }
+///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
 /// }
 /// ```
 #[async_trait]
@@ -183,25 +183,28 @@ pub trait PullRequestProvider {
         pr_number: u64,
     ) -> Result<Vec<Label>, Error>;
 
-    /// Updates a blocking review on the pull request. The update may be adding a blocking review,
-    /// updating the contents of the blocking review, or removing the review. The review should never
-    /// be an approving review.
+    /// Updates the GitHub check run status for the pull request. This should be used to report
+    /// the result of MergeWarden's validation as a GitHub check (success/failure, with details).
     ///
     /// # Arguments
     ///
-    /// * `repo_owner` - The owner of the repository.
-    /// * `repo_name` - The name of the repository.
-    /// * `pr_number` - The pull request number.
-    /// * `is_approved` - Whether the PR should be approved or 'rejected'.
+    /// * `repo_owner` - The owner of the repository
+    /// * `repo_name` - The name of the repository
+    /// * `pr_number` - The pull request number
+    /// * `conclusion` - The check run conclusion (e.g., "success", "failure")
+    /// * `output_title` - The title for the check run output
+    /// * `output_summary` - The summary for the check run output
     ///
     /// # Returns
     ///
     /// A `Result` indicating success or failure
-    async fn update_pr_blocking_review(
+    async fn update_pr_check_status(
         &self,
         repo_owner: &str,
         repo_name: &str,
         pr_number: u64,
-        is_approved: bool,
+        conclusion: &str,
+        output_title: &str,
+        output_summary: &str,
     ) -> Result<(), Error>;
 }

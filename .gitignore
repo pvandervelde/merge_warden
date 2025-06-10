@@ -24,10 +24,18 @@ mutants.out.old/
 # Hide the LLM memory bank
 memory-bank/
 
-# Hide the roo code prompts
+# Ignore the LLM instruction files
+memory-bank/
 .roo/system-prompt-*
+.roo/rules-*/*
 .roomodes
+
+.github/instructions/
+
+# Ignore the terraform state files
 ops/azure/.terraform.lock.hcl
 ops/azure/.terraform/terraform.tfstate
 ops/azure/.terraform/
+
+# Ignore the Azure Function local settings file
 configs/az_func/local.settings.json

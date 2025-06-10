@@ -161,12 +161,14 @@ impl PullRequestProvider for ErrorMockGitProvider {
         Ok(Vec::new())
     }
 
-    async fn update_pr_blocking_review(
+    async fn update_pr_check_status(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-        _is_approved: bool,
+        _conclusion: &str,
+        _output_title: &str,
+        _output_summary: &str,
     ) -> Result<(), Error> {
         Ok(())
     }
@@ -178,7 +180,6 @@ struct DynamicMockGitProvider {
     pull_requests: HashMap<u64, PullRequest>,
     labels: Arc<Mutex<Vec<Label>>>,
     comments: Arc<Mutex<Vec<Comment>>>,
-    pr_mergeable: Arc<Mutex<bool>>,
 }
 
 impl DynamicMockGitProvider {
@@ -187,7 +188,6 @@ impl DynamicMockGitProvider {
             pull_requests: HashMap::new(),
             labels: Arc::new(Mutex::new(Vec::new())),
             comments: Arc::new(Mutex::new(Vec::new())),
-            pr_mergeable: Arc::new(Mutex::new(true)),
         }
     }
 
@@ -203,10 +203,6 @@ impl DynamicMockGitProvider {
     fn get_comments(&self) -> Vec<Comment> {
         let comments = self.comments.lock().unwrap().clone();
         comments
-    }
-
-    fn is_mergeable(&self) -> bool {
-        *self.pr_mergeable.lock().unwrap()
     }
 }
 
@@ -303,15 +299,15 @@ impl PullRequestProvider for DynamicMockGitProvider {
         Ok(labels.clone())
     }
 
-    async fn update_pr_blocking_review(
+    async fn update_pr_check_status(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-        is_approved: bool,
+        _conclusion: &str,
+        _output_title: &str,
+        _output_summary: &str,
     ) -> Result<(), Error> {
-        let mut pr_mergeable = self.pr_mergeable.lock().unwrap();
-        *pr_mergeable = is_approved;
         Ok(())
     }
 }
@@ -322,7 +318,6 @@ struct MockGitProvider {
     pull_request: Arc<Mutex<Option<PullRequest>>>,
     labels: Arc<Mutex<Vec<Label>>>,
     comments: Arc<Mutex<Vec<Comment>>>,
-    pr_mergeable: Arc<Mutex<bool>>,
 }
 
 impl MockGitProvider {
@@ -331,7 +326,6 @@ impl MockGitProvider {
             pull_request: Arc::new(Mutex::new(None)),
             labels: Arc::new(Mutex::new(Vec::new())),
             comments: Arc::new(Mutex::new(Vec::new())),
-            pr_mergeable: Arc::new(Mutex::new(true)),
         }
     }
 
@@ -348,10 +342,6 @@ impl MockGitProvider {
     fn get_comments(&self) -> Vec<Comment> {
         let comments = self.comments.lock().unwrap().clone();
         comments
-    }
-
-    fn is_mergeable(&self) -> bool {
-        *self.pr_mergeable.lock().unwrap()
     }
 }
 
@@ -449,16 +439,15 @@ impl PullRequestProvider for MockGitProvider {
         Ok(labels.clone())
     }
 
-    async fn update_pr_blocking_review(
+    async fn update_pr_check_status(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
         _pr_number: u64,
-        is_approved: bool,
+        _conclusion: &str,
+        _output_title: &str,
+        _output_summary: &str,
     ) -> Result<(), Error> {
-        let mut pr_mergeable = self.pr_mergeable.lock().unwrap();
-        *pr_mergeable = is_approved;
-
         Ok(())
     }
 }
@@ -546,9 +535,6 @@ async fn test_process_pull_request_valid() {
         "Work item should be referenced"
     );
 
-    // Verify the PR is mergeable
-    assert!(warden.provider.is_mergeable(), "PR should be mergeable");
-
     // Verify no labels were added
     let labels = warden.provider.get_labels();
     assert!(
@@ -606,12 +592,6 @@ async fn test_process_pull_request_invalid_title() {
         "Work item should be referenced"
     );
 
-    // Verify the PR is not mergeable
-    assert!(
-        !warden.provider.is_mergeable(),
-        "PR should not be mergeable"
-    );
-
     // Verify the invalid title label was added
     let labels = warden.provider.get_labels();
     assert!(
@@ -659,12 +639,6 @@ async fn test_process_pull_request_missing_work_item() {
         "Work item should not be referenced"
     );
 
-    // Verify the PR is not mergeable
-    assert!(
-        !warden.provider.is_mergeable(),
-        "PR should not be mergeable"
-    );
-
     // Verify the missing work item label was added
     let labels = warden.provider.get_labels();
     assert!(
@@ -710,12 +684,6 @@ async fn test_process_pull_request_both_invalid() {
     assert!(
         !result.work_item_referenced,
         "Work item should not be referenced"
-    );
-
-    // Verify the PR is not mergeable
-    assert!(
-        !warden.provider.is_mergeable(),
-        "PR should not be mergeable"
     );
 
     // Verify both labels were added
@@ -840,9 +808,6 @@ async fn test_process_pull_request_custom_config_disabled_checks() {
         "Work item should be referenced when check is disabled"
     );
 
-    // Verify the PR is mergeable
-    assert!(warden.provider.is_mergeable(), "PR should be mergeable");
-
     // Verify no labels were added
     let labels = warden.provider.get_labels();
     assert!(
@@ -932,9 +897,6 @@ async fn test_process_pull_request_existing_labels_comments() {
         result.work_item_referenced,
         "Work item should be referenced"
     );
-
-    // Verify the PR is mergeable
-    assert!(warden.provider.is_mergeable(), "PR should be mergeable");
 
     // Verify the invalid labels were removed
     let labels = warden.provider.get_labels();

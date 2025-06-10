@@ -13,6 +13,10 @@ pub const KEY_RING_APP_PRIVATE_KEY_PATH: &str = "github_private_key_path";
 pub const KEY_RING_USER_TOKEN: &str = "github_token";
 pub const KEY_RING_WEB_HOOK_SECRET: &str = "webhook_secret";
 
+#[cfg(test)]
+#[path = "auth_tests.rs"]
+mod tests;
+
 /// Subcommands for the auth command
 #[derive(Subcommand, Debug)]
 pub enum AuthCommands {

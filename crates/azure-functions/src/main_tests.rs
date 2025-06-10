@@ -1,6 +1,6 @@
 use crate::{AppConfig, AppState};
 
-use super::{create_github_app, get_azure_config, handle_post_request, verify_github_signature};
+use super::{handle_post_request, verify_github_signature};
 use axum::{extract::State, http::HeaderMap};
 use hmac::{Hmac, Mac};
 use merge_warden_core::config::RulesConfig;
@@ -8,7 +8,6 @@ use merge_warden_developer_platforms::models::User;
 use octocrab::Octocrab;
 use sha2::Sha256;
 use std::sync::Arc;
-use tokio::sync::Mutex;
 
 #[tokio::test]
 async fn test_handle_webhook() {
@@ -98,4 +97,42 @@ fn test_verify_github_signature_missing_header() {
         !result,
         "Signature verification should fail when the header is missing"
     );
+}
+
+#[tokio::test]
+async fn test_get_azure_config_missing_env_vars() {
+    std::env::remove_var("KEY_VAULT_NAME");
+    let result = super::get_azure_config().await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_create_github_app_invalid_key() {
+    let config = super::AppConfig {
+        app_id: 123,
+        app_private_key: "invalid".to_string(),
+        webhook_secret: "secret".to_string(),
+        port_number: 3000,
+        require_work_items: false,
+        enforce_title_convention: false,
+    };
+    let result = super::create_github_app(&config).await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_handle_post_request_invalid_signature() {
+    use super::AppState;
+    use axum::http::HeaderMap;
+    use std::sync::Arc;
+    let state = Arc::new(AppState {
+        octocrab: octocrab::Octocrab::default(),
+        user: merge_warden_developer_platforms::models::User::default(),
+        rules: merge_warden_core::config::RulesConfig::default(),
+        webhook_secret: "secret".to_string(),
+    });
+    let headers = HeaderMap::new();
+    let body = "{}".to_string();
+    let result = super::handle_post_request(axum::extract::State(state), headers, body).await;
+    assert!(result.is_err());
 }

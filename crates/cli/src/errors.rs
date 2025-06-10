@@ -1,5 +1,9 @@
 use thiserror::Error;
 
+#[cfg(test)]
+#[path = "errors_tests.rs"]
+mod tests;
+
 /// CLI-specific errors
 #[derive(Error, Debug)]
 pub enum CliError {

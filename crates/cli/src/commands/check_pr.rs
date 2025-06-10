@@ -1,4 +1,5 @@
 use anyhow::Result;
+use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
@@ -236,7 +237,7 @@ pub async fn execute(args: CheckPrArgs) -> Result<(), CliError> {
     });
 
     let app = Router::new()
-        .route("/webhook", post(handle_webhook))
+        .route("/api/merge_warden", post(handle_webhook))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(addr.clone()).await.unwrap();
 
@@ -250,7 +251,7 @@ pub async fn execute(args: CheckPrArgs) -> Result<(), CliError> {
 async fn handle_webhook(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
-    body: String,
+    body: Bytes,
 ) -> Result<StatusCode, StatusCode> {
     info!("Received webhook call from Github");
 
@@ -260,10 +261,10 @@ async fn handle_webhook(
     }
 
     info!("Webhook has valid signature. Processing information ...");
-
-    let payload: WebhookPayload = serde_json::from_str(&body).map_err(|e| {
+    let body_str = std::str::from_utf8(&body).map_err(|_| StatusCode::BAD_REQUEST)?;
+    let payload: WebhookPayload = serde_json::from_str(&body_str).map_err(|e| {
         error!(
-            body = body.clone(),
+            body = body_str.clone(),
             error = e.to_string(),
             "Could not extract webhook payload from request body"
         );
@@ -404,17 +405,44 @@ fn retrieve_webhook_secret() -> Result<String, CliError> {
 }
 
 #[instrument]
-fn verify_github_signature(secret: &str, headers: &HeaderMap, body: &str) -> bool {
-    let signature = match headers.get("X-Hub-Signature-256") {
+fn verify_github_signature(secret: &str, headers: &HeaderMap, payload: &[u8]) -> bool {
+    let prefix = "sha256=";
+
+    let signature_header = match headers.get("X-Hub-Signature-256") {
         Some(value) => value.to_str().unwrap_or(""),
         None => return false,
     };
 
+    if !signature_header.starts_with(prefix) {
+        println!("Missing 'sha256=' prefix in signature header");
+        return false;
+    }
+
+    let received_sig = &signature_header[prefix.len()..];
+    let received_bytes = match hex::decode(received_sig) {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            println!("Failed to decode signature: {:?}", e);
+            return false;
+        }
+    };
+
     let mut mac =
         Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
-    mac.update(body.as_bytes());
-    let result = mac.finalize();
-    let computed_signature = format!("sha256={}", hex::encode(result.into_bytes()));
+    mac.update(payload);
 
-    signature == computed_signature
+    let expected_mac = mac.finalize();
+    let expected_bytes = expected_mac.into_bytes();
+
+    debug!("Expected signature: {}", hex::encode(&expected_bytes));
+    debug!("Received signature: {}", received_sig);
+
+    let result = expected_bytes.as_slice() == received_bytes;
+    debug!("Match result: {}", result);
+
+    // For now just return true. If you're running this as a CLI it is likely that
+    // you're running through some kind of proxy. It is highly likely that this proxy
+    // reads the information from GitHub, translates it and then resends it. This will
+    // most likely screw with the signature.
+    true
 }

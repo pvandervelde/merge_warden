@@ -15,6 +15,10 @@ use tracing_subscriber::EnvFilter;
 
 use crate::errors::AzureFunctionsError;
 
+#[cfg(test)]
+#[path = "telemetry_tests.rs"]
+mod tests;
+
 fn init_logs(exporter: Exporter<Client>) -> Result<(), AzureFunctionsError> {
     let logger_provider = SdkLoggerProvider::builder()
         .with_batch_exporter(exporter)
@@ -85,7 +89,7 @@ pub async fn init_telemetry(
             app_insights_connection_string,
             reqwest::Client::new(),
         )
-        .map_err(|e| AzureFunctionsError::ConfigError("Invalid connection string".to_string()))?;
+        .map_err(|e| AzureFunctionsError::ConfigError(e.to_string()))?;
 
     //init_logs(azure_monitor_exporter.clone())?;
     init_metrics(azure_monitor_exporter.clone())?;

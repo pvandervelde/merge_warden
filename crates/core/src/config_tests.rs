@@ -1,7 +1,8 @@
 use crate::config::{ValidationConfig, CONVENTIONAL_COMMIT_REGEX, WORK_ITEM_REGEX};
 use proptest::prelude::*;
 
-// New corner case tests for CONVENTIONAL_COMMIT_REGEX
+use super::*;
+
 #[test]
 fn test_conventional_commit_regex_edge_cases() {
     let edge_cases = vec![
@@ -71,7 +72,57 @@ fn test_conventional_commit_regex_valid_formats() {
     }
 }
 
-// Test for ValidationConfig::default()
+proptest! {
+    #[test]
+    fn test_conventional_commit_regex_random_inputs(input in ".*") {
+        let _ = CONVENTIONAL_COMMIT_REGEX.is_match(&input); // Ensure no panic occurs
+    }
+
+    #[test]
+    fn test_work_item_regex_random_inputs(input in ".*") {
+        let _ = WORK_ITEM_REGEX.is_match(&input); // Ensure no panic occurs
+    }
+}
+
+#[test]
+fn test_default_auth_method() {
+    assert_eq!(default_auth_method(), "token");
+}
+
+#[test]
+fn test_default_provider() {
+    assert_eq!(default_provider(), "github");
+}
+
+#[test]
+fn test_missing_work_item_label() {
+    assert_eq!(MISSING_WORK_ITEM_LABEL, "missing-work-item");
+}
+
+#[test]
+fn test_rules_config_new() {
+    let config = RulesConfig::new();
+    assert!(!config.require_work_items);
+    assert_eq!(config.enforce_title_convention, Some(false));
+    assert_eq!(config.min_approvals, Some(1));
+}
+
+#[test]
+fn test_title_comment_marker() {
+    assert_eq!(TITLE_COMMENT_MARKER, "<!-- PR_TITLE_CHECK -->");
+}
+
+#[test]
+fn test_title_invalid_label() {
+    assert_eq!(TITLE_INVALID_LABEL, "invalid-title-format");
+}
+
+#[test]
+fn test_valid_pr_types() {
+    assert!(VALID_PR_TYPES.contains(&"feat"));
+    assert!(VALID_PR_TYPES.contains(&"fix"));
+}
+
 #[test]
 fn test_validation_config_default() {
     let config = ValidationConfig::default();
@@ -90,7 +141,6 @@ fn test_validation_config_default() {
     );
 }
 
-// New corner case tests for WORK_ITEM_REGEX
 #[test]
 fn test_work_item_regex_edge_cases() {
     let edge_cases = vec![
@@ -162,17 +212,5 @@ fn test_work_item_regex_valid_formats() {
             "WORK_ITEM_REGEX should match valid reference '{}'",
             reference
         );
-    }
-}
-
-proptest! {
-    #[test]
-    fn test_conventional_commit_regex_random_inputs(input in ".*") {
-        let _ = CONVENTIONAL_COMMIT_REGEX.is_match(&input); // Ensure no panic occurs
-    }
-
-    #[test]
-    fn test_work_item_regex_random_inputs(input in ".*") {
-        let _ = WORK_ITEM_REGEX.is_match(&input); // Ensure no panic occurs
     }
 }
