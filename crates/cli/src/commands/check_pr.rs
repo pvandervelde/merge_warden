@@ -351,7 +351,7 @@ async fn handle_webhook(
         }
     };
 
-    let provider = GitHubProvider::new(api_with_pat, state.user.clone());
+    let provider = GitHubProvider::new(api_with_pat);
 
     // Get pull request
     // Create a custom configuration
