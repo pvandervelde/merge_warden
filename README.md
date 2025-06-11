@@ -1,6 +1,52 @@
 # merge_warden
 
-This repository contains the Merge Warden project.
+Merge Warden is a GitHub Action and Azure Function designed to enforce pull request rules and automate workflows based on
+repository configuration. It supports features like PR title validation, work item references, and more.
+
+## Configuration: merge-warden Rules
+
+merge-warden supports repository-specific configuration of pull request rules via a TOML file.
+
+### Configuration File Location
+
+* The configuration file must be named `.github/merge-warden.toml` and reside in the default branch.
+
+### Purpose
+
+This file allows you to specify which rules merge-warden should enforce for pull requests, such as PR title format and work item requirements. If the file is missing or malformed, merge-warden will fall back to default settings and log a warning.
+
+### Example Configuration
+
+```toml
+schemaVersion = 1
+
+[policies.pullRequests.prTitle]
+format = "conventional-commits"
+
+[policies.pullRequests.workItem]
+required = true
+pattern = "#\\d+"
+```
+
+### Schema Description
+
+* `schemaVersion` (integer): Version of the configuration schema. Used for backward compatibility.
+* `[policies.pullRequests.prTitle]`:
+  * `format` (string): PR title format. Supported: `conventional-commits` (default).
+* `[policies.pullRequests.workItem]`:
+  * `required` (bool): Whether a work item reference is required in the PR description. Default: `true`.
+  * `pattern` (string): Regex pattern for work item references. Default: `#\\d+` (e.g., `#123`).
+
+### Default Behavior
+
+* PR title must follow the conventional commit format.
+* PR description must contain a work item reference matching `#<number>`.
+
+### Notes
+
+* Only the default branch is checked for the configuration file.
+* If the configuration file is missing, malformed, or has an unsupported schema version, merge-warden logs a warning and uses defaults.
+* The schema is designed to be extensible for future rules. Always specify `schemaVersion`.
 
 ## Release Process
 
