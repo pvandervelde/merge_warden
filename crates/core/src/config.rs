@@ -5,6 +5,10 @@
 use lazy_static::lazy_static;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::fs;
+use std::path::Path;
+
+use crate::errors::ConfigLoadError;
 
 #[cfg(test)]
 #[path = "config_tests.rs"]
@@ -69,6 +73,62 @@ impl DefaultConfig {
     }
 }
 
+/// Top-level configuration struct for merge-warden
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct MergeWardenConfig {
+    pub schemaVersion: u32,
+    #[serde(default)]
+    pub policies: PoliciesConfig,
+}
+
+impl Default for MergeWardenConfig {
+    fn default() -> Self {
+        Self {
+            schemaVersion: 1,
+            policies: PoliciesConfig::default(),
+        }
+    }
+}
+
+/// Policies configuration
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct PoliciesConfig {
+    #[serde(default, rename = "pullRequests")]
+    pub pull_requests: PullRequestsPoliciesConfig,
+}
+
+/// Pull request policies configuration
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+pub struct PullRequestsPoliciesConfig {
+    #[serde(default)]
+    pub prTitle: PullRequestsTitlePolicyConfig,
+
+    #[serde(default)]
+    pub workItem: WorkItemPolicyConfig,
+}
+
+/// Configuration for PR title policy
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PullRequestsTitlePolicyConfig {
+    /// PR title format (e.g., "conventional-commits")
+    #[serde(default = "PullRequestsTitlePolicyConfig::default_format")]
+    pub format: String,
+}
+
+impl PullRequestsTitlePolicyConfig {
+    fn default_format() -> String {
+        "conventional-commits".to_string()
+    }
+}
+
+impl Default for PullRequestsTitlePolicyConfig {
+    fn default() -> Self {
+        Self {
+            format: Self::default_format(),
+        }
+    }
+}
+
 /// Rules configuration
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct RulesConfig {
@@ -118,10 +178,70 @@ impl Default for ValidationConfig {
     }
 }
 
+/// Configuration for work item policy
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WorkItemPolicyConfig {
+    /// Whether a work item reference is required in the PR description
+    #[serde(default = "WorkItemPolicyConfig::default_required")]
+    pub required: bool,
+    /// Regex pattern for work item references
+    #[serde(default = "WorkItemPolicyConfig::default_pattern")]
+    pub pattern: String,
+}
+
+impl WorkItemPolicyConfig {
+    fn default_required() -> bool {
+        true
+    }
+    fn default_pattern() -> String {
+        "#\\d+".to_string()
+    }
+}
+
+impl Default for WorkItemPolicyConfig {
+    fn default() -> Self {
+        Self {
+            required: Self::default_required(),
+            pattern: Self::default_pattern(),
+        }
+    }
+}
+
 fn default_auth_method() -> String {
     "token".to_string()
 }
 
 fn default_provider() -> String {
     "github".to_string()
+}
+
+/// Loads the merge-warden configuration from the given path.
+//
+/// If the file is missing, malformed, or has an unsupported schema version,
+/// this function returns a default configuration and logs a warning.
+///
+/// # Arguments
+/// * `path` - Path to the configuration file
+///
+/// # Returns
+/// * `Ok(MergeWardenConfig)` if loaded and valid
+/// * `Err(ConfigLoadError)` if there is a problem
+pub fn load_merge_warden_config<P: AsRef<Path>>(
+    path: P,
+) -> Result<MergeWardenConfig, ConfigLoadError> {
+    let path_ref = path.as_ref();
+    let content = match fs::read_to_string(path_ref) {
+        Ok(c) => c,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(ConfigLoadError::NotFound(path_ref.display().to_string()));
+        }
+        Err(e) => return Err(ConfigLoadError::Io(e)),
+    };
+    let config: MergeWardenConfig = toml::from_str(&content)?;
+    if config.schemaVersion != 1 {
+        return Err(ConfigLoadError::UnsupportedSchemaVersion(
+            config.schemaVersion,
+        ));
+    }
+    Ok(config)
 }
