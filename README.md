@@ -3,6 +3,11 @@
 Merge Warden is a GitHub Action and Azure Function designed to enforce pull request rules and automate workflows based on
 repository configuration. It supports features like PR title validation, work item references, and more.
 
+## Features
+
+* **Pull Request Title Validation**: Enforces conventional commit formats for PR titles.
+* **Work Item References**: Ensures PR descriptions include references to work items (e.g., issue numbers).
+
 ## Configuration: merge-warden Rules
 
 merge-warden supports repository-specific configuration of pull request rules via a TOML file.
@@ -13,7 +18,9 @@ merge-warden supports repository-specific configuration of pull request rules vi
 
 ### Purpose
 
-This file allows you to specify which rules merge-warden should enforce for pull requests, such as PR title format and work item requirements. If the file is missing or malformed, merge-warden will fall back to default settings and log a warning.
+This file allows you to specify which rules merge-warden should enforce for pull requests, such as PR title format and
+work item requirements. If the file is missing or malformed, merge-warden will fall back to default settings and log a
+warning.
 
 ### Example Configuration
 
@@ -45,7 +52,8 @@ pattern = "#\\d+"
 ### Notes
 
 * Only the default branch is checked for the configuration file.
-* If the configuration file is missing, malformed, or has an unsupported schema version, merge-warden logs a warning and uses defaults.
+* If the configuration file is missing, malformed, or has an unsupported schema version, merge-warden logs a warning and
+  uses defaults.
 * The schema is designed to be extensible for future rules. Always specify `schemaVersion`.
 
 ## Release Process
