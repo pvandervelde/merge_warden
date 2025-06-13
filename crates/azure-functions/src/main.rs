@@ -4,7 +4,7 @@ use azure_identity::ManagedIdentityCredentialOptions;
 use azure_security_keyvault_secrets::SecretClient;
 use hmac::{Hmac, Mac};
 use merge_warden_core::{
-    config::{RulesConfig, ValidationConfig},
+    config::{load_merge_warden_config, RulesConfig, ValidationConfig},
     MergeWarden, WebhookPayload,
 };
 use merge_warden_developer_platforms::{
@@ -383,16 +383,31 @@ async fn handle_post_request(
 
     let provider = GitHubProvider::new(api_with_pat);
 
-    // Get pull request
-    // Create a custom configuration
-    let config = ValidationConfig {
-        enforce_conventional_commits: state.rules.enforce_title_convention.unwrap_or(false),
-        require_work_item_references: state.rules.require_work_items,
-        auto_label: true,
+    // Load the merge-warden TOML config file
+    let merge_warden_config_path = ".github/merge-warden.toml";
+    let validation_config = match load_merge_warden_config(merge_warden_config_path) {
+        Ok(merge_warden_config) => {
+            info!(
+                "Loaded merge-warden config from {}",
+                merge_warden_config_path
+            );
+            merge_warden_config.to_validation_config()
+        }
+        Err(e) => {
+            warn!(
+                "Failed to load merge-warden config from {}: {}. Falling back to defaults.",
+                merge_warden_config_path, e
+            );
+            ValidationConfig {
+                enforce_conventional_commits: state.rules.enforce_title_convention.unwrap_or(false),
+                require_work_item_references: state.rules.require_work_items,
+                auto_label: true,
+            }
+        }
     };
 
-    // Create a MergeWarden instance with custom configuration
-    let warden = MergeWarden::with_config(provider, config);
+    // Create a MergeWarden instance with loaded or fallback configuration
+    let warden = MergeWarden::with_config(provider, validation_config);
 
     // Process a pull request
     info!(
