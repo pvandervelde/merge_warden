@@ -214,3 +214,122 @@ fn test_work_item_regex_valid_formats() {
         );
     }
 }
+
+#[test]
+fn test_merge_warden_config_to_validation_config_conventional_commits_and_work_item() {
+    use crate::config::*;
+    let config = MergeWardenConfig {
+        schemaVersion: 1,
+        policies: PoliciesConfig {
+            pull_requests: PullRequestsPoliciesConfig {
+                prTitle: PullRequestsTitlePolicyConfig {
+                    format: "conventional-commits".to_string(),
+                },
+                workItem: WorkItemPolicyConfig {
+                    required: true,
+                    pattern: "#\\d+".to_string(),
+                },
+            },
+        },
+    };
+    let validation = config.to_validation_config();
+    assert!(validation.enforce_conventional_commits);
+    assert!(validation.require_work_item_references);
+    assert!(validation.auto_label);
+}
+
+#[test]
+fn test_merge_warden_config_to_validation_config_non_conventional_commits() {
+    use crate::config::*;
+    let config = MergeWardenConfig {
+        schemaVersion: 1,
+        policies: PoliciesConfig {
+            pull_requests: PullRequestsPoliciesConfig {
+                prTitle: PullRequestsTitlePolicyConfig {
+                    format: "none".to_string(),
+                },
+                workItem: WorkItemPolicyConfig {
+                    required: false,
+                    pattern: "#\\d+".to_string(),
+                },
+            },
+        },
+    };
+    let validation = config.to_validation_config();
+    assert!(!validation.enforce_conventional_commits);
+    assert!(!validation.require_work_item_references);
+    assert!(validation.auto_label);
+}
+
+#[test]
+fn test_load_merge_warden_config_valid() {
+    use crate::config::*;
+    use std::fs::File;
+    use std::io::Write;
+    use tempfile::tempdir;
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("merge-warden.toml");
+    let toml = r##"schemaVersion = 1
+[policies.pullRequests.prTitle]
+format = "conventional-commits"
+[policies.pullRequests.workItem]
+required = true
+pattern = "#\\d+"
+"##;
+    let mut file = File::create(&file_path).unwrap();
+    file.write_all(toml.as_bytes()).unwrap();
+    let config = load_merge_warden_config(&file_path).unwrap();
+    assert_eq!(config.schemaVersion, 1);
+    assert_eq!(
+        config.policies.pull_requests.prTitle.format,
+        "conventional-commits"
+    );
+    assert!(config.policies.pull_requests.workItem.required);
+    assert_eq!(config.policies.pull_requests.workItem.pattern, "#\\d+");
+}
+
+#[test]
+fn test_load_merge_warden_config_not_found() {
+    use crate::config::*;
+    let result = load_merge_warden_config("/nonexistent/path/merge-warden.toml");
+    assert!(matches!(result, Err(ConfigLoadError::NotFound(_))));
+}
+
+#[test]
+fn test_load_merge_warden_config_invalid_toml() {
+    use crate::config::*;
+    use std::fs::File;
+    use std::io::Write;
+    use tempfile::tempdir;
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("merge-warden.toml");
+    let toml = "not a valid toml";
+    let mut file = File::create(&file_path).unwrap();
+    file.write_all(toml.as_bytes()).unwrap();
+    let result = load_merge_warden_config(&file_path);
+    assert!(matches!(result, Err(ConfigLoadError::Toml(_))));
+}
+
+#[test]
+fn test_load_merge_warden_config_unsupported_version() {
+    use crate::config::*;
+    use std::fs::File;
+    use std::io::Write;
+    use tempfile::tempdir;
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("merge-warden.toml");
+    let toml = r##"schemaVersion = 999
+[policies.pullRequests.prTitle]
+format = "conventional-commits"
+[policies.pullRequests.workItem]
+required = true
+pattern = "#\\d+"
+"##;
+    let mut file = File::create(&file_path).unwrap();
+    file.write_all(toml.as_bytes()).unwrap();
+    let result = load_merge_warden_config(&file_path);
+    assert!(matches!(
+        result,
+        Err(ConfigLoadError::UnsupportedSchemaVersion(999))
+    ));
+}

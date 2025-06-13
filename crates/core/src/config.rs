@@ -81,6 +81,22 @@ pub struct MergeWardenConfig {
     pub policies: PoliciesConfig,
 }
 
+/// Convert a MergeWardenConfig (TOML) to a ValidationConfig (runtime enforcement)
+impl MergeWardenConfig {
+    pub fn to_validation_config(&self) -> ValidationConfig {
+        // For now, only support the main PR policies (title, work item)
+        let pr_policies = &self.policies.pull_requests;
+        let enforce_conventional_commits = pr_policies.prTitle.format == "conventional-commits";
+        let require_work_item_references = pr_policies.workItem.required;
+        // Auto-labeling is always enabled for now (could be made configurable later)
+        ValidationConfig {
+            enforce_conventional_commits,
+            require_work_item_references,
+            auto_label: true,
+        }
+    }
+}
+
 impl Default for MergeWardenConfig {
     fn default() -> Self {
         Self {
