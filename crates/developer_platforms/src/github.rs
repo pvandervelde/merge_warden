@@ -1,12 +1,6 @@
 use async_trait::async_trait;
 use jsonwebtoken::EncodingKey;
-use octocrab::{
-    models::{
-        pulls::{Review, ReviewState},
-        ReviewId,
-    },
-    Octocrab,
-};
+use octocrab::Octocrab;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{debug, error, info, instrument, warn};
