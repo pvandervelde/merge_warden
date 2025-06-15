@@ -1,6 +1,5 @@
-use super::*;
 use crate::{
-    config::ValidationConfig,
+    config::CurrentPullRequestValidationConfiguration,
     config::{
         MISSING_WORK_ITEM_LABEL, TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL,
         WORK_ITEM_COMMENT_MARKER,
@@ -462,16 +461,12 @@ async fn test_constructor_new() {
 
     // Verify the default configuration
     assert!(
-        warden.config.enforce_conventional_commits,
+        warden.config.enforce_title_convention,
         "Default config should enforce conventional commits"
     );
     assert!(
-        warden.config.require_work_item_references,
+        warden.config.enforce_work_item_references,
         "Default config should require work item references"
-    );
-    assert!(
-        warden.config.auto_label,
-        "Default config should enable auto-labeling"
     );
 }
 
@@ -481,10 +476,13 @@ async fn test_constructor_with_config() {
     let provider = MockGitProvider::new();
 
     // Create a custom configuration
-    let config = ValidationConfig {
-        enforce_conventional_commits: false,
-        require_work_item_references: true,
-        auto_label: false,
+    let config = CurrentPullRequestValidationConfiguration {
+        enforce_title_convention: false,
+        title_pattern: "ab".to_string(),
+        invalid_title_label: None,
+        enforce_work_item_references: true,
+        work_item_reference_pattern: "cd".to_string(),
+        missing_work_item_label: None,
     };
 
     // Create a MergeWarden instance with custom config
@@ -492,16 +490,12 @@ async fn test_constructor_with_config() {
 
     // Verify the custom configuration
     assert!(
-        !warden.config.enforce_conventional_commits,
+        !warden.config.enforce_title_convention,
         "Custom config should not enforce conventional commits"
     );
     assert!(
-        warden.config.require_work_item_references,
+        warden.config.enforce_work_item_references,
         "Custom config should require work item references"
-    );
-    assert!(
-        !warden.config.auto_label,
-        "Custom config should not enable auto-labeling"
     );
 }
 
@@ -783,10 +777,13 @@ async fn test_process_pull_request_custom_config_disabled_checks() {
     provider.set_pull_request(pr);
 
     // Create a custom configuration with disabled checks
-    let config = ValidationConfig {
-        enforce_conventional_commits: false,
-        require_work_item_references: false,
-        auto_label: false,
+    let config = CurrentPullRequestValidationConfiguration {
+        enforce_title_convention: false,
+        title_pattern: "ab".to_string(),
+        invalid_title_label: None,
+        enforce_work_item_references: false,
+        work_item_reference_pattern: "cd".to_string(),
+        missing_work_item_label: None,
     };
 
     // Create a MergeWarden instance with custom config
