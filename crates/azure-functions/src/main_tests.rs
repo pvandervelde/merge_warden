@@ -1,9 +1,9 @@
-use crate::{AppConfig, AppState};
+use crate::AppState;
 
 use super::{handle_post_request, verify_github_signature};
 use axum::{extract::State, http::HeaderMap};
 use hmac::{Hmac, Mac};
-use merge_warden_core::config::RulesConfig;
+use merge_warden_core::config::ApplicationDefaults;
 use merge_warden_developer_platforms::models::User;
 use octocrab::Octocrab;
 use sha2::Sha256;
@@ -17,10 +17,13 @@ async fn test_handle_webhook() {
             id: 10,
             login: "a".to_string(),
         },
-        rules: RulesConfig {
-            require_work_items: true,
-            enforce_title_convention: Some(true),
-            min_approvals: None,
+        policies: ApplicationDefaults {
+            enable_title_validation: false,
+            default_title_pattern: "ab".to_string(),
+            default_invalid_title_label: None,
+            enable_work_item_validation: false,
+            default_work_item_pattern: "cd".to_string(),
+            default_missing_work_item_label: None,
         },
         webhook_secret: "test_secret".to_string(),
     });
@@ -113,8 +116,12 @@ async fn test_create_github_app_invalid_key() {
         app_private_key: "invalid".to_string(),
         webhook_secret: "secret".to_string(),
         port_number: 3000,
-        require_work_items: false,
         enforce_title_convention: false,
+        default_title_pattern: Some("ab".to_string()),
+        default_invalid_title_label: None,
+        require_work_items: false,
+        default_work_item_pattern: Some("cd".to_string()),
+        default_missing_work_item_label: None,
     };
     let result = super::create_github_app(&config).await;
     assert!(result.is_err());
@@ -128,7 +135,7 @@ async fn test_handle_post_request_invalid_signature() {
     let state = Arc::new(AppState {
         octocrab: octocrab::Octocrab::default(),
         user: merge_warden_developer_platforms::models::User::default(),
-        rules: merge_warden_core::config::RulesConfig::default(),
+        policies: merge_warden_core::config::ApplicationDefaults::default(),
         webhook_secret: "secret".to_string(),
     });
     let headers = HeaderMap::new();
