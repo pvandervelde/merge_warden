@@ -2,7 +2,7 @@ use anyhow::Result;
 use clap::Subcommand;
 use tracing::{debug, error, info, instrument};
 
-use crate::config::{get_config_path, Config};
+use crate::config::{get_config_path, AppConfig};
 use crate::errors::CliError;
 
 /// Subcommands for the config command
@@ -76,7 +76,7 @@ fn init_config(path: Option<&str>) -> Result<(), CliError> {
         return Err(err);
     }
 
-    let config = Config::default();
+    let config = AppConfig::default();
     if let Err(e) = config.save(&config_path) {
         error!(message = "Failed to save configuration", path = ?config_path, error = ?e);
         return Err(CliError::ConfigError(
@@ -95,7 +95,7 @@ fn validate_config(path: Option<&str>) -> Result<(), CliError> {
     let config_path = get_config_path(path);
     debug!(message = "Validating configuration", path = ?config_path);
 
-    match Config::load(&config_path) {
+    match AppConfig::load(&config_path) {
         Ok(_) => {
             info!(message = "Configuration is valid", path = ?config_path);
             println!("Configuration is valid");
@@ -120,7 +120,7 @@ fn get_config(path: Option<&str>, key: Option<&str>) -> Result<(), CliError> {
     let config_path = get_config_path(path);
     debug!(message = "Getting configuration", path = ?config_path, key = ?key);
 
-    let config = match Config::load(&config_path) {
+    let config = match AppConfig::load(&config_path) {
         Ok(c) => c,
         Err(e) => {
             error!(message = "Failed to load configuration", path = ?config_path, error = ?e);
@@ -158,9 +158,9 @@ fn set_config(path: Option<&str>, key: &str, value: &str) -> Result<(), CliError
 
     // Load existing config or create a new one
     let mut config = match if config_path.exists() {
-        Config::load(&config_path)
+        AppConfig::load(&config_path)
     } else {
-        Ok(Config::default())
+        Ok(AppConfig::default())
     } {
         Ok(c) => c,
         Err(e) => {
@@ -191,7 +191,7 @@ fn set_config(path: Option<&str>, key: &str, value: &str) -> Result<(), CliError
 }
 
 /// Get a value from the configuration by key path
-fn get_config_value(config: &Config, key: &str) -> Result<String, CliError> {
+fn get_config_value(config: &AppConfig, key: &str) -> Result<String, CliError> {
     let parts: Vec<&str> = key.split('.').collect();
     if parts.is_empty() {
         return Err(CliError::InvalidArguments(
@@ -208,17 +208,12 @@ fn get_config_value(config: &Config, key: &str) -> Result<String, CliError> {
             ))),
         },
         "rules" => match parts.get(1) {
-            Some(&"require_work_items") => Ok(config.rules.require_work_items.to_string()),
-            Some(&"enforce_title_convention") => Ok(config
-                .rules
-                .enforce_title_convention
-                .unwrap_or_default()
-                .to_string()),
-            Some(&"min_approvals") => Ok(config
-                .rules
-                .min_approvals
-                .map(|n| n.to_string())
-                .unwrap_or_default()),
+            Some(&"enforceWorkItemValidation") => {
+                Ok(config.policies.enable_work_item_validation.to_string())
+            }
+            Some(&"enforceTitleValidation") => {
+                Ok(config.policies.enable_title_validation.to_string())
+            }
             _ => Err(CliError::InvalidArguments(format!(
                 "Invalid configuration key: {}",
                 key
@@ -239,7 +234,7 @@ fn get_config_value(config: &Config, key: &str) -> Result<String, CliError> {
 }
 
 /// Set a value in the configuration by key path
-fn set_config_value(config: &mut Config, key: &str, value: &str) -> Result<(), CliError> {
+fn set_config_value(config: &mut AppConfig, key: &str, value: &str) -> Result<(), CliError> {
     let parts: Vec<&str> = key.split('.').collect();
     if parts.is_empty() {
         return Err(CliError::InvalidArguments(
@@ -259,8 +254,8 @@ fn set_config_value(config: &mut Config, key: &str, value: &str) -> Result<(), C
             ))),
         },
         "rules" => match parts.get(1) {
-            Some(&"require_work_items") => {
-                config.rules.require_work_items = value.parse().map_err(|_| {
+            Some(&"enforceWorkItemValidation") => {
+                config.policies.enable_work_item_validation = value.parse().map_err(|_| {
                     CliError::InvalidArguments(format!(
                         "Invalid value for require_work_items: {}",
                         value
@@ -268,26 +263,13 @@ fn set_config_value(config: &mut Config, key: &str, value: &str) -> Result<(), C
                 })?;
                 Ok(())
             }
-            Some(&"enforce_title_convention") => {
-                if value.is_empty() {
-                    config.rules.enforce_title_convention = None;
-                } else {
-                    let enforce = value.parse().unwrap_or(false);
-                    config.rules.enforce_title_convention = Some(enforce);
-                }
-                Ok(())
-            }
-            Some(&"min_approvals") => {
-                if value.is_empty() {
-                    config.rules.min_approvals = None;
-                } else {
-                    config.rules.min_approvals = Some(value.parse().map_err(|_| {
-                        CliError::InvalidArguments(format!(
-                            "Invalid value for min_approvals: {}",
-                            value
-                        ))
-                    })?);
-                }
+            Some(&"enforceTitleValidation") => {
+                config.policies.enable_title_validation = value.parse().map_err(|_| {
+                    CliError::InvalidArguments(format!(
+                        "Invalid value for require_work_items: {}",
+                        value
+                    ))
+                })?;
                 Ok(())
             }
             _ => Err(CliError::InvalidArguments(format!(

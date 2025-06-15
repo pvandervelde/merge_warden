@@ -4,7 +4,7 @@ use keyring::Entry;
 use std::path::PathBuf;
 use tracing::{debug, error, info, instrument};
 
-use crate::config::{get_config_path, Config};
+use crate::config::{get_config_path, AppConfig};
 use crate::errors::CliError;
 
 pub const KEY_RING_SERVICE_NAME: &str = "merge_warden_cli";
@@ -46,7 +46,7 @@ async fn auth_github(method: &str) -> Result<(), CliError> {
     debug!(message = "Authenticating with GitHub", method = method);
 
     let config_path = get_config_path(None);
-    let mut config = match Config::load(&config_path) {
+    let mut config = match AppConfig::load(&config_path) {
         Ok(c) => c,
         Err(e) => {
             error!(message = "Failed to load configuration", path = ?config_path, error = ?e);
