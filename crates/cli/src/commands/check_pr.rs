@@ -4,6 +4,7 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use axum::Router;
+use axum_macros::debug_handler;
 use clap::Args;
 use hmac::{Hmac, Mac};
 use keyring::Entry;
@@ -247,6 +248,7 @@ pub async fn execute(args: CheckPrArgs) -> Result<(), CliError> {
     Ok(())
 }
 
+#[debug_handler]
 #[instrument(skip(state, headers, body))]
 async fn handle_webhook(
     State(state): State<Arc<AppState>>,

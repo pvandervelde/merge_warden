@@ -1,4 +1,5 @@
 use axum::{extract::State, routing::get, routing::post, Router};
+use axum_macros::debug_handler;
 use azure_core::credentials::TokenCredential;
 use azure_identity::ManagedIdentityCredentialOptions;
 use azure_security_keyvault_secrets::SecretClient;
@@ -337,6 +338,7 @@ async fn handle_get_request(
     Ok(StatusCode::OK)
 }
 
+#[debug_handler]
 #[instrument(skip(state, headers, body))]
 async fn handle_post_request(
     State(state): State<Arc<AppState>>,
