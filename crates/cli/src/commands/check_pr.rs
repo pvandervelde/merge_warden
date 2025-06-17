@@ -357,38 +357,45 @@ async fn handle_webhook(
 
     // Load the merge-warden TOML config file
     let merge_warden_config_path = ".github/merge-warden.toml";
-    let validation_config =
-        match load_merge_warden_config(merge_warden_config_path, &state.config.policies) {
-            Ok(merge_warden_config) => {
-                info!(
-                    "Loaded merge-warden config from {}",
-                    merge_warden_config_path
-                );
-                merge_warden_config.to_validation_config()
+    let validation_config = match load_merge_warden_config(
+        repo_owner,
+        &repository.name,
+        merge_warden_config_path,
+        &provider,
+        &state.config.policies,
+    )
+    .await
+    {
+        Ok(merge_warden_config) => {
+            info!(
+                "Loaded merge-warden config from {}",
+                merge_warden_config_path
+            );
+            merge_warden_config.to_validation_config()
+        }
+        Err(e) => {
+            warn!(
+                "Failed to load merge-warden config from {}: {}. Falling back to defaults.",
+                merge_warden_config_path, e
+            );
+            CurrentPullRequestValidationConfiguration {
+                enforce_title_convention: state.config.policies.enable_title_validation,
+                title_pattern: state.config.policies.default_title_pattern.clone(),
+                invalid_title_label: state.config.policies.default_invalid_title_label.clone(),
+                enforce_work_item_references: state.config.policies.enable_work_item_validation,
+                work_item_reference_pattern: state
+                    .config
+                    .policies
+                    .default_work_item_pattern
+                    .clone(),
+                missing_work_item_label: state
+                    .config
+                    .policies
+                    .default_missing_work_item_label
+                    .clone(),
             }
-            Err(e) => {
-                warn!(
-                    "Failed to load merge-warden config from {}: {}. Falling back to defaults.",
-                    merge_warden_config_path, e
-                );
-                CurrentPullRequestValidationConfiguration {
-                    enforce_title_convention: state.config.policies.enable_title_validation,
-                    title_pattern: state.config.policies.default_title_pattern.clone(),
-                    invalid_title_label: state.config.policies.default_invalid_title_label.clone(),
-                    enforce_work_item_references: state.config.policies.enable_work_item_validation,
-                    work_item_reference_pattern: state
-                        .config
-                        .policies
-                        .default_work_item_pattern
-                        .clone(),
-                    missing_work_item_label: state
-                        .config
-                        .policies
-                        .default_missing_work_item_label
-                        .clone(),
-                }
-            }
-        };
+        }
+    };
 
     // Create a MergeWarden instance with loaded or fallback configuration
     let warden = MergeWarden::with_config(provider, validation_config);
