@@ -1,13 +1,31 @@
 use crate::config::{
     CurrentPullRequestValidationConfiguration, CONVENTIONAL_COMMIT_REGEX, WORK_ITEM_REGEX,
 };
+use async_trait::async_trait;
+use merge_warden_developer_platforms::errors::Error;
 use proptest::prelude::*;
+use std::fs::File;
+use std::io::Write;
+use tempfile::tempdir;
 
 use super::*;
 
+struct MockFetcher {}
+
+#[async_trait]
+impl ConfigFetcher for MockFetcher {
+    async fn fetch_config(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        path: &str,
+    ) -> Result<Option<String>, Error> {
+        Ok(None)
+    }
+}
+
 #[test]
 fn test_application_defaults_struct_and_methods() {
-    use crate::config::*;
     let defaults = ApplicationDefaults::default();
     assert!(!defaults.enable_title_validation);
     assert_eq!(
@@ -106,7 +124,6 @@ proptest! {
 
 #[test]
 fn test_current_pr_validation_config_new() {
-    use crate::config::*;
     let config = CurrentPullRequestValidationConfiguration::new(
         true,
         Some("custom-title".to_string()),
@@ -131,7 +148,6 @@ fn test_current_pr_validation_config_new() {
 
 #[test]
 fn test_custom_regex_patterns_are_used() {
-    use crate::config::*;
     let config = RepositoryProvidedConfig {
         schema_version: 1,
         policies: PoliciesConfig {
@@ -159,27 +175,20 @@ fn test_custom_regex_patterns_are_used() {
     assert!(custom_work_item_regex.is_match(custom_work_item));
 }
 
-#[test]
-fn test_load_merge_warden_config_empty_file() {
-    use crate::config::*;
-    use std::fs::File;
-    use tempfile::tempdir;
+#[tokio::test]
+async fn test_load_merge_warden_config_empty_file() {
     let dir = tempdir().unwrap();
-    let file_path = dir.path().join("merge-warden.toml");
-    File::create(&file_path).unwrap();
+    let file_path = "merge-warden.toml";
+    let fetcher = MockFetcher {};
     let app_defaults = ApplicationDefaults::default();
-    let result = load_merge_warden_config(&file_path, &app_defaults);
+    let result = load_merge_warden_config("a", "b", &file_path, &fetcher, &app_defaults).await;
     assert!(matches!(result, Err(ConfigLoadError::Toml(_))));
 }
 
-#[test]
-fn test_load_merge_warden_config_invalid_schema() {
-    use crate::config::*;
-    use std::fs::File;
-    use std::io::Write;
-    use tempfile::tempdir;
+#[tokio::test]
+async fn test_load_merge_warden_config_invalid_schema() {
     let dir = tempdir().unwrap();
-    let file_path = dir.path().join("merge-warden.toml");
+    let file_path = "merge-warden.toml";
     let toml = r##"schemaVersion = 2
 [policies.pullRequests.prTitle]
 required = true
@@ -190,22 +199,20 @@ pattern = "bar"
 "##;
     let mut file = File::create(&file_path).unwrap();
     file.write_all(toml.as_bytes()).unwrap();
+
+    let fetcher = MockFetcher {};
     let app_defaults = ApplicationDefaults::default();
-    let result = load_merge_warden_config(&file_path, &app_defaults);
+    let result = load_merge_warden_config("a", "b", &file_path, &fetcher, &app_defaults).await;
     assert!(matches!(
         result,
         Err(ConfigLoadError::UnsupportedSchemaVersion(2))
     ));
 }
 
-#[test]
-fn test_load_merge_warden_config_malformed_toml() {
-    use crate::config::*;
-    use std::fs::File;
-    use std::io::Write;
-    use tempfile::tempdir;
+#[tokio::test]
+async fn test_load_merge_warden_config_malformed_toml() {
     let dir = tempdir().unwrap();
-    let file_path = dir.path().join("merge-warden.toml");
+    let file_path = "merge-warden.toml";
     let toml = r#"schemaVersion = 1
 [policies.pullRequests.prTitle
 required = true
@@ -213,27 +220,32 @@ pattern = "foo"
 "#; // missing closing bracket for table
     let mut file = File::create(&file_path).unwrap();
     file.write_all(toml.as_bytes()).unwrap();
+
+    let fetcher = MockFetcher {};
     let app_defaults = ApplicationDefaults::default();
-    let result = load_merge_warden_config(&file_path, &app_defaults);
+    let result = load_merge_warden_config("a", "b", &file_path, &fetcher, &app_defaults).await;
     assert!(matches!(result, Err(ConfigLoadError::Toml(_))));
 }
 
-#[test]
-fn test_load_merge_warden_config_missing_file() {
-    use crate::config::*;
+#[tokio::test]
+async fn test_load_merge_warden_config_missing_file() {
+    let fetcher = MockFetcher {};
     let app_defaults = ApplicationDefaults::default();
-    let result = load_merge_warden_config("/nonexistent/path/merge-warden.toml", &app_defaults);
+    let result = load_merge_warden_config(
+        "a",
+        "b",
+        "/nonexistent/path/merge-warden.toml",
+        &fetcher,
+        &app_defaults,
+    )
+    .await;
     assert!(matches!(result, Err(ConfigLoadError::NotFound(_))));
 }
 
-#[test]
-fn test_load_merge_warden_config_missing_optional_fields() {
-    use crate::config::*;
-    use std::fs::File;
-    use std::io::Write;
-    use tempfile::tempdir;
+#[tokio::test]
+async fn test_load_merge_warden_config_missing_optional_fields() {
     let dir = tempdir().unwrap();
-    let file_path = dir.path().join("merge-warden.toml");
+    let file_path = "merge-warden.toml";
     let toml = r#"schemaVersion = 1
 [policies.pullRequests.prTitle]
 required = true
@@ -246,8 +258,12 @@ pattern = "bar"
 "#;
     let mut file = File::create(&file_path).unwrap();
     file.write_all(toml.as_bytes()).unwrap();
+
+    let fetcher = MockFetcher {};
     let app_defaults = ApplicationDefaults::default();
-    let config = load_merge_warden_config(&file_path, &app_defaults).unwrap();
+    let config = load_merge_warden_config("a", "b", &file_path, &fetcher, &app_defaults)
+        .await
+        .unwrap();
     assert_eq!(
         config
             .policies
@@ -266,20 +282,18 @@ pattern = "bar"
     );
 }
 
-#[test]
-fn test_load_merge_warden_config_only_schema_version() {
-    use crate::config::*;
-    use std::fs::File;
-    use std::io::Write;
-    use tempfile::tempdir;
+#[tokio::test]
+async fn test_load_merge_warden_config_only_schema_version() {
     let dir = tempdir().unwrap();
-    let file_path = dir.path().join("merge-warden.toml");
+    let file_path = "merge-warden.toml";
     let toml = r#"schemaVersion = 1
 "#;
     let mut file = File::create(&file_path).unwrap();
     file.write_all(toml.as_bytes()).unwrap();
+
+    let fetcher = MockFetcher {};
     let app_defaults = ApplicationDefaults::default();
-    let config = load_merge_warden_config(&file_path, &app_defaults);
+    let config = load_merge_warden_config("a", "b", &file_path, &fetcher, &app_defaults).await;
     // Should succeed, but policies will be defaulted
     assert!(config.is_ok());
     let config = config.unwrap();
@@ -289,14 +303,10 @@ fn test_load_merge_warden_config_only_schema_version() {
     assert!(config.policies.pull_requests.work_item_policies.required);
 }
 
-#[test]
-fn test_load_merge_warden_config_valid() {
-    use crate::config::*;
-    use std::fs::File;
-    use std::io::Write;
-    use tempfile::tempdir;
+#[tokio::test]
+async fn test_load_merge_warden_config_valid() {
     let dir = tempdir().unwrap();
-    let file_path = dir.path().join("merge-warden.toml");
+    let file_path = "merge-warden.toml";
     let toml = r##"schemaVersion = 1
 [policies.pullRequests.prTitle]
 required = true
@@ -309,8 +319,12 @@ label_if_missing = "missing-work-item"
 "##;
     let mut file = File::create(&file_path).unwrap();
     file.write_all(toml.as_bytes()).unwrap();
+
+    let fetcher = MockFetcher {};
     let app_defaults = ApplicationDefaults::default();
-    let config = load_merge_warden_config(&file_path, &app_defaults).unwrap();
+    let config = load_merge_warden_config("a", "b", &file_path, &fetcher, &app_defaults)
+        .await
+        .unwrap();
     assert_eq!(config.schema_version, 1);
     assert!(config.policies.pull_requests.title_policies.required);
     assert_eq!(
@@ -343,7 +357,6 @@ label_if_missing = "missing-work-item"
 
 #[test]
 fn test_merge_warden_config_to_validation_config_conventional_commits_and_work_item() {
-    use crate::config::*;
     let config = RepositoryProvidedConfig {
         schema_version: 1,
         policies: PoliciesConfig {
@@ -376,7 +389,6 @@ fn test_merge_warden_config_to_validation_config_conventional_commits_and_work_i
 
 #[test]
 fn test_merge_warden_config_to_validation_config_non_conventional_commits() {
-    use crate::config::*;
     let config = RepositoryProvidedConfig {
         schema_version: 1,
         policies: PoliciesConfig {
