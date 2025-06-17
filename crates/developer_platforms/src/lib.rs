@@ -8,6 +8,19 @@ pub mod models;
 use errors::Error;
 use models::{Comment, Label, PullRequest};
 
+/// Trait to fetch configuration files from remote repositories.
+#[async_trait]
+pub trait ConfigFetcher: Sync + Send {
+    /// Fetch the content of a configuration file at the given path.
+    /// Returns Ok(Some(content)) if found, Ok(None) if not found, or Err on error.
+    async fn fetch_config(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        path: &str,
+    ) -> Result<Option<String>, Error>;
+}
+
 /// Trait for interacting with developer platforms that provide pull requests (e.g., GitHub, GitLab).
 ///
 /// Implementations of this trait provide the necessary functionality to
