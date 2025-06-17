@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use base64::Engine;
 use jsonwebtoken::EncodingKey;
 use octocrab::Octocrab;
 use serde::{Deserialize, Serialize};
@@ -8,7 +9,7 @@ use tracing::{debug, error, info, instrument, warn};
 use crate::{
     errors::Error,
     models::{Comment, Label, PullRequest, User},
-    PullRequestProvider,
+    ConfigFetcher, PullRequestProvider,
 };
 
 #[cfg(test)]
@@ -245,8 +246,87 @@ pub struct GitHubProvider {
 }
 
 impl GitHubProvider {
+    pub async fn fetch_default_branch(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+    ) -> Result<String, crate::errors::Error> {
+        let repo = match self.client.repos(repo_owner, repo_name).get().await {
+            Ok(r) => r,
+            Err(e) => {
+                log_octocrab_error("Failed to get repository information", e);
+                return Err(Error::InvalidResponse);
+            }
+        };
+        let branch = repo.default_branch.unwrap_or("main".to_string());
+
+        Ok(branch)
+    }
+
+    /// Fetch the content of a file from the repository at the given path.
+    /// Returns Ok(Some(content)) if found, Ok(None) if not found, or Err on error.
+    pub async fn fetch_file_content(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        path: &str,
+        reference: Option<&str>,
+    ) -> Result<Option<String>, crate::errors::Error> {
+        let content_result = self
+            .client
+            .repos(repo_owner, repo_name)
+            .get_content()
+            .path(path)
+            .r#ref(reference.unwrap_or("main"))
+            .send()
+            .await;
+
+        match content_result {
+            Ok(response) => {
+                if let Some(file) = response.items.into_iter().next() {
+                    if let Some(content) = file.content {
+                        // GitHub API returns base64 encoded content with newlines
+                        let decoded = base64::engine::general_purpose::STANDARD
+                            .decode(content.replace('\n', ""))
+                            .map_err(|_| crate::errors::Error::InvalidResponse)?;
+                        let content_str = String::from_utf8(decoded)
+                            .map_err(|_| crate::errors::Error::InvalidResponse)?;
+                        Ok(Some(content_str))
+                    } else {
+                        Ok(None)
+                    }
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(e) => {
+                // If 404, treat as not found
+                if e.to_string().contains("404") {
+                    Ok(None)
+                } else {
+                    Err(crate::errors::Error::ApiError())
+                }
+            }
+        }
+    }
+
     pub fn new(client: Octocrab) -> Self {
         Self { client }
+    }
+}
+
+#[async_trait]
+impl ConfigFetcher for GitHubProvider {
+    #[instrument]
+    async fn fetch_config(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        path: &str,
+    ) -> Result<Option<String>, Error> {
+        let default_branch_name = self.fetch_default_branch(repo_owner, repo_name).await?;
+        self.fetch_file_content(repo_owner, repo_name, path, Some(&default_branch_name))
+            .await
     }
 }
 
