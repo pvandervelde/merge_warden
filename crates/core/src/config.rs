@@ -3,9 +3,9 @@
 //! This module centralizes configuration constants and settings used throughout
 //! the crate, making it easier to modify behavior in one place.
 use lazy_static::lazy_static;
+use merge_warden_developer_platforms::ConfigFetcher;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
-use std::path::Path;
 
 use crate::errors::ConfigLoadError;
 
@@ -554,25 +554,31 @@ impl Default for WorkItemPolicyConfig {
 /// this function returns a default configuration and logs a warning.
 ///
 /// # Arguments
+/// * `repo_owner` - The name of the user or organisation that owns the repository in which the configuration is stored
+/// * `repo_name` - The name of the repository in which the configuration is stored
 /// * `path` - Path to the configuration file
+/// * `fetch_repo_config` - The config fetcher used to get the config from the repository
 /// * `app_defaults` - The default setting values for the application
 ///
 /// # Returns
 /// * `Ok(RepositoryConfig)` if loaded and valid
 /// * `Err(ConfigLoadError)` if there is a problem
-pub fn load_merge_warden_config<P: AsRef<Path>>(
-    path: P,
+pub async fn load_merge_warden_config(
+    repo_owner: &str,
+    repo_name: &str,
+    path_relative_to_repository_root: &str,
+    fetch_repo_config: &dyn ConfigFetcher,
     app_defaults: &ApplicationDefaults,
 ) -> Result<RepositoryProvidedConfig, ConfigLoadError> {
-    let path_ref = path.as_ref();
-    let content = match std::fs::read_to_string(path_ref) {
+    let potential_content = match fetch_repo_config
+        .fetch_config(repo_owner, repo_name, path_relative_to_repository_root)
+        .await
+    {
         Ok(c) => c,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-            return Err(ConfigLoadError::NotFound(path_ref.display().to_string()));
-        }
-        Err(e) => return Err(ConfigLoadError::Io(e)),
+        Err(e) => return Err(ConfigLoadError::NotFound(e.to_string())),
     };
 
+    let content = potential_content.unwrap_or(String::new());
     let mut config: RepositoryProvidedConfig = toml::from_str(&content)?;
     if config.schema_version != 1 {
         return Err(ConfigLoadError::UnsupportedSchemaVersion(
