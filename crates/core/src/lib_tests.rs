@@ -168,6 +168,7 @@ impl PullRequestProvider for ErrorMockGitProvider {
         _conclusion: &str,
         _output_title: &str,
         _output_summary: &str,
+        _output_text: &str,
     ) -> Result<(), Error> {
         Ok(())
     }
@@ -306,6 +307,7 @@ impl PullRequestProvider for DynamicMockGitProvider {
         _conclusion: &str,
         _output_title: &str,
         _output_summary: &str,
+        _output_text: &str,
     ) -> Result<(), Error> {
         Ok(())
     }
@@ -446,6 +448,7 @@ impl PullRequestProvider for MockGitProvider {
         _conclusion: &str,
         _output_title: &str,
         _output_summary: &str,
+        _output_text: &str,
     ) -> Result<(), Error> {
         Ok(())
     }
@@ -742,8 +745,7 @@ async fn test_handle_title_validation_invalid_to_valid() {
     // Handle title validation with valid title
     warden
         .communicate_pr_title_validity_status("owner", "repo", &pr, true)
-        .await
-        .unwrap();
+        .await;
 
     // Verify the label was removed
     let labels = warden.provider.get_labels();
@@ -1100,8 +1102,7 @@ async fn test_handle_work_item_validation_missing_to_present() {
     // Handle work item validation with valid work item reference
     warden
         .communicate_pr_work_item_validity_status("owner", "repo", &pr, true)
-        .await
-        .unwrap();
+        .await;
 
     // Verify the label was removed
     let labels = warden.provider.get_labels();

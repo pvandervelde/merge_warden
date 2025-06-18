@@ -59,7 +59,7 @@ pub trait ConfigFetcher: Sync + Send {
 ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
 ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
 ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
-///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
+///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
 /// }
 /// ```
 #[async_trait]
@@ -207,10 +207,12 @@ pub trait PullRequestProvider {
     /// * `conclusion` - The check run conclusion (e.g., "success", "failure")
     /// * `output_title` - The title for the check run output
     /// * `output_summary` - The summary for the check run output
+    /// * `output_text` - The text for the check run output. Supports Markdown
     ///
     /// # Returns
     ///
     /// A `Result` indicating success or failure
+    #[allow(clippy::too_many_arguments)]
     async fn update_pr_check_status(
         &self,
         repo_owner: &str,
@@ -219,5 +221,6 @@ pub trait PullRequestProvider {
         conclusion: &str,
         output_title: &str,
         output_summary: &str,
+        output_text: &str,
     ) -> Result<(), Error>;
 }

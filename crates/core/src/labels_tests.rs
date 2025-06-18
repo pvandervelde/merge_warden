@@ -117,6 +117,7 @@ impl PullRequestProvider for MockGitProvider {
         _conclusion: &str,
         _output_title: &str,
         _output_summary: &str,
+        _output_text: &str,
     ) -> Result<(), Error> {
         unimplemented!("Not needed for this test")
     }
@@ -198,6 +199,7 @@ impl PullRequestProvider for ErrorMockGitProvider {
         _conclusion: &str,
         _output_title: &str,
         _output_summary: &str,
+        _output_text: &str,
     ) -> Result<(), Error> {
         unimplemented!("Not needed for this test")
     }
