@@ -753,6 +753,41 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
             "Got pull request",
         );
 
+        // If the pull request is a draft then we don't review it initially. We wait until it is ready for review
+        let check_title = "MergeWarden PR Validation";
+        if pr.draft {
+            info!(message = "Pull request is in draft mode. Will not review pull request until it is marked as ready for review.");
+
+            self.provider
+                .update_pr_check_status(
+                    repo_owner,
+                    repo_name,
+                    pr_number,
+                    "skipped",
+                    check_title,
+                    "Pull request is in draft mode. Will not review pull request until it is marked as ready for review.",
+                    "",
+                )
+                .await
+                .map_err(|e| {
+                    error!(
+                        repository_owner = repo_owner,
+                        repository = repo_name,
+                        pull_request = pr_number,
+                        error = e.to_string(),
+                        "Failed to add or update GitHub check run"
+                    );
+                    MergeWardenError::FailedToUpdatePullRequest(
+                        "Failed to add or update GitHub check run".to_string(),
+                    )
+                })?;
+            return Ok(CheckResult {
+                title_valid: true,
+                work_item_referenced: true,
+                labels: Vec::<String>::new(),
+            });
+        }
+
         // Check PR title follows the conventional commit structure if enabled
         let is_title_valid = if self.config.enforce_title_convention {
             self.check_title(&pr)

@@ -307,12 +307,6 @@ async fn handle_webhook(
         return Err(StatusCode::BAD_REQUEST);
     };
 
-    // If the pull request is a draft then we don't review it initially. We wait until it is ready for review
-    if pr.draft {
-        info!(message = "Pull request is in draft mode. Will not review pull request until it is marked as ready for review.");
-        return Ok(StatusCode::OK);
-    }
-
     let parts: Vec<&str> = repository.full_name.split('/').collect();
     if parts.len() != 2 {
         warn!(
@@ -450,7 +444,7 @@ fn verify_github_signature(secret: &str, headers: &HeaderMap, payload: &[u8]) ->
     };
 
     if !signature_header.starts_with(prefix) {
-        println!("Missing 'sha256=' prefix in signature header");
+        error!("Missing 'sha256=' prefix in signature header");
         return false;
     }
 
@@ -458,7 +452,7 @@ fn verify_github_signature(secret: &str, headers: &HeaderMap, payload: &[u8]) ->
     let received_bytes = match hex::decode(received_sig) {
         Ok(bytes) => bytes,
         Err(e) => {
-            println!("Failed to decode signature: {:?}", e);
+            error!("Failed to decode signature: {:?}", e);
             return false;
         }
     };
@@ -470,11 +464,11 @@ fn verify_github_signature(secret: &str, headers: &HeaderMap, payload: &[u8]) ->
     let expected_mac = mac.finalize();
     let expected_bytes = expected_mac.into_bytes();
 
-    debug!("Expected signature: {}", hex::encode(expected_bytes));
-    debug!("Received signature: {}", received_sig);
+    //debug!("Expected signature: {}", hex::encode(expected_bytes));
+    //debug!("Received signature: {}", received_sig);
 
     let result = expected_bytes.as_slice() == received_bytes;
-    debug!("Match result: {}", result);
+    //debug!("Match result: {}", result);
 
     // For now just return true. If you're running this as a CLI it is likely that
     // you're running through some kind of proxy. It is highly likely that this proxy

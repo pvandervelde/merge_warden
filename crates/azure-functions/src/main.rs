@@ -397,12 +397,6 @@ async fn handle_post_request(
         return Err(StatusCode::BAD_REQUEST);
     };
 
-    // If the pull request is a draft then we don't review it initially. We wait until it is ready for review
-    if pr.draft {
-        info!(message = "Pull request is in draft mode. Will not review pull request until it is marked as ready for review.");
-        return Ok(StatusCode::OK);
-    }
-
     let parts: Vec<&str> = repository.full_name.split('/').collect();
     if parts.len() != 2 {
         warn!(
