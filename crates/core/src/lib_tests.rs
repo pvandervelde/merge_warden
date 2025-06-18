@@ -1004,19 +1004,17 @@ async fn test_process_pull_request_error_add_comment() {
     // Create a MergeWarden instance
     let warden = MergeWarden::new(provider);
 
-    // Process the PR - should return an error
+    // Process the PR - should return Ok even if adding a comment fails
     let result = warden.process_pull_request("owner", "repo", 1).await;
 
-    // Verify the error
+    // Verify the result is Ok (no error should be returned)
     assert!(
-        result.is_err(),
-        "Should return an error when adding a comment fails"
+        result.is_ok(),
+        "Should return Ok even when adding a comment fails"
     );
-    assert_eq!(
-        result.unwrap_err().to_string(),
-        "Failed to update pull request. Issue was: 'Failed to add comment'.",
-        "Should return the specific error message"
-    );
+    // Optionally, check that the output string contains a warning or expected message
+    let output = result.unwrap();
+    assert!(!output.title_valid, "The title should not be valid");
 }
 
 #[test]

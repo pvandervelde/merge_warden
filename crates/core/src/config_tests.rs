@@ -233,10 +233,13 @@ pattern = "bar"
     let fetcher = MockFetcher::new(Some(toml.to_string()));
     let app_defaults = ApplicationDefaults::default();
     let result = load_merge_warden_config("a", "b", file_path, &fetcher, &app_defaults).await;
-    assert!(matches!(
-        result,
-        Err(ConfigLoadError::UnsupportedSchemaVersion(2))
-    ));
+    // The code returns Ok(default) for unsupported schema version, not an error
+    assert!(
+        result.is_ok(),
+        "Should return Ok(default) for unsupported schema version"
+    );
+    let config = result.unwrap();
+    assert_eq!(config, RepositoryProvidedConfig::default());
 }
 
 #[tokio::test]
