@@ -431,7 +431,7 @@ impl PullRequestsTitlePolicyConfig {
     }
 
     fn default_required() -> bool {
-        true
+        false
     }
 }
 
@@ -534,7 +534,7 @@ impl WorkItemPolicyConfig {
     }
 
     fn default_required() -> bool {
-        true
+        false
     }
 }
 
@@ -578,12 +578,15 @@ pub async fn load_merge_warden_config(
         Err(e) => return Err(ConfigLoadError::NotFound(e.to_string())),
     };
 
-    let content = potential_content.unwrap_or(String::new());
-    let mut config: RepositoryProvidedConfig = toml::from_str(&content)?;
-    if config.schema_version != 1 {
-        return Err(ConfigLoadError::UnsupportedSchemaVersion(
-            config.schema_version,
-        ));
+    let mut config: RepositoryProvidedConfig = RepositoryProvidedConfig::default();
+    if potential_content.is_some() {
+        let content = potential_content.unwrap();
+        config = toml::from_str(&content)?;
+        if config.schema_version != 1 {
+            return Err(ConfigLoadError::UnsupportedSchemaVersion(
+                config.schema_version,
+            ));
+        }
     }
 
     // Enforce application-level enables for validations

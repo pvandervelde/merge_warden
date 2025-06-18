@@ -4,23 +4,28 @@ use crate::config::{
 use async_trait::async_trait;
 use merge_warden_developer_platforms::errors::Error;
 use proptest::prelude::*;
-use std::fs::File;
-use std::io::Write;
-use tempfile::tempdir;
 
 use super::*;
 
-struct MockFetcher {}
+struct MockFetcher {
+    config_text: Option<String>,
+}
+
+impl MockFetcher {
+    pub fn new(config_text: Option<String>) -> Self {
+        Self { config_text }
+    }
+}
 
 #[async_trait]
 impl ConfigFetcher for MockFetcher {
     async fn fetch_config(
         &self,
-        repo_owner: &str,
-        repo_name: &str,
-        path: &str,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _path: &str,
     ) -> Result<Option<String>, Error> {
-        Ok(None)
+        Ok(self.config_text.clone())
     }
 }
 
@@ -177,17 +182,44 @@ fn test_custom_regex_patterns_are_used() {
 
 #[tokio::test]
 async fn test_load_merge_warden_config_empty_file() {
-    let dir = tempdir().unwrap();
     let file_path = "merge-warden.toml";
-    let fetcher = MockFetcher {};
+    let fetcher = MockFetcher::new(None);
     let app_defaults = ApplicationDefaults::default();
-    let result = load_merge_warden_config("a", "b", &file_path, &fetcher, &app_defaults).await;
-    assert!(matches!(result, Err(ConfigLoadError::Toml(_))));
+    let config = load_merge_warden_config("a", "b", file_path, &fetcher, &app_defaults)
+        .await
+        .unwrap();
+
+    assert!(!config.policies.pull_requests.title_policies.required,);
+    assert_eq!(
+        config.policies.pull_requests.title_policies.pattern,
+        app_defaults.default_title_pattern
+    );
+    assert_eq!(
+        config
+            .policies
+            .pull_requests
+            .title_policies
+            .label_if_missing,
+        app_defaults.default_invalid_title_label
+    );
+
+    assert!(!config.policies.pull_requests.work_item_policies.required,);
+    assert_eq!(
+        config.policies.pull_requests.work_item_policies.pattern,
+        app_defaults.default_work_item_pattern
+    );
+    assert_eq!(
+        config
+            .policies
+            .pull_requests
+            .work_item_policies
+            .label_if_missing,
+        app_defaults.default_missing_work_item_label
+    );
 }
 
 #[tokio::test]
 async fn test_load_merge_warden_config_invalid_schema() {
-    let dir = tempdir().unwrap();
     let file_path = "merge-warden.toml";
     let toml = r##"schemaVersion = 2
 [policies.pullRequests.prTitle]
@@ -197,12 +229,10 @@ pattern = "foo"
 required = true
 pattern = "bar"
 "##;
-    let mut file = File::create(&file_path).unwrap();
-    file.write_all(toml.as_bytes()).unwrap();
 
-    let fetcher = MockFetcher {};
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
     let app_defaults = ApplicationDefaults::default();
-    let result = load_merge_warden_config("a", "b", &file_path, &fetcher, &app_defaults).await;
+    let result = load_merge_warden_config("a", "b", file_path, &fetcher, &app_defaults).await;
     assert!(matches!(
         result,
         Err(ConfigLoadError::UnsupportedSchemaVersion(2))
@@ -211,40 +241,64 @@ pattern = "bar"
 
 #[tokio::test]
 async fn test_load_merge_warden_config_malformed_toml() {
-    let dir = tempdir().unwrap();
     let file_path = "merge-warden.toml";
     let toml = r#"schemaVersion = 1
 [policies.pullRequests.prTitle
 required = true
 pattern = "foo"
 "#; // missing closing bracket for table
-    let mut file = File::create(&file_path).unwrap();
-    file.write_all(toml.as_bytes()).unwrap();
 
-    let fetcher = MockFetcher {};
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
     let app_defaults = ApplicationDefaults::default();
-    let result = load_merge_warden_config("a", "b", &file_path, &fetcher, &app_defaults).await;
+    let result = load_merge_warden_config("a", "b", file_path, &fetcher, &app_defaults).await;
     assert!(matches!(result, Err(ConfigLoadError::Toml(_))));
 }
 
 #[tokio::test]
 async fn test_load_merge_warden_config_missing_file() {
-    let fetcher = MockFetcher {};
+    let fetcher = MockFetcher::new(None);
     let app_defaults = ApplicationDefaults::default();
-    let result = load_merge_warden_config(
+    let config = load_merge_warden_config(
         "a",
         "b",
         "/nonexistent/path/merge-warden.toml",
         &fetcher,
         &app_defaults,
     )
-    .await;
-    assert!(matches!(result, Err(ConfigLoadError::NotFound(_))));
+    .await
+    .unwrap();
+
+    assert!(!config.policies.pull_requests.title_policies.required);
+    assert_eq!(
+        config.policies.pull_requests.title_policies.pattern,
+        app_defaults.default_title_pattern
+    );
+    assert_eq!(
+        config
+            .policies
+            .pull_requests
+            .title_policies
+            .label_if_missing,
+        app_defaults.default_invalid_title_label
+    );
+
+    assert!(!config.policies.pull_requests.work_item_policies.required);
+    assert_eq!(
+        config.policies.pull_requests.work_item_policies.pattern,
+        app_defaults.default_work_item_pattern
+    );
+    assert_eq!(
+        config
+            .policies
+            .pull_requests
+            .work_item_policies
+            .label_if_missing,
+        app_defaults.default_missing_work_item_label
+    );
 }
 
 #[tokio::test]
 async fn test_load_merge_warden_config_missing_optional_fields() {
-    let dir = tempdir().unwrap();
     let file_path = "merge-warden.toml";
     let toml = r#"schemaVersion = 1
 [policies.pullRequests.prTitle]
@@ -256,12 +310,10 @@ required = true
 pattern = "bar"
 # label_if_missing omitted
 "#;
-    let mut file = File::create(&file_path).unwrap();
-    file.write_all(toml.as_bytes()).unwrap();
 
-    let fetcher = MockFetcher {};
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
     let app_defaults = ApplicationDefaults::default();
-    let config = load_merge_warden_config("a", "b", &file_path, &fetcher, &app_defaults)
+    let config = load_merge_warden_config("a", "b", file_path, &fetcher, &app_defaults)
         .await
         .unwrap();
     assert_eq!(
@@ -284,28 +336,24 @@ pattern = "bar"
 
 #[tokio::test]
 async fn test_load_merge_warden_config_only_schema_version() {
-    let dir = tempdir().unwrap();
     let file_path = "merge-warden.toml";
     let toml = r#"schemaVersion = 1
 "#;
-    let mut file = File::create(&file_path).unwrap();
-    file.write_all(toml.as_bytes()).unwrap();
 
-    let fetcher = MockFetcher {};
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
     let app_defaults = ApplicationDefaults::default();
-    let config = load_merge_warden_config("a", "b", &file_path, &fetcher, &app_defaults).await;
+    let config = load_merge_warden_config("a", "b", file_path, &fetcher, &app_defaults).await;
     // Should succeed, but policies will be defaulted
     assert!(config.is_ok());
     let config = config.unwrap();
     assert_eq!(config.schema_version, 1);
     // Defaults for policies
-    assert!(config.policies.pull_requests.title_policies.required);
-    assert!(config.policies.pull_requests.work_item_policies.required);
+    assert!(!config.policies.pull_requests.title_policies.required);
+    assert!(!config.policies.pull_requests.work_item_policies.required);
 }
 
 #[tokio::test]
 async fn test_load_merge_warden_config_valid() {
-    let dir = tempdir().unwrap();
     let file_path = "merge-warden.toml";
     let toml = r##"schemaVersion = 1
 [policies.pullRequests.prTitle]
@@ -317,12 +365,10 @@ required = true
 pattern = "#\\d+"
 label_if_missing = "missing-work-item"
 "##;
-    let mut file = File::create(&file_path).unwrap();
-    file.write_all(toml.as_bytes()).unwrap();
 
-    let fetcher = MockFetcher {};
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
     let app_defaults = ApplicationDefaults::default();
-    let config = load_merge_warden_config("a", "b", &file_path, &fetcher, &app_defaults)
+    let config = load_merge_warden_config("a", "b", file_path, &fetcher, &app_defaults)
         .await
         .unwrap();
     assert_eq!(config.schema_version, 1);
