@@ -6,6 +6,7 @@ use lazy_static::lazy_static;
 use merge_warden_developer_platforms::ConfigFetcher;
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use tracing::{error, info, warn};
 
 use crate::errors::ConfigLoadError;
 
@@ -575,17 +576,33 @@ pub async fn load_merge_warden_config(
         .await
     {
         Ok(c) => c,
-        Err(e) => return Err(ConfigLoadError::NotFound(e.to_string())),
+        Err(e) => {
+            warn!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                path = path_relative_to_repository_root,
+                "Failed to find configuration file in repository"
+            );
+            return Err(ConfigLoadError::NotFound(e.to_string()));
+        }
     };
 
     let mut config: RepositoryProvidedConfig = RepositoryProvidedConfig::default();
     if potential_content.is_some() {
         let content = potential_content.unwrap();
+
         config = toml::from_str(&content)?;
         if config.schema_version != 1 {
-            return Err(ConfigLoadError::UnsupportedSchemaVersion(
-                config.schema_version,
-            ));
+            error!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                path = path_relative_to_repository_root,
+                config_version = config.schema_version,
+                "Configuration in repository has an unexepected version. Will not be able to load configuration."
+            );
+
+            // If we can't load the configuration we just pretend it's not there
+            config = RepositoryProvidedConfig::default();
         }
     }
 
@@ -648,6 +665,33 @@ pub async fn load_merge_warden_config(
             .work_item_policies
             .label_if_missing = app_defaults.default_missing_work_item_label.clone();
     }
+
+    info!(
+        enable_title_validation = config.policies.pull_requests.title_policies.required,
+        title_validation_pattern = config.policies.pull_requests.title_policies.pattern.clone(),
+        label_if_title_validation_fails = config
+            .policies
+            .pull_requests
+            .title_policies
+            .label_if_missing
+            .clone()
+            .unwrap_or_default(),
+        enable_work_item_validation = config.policies.pull_requests.work_item_policies.required,
+        work_item_validation_pattern = config
+            .policies
+            .pull_requests
+            .work_item_policies
+            .pattern
+            .clone(),
+        label_if_work_item_validation_fails = config
+            .policies
+            .pull_requests
+            .work_item_policies
+            .label_if_missing
+            .clone()
+            .unwrap_or_default(),
+        "Configuration loaded"
+    );
 
     Ok(config)
 }

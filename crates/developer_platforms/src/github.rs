@@ -325,6 +325,14 @@ impl ConfigFetcher for GitHubProvider {
         path: &str,
     ) -> Result<Option<String>, Error> {
         let default_branch_name = self.fetch_default_branch(repo_owner, repo_name).await?;
+
+        info!(
+            repository_owner = repo_owner,
+            repository = repo_name,
+            path = path,
+            branch = default_branch_name,
+            "Fetching configuration file from default branch in repository ...",
+        );
         self.fetch_file_content(repo_owner, repo_name, path, Some(&default_branch_name))
             .await
     }
@@ -537,6 +545,7 @@ impl PullRequestProvider for GitHubProvider {
         conclusion: &str,
         output_title: &str,
         output_summary: &str,
+        output_text: &str,
     ) -> Result<(), Error> {
         // Get the commit SHA for the PR head
         let pr_data = self
@@ -560,7 +569,8 @@ impl PullRequestProvider for GitHubProvider {
             "conclusion": conclusion,
             "output": {
                 "title": output_title,
-                "summary": output_summary
+                "summary": output_summary,
+                "text": output_text,
             }
         });
 
