@@ -552,6 +552,7 @@ async fn main() -> Result<(), AzureFunctionsError> {
                 WORK_ITEM_REGEX.to_string()
             },
             default_missing_work_item_label: app_config.default_missing_work_item_label.clone(),
+            bypass_rules: Default::default(),
         },
         webhook_secret: app_config.webhook_secret,
     });

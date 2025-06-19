@@ -1,5 +1,6 @@
 use crate::config::{
-    CurrentPullRequestValidationConfiguration, CONVENTIONAL_COMMIT_REGEX, WORK_ITEM_REGEX,
+    BypassRule, BypassRules, CurrentPullRequestValidationConfiguration, CONVENTIONAL_COMMIT_REGEX,
+    WORK_ITEM_REGEX,
 };
 use async_trait::async_trait;
 use merge_warden_developer_platforms::errors::Error;
@@ -569,4 +570,138 @@ fn test_work_item_regex_valid_formats() {
             reference
         );
     }
+}
+
+#[test]
+fn test_bypass_rule_default() {
+    let rule = BypassRule::default();
+    assert!(!rule.enabled);
+    assert!(rule.users.is_empty());
+}
+
+#[test]
+fn test_bypass_rule_serialization() {
+    let rule = BypassRule {
+        enabled: true,
+        users: vec!["user1".to_string(), "user2".to_string()],
+    };
+
+    let serialized = serde_json::to_string(&rule).expect("Failed to serialize BypassRule");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&serialized).expect("Failed to parse JSON");
+
+    assert_eq!(parsed["enabled"], true);
+    assert_eq!(parsed["users"][0], "user1");
+    assert_eq!(parsed["users"][1], "user2");
+}
+
+#[test]
+fn test_bypass_rule_deserialization() {
+    let json = r#"{"enabled": false, "users": ["admin", "bot"]}"#;
+    let rule: BypassRule = serde_json::from_str(json).expect("Failed to deserialize BypassRule");
+
+    assert!(!rule.enabled);
+    assert_eq!(rule.users.len(), 2);
+    assert_eq!(rule.users[0], "admin");
+    assert_eq!(rule.users[1], "bot");
+}
+
+#[test]
+fn test_bypass_rules_default() {
+    let rules = BypassRules::default();
+    assert!(!rules.title_convention.enabled);
+    assert!(!rules.work_items.enabled);
+    assert!(rules.title_convention.users.is_empty());
+    assert!(rules.work_items.users.is_empty());
+}
+
+#[test]
+fn test_bypass_rules_serialization() {
+    let rules = BypassRules {
+        title_convention: BypassRule {
+            enabled: true,
+            users: vec!["release-bot".to_string()],
+        },
+        work_items: BypassRule {
+            enabled: false,
+            users: vec![],
+        },
+    };
+
+    let serialized = serde_json::to_string(&rules).expect("Failed to serialize BypassRules");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&serialized).expect("Failed to parse JSON");
+    assert_eq!(parsed["title_convention"]["enabled"], true);
+    assert_eq!(parsed["title_convention"]["users"][0], "release-bot");
+    assert_eq!(parsed["work_items"]["enabled"], false);
+}
+
+#[test]
+fn test_bypass_rules_deserialization() {
+    let json = r#"{
+        "title_convention": {"enabled": true, "users": ["admin"]},
+        "work_items": {"enabled": true, "users": ["hotfix-team", "admin"]},
+        "branch_protection": {"enabled": false, "users": []}
+    }"#;
+
+    let rules: BypassRules = serde_json::from_str(json).expect("Failed to deserialize BypassRules");
+
+    assert!(rules.title_convention.enabled);
+    assert_eq!(rules.title_convention.users, vec!["admin"]);
+    assert!(rules.work_items.enabled);
+    assert_eq!(rules.work_items.users, vec!["hotfix-team", "admin"]);
+}
+
+#[test]
+fn test_bypass_rules_partial_deserialization() {
+    // Test that missing fields default properly
+    let json = r#"{"title_convention": {"enabled": true, "users": ["admin"]}}"#;
+
+    let rules: BypassRules = serde_json::from_str(json).expect("Failed to deserialize BypassRules");
+
+    assert!(rules.title_convention.enabled);
+    assert_eq!(rules.title_convention.users, vec!["admin"]);
+    // Other fields should use defaults
+    assert!(!rules.work_items.enabled);
+    assert!(rules.work_items.users.is_empty());
+}
+
+#[test]
+fn test_application_defaults_with_bypass_rules() {
+    let defaults = ApplicationDefaults::default();
+
+    // Verify bypass rules are included and default correctly
+    assert!(!defaults.bypass_rules.title_convention.enabled);
+    assert!(!defaults.bypass_rules.work_items.enabled);
+}
+
+#[test]
+fn test_application_defaults_bypass_rules_serialization() {
+    let defaults = ApplicationDefaults {
+        enable_title_validation: true,
+        default_title_pattern: "test".to_string(),
+        default_invalid_title_label: Some("invalid".to_string()),
+        enable_work_item_validation: true,
+        default_work_item_pattern: "pattern".to_string(),
+        default_missing_work_item_label: Some("missing".to_string()),
+        bypass_rules: BypassRules {
+            title_convention: BypassRule {
+                enabled: true,
+                users: vec!["admin".to_string()],
+            },
+            work_items: BypassRule::default(),
+        },
+    };
+
+    let serialized =
+        serde_json::to_string(&defaults).expect("Failed to serialize ApplicationDefaults");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&serialized).expect("Failed to parse JSON");
+
+    assert_eq!(parsed["enforceTitleValidation"], true);
+    assert_eq!(parsed["bypassRules"]["title_convention"]["enabled"], true);
+    assert_eq!(
+        parsed["bypassRules"]["title_convention"]["users"][0],
+        "admin"
+    );
 }

@@ -58,6 +58,7 @@ mod tests;
 ///         title: "feat(auth): add GitHub login".to_string(),
 ///         draft: false,
 ///         body: Some("This PR adds GitHub login functionality.".to_string()),
+///         author: None,
 ///     };
 ///
 ///     let labels = set_pull_request_labels(provider, "owner", "repo", &pr).await?;

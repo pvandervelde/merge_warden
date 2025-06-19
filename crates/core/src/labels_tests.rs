@@ -4,7 +4,7 @@ use merge_warden_developer_platforms::errors::Error;
 use std::sync::{Arc, Mutex};
 use tokio::test;
 
-use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
+use merge_warden_developer_platforms::models::{Comment, Label, PullRequest, User};
 use merge_warden_developer_platforms::PullRequestProvider;
 
 // Mock implementation of PullRequestProvider for testing
@@ -213,6 +213,10 @@ async fn test_determine_labels_breaking_change() {
         title: "feat(api)!: change authentication flow".to_string(),
         draft: false,
         body: Some("This is a breaking change to the API".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -237,6 +241,10 @@ async fn test_determine_labels_breaking_change_in_body() {
         title: "feat(api): change authentication flow".to_string(),
         draft: false,
         body: Some("This is a BREAKING CHANGE to the API".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -261,6 +269,10 @@ async fn test_determine_labels_bug_fix() {
         title: "fix: correct login issue".to_string(),
         draft: false,
         body: Some("This fixes a bug in the login flow".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -286,6 +298,10 @@ async fn test_determine_labels_conflicting_information() {
         body: Some(
             "This adds a new feature to the login flow. It's a feature, not a bug fix.".to_string(),
         ), // Suggests a feature
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -310,6 +326,10 @@ async fn test_determine_labels_empty_pr_body() {
         title: "feat: add feature".to_string(),
         draft: false,
         body: Some("".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -327,6 +347,10 @@ async fn test_determine_labels_error_handling() {
         title: "feat: add new feature".to_string(),
         draft: false,
         body: Some("This is a new feature".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let result = set_pull_request_labels(&provider, "owner", "repo", &pr).await;
@@ -349,6 +373,10 @@ async fn test_determine_labels_feature() {
         title: "feat: add new feature".to_string(),
         draft: false,
         body: Some("This is a new feature".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -371,6 +399,10 @@ async fn test_determine_labels_hotfix() {
         title: "fix: urgent issue in production".to_string(),
         draft: false,
         body: Some("This is a hotfix for the production issue".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -395,6 +427,10 @@ async fn test_determine_labels_invalid_type_in_pr_title() {
         title: "unknown: add feature".to_string(),
         draft: false,
         body: Some("This PR adds a feature.".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -415,6 +451,10 @@ async fn test_determine_labels_keyword_priority() {
         title: "fix: security vulnerability".to_string(),
         draft: false,
         body: Some("This is a critical security hotfix that needs to be deployed immediately. It also addresses some technical debt.".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -444,6 +484,10 @@ async fn test_determine_labels_missing_type_in_pr_title() {
         title: "add feature".to_string(),
         draft: false,
         body: Some("This PR adds a feature.".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -463,6 +507,10 @@ async fn test_determine_labels_multiple_keywords() {
             "This is a hotfix for a security vulnerability. It addresses technical debt as well."
                 .to_string(),
         ),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -491,6 +539,10 @@ async fn test_determine_labels_no_keywords_in_pr_body() {
         title: "feat: add feature".to_string(),
         draft: false,
         body: Some("This PR adds a new feature.".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -511,6 +563,10 @@ async fn test_determine_labels_security() {
         title: "fix: address security vulnerability".to_string(),
         draft: false,
         body: Some("This fixes a security issue in the authentication flow".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -535,6 +591,10 @@ async fn test_determine_labels_tech_debt() {
         title: "refactor: improve code organization".to_string(),
         draft: false,
         body: Some("This addresses technical debt in the codebase".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -559,6 +619,10 @@ async fn test_determine_labels_with_scope() {
         title: "feat(auth): add login with GitHub".to_string(),
         draft: false,
         body: Some("This adds GitHub login".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)

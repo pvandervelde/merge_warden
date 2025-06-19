@@ -276,6 +276,10 @@ pub struct ApplicationDefaults {
         default = "ApplicationDefaults::default_work_item_missing_label"
     )]
     pub default_missing_work_item_label: Option<String>,
+
+    /// Bypass rules for allowing specific users to skip validation
+    #[serde(rename = "bypassRules", default)]
+    pub bypass_rules: BypassRules,
 }
 
 impl ApplicationDefaults {
@@ -313,6 +317,7 @@ impl Default for ApplicationDefaults {
             enable_work_item_validation: ApplicationDefaults::default_work_item_required(),
             default_work_item_pattern: ApplicationDefaults::default_work_item_pattern(),
             default_missing_work_item_label: ApplicationDefaults::default_work_item_missing_label(),
+            bypass_rules: BypassRules::default(),
         }
     }
 }
@@ -545,6 +550,101 @@ impl Default for WorkItemPolicyConfig {
             required: Self::default_required(),
             pattern: Self::default_pattern(),
             label_if_missing: Self::default_label(),
+        }
+    }
+}
+
+/// Configuration for bypass rules allowing specific users to skip validation
+///
+/// Bypass rules allow designated users to bypass specific validation rules.
+/// This is useful for automated systems, release processes, or emergency fixes
+/// where normal validation requirements might need to be temporarily waived.
+///
+/// # Security Considerations
+///
+/// - Bypass rules should be used sparingly and only for trusted users
+/// - All bypass decisions are logged for audit purposes
+/// - Users are identified by their GitHub username (case-sensitive)
+/// - Disabled rules will not bypass any validation
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_core::config::BypassRule;
+///
+/// // Allow release automation to bypass title validation
+/// let title_bypass = BypassRule {
+///     enabled: true,
+///     users: vec!["release-bot".to_string(), "admin".to_string()],
+/// };
+///
+/// // Disable work item bypass for all users
+/// let work_item_bypass = BypassRule {
+///     enabled: false,
+///     users: vec![],
+/// };
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BypassRule {
+    /// Whether this bypass rule is enabled
+    pub enabled: bool,
+
+    /// List of GitHub usernames allowed to bypass this rule
+    pub users: Vec<String>,
+}
+
+impl Default for BypassRule {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            users: Vec::new(),
+        }
+    }
+}
+
+/// Collection of all bypass rules for different validation types
+///
+/// This struct groups bypass rules for different validation categories,
+/// allowing fine-grained control over which users can bypass which rules.
+///
+/// # Rule Categories
+///
+/// - `title_convention` - Bypass for pull request title format validation
+/// - `work_items` - Bypass for work item reference validation
+/// - `branch_protection` - Reserved for future branch protection bypasses
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_core::config::{BypassRules, BypassRule};
+///
+/// let bypass_rules = BypassRules {
+///     title_convention: BypassRule {
+///         enabled: true,
+///         users: vec!["release-bot".to_string()],
+///     },
+///     work_items: BypassRule {
+///         enabled: true,
+///         users: vec!["hotfix-team".to_string()],
+///     },
+/// };
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BypassRules {
+    /// Bypass rule for title convention validation
+    #[serde(default)]
+    pub title_convention: BypassRule,
+
+    /// Bypass rule for work item validation
+    #[serde(default)]
+    pub work_items: BypassRule,
+}
+
+impl Default for BypassRules {
+    fn default() -> Self {
+        Self {
+            title_convention: BypassRule::default(),
+            work_items: BypassRule::default(),
         }
     }
 }

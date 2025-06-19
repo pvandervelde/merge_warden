@@ -54,6 +54,7 @@ mod tests;
 ///     title: "feat: add new feature".to_string(),
 ///     draft: false,
 ///     body: Some("This PR adds a new feature.\n\nFixes #42".to_string()),
+///     author: None,
 /// };
 ///
 /// let has_reference = check_work_item_reference(&pr_with_reference);
@@ -65,6 +66,7 @@ mod tests;
 ///     title: "feat: another feature".to_string(),
 ///     draft: false,
 ///     body: Some("This PR adds another feature.".to_string()),
+///     author: None,
 /// };
 ///
 /// let has_reference = check_work_item_reference(&pr_without_reference);

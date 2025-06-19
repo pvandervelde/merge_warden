@@ -1,5 +1,5 @@
 use crate::checks::title::check_pr_title;
-use merge_warden_developer_platforms::models::PullRequest;
+use merge_warden_developer_platforms::models::{PullRequest, User};
 
 #[test]
 fn test_empty_title() {
@@ -8,6 +8,7 @@ fn test_empty_title() {
         title: "".to_string(),
         draft: false,
         body: Some("Test body".to_string()),
+        author: None,
     };
 
     let result = check_pr_title(&pr);
@@ -28,6 +29,10 @@ fn test_invalid_prefixes() {
             title: title.to_string(),
             draft: false,
             body: Some("Test body".to_string()),
+            author: Some(User {
+                id: 456,
+                login: "developer123".to_string(),
+            }),
         };
 
         let result = check_pr_title(&pr);
@@ -50,6 +55,10 @@ fn test_invalid_separators() {
             title: title.to_string(),
             draft: false,
             body: Some("Test body".to_string()),
+            author: Some(User {
+                id: 456,
+                login: "developer123".to_string(),
+            }),
         };
 
         let result = check_pr_title(&pr);
@@ -79,6 +88,10 @@ fn test_invalid_title_formats() {
             title: title.to_string(),
             draft: false,
             body: Some("Test body".to_string()),
+            author: Some(User {
+                id: 456,
+                login: "developer123".to_string(),
+            }),
         };
 
         let result = check_pr_title(&pr);
@@ -93,6 +106,10 @@ fn test_missing_prefix() {
         title: "add feature".to_string(),
         draft: false,
         body: Some("Test body".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let result = check_pr_title(&pr);
@@ -114,6 +131,10 @@ fn test_multiple_scopes() {
             title: title.to_string(),
             draft: false,
             body: Some("Test body".to_string()),
+            author: Some(User {
+                id: 456,
+                login: "developer123".to_string(),
+            }),
         };
 
         let result = check_pr_title(&pr);
@@ -140,6 +161,10 @@ fn test_scope_with_special_characters() {
             title: title.to_string(),
             draft: false,
             body: Some("Test body".to_string()),
+            author: Some(User {
+                id: 456,
+                login: "developer123".to_string(),
+            }),
         };
 
         let result = check_pr_title(&pr);
@@ -158,6 +183,10 @@ fn test_special_characters_in_title() {
         title: "feat: add feature with special chars !@#$%^&*()".to_string(),
         draft: false,
         body: Some("Test body".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let result = check_pr_title(&pr);
@@ -172,6 +201,10 @@ fn test_title_correction() {
         title: "invalid title".to_string(),
         draft: false,
         body: Some("Test body".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let result = check_pr_title(&pr);
@@ -183,6 +216,10 @@ fn test_title_correction() {
         title: "feat: valid title".to_string(),
         draft: false,
         body: Some("Test body".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let result = check_pr_title(&updated_pr);
@@ -205,6 +242,10 @@ fn test_title_with_breaking_change_indicators() {
             title: title.to_string(),
             draft: false,
             body: Some("Test body".to_string()),
+            author: Some(User {
+                id: 456,
+                login: "developer123".to_string(),
+            }),
         };
 
         let result = check_pr_title(&pr);
@@ -241,6 +282,10 @@ fn test_valid_title_formats() {
             title: title.to_string(),
             draft: false,
             body: Some("Test body".to_string()),
+            author: Some(User {
+                id: 456,
+                login: "developer123".to_string(),
+            }),
         };
 
         let result = check_pr_title(&pr);
@@ -256,6 +301,10 @@ fn test_very_long_title() {
         title: long_title,
         draft: false,
         body: Some("Test body".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let result = check_pr_title(&pr);

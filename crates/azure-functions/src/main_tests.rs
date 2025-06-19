@@ -3,7 +3,7 @@ use crate::AppState;
 use super::{handle_post_request, verify_github_signature};
 use axum::{extract::State, http::HeaderMap};
 use hmac::{Hmac, Mac};
-use merge_warden_core::config::ApplicationDefaults;
+use merge_warden_core::config::{ApplicationDefaults, BypassRules};
 use merge_warden_developer_platforms::models::User;
 use octocrab::Octocrab;
 use sha2::Sha256;
@@ -24,6 +24,7 @@ async fn test_handle_webhook() {
             enable_work_item_validation: false,
             default_work_item_pattern: "cd".to_string(),
             default_missing_work_item_label: None,
+            bypass_rules: BypassRules::default(),
         },
         webhook_secret: "test_secret".to_string(),
     });

@@ -87,6 +87,10 @@ impl PullRequestProvider for ErrorMockGitProvider {
                 title: title.to_string(),
                 draft: false,
                 body: Some(body.to_string()),
+                author: Some(User {
+                    id: 456,
+                    login: "developer123".to_string(),
+                }),
             })
         }
     }
@@ -513,6 +517,10 @@ async fn test_process_pull_request_valid() {
         title: "feat: add new feature".to_string(),
         draft: false,
         body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
     provider.set_pull_request(pr);
 
@@ -570,6 +578,10 @@ async fn test_process_pull_request_invalid_title() {
         title: "invalid title".to_string(), // Missing conventional commit format
         draft: false,
         body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
     provider.set_pull_request(pr);
 
@@ -617,6 +629,10 @@ async fn test_process_pull_request_missing_work_item() {
         title: "feat: add new feature".to_string(),
         draft: false,
         body: Some("No work item reference".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
     provider.set_pull_request(pr);
 
@@ -664,6 +680,10 @@ async fn test_process_pull_request_both_invalid() {
         title: "invalid title".to_string(), // Missing conventional commit format
         draft: false,
         body: Some("No work item reference".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
     provider.set_pull_request(pr);
 
@@ -740,6 +760,10 @@ async fn test_handle_title_validation_invalid_to_valid() {
         title: "feat: add new feature".to_string(),
         draft: false,
         body: Some("Test body".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     // Handle title validation with valid title
@@ -775,6 +799,10 @@ async fn test_process_pull_request_custom_config_disabled_checks() {
         title: "invalid title".to_string(), // Missing conventional commit format
         draft: false,
         body: Some("No work item reference".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
     provider.set_pull_request(pr);
 
@@ -878,6 +906,10 @@ async fn test_process_pull_request_existing_labels_comments() {
         title: "feat: add new feature".to_string(),
         draft: false,
         body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
     provider.set_pull_request(pr);
 
@@ -941,6 +973,10 @@ async fn test_process_pull_request_dynamic_provider() {
         title: "feat: add new feature".to_string(),
         draft: false,
         body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let invalid_pr = PullRequest {
@@ -948,6 +984,10 @@ async fn test_process_pull_request_dynamic_provider() {
         title: "invalid title".to_string(),
         draft: false,
         body: Some("No work item reference".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     provider.add_pull_request(valid_pr);
@@ -1095,6 +1135,10 @@ async fn test_handle_work_item_validation_missing_to_present() {
         title: "feat: add new feature".to_string(),
         draft: false,
         body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     // Handle work item validation with valid work item reference

@@ -1,5 +1,5 @@
 use crate::checks::work_item::check_work_item_reference;
-use merge_warden_developer_platforms::models::PullRequest;
+use merge_warden_developer_platforms::models::{PullRequest, User};
 
 #[test]
 fn test_empty_body() {
@@ -8,6 +8,10 @@ fn test_empty_body() {
         title: "feat: test".to_string(),
         draft: false,
         body: None,
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let result = check_work_item_reference(&pr);
@@ -33,6 +37,10 @@ fn test_alternative_keywords() {
             title: "feat: test".to_string(),
             draft: false,
             body: Some(reference.to_string()),
+            author: Some(User {
+                id: 456,
+                login: "developer123".to_string(),
+            }),
         };
 
         let result = check_work_item_reference(&pr);
@@ -71,6 +79,10 @@ fn test_case_sensitivity() {
             title: "feat: test".to_string(),
             draft: false,
             body: Some(reference.to_string()),
+            author: Some(User {
+                id: 456,
+                login: "developer123".to_string(),
+            }),
         };
 
         let result = check_work_item_reference(&pr);
@@ -101,6 +113,10 @@ fn test_different_issue_formats() {
             title: "feat: test".to_string(),
             draft: false,
             body: Some(reference.to_string()),
+            author: Some(User {
+                id: 456,
+                login: "developer123".to_string(),
+            }),
         };
 
         let result = check_work_item_reference(&pr);
@@ -136,6 +152,10 @@ fn test_invalid_work_item_references() {
             title: "feat: test".to_string(),
             draft: false,
             body: Some(reference.to_string()),
+            author: Some(User {
+                id: 456,
+                login: "developer123".to_string(),
+            }),
         };
 
         let result = check_work_item_reference(&pr);
@@ -158,6 +178,10 @@ fn test_malformed_references() {
             title: "feat: test".to_string(),
             draft: false,
             body: Some(reference.to_string()),
+            author: Some(User {
+                id: 456,
+                login: "developer123".to_string(),
+            }),
         };
 
         let result = check_work_item_reference(&pr);
@@ -176,6 +200,10 @@ fn test_mixed_valid_and_invalid_references() {
         title: "feat: test".to_string(),
         draft: false,
         body: Some("Fixes #123\nInvalid reference\nCloses #456".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let result = check_work_item_reference(&pr);
@@ -192,6 +220,10 @@ fn test_multiple_valid_work_item_references() {
         title: "feat: test".to_string(),
         draft: false,
         body: Some("Fixes #123\nCloses #456\nResolves #789".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let result = check_work_item_reference(&pr);
@@ -215,6 +247,10 @@ fn test_position_in_body() {
             title: "feat: test".to_string(),
             draft: false,
             body: Some(body.to_string()),
+            author: Some(User {
+                id: 456,
+                login: "developer123".to_string(),
+            }),
         };
 
         let result = check_work_item_reference(&pr);
@@ -245,6 +281,10 @@ fn test_valid_work_item_references() {
             title: "feat: test".to_string(),
             draft: false,
             body: Some(reference.to_string()),
+            author: Some(User {
+                id: 456,
+                login: "developer123".to_string(),
+            }),
         };
 
         let result = check_work_item_reference(&pr);
@@ -260,6 +300,10 @@ fn test_very_long_body() {
         title: "feat: test".to_string(),
         draft: false,
         body: Some(long_body),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let result = check_work_item_reference(&pr);
@@ -276,6 +320,10 @@ fn test_work_item_correction() {
         title: "feat: test".to_string(),
         draft: false,
         body: Some("No reference here".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let result = check_work_item_reference(&pr);
@@ -286,6 +334,10 @@ fn test_work_item_correction() {
         title: "feat: test".to_string(),
         draft: false,
         body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let result = check_work_item_reference(&updated_pr);

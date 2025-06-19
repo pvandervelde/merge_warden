@@ -51,6 +51,7 @@ mod tests;
 ///     title: "feat(auth): add GitHub login".to_string(),
 ///     draft: false,
 ///     body: Some("This PR adds GitHub login functionality.".to_string()),
+///     author: None,
 /// };
 ///
 /// let is_valid = check_pr_title(&pr);
