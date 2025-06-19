@@ -1,10 +1,14 @@
 use axum::{extract::State, routing::get, routing::post, Router};
+use axum_macros::debug_handler;
 use azure_core::credentials::TokenCredential;
 use azure_identity::ManagedIdentityCredentialOptions;
 use azure_security_keyvault_secrets::SecretClient;
 use hmac::{Hmac, Mac};
 use merge_warden_core::{
-    config::{RulesConfig, ValidationConfig},
+    config::{
+        load_merge_warden_config, ApplicationDefaults, CurrentPullRequestValidationConfiguration,
+        CONVENTIONAL_COMMIT_REGEX, WORK_ITEM_REGEX,
+    },
     MergeWarden, WebhookPayload,
 };
 use merge_warden_developer_platforms::{
@@ -32,13 +36,18 @@ struct AppConfig {
     webhook_secret: String,
     port_number: u16,
     require_work_items: bool,
+    default_title_pattern: Option<String>,
+    default_invalid_title_label: Option<String>,
+
     enforce_title_convention: bool,
+    default_work_item_pattern: Option<String>,
+    default_missing_work_item_label: Option<String>,
 }
 
 pub struct AppState {
     pub octocrab: Octocrab,
     pub user: User,
-    pub rules: RulesConfig,
+    pub policies: ApplicationDefaults,
     pub webhook_secret: String,
 }
 
@@ -173,6 +182,30 @@ async fn get_azure_config() -> Result<AppConfig, AzureFunctionsError> {
         }
     };
 
+    let title_convention_pattern_key = "TITLE_CONVENTION_PATTERN";
+    let title_convention_pattern = match env::var(title_convention_pattern_key) {
+        Ok(val) => Some(val),
+        Err(e) => {
+            info!(
+                error = e.to_string(),
+                "Failed to parse the {} key", title_convention_pattern_key
+            );
+            None
+        }
+    };
+
+    let missing_title_label_key = "MISSING_TITLE_LABEL";
+    let missing_title_label = match env::var(missing_title_label_key) {
+        Ok(val) => Some(val),
+        Err(e) => {
+            info!(
+                error = e.to_string(),
+                "Failed to parse the {} key", missing_title_label_key
+            );
+            None
+        }
+    };
+
     let require_work_items_key = "REQUIRE_WORK_ITEMS";
     let require_work_items = match env::var(require_work_items_key) {
         Ok(val) => match val.parse() {
@@ -194,13 +227,41 @@ async fn get_azure_config() -> Result<AppConfig, AzureFunctionsError> {
         }
     };
 
+    let work_item_pattern_key = "WORK_ITEM_PATTERN";
+    let work_item_convention_pattern = match env::var(work_item_pattern_key) {
+        Ok(val) => Some(val),
+        Err(e) => {
+            info!(
+                error = e.to_string(),
+                "Failed to parse the {} key", work_item_pattern_key
+            );
+            None
+        }
+    };
+
+    let missing_work_item_label_key = "MISSING_WORK_ITEM_LABEL";
+    let missing_work_item_label = match env::var(missing_work_item_label_key) {
+        Ok(val) => Some(val),
+        Err(e) => {
+            info!(
+                error = e.to_string(),
+                "Failed to parse the {} key", missing_work_item_label_key
+            );
+            None
+        }
+    };
+
     let config = AppConfig {
         app_id: app_id_to_number,
         app_private_key,
         webhook_secret,
         port_number: port,
         enforce_title_convention,
+        default_title_pattern: title_convention_pattern,
+        default_invalid_title_label: missing_title_label,
         require_work_items,
+        default_work_item_pattern: work_item_convention_pattern,
+        default_missing_work_item_label: missing_work_item_label,
     };
 
     Ok(config)
@@ -266,17 +327,18 @@ async fn get_secret_from_keyvault(
     Ok(value.value.unwrap_or_default())
 }
 
-#[instrument(skip(state, headers, body))]
+#[instrument(skip(_state, _headers, _body))]
 async fn handle_get_request(
-    State(state): State<Arc<AppState>>,
-    headers: HeaderMap,
-    body: String,
+    State(_state): State<Arc<AppState>>,
+    _headers: HeaderMap,
+    _body: String,
 ) -> Result<StatusCode, StatusCode> {
     info!("Received get request ...");
 
     Ok(StatusCode::OK)
 }
 
+#[debug_handler]
 #[instrument(skip(state, headers, body))]
 async fn handle_post_request(
     State(state): State<Arc<AppState>>,
@@ -335,12 +397,6 @@ async fn handle_post_request(
         return Err(StatusCode::BAD_REQUEST);
     };
 
-    // If the pull request is a draft then we don't review it initially. We wait until it is ready for review
-    if pr.draft {
-        info!(message = "Pull request is in draft mode. Will not review pull request until it is marked as ready for review.");
-        return Ok(StatusCode::OK);
-    }
-
     let parts: Vec<&str> = repository.full_name.split('/').collect();
     if parts.len() != 2 {
         warn!(
@@ -381,18 +437,44 @@ async fn handle_post_request(
         }
     };
 
-    let provider = GitHubProvider::new(api_with_pat, state.user.clone());
+    let provider = GitHubProvider::new(api_with_pat);
 
-    // Get pull request
-    // Create a custom configuration
-    let config = ValidationConfig {
-        enforce_conventional_commits: state.rules.enforce_title_convention.unwrap_or(false),
-        require_work_item_references: state.rules.require_work_items,
-        auto_label: true,
+    // Load the merge-warden TOML config file
+    let merge_warden_config_path = ".github/merge-warden.toml";
+    let validation_config = match load_merge_warden_config(
+        repo_owner,
+        &repository.name,
+        merge_warden_config_path,
+        &provider,
+        &state.policies,
+    )
+    .await
+    {
+        Ok(merge_warden_config) => {
+            info!(
+                "Loaded merge-warden config from {}",
+                merge_warden_config_path
+            );
+            merge_warden_config.to_validation_config()
+        }
+        Err(e) => {
+            warn!(
+                "Failed to load merge-warden config from {}: {}. Falling back to defaults.",
+                merge_warden_config_path, e
+            );
+            CurrentPullRequestValidationConfiguration {
+                enforce_title_convention: state.policies.enable_title_validation,
+                title_pattern: state.policies.default_title_pattern.clone(),
+                invalid_title_label: state.policies.default_invalid_title_label.clone(),
+                enforce_work_item_references: state.policies.enable_work_item_validation,
+                work_item_reference_pattern: state.policies.default_work_item_pattern.clone(),
+                missing_work_item_label: state.policies.default_missing_work_item_label.clone(),
+            }
+        }
     };
 
-    // Create a MergeWarden instance with custom configuration
-    let warden = MergeWarden::with_config(provider, config);
+    // Create a MergeWarden instance with loaded or fallback configuration
+    let warden = MergeWarden::with_config(provider, validation_config);
 
     // Process a pull request
     info!(
@@ -454,10 +536,22 @@ async fn main() -> Result<(), AzureFunctionsError> {
     let state = Arc::new(AppState {
         octocrab,
         user,
-        rules: RulesConfig {
-            require_work_items: app_config.require_work_items,
-            enforce_title_convention: Some(app_config.enforce_title_convention),
-            min_approvals: None,
+        policies: ApplicationDefaults {
+            enable_title_validation: app_config.enforce_title_convention,
+            default_title_pattern: if let Some(pattern) = &app_config.default_title_pattern {
+                pattern.to_string()
+            } else {
+                CONVENTIONAL_COMMIT_REGEX.to_string()
+            },
+            default_invalid_title_label: app_config.default_invalid_title_label.clone(),
+            enable_work_item_validation: app_config.require_work_items,
+            default_work_item_pattern: if let Some(pattern) = &app_config.default_work_item_pattern
+            {
+                pattern.to_string()
+            } else {
+                WORK_ITEM_REGEX.to_string()
+            },
+            default_missing_work_item_label: app_config.default_missing_work_item_label.clone(),
         },
         webhook_secret: app_config.webhook_secret,
     });

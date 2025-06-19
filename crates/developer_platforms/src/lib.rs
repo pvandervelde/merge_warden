@@ -8,6 +8,19 @@ pub mod models;
 use errors::Error;
 use models::{Comment, Label, PullRequest};
 
+/// Trait to fetch configuration files from remote repositories.
+#[async_trait]
+pub trait ConfigFetcher: Sync + Send {
+    /// Fetch the content of a configuration file at the given path.
+    /// Returns Ok(Some(content)) if found, Ok(None) if not found, or Err on error.
+    async fn fetch_config(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        path: &str,
+    ) -> Result<Option<String>, Error>;
+}
+
 /// Trait for interacting with developer platforms that provide pull requests (e.g., GitHub, GitLab).
 ///
 /// Implementations of this trait provide the necessary functionality to
@@ -46,7 +59,7 @@ use models::{Comment, Label, PullRequest};
 ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
 ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
 ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
-///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
+///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
 /// }
 /// ```
 #[async_trait]
@@ -194,10 +207,12 @@ pub trait PullRequestProvider {
     /// * `conclusion` - The check run conclusion (e.g., "success", "failure")
     /// * `output_title` - The title for the check run output
     /// * `output_summary` - The summary for the check run output
+    /// * `output_text` - The text for the check run output. Supports Markdown
     ///
     /// # Returns
     ///
     /// A `Result` indicating success or failure
+    #[allow(clippy::too_many_arguments)]
     async fn update_pr_check_status(
         &self,
         repo_owner: &str,
@@ -206,5 +221,6 @@ pub trait PullRequestProvider {
         conclusion: &str,
         output_title: &str,
         output_summary: &str,
+        output_text: &str,
     ) -> Result<(), Error>;
 }

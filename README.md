@@ -1,6 +1,74 @@
 # merge_warden
 
-This repository contains the Merge Warden project.
+Merge Warden is a GitHub Action and Azure Function designed to enforce pull request rules and automate workflows based on
+repository configuration. It supports features like PR title validation, work item references, and more.
+
+## Features
+
+* **Pull Request Title Validation**: Enforces conventional commit formats for PR titles.
+* **Work Item References**: Ensures PR descriptions include references to work items (e.g., issue numbers).
+
+## Configuration: merge-warden Rules
+
+merge-warden supports repository-specific configuration of pull request rules via a TOML file.
+
+### Configuration File Location
+
+* The configuration file must be named `.github/merge-warden.toml` and reside in the default branch.
+
+### Purpose
+
+This file allows you to specify which rules merge-warden should enforce for pull requests, such as PR title format and
+work item requirements. If the file is missing or malformed, merge-warden will fall back to default settings and log a
+warning.
+
+### Example Configuration
+
+```toml
+schemaVersion = 1
+
+# Define the pull request policies pertaining to the pull request title.
+[policies.pullRequests.prTitle]
+# Indicate if the pull request title should follow a specific format.
+required = true
+# The regular expression pattern that the pull request title must match. By default it follows the conventional commit
+# specification.
+pattern = "^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\\([a-z0-9_-]+\\))?!?: .+"
+# Define the label that will be applied to the pull request if the title does not match the specified pattern.
+# If the label is not specified, no label will be applied.
+label_if_missing = "invalid-title-format"
+
+[policies.pullRequests.workItem]
+# Indicate if the pull request description should contain a work item reference.
+required = true
+# The regular expression pattern that the pull request description must match to reference a work item.
+# By default, it matches issue references like `#123`, `GH-123`, or full URLs to GitHub issues.
+pattern = "(?i)(fixes|closes|resolves|references|relates to)\\s+(#\\d+|GH-\\d+|https://github\\.com/[^/]+/[^/]+/issues/\\d+|[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+#\\d+)"
+# Define the label that will be applied to the pull request if it does not contain a work item reference.
+# If the label is not specified, no label will be applied.
+label_if_missing = "missing-work-item"
+```
+
+### Schema Description
+
+* `schemaVersion` (integer): Version of the configuration schema. Used for backward compatibility.
+* `[policies.pullRequests.prTitle]`:
+  * `format` (string): PR title format. Supported: `conventional-commits` (default).
+* `[policies.pullRequests.workItem]`:
+  * `required` (bool): Whether a work item reference is required in the PR description. Default: `true`.
+  * `pattern` (string): Regex pattern for work item references. Default: `#\\d+` (e.g., `#123`).
+
+### Default Behavior
+
+* PR title must follow the conventional commit format.
+* PR description must contain a work item reference matching `#<number>`.
+
+### Notes
+
+* Only the default branch is checked for the configuration file.
+* If the configuration file is missing, malformed, or has an unsupported schema version, merge-warden logs a warning and
+  uses defaults.
+* The schema is designed to be extensible for future rules. Always specify `schemaVersion`.
 
 ## Release Process
 

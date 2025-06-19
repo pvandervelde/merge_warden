@@ -16,6 +16,7 @@ merge_warden_core = { path = "../core" }
 merge_warden_developer_platforms = { path = "../developer_platforms" }
 anyhow = { workspace = true }
 axum = { workspace = true }
+axum-macros = { workspace = true }
 clap = { workspace = true }
 dirs = "6.0"
 hex.workspace = true

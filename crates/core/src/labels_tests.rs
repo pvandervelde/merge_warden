@@ -1,4 +1,3 @@
-use super::*;
 use crate::labels::set_pull_request_labels;
 use async_trait::async_trait;
 use merge_warden_developer_platforms::errors::Error;
@@ -112,12 +111,13 @@ impl PullRequestProvider for MockGitProvider {
 
     async fn update_pr_check_status(
         &self,
-        repo_owner: &str,
-        repo_name: &str,
-        pr_number: u64,
-        conclusion: &str,
-        output_title: &str,
-        output_summary: &str,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _pr_number: u64,
+        _conclusion: &str,
+        _output_title: &str,
+        _output_summary: &str,
+        _output_text: &str,
     ) -> Result<(), Error> {
         unimplemented!("Not needed for this test")
     }
@@ -193,12 +193,13 @@ impl PullRequestProvider for ErrorMockGitProvider {
 
     async fn update_pr_check_status(
         &self,
-        repo_owner: &str,
-        repo_name: &str,
-        pr_number: u64,
-        conclusion: &str,
-        output_title: &str,
-        output_summary: &str,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _pr_number: u64,
+        _conclusion: &str,
+        _output_title: &str,
+        _output_summary: &str,
+        _output_text: &str,
     ) -> Result<(), Error> {
         unimplemented!("Not needed for this test")
     }

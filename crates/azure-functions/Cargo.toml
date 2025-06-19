@@ -11,6 +11,7 @@ version.workspace = true
 merge_warden_core = { path = "../core" }
 merge_warden_developer_platforms = { path = "../developer_platforms" }
 axum = { workspace = true }
+axum-macros = { workspace = true }
 azure_identity = "0.23.0"
 azure_security_keyvault_secrets = "0.2.0"
 hex.workspace = true
@@ -18,7 +19,10 @@ hmac.workspace = true
 octocrab = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { workspace = true }
-opentelemetry-application-insights = { version = "0.40.0", features = ["reqwest", "tracing"] }
+opentelemetry-application-insights = { version = "0.40.0", features = [
+    "reqwest",
+    "tracing",
+] }
 opentelemetry-otlp = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }

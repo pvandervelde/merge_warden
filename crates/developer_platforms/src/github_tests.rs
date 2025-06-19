@@ -1,6 +1,3 @@
-use super::*;
-use crate::errors::Error;
-
 #[tokio::test]
 async fn test_github_provider_error_handling() {
     // TODO: Implement a real error scenario for GitHubProvider.

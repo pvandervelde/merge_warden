@@ -1,6 +1,5 @@
-use super::*;
 use crate::{
-    config::ValidationConfig,
+    config::CurrentPullRequestValidationConfiguration,
     config::{
         MISSING_WORK_ITEM_LABEL, TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL,
         WORK_ITEM_COMMENT_MARKER,
@@ -169,6 +168,7 @@ impl PullRequestProvider for ErrorMockGitProvider {
         _conclusion: &str,
         _output_title: &str,
         _output_summary: &str,
+        _output_text: &str,
     ) -> Result<(), Error> {
         Ok(())
     }
@@ -307,6 +307,7 @@ impl PullRequestProvider for DynamicMockGitProvider {
         _conclusion: &str,
         _output_title: &str,
         _output_summary: &str,
+        _output_text: &str,
     ) -> Result<(), Error> {
         Ok(())
     }
@@ -447,6 +448,7 @@ impl PullRequestProvider for MockGitProvider {
         _conclusion: &str,
         _output_title: &str,
         _output_summary: &str,
+        _output_text: &str,
     ) -> Result<(), Error> {
         Ok(())
     }
@@ -462,16 +464,12 @@ async fn test_constructor_new() {
 
     // Verify the default configuration
     assert!(
-        warden.config.enforce_conventional_commits,
+        warden.config.enforce_title_convention,
         "Default config should enforce conventional commits"
     );
     assert!(
-        warden.config.require_work_item_references,
+        warden.config.enforce_work_item_references,
         "Default config should require work item references"
-    );
-    assert!(
-        warden.config.auto_label,
-        "Default config should enable auto-labeling"
     );
 }
 
@@ -481,10 +479,13 @@ async fn test_constructor_with_config() {
     let provider = MockGitProvider::new();
 
     // Create a custom configuration
-    let config = ValidationConfig {
-        enforce_conventional_commits: false,
-        require_work_item_references: true,
-        auto_label: false,
+    let config = CurrentPullRequestValidationConfiguration {
+        enforce_title_convention: false,
+        title_pattern: "ab".to_string(),
+        invalid_title_label: None,
+        enforce_work_item_references: true,
+        work_item_reference_pattern: "cd".to_string(),
+        missing_work_item_label: None,
     };
 
     // Create a MergeWarden instance with custom config
@@ -492,16 +493,12 @@ async fn test_constructor_with_config() {
 
     // Verify the custom configuration
     assert!(
-        !warden.config.enforce_conventional_commits,
+        !warden.config.enforce_title_convention,
         "Custom config should not enforce conventional commits"
     );
     assert!(
-        warden.config.require_work_item_references,
+        warden.config.enforce_work_item_references,
         "Custom config should require work item references"
-    );
-    assert!(
-        !warden.config.auto_label,
-        "Custom config should not enable auto-labeling"
     );
 }
 
@@ -748,8 +745,7 @@ async fn test_handle_title_validation_invalid_to_valid() {
     // Handle title validation with valid title
     warden
         .communicate_pr_title_validity_status("owner", "repo", &pr, true)
-        .await
-        .unwrap();
+        .await;
 
     // Verify the label was removed
     let labels = warden.provider.get_labels();
@@ -783,10 +779,13 @@ async fn test_process_pull_request_custom_config_disabled_checks() {
     provider.set_pull_request(pr);
 
     // Create a custom configuration with disabled checks
-    let config = ValidationConfig {
-        enforce_conventional_commits: false,
-        require_work_item_references: false,
-        auto_label: false,
+    let config = CurrentPullRequestValidationConfiguration {
+        enforce_title_convention: false,
+        title_pattern: "ab".to_string(),
+        invalid_title_label: None,
+        enforce_work_item_references: false,
+        work_item_reference_pattern: "cd".to_string(),
+        missing_work_item_label: None,
     };
 
     // Create a MergeWarden instance with custom config
@@ -1005,19 +1004,17 @@ async fn test_process_pull_request_error_add_comment() {
     // Create a MergeWarden instance
     let warden = MergeWarden::new(provider);
 
-    // Process the PR - should return an error
+    // Process the PR - should return Ok even if adding a comment fails
     let result = warden.process_pull_request("owner", "repo", 1).await;
 
-    // Verify the error
+    // Verify the result is Ok (no error should be returned)
     assert!(
-        result.is_err(),
-        "Should return an error when adding a comment fails"
+        result.is_ok(),
+        "Should return Ok even when adding a comment fails"
     );
-    assert_eq!(
-        result.unwrap_err().to_string(),
-        "Failed to update pull request. Issue was: 'Failed to add comment'.",
-        "Should return the specific error message"
-    );
+    // Optionally, check that the output string contains a warning or expected message
+    let output = result.unwrap();
+    assert!(!output.title_valid, "The title should not be valid");
 }
 
 #[test]
@@ -1103,8 +1100,7 @@ async fn test_handle_work_item_validation_missing_to_present() {
     // Handle work item validation with valid work item reference
     warden
         .communicate_pr_work_item_validity_status("owner", "repo", &pr, true)
-        .await
-        .unwrap();
+        .await;
 
     // Verify the label was removed
     let labels = warden.provider.get_labels();

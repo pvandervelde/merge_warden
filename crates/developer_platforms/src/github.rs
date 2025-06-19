@@ -1,12 +1,7 @@
 use async_trait::async_trait;
+use base64::Engine;
 use jsonwebtoken::EncodingKey;
-use octocrab::{
-    models::{
-        pulls::{Review, ReviewState},
-        ReviewId,
-    },
-    Octocrab,
-};
+use octocrab::Octocrab;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use tracing::{debug, error, info, instrument, warn};
@@ -14,7 +9,7 @@ use tracing::{debug, error, info, instrument, warn};
 use crate::{
     errors::Error,
     models::{Comment, Label, PullRequest, User},
-    PullRequestProvider,
+    ConfigFetcher, PullRequestProvider,
 };
 
 #[cfg(test)]
@@ -248,163 +243,98 @@ fn log_octocrab_error(message: &str, e: octocrab::Error) {
 #[derive(Debug, Default)]
 pub struct GitHubProvider {
     client: Octocrab,
-    user: User,
 }
 
 impl GitHubProvider {
-    /// Creates a new review for a pull request.
-    ///
-    /// # Arguments
-    ///
-    /// * `repo_owner` - The owner of the repository
-    /// * `repo_name` - The name of the repository
-    /// * `pr_number` - The pull request number
-    /// * `body` - The review comment
-    /// * `event` - The review event type (APPROVE, REQUEST_CHANGES, COMMENT)
-    ///
-    /// # Returns
-    ///
-    /// A `Result` indicating success or failure
-    #[instrument]
-    async fn create_review(
+    pub async fn fetch_default_branch(
         &self,
         repo_owner: &str,
         repo_name: &str,
-        pr_number: u64,
-        event: &str,
-    ) -> Result<(), Error> {
-        // The app should never approve a PR
-        if event == "APPROVE" {
-            return Err(Error::ApprovalProhibited);
-        }
-
-        #[derive(Debug, Serialize)]
-        struct CreateReviewRequest<'a> {
-            body: &'a str,
-            event: &'a str,
-        }
-
-        let route = format!(
-            "/repos/{}/{}/pulls/{}/reviews",
-            repo_owner, repo_name, pr_number
-        );
-
-        let request = CreateReviewRequest {
-            body: "Requirements for Pull Requests not met. Please review comments and update Pull Request.",
-            event,
+    ) -> Result<String, crate::errors::Error> {
+        let repo = match self.client.repos(repo_owner, repo_name).get().await {
+            Ok(r) => r,
+            Err(e) => {
+                log_octocrab_error("Failed to get repository information", e);
+                return Err(Error::InvalidResponse);
+            }
         };
+        let branch = repo.default_branch.unwrap_or("main".to_string());
 
-        debug!(
-            repository_owner = repo_owner,
-            repository = repo_name,
-            pull_request = pr_number,
-            "Creating review for pr",
-        );
-
-        self.client
-            ._post(route, Some(&request))
-            .await
-            .map_err(|e| {
-                log_octocrab_error("Failed to create new review", e);
-                Error::FailedToUpdatePullRequest("Failed to create review".to_string())
-            })?;
-
-        Ok(())
+        Ok(branch)
     }
 
-    /// Dismisses a review for a pull request.
-    ///
-    /// # Arguments
-    ///
-    /// * `repo_owner` - The owner of the repository
-    /// * `repo_name` - The name of the repository
-    /// * `pr_number` - The pull request number
-    /// * `review_id` - The ID of the review to dismiss
-    /// * `message` - The dismissal message
-    ///
-    /// # Returns
-    ///
-    /// A `Result` indicating success or failure
-    #[instrument]
-    async fn dismiss_review(
+    /// Fetch the content of a file from the repository at the given path.
+    /// Returns Ok(Some(content)) if found, Ok(None) if not found, or Err on error.
+    pub async fn fetch_file_content(
         &self,
         repo_owner: &str,
         repo_name: &str,
-        pr_number: u64,
-        review_id: ReviewId,
-        message: &str,
-    ) -> Result<(), Error> {
-        #[derive(Debug, Serialize)]
-        struct DismissReviewRequest<'a> {
-            message: &'a str,
-        }
+        path: &str,
+        reference: Option<&str>,
+    ) -> Result<Option<String>, crate::errors::Error> {
+        let content_result = self
+            .client
+            .repos(repo_owner, repo_name)
+            .get_content()
+            .path(path)
+            .r#ref(reference.unwrap_or("main"))
+            .send()
+            .await;
 
-        let route = format!(
-            "/repos/{}/{}/pulls/{}/reviews/{}/dismissals",
-            repo_owner, repo_name, pr_number, review_id
-        );
-        let request = DismissReviewRequest { message };
+        match content_result {
+            Ok(response) => {
+                if let Some(file) = response.items.into_iter().next() {
+                    if let Some(content) = file.content {
+                        // GitHub API returns base64 encoded content with newlines
+                        let decoded = base64::engine::general_purpose::STANDARD
+                            .decode(content.replace('\n', ""))
+                            .map_err(|_| crate::errors::Error::InvalidResponse)?;
+                        let content_str = String::from_utf8(decoded)
+                            .map_err(|_| crate::errors::Error::InvalidResponse)?;
+                        Ok(Some(content_str))
+                    } else {
+                        Ok(None)
+                    }
+                } else {
+                    Ok(None)
+                }
+            }
+            Err(e) => {
+                // If 404, treat as not found
+                if e.to_string().contains("404") {
+                    Ok(None)
+                } else {
+                    Err(crate::errors::Error::ApiError())
+                }
+            }
+        }
+    }
+
+    pub fn new(client: Octocrab) -> Self {
+        Self { client }
+    }
+}
+
+#[async_trait]
+impl ConfigFetcher for GitHubProvider {
+    #[instrument]
+    async fn fetch_config(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        path: &str,
+    ) -> Result<Option<String>, Error> {
+        let default_branch_name = self.fetch_default_branch(repo_owner, repo_name).await?;
 
         info!(
             repository_owner = repo_owner,
             repository = repo_name,
-            pull_request = pr_number,
-            review_id = review_id.into_inner(),
-            "Dismissing review ...",
+            path = path,
+            branch = default_branch_name,
+            "Fetching configuration file from default branch in repository ...",
         );
-
-        self.client._put(route, Some(&request)).await.map_err(|e| {
-            log_octocrab_error("Failed to dismiss existing review", e);
-            Error::FailedToUpdatePullRequest("Failed to dismiss review".to_string())
-        })?;
-
-        Ok(())
-    }
-
-    /// Lists all reviews for a pull request.
-    ///
-    /// # Arguments
-    ///
-    /// * `repo_owner` - The owner of the repository
-    /// * `repo_name` - The name of the repository
-    /// * `pr_number` - The pull request number
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing a vector of reviews
-    #[instrument]
-    async fn list_reviews(
-        &self,
-        repo_owner: &str,
-        repo_name: &str,
-        pr_number: u64,
-    ) -> Result<Vec<Review>, Error> {
-        let mut current_page = match self
-            .client
-            .pulls(repo_owner, repo_name)
-            .list_reviews(pr_number)
-            .send()
+        self.fetch_file_content(repo_owner, repo_name, path, Some(&default_branch_name))
             .await
-        {
-            Ok(p) => p,
-            Err(e) => {
-                log_octocrab_error("Failed to list reviews", e);
-                return Err(Error::InvalidResponse);
-            }
-        };
-
-        let mut reviews = current_page.take_items();
-        while let Ok(Some(mut new_page)) = self.client.get_page(&current_page.next).await {
-            reviews.extend(new_page.take_items());
-
-            current_page = new_page;
-        }
-
-        Ok(reviews)
-    }
-
-    pub fn new(client: Octocrab, user: User) -> Self {
-        Self { client, user }
     }
 }
 
@@ -615,6 +545,7 @@ impl PullRequestProvider for GitHubProvider {
         conclusion: &str,
         output_title: &str,
         output_summary: &str,
+        output_text: &str,
     ) -> Result<(), Error> {
         // Get the commit SHA for the PR head
         let pr_data = self
@@ -638,7 +569,8 @@ impl PullRequestProvider for GitHubProvider {
             "conclusion": conclusion,
             "output": {
                 "title": output_title,
-                "summary": output_summary
+                "summary": output_summary,
+                "text": output_text,
             }
         });
 

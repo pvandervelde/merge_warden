@@ -4,10 +4,13 @@ use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
 use axum::routing::post;
 use axum::Router;
+use axum_macros::debug_handler;
 use clap::Args;
 use hmac::{Hmac, Mac};
 use keyring::Entry;
-use merge_warden_core::config::ValidationConfig;
+use merge_warden_core::config::{
+    load_merge_warden_config, CurrentPullRequestValidationConfiguration,
+};
 use merge_warden_core::{MergeWarden, WebhookPayload};
 use merge_warden_developer_platforms::github::{
     authenticate_with_access_token, create_app_client, GitHubProvider,
@@ -23,15 +26,14 @@ use tracing::{debug, error, info, instrument, warn};
 use crate::commands::auth::{
     KEY_RING_APP_ID, KEY_RING_APP_PRIVATE_KEY_PATH, KEY_RING_SERVICE_NAME,
 };
-use crate::config::{get_config_path, Config};
+use crate::config::{get_config_path, AppConfig};
 use crate::errors::CliError;
 
 use super::auth::KEY_RING_WEB_HOOK_SECRET;
 
 pub struct AppState {
     pub octocrab: Octocrab,
-    pub user: User,
-    pub config: Config,
+    pub config: AppConfig,
     pub webhook_secret: String,
 }
 
@@ -104,7 +106,7 @@ pub struct ValidationResult {
 ///     Ok(())
 /// }
 /// ```
-async fn create_github_app(config: &Config) -> Result<(Octocrab, User), CliError> {
+async fn create_github_app(config: &AppConfig) -> Result<(Octocrab, User), CliError> {
     debug!("Creating GitHub app client");
     let provider = match config.authentication.auth_method.as_str() {
         "token" => {
@@ -221,17 +223,16 @@ async fn create_github_app(config: &Config) -> Result<(Octocrab, User), CliError
 pub async fn execute(args: CheckPrArgs) -> Result<(), CliError> {
     // Load configuration
     let config_path = get_config_path(args.config.as_deref());
-    let config = Config::load(&config_path)
+    let config = AppConfig::load(&config_path)
         .map_err(|e| CliError::ConfigError(format!("Failed to load configuration: {}", e)))?;
 
     let (octocrab, user) = create_github_app(&config).await?;
     let webhook_secret = retrieve_webhook_secret()?;
 
-    let addr = format!("0.0.0.0:{}", config.pr_validation.port);
+    let addr = format!("0.0.0.0:{}", config.webhooks.port);
 
     let state = Arc::new(AppState {
         octocrab,
-        user,
         config,
         webhook_secret,
     });
@@ -247,6 +248,7 @@ pub async fn execute(args: CheckPrArgs) -> Result<(), CliError> {
     Ok(())
 }
 
+#[debug_handler]
 #[instrument(skip(state, headers, body))]
 async fn handle_webhook(
     State(state): State<Arc<AppState>>,
@@ -262,9 +264,9 @@ async fn handle_webhook(
 
     info!("Webhook has valid signature. Processing information ...");
     let body_str = std::str::from_utf8(&body).map_err(|_| StatusCode::BAD_REQUEST)?;
-    let payload: WebhookPayload = serde_json::from_str(&body_str).map_err(|e| {
+    let payload: WebhookPayload = serde_json::from_str(body_str).map_err(|e| {
         error!(
-            body = body_str.clone(),
+            body = body_str.to_string(),
             error = e.to_string(),
             "Could not extract webhook payload from request body"
         );
@@ -304,12 +306,6 @@ async fn handle_webhook(
         warn!(message = "Web hook payload did not include pull request information. Cannot process changes.");
         return Err(StatusCode::BAD_REQUEST);
     };
-
-    // If the pull request is a draft then we don't review it initially. We wait until it is ready for review
-    if pr.draft {
-        info!(message = "Pull request is in draft mode. Will not review pull request until it is marked as ready for review.");
-        return Ok(StatusCode::OK);
-    }
 
     let parts: Vec<&str> = repository.full_name.split('/').collect();
     if parts.len() != 2 {
@@ -351,18 +347,52 @@ async fn handle_webhook(
         }
     };
 
-    let provider = GitHubProvider::new(api_with_pat, state.user.clone());
+    let provider = GitHubProvider::new(api_with_pat);
 
-    // Get pull request
-    // Create a custom configuration
-    let config = ValidationConfig {
-        enforce_conventional_commits: state.config.rules.enforce_title_convention.unwrap_or(false),
-        require_work_item_references: state.config.rules.require_work_items,
-        auto_label: true,
+    // Load the merge-warden TOML config file
+    let merge_warden_config_path = ".github/merge-warden.toml";
+    let validation_config = match load_merge_warden_config(
+        repo_owner,
+        &repository.name,
+        merge_warden_config_path,
+        &provider,
+        &state.config.policies,
+    )
+    .await
+    {
+        Ok(merge_warden_config) => {
+            info!(
+                "Loaded merge-warden config from {}",
+                merge_warden_config_path
+            );
+            merge_warden_config.to_validation_config()
+        }
+        Err(e) => {
+            warn!(
+                "Failed to load merge-warden config from {}: {}. Falling back to defaults.",
+                merge_warden_config_path, e
+            );
+            CurrentPullRequestValidationConfiguration {
+                enforce_title_convention: state.config.policies.enable_title_validation,
+                title_pattern: state.config.policies.default_title_pattern.clone(),
+                invalid_title_label: state.config.policies.default_invalid_title_label.clone(),
+                enforce_work_item_references: state.config.policies.enable_work_item_validation,
+                work_item_reference_pattern: state
+                    .config
+                    .policies
+                    .default_work_item_pattern
+                    .clone(),
+                missing_work_item_label: state
+                    .config
+                    .policies
+                    .default_missing_work_item_label
+                    .clone(),
+            }
+        }
     };
 
-    // Create a MergeWarden instance with custom configuration
-    let warden = MergeWarden::with_config(provider, config);
+    // Create a MergeWarden instance with loaded or fallback configuration
+    let warden = MergeWarden::with_config(provider, validation_config);
 
     // Process a pull request
     info!(
@@ -414,7 +444,7 @@ fn verify_github_signature(secret: &str, headers: &HeaderMap, payload: &[u8]) ->
     };
 
     if !signature_header.starts_with(prefix) {
-        println!("Missing 'sha256=' prefix in signature header");
+        error!("Missing 'sha256=' prefix in signature header");
         return false;
     }
 
@@ -422,7 +452,7 @@ fn verify_github_signature(secret: &str, headers: &HeaderMap, payload: &[u8]) ->
     let received_bytes = match hex::decode(received_sig) {
         Ok(bytes) => bytes,
         Err(e) => {
-            println!("Failed to decode signature: {:?}", e);
+            error!("Failed to decode signature: {:?}", e);
             return false;
         }
     };
@@ -434,11 +464,11 @@ fn verify_github_signature(secret: &str, headers: &HeaderMap, payload: &[u8]) ->
     let expected_mac = mac.finalize();
     let expected_bytes = expected_mac.into_bytes();
 
-    debug!("Expected signature: {}", hex::encode(&expected_bytes));
-    debug!("Received signature: {}", received_sig);
+    //debug!("Expected signature: {}", hex::encode(expected_bytes));
+    //debug!("Received signature: {}", received_sig);
 
     let result = expected_bytes.as_slice() == received_bytes;
-    debug!("Match result: {}", result);
+    //debug!("Match result: {}", result);
 
     // For now just return true. If you're running this as a CLI it is likely that
     // you're running through some kind of proxy. It is highly likely that this proxy

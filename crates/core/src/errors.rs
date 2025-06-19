@@ -1,5 +1,24 @@
 use thiserror::Error;
 
+/// Errors that can occur when loading the merge-warden configuration
+#[derive(Debug, Error)]
+pub enum ConfigLoadError {
+    #[error("Configuration file not found at {0}")]
+    NotFound(String),
+
+    #[error("Failed to parse configuration file: {0}")]
+    ParseError(String),
+
+    #[error("Unsupported schema version: {0}")]
+    UnsupportedSchemaVersion(u32),
+
+    #[error("IO error: {0}")]
+    Io(#[from] std::io::Error),
+
+    #[error("TOML error: {0}")]
+    Toml(#[from] toml::de::Error),
+}
+
 #[derive(Error, Debug)]
 pub enum MergeWardenError {
     #[error("Configuration error: {0}")]
