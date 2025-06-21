@@ -455,7 +455,7 @@ async fn handle_post_request(
                 "Loaded merge-warden config from {}",
                 merge_warden_config_path
             );
-            merge_warden_config.to_validation_config()
+            merge_warden_config.to_validation_config(&state.policies.bypass_rules)
         }
         Err(e) => {
             warn!(
@@ -469,6 +469,7 @@ async fn handle_post_request(
                 enforce_work_item_references: state.policies.enable_work_item_validation,
                 work_item_reference_pattern: state.policies.default_work_item_pattern.clone(),
                 missing_work_item_label: state.policies.default_missing_work_item_label.clone(),
+                bypass_rules: state.policies.bypass_rules.clone(),
             }
         }
     };

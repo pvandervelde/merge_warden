@@ -346,3 +346,151 @@ fn test_work_item_correction() {
         "Updated PR with work item reference should be valid"
     );
 }
+
+// Tests for bypass functionality
+mod bypass_tests {
+    use super::*;
+    use crate::checks::work_item::check_work_item_reference_with_bypass;
+    use crate::config::BypassRule;
+
+    #[test]
+    fn test_bypass_disabled() {
+        let pr = PullRequest {
+            number: 1,
+            title: "feat: emergency fix".to_string(),
+            draft: false,
+            body: Some("Emergency fix without work item".to_string()),
+            author: Some(User {
+                id: 123,
+                login: "bypass-user".to_string(),
+            }),
+        };
+
+        let bypass_rule = BypassRule {
+            enabled: false,
+            users: vec!["bypass-user".to_string()],
+        };
+
+        let result = check_work_item_reference_with_bypass(&pr, &bypass_rule);
+        assert!(!result, "Should fail validation when bypass is disabled");
+    }
+
+    #[test]
+    fn test_bypass_enabled_user_in_list() {
+        let pr = PullRequest {
+            number: 1,
+            title: "feat: emergency fix".to_string(),
+            draft: false,
+            body: Some("Emergency fix without work item".to_string()),
+            author: Some(User {
+                id: 123,
+                login: "bypass-user".to_string(),
+            }),
+        };
+
+        let bypass_rule = BypassRule {
+            enabled: true,
+            users: vec!["bypass-user".to_string()],
+        };
+
+        let result = check_work_item_reference_with_bypass(&pr, &bypass_rule);
+        assert!(result, "Should bypass validation for authorized user");
+    }
+
+    #[test]
+    fn test_bypass_enabled_user_not_in_list() {
+        let pr = PullRequest {
+            number: 1,
+            title: "feat: emergency fix".to_string(),
+            draft: false,
+            body: Some("Emergency fix without work item".to_string()),
+            author: Some(User {
+                id: 123,
+                login: "regular-user".to_string(),
+            }),
+        };
+
+        let bypass_rule = BypassRule {
+            enabled: true,
+            users: vec!["bypass-user".to_string()],
+        };
+
+        let result = check_work_item_reference_with_bypass(&pr, &bypass_rule);
+        assert!(
+            !result,
+            "Should not bypass validation for unauthorized user"
+        );
+    }
+
+    #[test]
+    fn test_bypass_enabled_no_author() {
+        let pr = PullRequest {
+            number: 1,
+            title: "feat: emergency fix".to_string(),
+            draft: false,
+            body: Some("Emergency fix without work item".to_string()),
+            author: None,
+        };
+
+        let bypass_rule = BypassRule {
+            enabled: true,
+            users: vec!["bypass-user".to_string()],
+        };
+
+        let result = check_work_item_reference_with_bypass(&pr, &bypass_rule);
+        assert!(
+            !result,
+            "Should not bypass validation when no author is present"
+        );
+    }
+
+    #[test]
+    fn test_bypass_user_with_valid_work_item() {
+        let pr = PullRequest {
+            number: 1,
+            title: "feat: feature with work item".to_string(),
+            draft: false,
+            body: Some("This feature fixes #123".to_string()),
+            author: Some(User {
+                id: 123,
+                login: "bypass-user".to_string(),
+            }),
+        };
+
+        let bypass_rule = BypassRule {
+            enabled: true,
+            users: vec!["bypass-user".to_string()],
+        };
+
+        let result = check_work_item_reference_with_bypass(&pr, &bypass_rule);
+        assert!(
+            result,
+            "Should return true for bypass user even with valid work item"
+        );
+    }
+
+    #[test]
+    fn test_normal_user_with_valid_work_item() {
+        let pr = PullRequest {
+            number: 1,
+            title: "feat: feature with work item".to_string(),
+            draft: false,
+            body: Some("This feature fixes #123".to_string()),
+            author: Some(User {
+                id: 456,
+                login: "regular-user".to_string(),
+            }),
+        };
+
+        let bypass_rule = BypassRule {
+            enabled: true,
+            users: vec!["bypass-user".to_string()],
+        };
+
+        let result = check_work_item_reference_with_bypass(&pr, &bypass_rule);
+        assert!(
+            result,
+            "Should return true for regular user with valid work item"
+        );
+    }
+}

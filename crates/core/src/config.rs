@@ -362,7 +362,10 @@ pub struct RepositoryProvidedConfig {
 
 /// Convert a RepositoryConfig (TOML) to a ValidationConfig (runtime enforcement)
 impl RepositoryProvidedConfig {
-    pub fn to_validation_config(&self) -> CurrentPullRequestValidationConfiguration {
+    pub fn to_validation_config(
+        &self,
+        bypass_rules: &BypassRules,
+    ) -> CurrentPullRequestValidationConfiguration {
         // For now, only support the main PR policies (title, work item)
         let pr_policies = &self.policies.pull_requests;
 
@@ -373,7 +376,6 @@ impl RepositoryProvidedConfig {
         let enforce_work_item_references = pr_policies.work_item_policies.required;
         let work_item_reference_pattern = pr_policies.work_item_policies.pattern.clone();
         let missing_work_item_label = pr_policies.work_item_policies.label_if_missing.clone();
-
         CurrentPullRequestValidationConfiguration {
             enforce_title_convention,
             title_pattern,
@@ -381,6 +383,7 @@ impl RepositoryProvidedConfig {
             enforce_work_item_references,
             work_item_reference_pattern,
             missing_work_item_label,
+            bypass_rules: bypass_rules.clone(),
         }
     }
 }
@@ -468,9 +471,11 @@ pub struct CurrentPullRequestValidationConfiguration {
 
     /// The regular expression used to determine if a work item reference exists
     pub work_item_reference_pattern: String,
-
     /// The label to apply when no work item reference is found. No label will be applied if set to `None`.
     pub missing_work_item_label: Option<String>,
+
+    /// Rules for bypassing validation checks
+    pub bypass_rules: BypassRules,
 }
 
 impl CurrentPullRequestValidationConfiguration {
@@ -481,6 +486,7 @@ impl CurrentPullRequestValidationConfiguration {
         enforce_work_item_references: bool,
         work_item_reference_pattern: Option<String>,
         missing_work_item_label: Option<String>,
+        bypass_rules: Option<BypassRules>,
     ) -> Self {
         Self {
             enforce_title_convention,
@@ -497,6 +503,7 @@ impl CurrentPullRequestValidationConfiguration {
                 WORK_ITEM_REGEX.to_string()
             },
             missing_work_item_label,
+            bypass_rules: bypass_rules.unwrap_or_default(),
         }
     }
 }
@@ -510,6 +517,7 @@ impl Default for CurrentPullRequestValidationConfiguration {
             enforce_work_item_references: true,
             work_item_reference_pattern: WORK_ITEM_REGEX.to_string(),
             missing_work_item_label: Some(MISSING_WORK_ITEM_LABEL.to_string()),
+            bypass_rules: BypassRules::default(),
         }
     }
 }

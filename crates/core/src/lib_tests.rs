@@ -1,5 +1,5 @@
 use crate::{
-    config::CurrentPullRequestValidationConfiguration,
+    config::{BypassRules, CurrentPullRequestValidationConfiguration},
     config::{
         MISSING_WORK_ITEM_LABEL, TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL,
         WORK_ITEM_COMMENT_MARKER,
@@ -480,9 +480,7 @@ async fn test_constructor_new() {
 #[test]
 async fn test_constructor_with_config() {
     // Create a mock provider
-    let provider = MockGitProvider::new();
-
-    // Create a custom configuration
+    let provider = MockGitProvider::new(); // Create a custom configuration
     let config = CurrentPullRequestValidationConfiguration {
         enforce_title_convention: false,
         title_pattern: "ab".to_string(),
@@ -490,6 +488,7 @@ async fn test_constructor_with_config() {
         enforce_work_item_references: true,
         work_item_reference_pattern: "cd".to_string(),
         missing_work_item_label: None,
+        bypass_rules: BypassRules::default(),
     };
 
     // Create a MergeWarden instance with custom config
@@ -804,9 +803,7 @@ async fn test_process_pull_request_custom_config_disabled_checks() {
             login: "developer123".to_string(),
         }),
     };
-    provider.set_pull_request(pr);
-
-    // Create a custom configuration with disabled checks
+    provider.set_pull_request(pr); // Create a custom configuration with disabled checks
     let config = CurrentPullRequestValidationConfiguration {
         enforce_title_convention: false,
         title_pattern: "ab".to_string(),
@@ -814,6 +811,7 @@ async fn test_process_pull_request_custom_config_disabled_checks() {
         enforce_work_item_references: false,
         work_item_reference_pattern: "cd".to_string(),
         missing_work_item_label: None,
+        bypass_rules: BypassRules::default(),
     };
 
     // Create a MergeWarden instance with custom config

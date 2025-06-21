@@ -137,6 +137,7 @@ fn test_current_pr_validation_config_new() {
         false,
         Some("custom-work-item".to_string()),
         Some("custom-missing-label".to_string()),
+        Some(BypassRules::default()),
     );
     assert!(config.enforce_title_convention);
     assert_eq!(config.title_pattern, "custom-title");
@@ -171,7 +172,7 @@ fn test_custom_regex_patterns_are_used() {
             },
         },
     };
-    let validation = config.to_validation_config();
+    let validation = config.to_validation_config(&BypassRules::default());
     let custom_title = "CUSTOM: test title";
     let custom_title_regex = regex::Regex::new(&validation.title_pattern).unwrap();
     assert!(custom_title_regex.is_match(custom_title));
@@ -424,7 +425,7 @@ fn test_merge_warden_config_to_validation_config_conventional_commits_and_work_i
             },
         },
     };
-    let validation = config.to_validation_config();
+    let validation = config.to_validation_config(&BypassRules::default());
     assert!(validation.enforce_title_convention);
     assert!(validation.enforce_work_item_references);
     assert_eq!(
@@ -456,7 +457,7 @@ fn test_merge_warden_config_to_validation_config_non_conventional_commits() {
             },
         },
     };
-    let validation = config.to_validation_config();
+    let validation = config.to_validation_config(&BypassRules::default());
     assert!(!validation.enforce_title_convention);
     assert!(!validation.enforce_work_item_references);
     assert_eq!(validation.invalid_title_label, None);

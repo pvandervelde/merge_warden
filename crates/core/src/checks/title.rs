@@ -7,12 +7,79 @@
 //! messages. It provides an easy set of rules for creating an explicit commit history,
 //! which makes it easier to write automated tools on top of.
 
-use crate::config::CONVENTIONAL_COMMIT_REGEX;
+use crate::{
+    bypass::can_bypass_title_validation,
+    config::{BypassRule, CONVENTIONAL_COMMIT_REGEX},
+};
 use merge_warden_developer_platforms::models::PullRequest;
 
 #[cfg(test)]
 #[path = "title_tests.rs"]
 mod tests;
+
+/// Validates that the PR title follows the Conventional Commits format with bypass support.
+///
+/// This function checks if the PR title follows the Conventional Commits format.
+/// If bypass rules are provided and the PR author is allowed to bypass title validation,
+/// the function will return `true` regardless of the title format.
+///
+/// # Arguments
+///
+/// * `pr` - The pull request to validate
+/// * `bypass_rule` - The bypass rule for title validation
+///
+/// # Returns
+///
+/// A `bool` indicating whether the title is valid or can be bypassed
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_developer_platforms::models::{PullRequest, User};
+/// use merge_warden_core::checks::title::check_pr_title_with_bypass;
+/// use merge_warden_core::config::BypassRule;
+///
+/// // Regular validation
+/// let pr = PullRequest {
+///     number: 123,
+///     title: "feat(auth): add GitHub login".to_string(),
+///     draft: false,
+///     body: Some("This PR adds GitHub login functionality.".to_string()),
+///     author: None,
+/// };
+///
+/// let bypass_rule = BypassRule::default(); // Disabled bypass
+/// let is_valid = check_pr_title_with_bypass(&pr, &bypass_rule);
+/// assert!(is_valid);
+///
+/// // Bypass validation for authorized user with invalid title
+/// let pr_with_bad_title = PullRequest {
+///     number: 124,
+///     title: "fix urgent bug".to_string(), // Invalid format
+///     draft: false,
+///     body: Some("Emergency fix".to_string()),
+///     author: Some(User {
+///         id: 123,
+///         login: "emergency-bot".to_string(),
+///     }),
+/// };
+///
+/// let bypass_rule = BypassRule {
+///     enabled: true,
+///     users: vec!["emergency-bot".to_string()],
+/// };
+/// let is_valid = check_pr_title_with_bypass(&pr_with_bad_title, &bypass_rule);
+/// assert!(is_valid); // Bypass allows invalid title
+/// ```
+pub fn check_pr_title_with_bypass(pr: &PullRequest, bypass_rule: &BypassRule) -> bool {
+    // Check if user can bypass title validation
+    if can_bypass_title_validation(pr.author.as_ref(), bypass_rule) {
+        return true;
+    }
+
+    // Otherwise, perform normal validation
+    check_pr_title(pr)
+}
 
 /// Validates that the PR title follows the Conventional Commits format.
 ///

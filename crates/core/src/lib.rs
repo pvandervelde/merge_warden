@@ -14,7 +14,7 @@
 //! use merge_warden_developer_platforms::PullRequestProvider;
 //! use merge_warden_core::{
 //!     MergeWarden,
-//!     config::{ CONVENTIONAL_COMMIT_REGEX, CurrentPullRequestValidationConfiguration, MISSING_WORK_ITEM_LABEL, TITLE_INVALID_LABEL, WORK_ITEM_REGEX }};
+//!     config::{ BypassRules, CONVENTIONAL_COMMIT_REGEX, CurrentPullRequestValidationConfiguration, MISSING_WORK_ITEM_LABEL, TITLE_INVALID_LABEL, WORK_ITEM_REGEX }};
 //! use anyhow::Result;
 //!
 //! async fn validate_pr<P: PullRequestProvider + std::fmt::Debug>(provider: P) -> Result<()> {
@@ -47,6 +47,7 @@
 //!         enforce_work_item_references: true,
 //!         work_item_reference_pattern: WORK_ITEM_REGEX.to_string(),
 //!         missing_work_item_label: Some(MISSING_WORK_ITEM_LABEL.to_string()),
+//!         bypass_rules: BypassRules::default(),
 //!     };
 //!
 //!     // Create a MergeWarden instance with custom configuration
@@ -63,6 +64,7 @@ use indoc::formatdoc;
 use merge_warden_developer_platforms::models::{Installation, PullRequest, Repository};
 use merge_warden_developer_platforms::PullRequestProvider;
 
+pub mod bypass;
 pub mod checks;
 pub mod config;
 use config::CurrentPullRequestValidationConfiguration;
@@ -135,7 +137,7 @@ pub struct MergeWarden<P: PullRequestProvider + std::fmt::Debug> {
 impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     /// Checks if the PR title follows the Conventional Commits format.
     ///
-    /// This is a wrapper around the `checks::title::check_pr_title` function.
+    /// This is a wrapper around the `checks::title::check_pr_title_with_bypass` function.
     ///
     /// # Arguments
     ///
@@ -147,12 +149,12 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     #[instrument]
     fn check_title(&self, pr: &PullRequest) -> bool {
         debug!(pull_request = pr.number, "Checking PR title",);
-        checks::title::check_pr_title(pr)
+        checks::title::check_pr_title_with_bypass(pr, &self.config.bypass_rules.title_convention)
     }
 
     /// Checks if the PR description references a work item or issue.
     ///
-    /// This is a wrapper around the `checks::work_item::check_work_item_reference` function.
+    /// This is a wrapper around the `checks::work_item::check_work_item_reference_with_bypass` function.
     ///
     /// # Arguments
     ///
@@ -167,7 +169,10 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
             pull_request = pr.number,
             "Checking work item reference in PR description"
         );
-        checks::work_item::check_work_item_reference(pr)
+        checks::work_item::check_work_item_reference_with_bypass(
+            pr,
+            &self.config.bypass_rules.work_items,
+        )
     }
 
     /// Handles side effects for PR title validation.
@@ -974,8 +979,12 @@ Please update the PR body to include a valid work item reference."#;
     /// use anyhow::Result;
     /// use async_trait::async_trait;
     /// use merge_warden_core::{
-    ///    MergeWarden,
-    ///    config::{ CONVENTIONAL_COMMIT_REGEX, CurrentPullRequestValidationConfiguration, MISSING_WORK_ITEM_LABEL, TITLE_INVALID_LABEL, WORK_ITEM_REGEX }};
+    ///     MergeWarden,
+    ///     config::{
+    ///         BypassRules, CONVENTIONAL_COMMIT_REGEX, CurrentPullRequestValidationConfiguration,
+    ///         MISSING_WORK_ITEM_LABEL, TITLE_INVALID_LABEL, WORK_ITEM_REGEX
+    ///     }
+    /// };
     /// use merge_warden_developer_platforms::PullRequestProvider;
     /// use merge_warden_developer_platforms::errors::Error;
     /// use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
@@ -1015,6 +1024,7 @@ Please update the PR body to include a valid work item reference."#;
     ///         enforce_work_item_references: true,
     ///         work_item_reference_pattern: WORK_ITEM_REGEX.to_string(),
     ///         missing_work_item_label: Some(MISSING_WORK_ITEM_LABEL.to_string()),
+    ///         bypass_rules: BypassRules::default(),
     ///     };
     ///
     ///     let warden = MergeWarden::with_config(provider, config);

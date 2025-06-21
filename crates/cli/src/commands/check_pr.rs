@@ -365,7 +365,7 @@ async fn handle_webhook(
                 "Loaded merge-warden config from {}",
                 merge_warden_config_path
             );
-            merge_warden_config.to_validation_config()
+            merge_warden_config.to_validation_config(&state.config.policies.bypass_rules)
         }
         Err(e) => {
             warn!(
@@ -387,6 +387,7 @@ async fn handle_webhook(
                     .policies
                     .default_missing_work_item_label
                     .clone(),
+                bypass_rules: state.config.policies.bypass_rules.clone(),
             }
         }
     };
