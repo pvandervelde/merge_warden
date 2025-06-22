@@ -5,6 +5,8 @@ use tracing::{debug, error, info, instrument};
 use crate::config::{get_config_path, AppConfig};
 use crate::errors::CliError;
 
+pub mod bypass;
+
 /// Subcommands for the config command
 #[derive(Subcommand, Debug)]
 pub enum ConfigCommands {
@@ -44,6 +46,10 @@ pub enum ConfigCommands {
         /// Value to set
         value: String,
     },
+
+    /// Manage bypass rules
+    #[command(subcommand)]
+    Bypass(bypass::BypassCommands),
 }
 
 /// Execute the config command
@@ -54,6 +60,7 @@ pub async fn execute(cmd: ConfigCommands) -> Result<(), CliError> {
         ConfigCommands::Validate { path } => validate_config(path.as_deref()),
         ConfigCommands::Get { path, key } => get_config(path.as_deref(), key.as_deref()),
         ConfigCommands::Set { path, key, value } => set_config(path.as_deref(), &key, &value),
+        ConfigCommands::Bypass(bypass_cmd) => bypass::execute(bypass_cmd).await,
     }
 }
 
@@ -219,6 +226,13 @@ fn get_config_value(config: &AppConfig, key: &str) -> Result<String, CliError> {
                 key
             ))),
         },
+        "policies" => match parts.get(1) {
+            Some(&"bypassRules") => get_bypass_rule_value(&config.policies, &parts[2..]),
+            _ => Err(CliError::InvalidArguments(format!(
+                "Invalid configuration key: {}",
+                key
+            ))),
+        },
         "authentication" => match parts.get(1) {
             Some(&"auth_method") => Ok(config.authentication.auth_method.clone()),
             _ => Err(CliError::InvalidArguments(format!(
@@ -277,6 +291,13 @@ fn set_config_value(config: &mut AppConfig, key: &str, value: &str) -> Result<()
                 key
             ))),
         },
+        "policies" => match parts.get(1) {
+            Some(&"bypassRules") => set_bypass_rule_value(&mut config.policies, &parts[2..], value),
+            _ => Err(CliError::InvalidArguments(format!(
+                "Invalid configuration key: {}",
+                key
+            ))),
+        },
         "authentication" => match parts.get(1) {
             Some(&"auth_method") => {
                 if value.is_empty() {
@@ -294,6 +315,118 @@ fn set_config_value(config: &mut AppConfig, key: &str, value: &str) -> Result<()
         _ => Err(CliError::InvalidArguments(format!(
             "Invalid configuration key: {}",
             key
+        ))),
+    }
+}
+
+/// Get a bypass rule value by path
+fn get_bypass_rule_value(
+    policies: &merge_warden_core::config::ApplicationDefaults,
+    parts: &[&str],
+) -> Result<String, CliError> {
+    if parts.is_empty() {
+        return Err(CliError::InvalidArguments(
+            "Invalid bypass rule path".to_string(),
+        ));
+    }
+
+    match parts[0] {
+        "titleConvention" => match parts.get(1) {
+            Some(&"enabled") => Ok(policies.bypass_rules.title_convention.enabled.to_string()),
+            Some(&"users") => Ok(format!(
+                "{:?}",
+                policies.bypass_rules.title_convention.users
+            )),
+            _ => Err(CliError::InvalidArguments(
+                "Invalid title convention bypass path. Use 'enabled' or 'users'".to_string(),
+            )),
+        },
+        "workItems" => match parts.get(1) {
+            Some(&"enabled") => Ok(policies.bypass_rules.work_items.enabled.to_string()),
+            Some(&"users") => Ok(format!("{:?}", policies.bypass_rules.work_items.users)),
+            _ => Err(CliError::InvalidArguments(
+                "Invalid work items bypass path. Use 'enabled' or 'users'".to_string(),
+            )),
+        },
+        _ => Err(CliError::InvalidArguments(format!(
+            "Invalid bypass rule type: {}. Use 'titleConvention' or 'workItems'",
+            parts[0]
+        ))),
+    }
+}
+
+/// Set a bypass rule value by path
+fn set_bypass_rule_value(
+    policies: &mut merge_warden_core::config::ApplicationDefaults,
+    parts: &[&str],
+    value: &str,
+) -> Result<(), CliError> {
+    if parts.is_empty() {
+        return Err(CliError::InvalidArguments(
+            "Invalid bypass rule path".to_string(),
+        ));
+    }
+
+    match parts[0] {
+        "titleConvention" => match parts.get(1) {
+            Some(&"enabled") => {
+                policies.bypass_rules.title_convention.enabled = value.parse().map_err(|_| {
+                    CliError::InvalidArguments(format!(
+                        "Invalid boolean value for enabled: {}",
+                        value
+                    ))
+                })?;
+                Ok(())
+            }
+            Some(&"users") => {
+                // Parse comma-separated user list
+                let users: Vec<String> = if value.trim().is_empty() {
+                    Vec::new()
+                } else {
+                    value
+                        .split(',')
+                        .map(|u| u.trim().to_string())
+                        .filter(|u| !u.is_empty())
+                        .collect()
+                };
+                policies.bypass_rules.title_convention.users = users;
+                Ok(())
+            }
+            _ => Err(CliError::InvalidArguments(
+                "Invalid title convention bypass path. Use 'enabled' or 'users'".to_string(),
+            )),
+        },
+        "workItems" => match parts.get(1) {
+            Some(&"enabled") => {
+                policies.bypass_rules.work_items.enabled = value.parse().map_err(|_| {
+                    CliError::InvalidArguments(format!(
+                        "Invalid boolean value for enabled: {}",
+                        value
+                    ))
+                })?;
+                Ok(())
+            }
+            Some(&"users") => {
+                // Parse comma-separated user list
+                let users: Vec<String> = if value.trim().is_empty() {
+                    Vec::new()
+                } else {
+                    value
+                        .split(',')
+                        .map(|u| u.trim().to_string())
+                        .filter(|u| !u.is_empty())
+                        .collect()
+                };
+                policies.bypass_rules.work_items.users = users;
+                Ok(())
+            }
+            _ => Err(CliError::InvalidArguments(
+                "Invalid work items bypass path. Use 'enabled' or 'users'".to_string(),
+            )),
+        },
+        _ => Err(CliError::InvalidArguments(format!(
+            "Invalid bypass rule type: {}. Use 'titleConvention' or 'workItems'",
+            parts[0]
         ))),
     }
 }

@@ -6,7 +6,7 @@ mod commands;
 mod config;
 mod errors;
 
-use commands::{auth::AuthCommands, check_pr::CheckPrArgs, config_cmd::ConfigCommands};
+use commands::{auth::AuthCommands, check_pr::CheckPrArgs, config::ConfigCommands};
 use errors::CliError;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
@@ -66,7 +66,7 @@ async fn main() -> Result<(), CliError> {
             }
         },
         Commands::Config(cmd) => {
-            if let Err(e) = commands::config_cmd::execute(cmd).await {
+            if let Err(e) = commands::config::execute(cmd).await {
                 error!("Error executing config command: {}", e);
                 return Err(e.into());
             }
