@@ -77,6 +77,7 @@ use serde::Deserialize;
 use tracing::{debug, error, info, instrument, warn};
 
 pub mod labels;
+pub mod validation_result;
 
 #[cfg(test)]
 #[path = "lib_tests.rs"]
