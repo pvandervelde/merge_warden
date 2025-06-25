@@ -64,7 +64,6 @@ use indoc::formatdoc;
 use merge_warden_developer_platforms::models::{Installation, PullRequest, Repository};
 use merge_warden_developer_platforms::PullRequestProvider;
 
-pub mod bypass;
 pub mod checks;
 pub mod config;
 use config::CurrentPullRequestValidationConfiguration;
@@ -150,7 +149,12 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     #[instrument]
     fn check_title(&self, pr: &PullRequest) -> bool {
         debug!(pull_request = pr.number, "Checking PR title",);
-        checks::title::check_pr_title_with_bypass(pr, &self.config.bypass_rules.title_convention)
+        checks::check_pr_title(
+            pr,
+            &self.config.bypass_rules.title_convention(),
+            &self.config,
+        )
+        .is_valid
     }
 
     /// Checks if the PR description references a work item or issue.
@@ -163,17 +167,18 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     ///
     /// # Returns
     ///
-    /// A `Result` containing a boolean indicating whether a work item is referenced
-    #[instrument]
+    /// A `Result` containing a boolean indicating whether a work item is referenced    #[instrument]
     fn check_work_item_reference(&self, pr: &PullRequest) -> bool {
         debug!(
             pull_request = pr.number,
             "Checking work item reference in PR description"
         );
-        checks::work_item::check_work_item_reference_with_bypass(
+        checks::check_work_item_reference(
             pr,
-            &self.config.bypass_rules.work_items,
+            &self.config.bypass_rules.work_item_convention(),
+            &self.config,
         )
+        .is_valid
     }
 
     /// Handles side effects for PR title validation.
