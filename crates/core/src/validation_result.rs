@@ -187,6 +187,114 @@ impl ValidationResult {
             bypass_info: Some(bypass_info),
         }
     }
+
+    /// Convenience method to check if the validation result is valid
+    ///
+    /// Returns true if the validation passed (either through valid content or bypass).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use merge_warden_core::validation_result::ValidationResult;
+    ///
+    /// let valid = ValidationResult::valid();
+    /// assert!(valid.is_valid());
+    ///
+    /// let invalid = ValidationResult::invalid();
+    /// assert!(!invalid.is_valid());
+    /// ```
+    pub fn is_valid(&self) -> bool {
+        self.is_valid
+    }
+
+    /// Convenience method to check if a bypass was used
+    ///
+    /// Returns true if validation passed due to a bypass rule, false otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use merge_warden_core::validation_result::{ValidationResult, BypassInfo, BypassRuleType};
+    ///
+    /// let bypass_info = BypassInfo {
+    ///     rule_type: BypassRuleType::TitleConvention,
+    ///     user: "admin".to_string(),
+    /// };
+    ///
+    /// let bypassed = ValidationResult::bypassed(bypass_info);
+    /// assert!(bypassed.was_bypassed());
+    ///
+    /// let valid = ValidationResult::valid();
+    /// assert!(!valid.was_bypassed());
+    /// ```
+    pub fn was_bypassed(&self) -> bool {
+        self.bypass_used
+    }
+
+    /// Convenience method to get bypass information
+    ///
+    /// Returns the bypass information if a bypass was used, None otherwise.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use merge_warden_core::validation_result::{ValidationResult, BypassInfo, BypassRuleType};
+    ///
+    /// let bypass_info = BypassInfo {
+    ///     rule_type: BypassRuleType::TitleConvention,
+    ///     user: "admin".to_string(),
+    /// };
+    ///
+    /// let bypassed = ValidationResult::bypassed(bypass_info.clone());
+    /// assert_eq!(bypassed.bypass_info(), Some(&bypass_info));
+    ///
+    /// let valid = ValidationResult::valid();
+    /// assert_eq!(valid.bypass_info(), None);
+    /// ```
+    pub fn bypass_info(&self) -> Option<&BypassInfo> {
+        self.bypass_info.as_ref()
+    }
+}
+
+impl BypassInfo {
+    /// Returns the username of the user who had bypass permissions
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use merge_warden_core::validation_result::{BypassInfo, BypassRuleType};
+    ///
+    /// let bypass_info = BypassInfo {
+    ///     rule_type: BypassRuleType::TitleConvention,
+    ///     user: "admin".to_string(),
+    /// };
+    ///
+    /// assert_eq!(bypass_info.user_login(), Some("admin"));
+    /// ```
+    pub fn user_login(&self) -> Option<&str> {
+        Some(&self.user)
+    }
+
+    /// Returns a description of the bypass based on the rule type
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use merge_warden_core::validation_result::{BypassInfo, BypassRuleType};
+    ///
+    /// let bypass_info = BypassInfo {
+    ///     rule_type: BypassRuleType::TitleConvention,
+    ///     user: "admin".to_string(),
+    /// };
+    ///
+    /// assert_eq!(bypass_info.description(), Some("Title validation bypassed"));
+    /// ```
+    pub fn description(&self) -> Option<&str> {
+        match self.rule_type {
+            BypassRuleType::TitleConvention => Some("Title validation bypassed"),
+            BypassRuleType::WorkItemReference => Some("Work item validation bypassed"),
+        }
+    }
 }
 
 impl std::fmt::Display for BypassRuleType {

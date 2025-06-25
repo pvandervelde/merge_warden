@@ -13,6 +13,7 @@ use crate::config::CONVENTIONAL_COMMIT_REGEX;
 use crate::errors::MergeWardenError;
 use merge_warden_developer_platforms::models::PullRequest;
 use merge_warden_developer_platforms::PullRequestProvider;
+use regex::Regex;
 
 #[cfg(test)]
 #[path = "labels_tests.rs"]
@@ -76,7 +77,16 @@ pub async fn set_pull_request_labels<P: PullRequestProvider>(
     let mut labels = Vec::new();
 
     // Extract type from PR title using pre-compiled regex
-    if let Some(captures) = CONVENTIONAL_COMMIT_REGEX.captures(&pr.title) {
+    let regex = match Regex::new(CONVENTIONAL_COMMIT_REGEX) {
+        Ok(r) => r,
+        Err(e) => {
+            return Err(MergeWardenError::ConfigError(
+                "Failed to create a title extraction regex.".to_string(),
+            ))
+        }
+    };
+
+    if let Some(captures) = regex.captures(&pr.title) {
         let pr_type = captures.get(1).unwrap().as_str();
 
         // Add type-based label
