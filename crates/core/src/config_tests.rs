@@ -57,9 +57,10 @@ fn test_conventional_commit_regex_edge_cases() {
         "feat(api)!: add feature with special chars !@#$%^&*()", // Special characters in description
     ];
 
+    let regex = Regex::new(CONVENTIONAL_COMMIT_REGEX).unwrap();
     for title in edge_cases {
         assert!(
-            CONVENTIONAL_COMMIT_REGEX.is_match(title),
+            regex.is_match(title),
             "CONVENTIONAL_COMMIT_REGEX should match edge case title '{}'",
             title
         );
@@ -80,9 +81,10 @@ fn test_conventional_commit_regex_invalid_formats() {
         "feat(api)(auth): add new feature", // Multiple scopes
     ];
 
+    let regex = Regex::new(CONVENTIONAL_COMMIT_REGEX).unwrap();
     for title in invalid_titles {
         assert!(
-            !CONVENTIONAL_COMMIT_REGEX.is_match(title),
+            !regex.is_match(title),
             "CONVENTIONAL_COMMIT_REGEX should not match invalid title '{}'",
             title
         );
@@ -107,9 +109,10 @@ fn test_conventional_commit_regex_valid_formats() {
         "feat(api)!: breaking change in API",
     ];
 
+    let regex = Regex::new(CONVENTIONAL_COMMIT_REGEX).unwrap();
     for title in valid_titles {
         assert!(
-            CONVENTIONAL_COMMIT_REGEX.is_match(title),
+            regex.is_match(title),
             "CONVENTIONAL_COMMIT_REGEX should match valid title '{}'",
             title
         );
@@ -119,12 +122,14 @@ fn test_conventional_commit_regex_valid_formats() {
 proptest! {
     #[test]
     fn test_conventional_commit_regex_random_inputs(input in ".*") {
-        let _ = CONVENTIONAL_COMMIT_REGEX.is_match(&input); // Ensure no panic occurs
+        let regex = Regex::new(CONVENTIONAL_COMMIT_REGEX).unwrap();
+        let _ = regex.is_match(&input); // Ensure no panic occurs
     }
 
     #[test]
     fn test_work_item_regex_random_inputs(input in ".*") {
-        let _ = WORK_ITEM_REGEX.is_match(&input); // Ensure no panic occurs
+        let regex = Regex::new(WORK_ITEM_REGEX).unwrap();
+        let _ = regex.is_match(&input); // Ensure no panic occurs
     }
 }
 
@@ -517,10 +522,11 @@ fn test_work_item_regex_edge_cases() {
         "Relates to https://github.com/owner/repo/issues/123?query=param",
     ];
 
+    let regex = Regex::new(WORK_ITEM_REGEX).unwrap();
     for reference in edge_cases {
         let expected_match = should_match.contains(&reference);
         assert_eq!(
-            WORK_ITEM_REGEX.is_match(reference),
+            regex.is_match(reference),
             expected_match,
             "WORK_ITEM_REGEX match for '{}' should be {}",
             reference,
@@ -538,9 +544,10 @@ fn test_work_item_regex_invalid_formats() {
         "Fixes https://github.com/owner/repo/issues123", // Missing separator
     ];
 
+    let regex = Regex::new(WORK_ITEM_REGEX).unwrap();
     for reference in invalid_references {
         assert!(
-            !WORK_ITEM_REGEX.is_match(reference),
+            !regex.is_match(reference),
             "WORK_ITEM_REGEX should not match invalid reference '{}'",
             reference
         );
@@ -564,9 +571,10 @@ fn test_work_item_regex_valid_formats() {
         "Fixes https://github.com/owner/repo/issues/123",
     ];
 
+    let regex = Regex::new(WORK_ITEM_REGEX).unwrap();
     for reference in valid_references {
         assert!(
-            WORK_ITEM_REGEX.is_match(reference),
+            regex.is_match(reference),
             "WORK_ITEM_REGEX should match valid reference '{}'",
             reference
         );
