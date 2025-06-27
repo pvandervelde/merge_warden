@@ -104,7 +104,7 @@ pub struct BypassInfo {
 ///     BypassRuleType::WorkItemReference => println!("Work item validation was bypassed"),
 /// }
 /// ```
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum BypassRuleType {
     /// Conventional commit title format validation was bypassed
     TitleConvention,

@@ -336,16 +336,13 @@ impl Default for ApplicationDefaults {
 /// use merge_warden_core::config::BypassRule;
 ///
 /// // Allow release automation to bypass title validation
-/// let title_bypass = BypassRule {
-///     enabled: true,
-///     users: vec!["release-bot".to_string(), "admin".to_string()],
-/// };
+/// let title_bypass = BypassRule::new(
+///     true,
+///     vec!["release-bot".to_string(), "admin".to_string()]
+/// );
 ///
 /// // Disable work item bypass for all users
-/// let work_item_bypass = BypassRule {
-///     enabled: false,
-///     users: vec![],
-/// };
+/// let work_item_bypass = BypassRule::new(false, vec![]);
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BypassRule {
@@ -426,16 +423,10 @@ impl BypassRule {
 /// ```
 /// use merge_warden_core::config::{BypassRules, BypassRule};
 ///
-/// let bypass_rules = BypassRules {
-///     title_convention: BypassRule {
-///         enabled: true,
-///         users: vec!["release-bot".to_string()],
-///     },
-///     work_items: BypassRule {
-///         enabled: true,
-///         users: vec!["hotfix-team".to_string()],
-///     },
-/// };
+/// let bypass_rules = BypassRules::new(
+///     BypassRule::new(true, vec!["release-bot".to_string()]),
+///     BypassRule::new(true, vec!["hotfix-team".to_string()])
+/// );
 /// ```
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct BypassRules {

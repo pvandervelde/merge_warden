@@ -39,8 +39,8 @@ mod tests;
 ///
 /// ```
 /// use merge_warden_developer_platforms::models::{PullRequest, User};
-/// use merge_warden_core::checks::title::check_pr_title_with_bypass;
-/// use merge_warden_core::config::BypassRule;
+/// use merge_warden_core::checks::check_pr_title;
+/// use merge_warden_core::config::{BypassRule, CurrentPullRequestValidationConfiguration};
 ///
 /// // Regular validation
 /// let pr = PullRequest {
@@ -52,7 +52,8 @@ mod tests;
 /// };
 ///
 /// let bypass_rule = BypassRule::default(); // Disabled bypass
-/// let result = check_pr_title_with_bypass(&pr, &bypass_rule);
+/// let config = CurrentPullRequestValidationConfiguration::default();
+/// let result = check_pr_title(&pr, &bypass_rule, &config);
 /// assert!(result.is_valid());
 /// assert!(!result.was_bypassed());
 ///
@@ -68,11 +69,8 @@ mod tests;
 ///     }),
 /// };
 ///
-/// let bypass_rule = BypassRule {
-///     enabled: true,
-///     users: vec!["emergency-bot".to_string()],
-/// };
-/// let result = check_pr_title_with_bypass(&pr_with_bad_title, &bypass_rule);
+/// let bypass_rule = BypassRule::new(true, vec!["emergency-bot".to_string()]);
+/// let result = check_pr_title(&pr_with_bad_title, &bypass_rule, &config);
 /// assert!(result.is_valid()); // Bypass allows invalid title
 /// assert!(result.was_bypassed());
 /// ```
@@ -128,8 +126,8 @@ pub fn check_pr_title(
 ///
 /// ```
 /// use merge_warden_developer_platforms::models::{PullRequest, User};
-/// use merge_warden_core::checks::work_item::check_work_item_reference_with_bypass;
-/// use merge_warden_core::config::BypassRule;
+/// use merge_warden_core::checks::check_work_item_reference;
+/// use merge_warden_core::config::{BypassRule, CurrentPullRequestValidationConfiguration};
 ///
 /// // PR author who can bypass validation
 /// let bypass_user = User {
@@ -145,12 +143,10 @@ pub fn check_pr_title(
 ///     author: Some(bypass_user),
 /// };
 ///
-/// let bypass_rule = BypassRule {
-///     enabled: true,
-///     users: vec!["bypass-user".to_string()],
-/// };
+/// let bypass_rule = BypassRule::new(true, vec!["bypass-user".to_string()]);
+/// let config = CurrentPullRequestValidationConfiguration::default();
 ///
-/// let result = check_work_item_reference_with_bypass(&pr_with_bypass, &bypass_rule);
+/// let result = check_work_item_reference(&pr_with_bypass, &bypass_rule, &config);
 /// assert!(result.is_valid()); // Bypassed, so returns true
 /// assert!(result.was_bypassed()); // Indicates bypass was used
 /// ```
