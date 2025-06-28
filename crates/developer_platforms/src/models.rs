@@ -134,6 +134,51 @@ pub struct PullRequest {
     pub author: Option<User>,
 }
 
+/// Represents a file that has been changed in a pull request.
+///
+/// This struct contains information about a file that was modified, added, or
+/// deleted as part of a pull request. Used for calculating PR size and analyzing
+/// the scope of changes.
+///
+/// # Fields
+///
+/// * `filename` - The path of the file relative to the repository root
+/// * `additions` - Number of lines added to the file
+/// * `deletions` - Number of lines deleted from the file
+/// * `changes` - Total number of line changes (additions + deletions)
+/// * `status` - The change status of the file (added, modified, deleted, renamed)
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_developer_platforms::models::PullRequestFile;
+///
+/// let file = PullRequestFile {
+///     filename: "src/main.rs".to_string(),
+///     additions: 15,
+///     deletions: 5,
+///     changes: 20,
+///     status: "modified".to_string(),
+/// };
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PullRequestFile {
+    /// The file path relative to the repository root
+    pub filename: String,
+
+    /// Number of lines added to the file
+    pub additions: u32,
+
+    /// Number of lines deleted from the file
+    pub deletions: u32,
+
+    /// Total changes (additions + deletions)
+    pub changes: u32,
+
+    /// File status (added, modified, deleted, renamed)
+    pub status: String,
+}
+
 #[derive(Deserialize)]
 pub struct Repository {
     pub full_name: String,

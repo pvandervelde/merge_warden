@@ -121,6 +121,15 @@ impl PullRequestProvider for MockGitProvider {
     ) -> Result<(), Error> {
         unimplemented!("Not needed for this test")
     }
+
+    async fn get_pull_request_files(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _pr_number: u64,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> {
+        unimplemented!("Not needed for this test")
+    }
 }
 
 #[async_trait]
@@ -201,6 +210,15 @@ impl PullRequestProvider for ErrorMockGitProvider {
         _output_summary: &str,
         _output_text: &str,
     ) -> Result<(), Error> {
+        unimplemented!("Not needed for this test")
+    }
+
+    async fn get_pull_request_files(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _pr_number: u64,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> {
         unimplemented!("Not needed for this test")
     }
 }

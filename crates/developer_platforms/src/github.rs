@@ -8,7 +8,7 @@ use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
     errors::Error,
-    models::{Comment, Label, PullRequest, User},
+    models::{Comment, Label, PullRequest, PullRequestFile, User},
     ConfigFetcher, PullRequestProvider,
 };
 
@@ -584,5 +584,69 @@ impl PullRequestProvider for GitHubProvider {
             Error::FailedToUpdatePullRequest("Failed to create/update check run".to_string())
         })?;
         Ok(())
+    }
+
+    #[instrument]
+    async fn get_pull_request_files(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr_number: u64,
+    ) -> Result<Vec<PullRequestFile>, Error> {
+        match self
+            .client
+            .pulls(repo_owner, repo_name)
+            .list_files(pr_number)
+            .await
+        {
+            Ok(response) => {
+                let files: Vec<PullRequestFile> = response
+                    .items
+                    .into_iter()
+                    .map(|file| PullRequestFile {
+                        filename: file.filename,
+                        additions: file.additions as u32,
+                        deletions: file.deletions as u32,
+                        changes: file.changes as u32,
+                        status: match file.status {
+                            octocrab::models::repos::DiffEntryStatus::Added => "added".to_string(),
+                            octocrab::models::repos::DiffEntryStatus::Removed => {
+                                "removed".to_string()
+                            }
+                            octocrab::models::repos::DiffEntryStatus::Modified => {
+                                "modified".to_string()
+                            }
+                            octocrab::models::repos::DiffEntryStatus::Renamed => {
+                                "renamed".to_string()
+                            }
+                            octocrab::models::repos::DiffEntryStatus::Copied => {
+                                "copied".to_string()
+                            }
+                            octocrab::models::repos::DiffEntryStatus::Changed => {
+                                "changed".to_string()
+                            }
+                            octocrab::models::repos::DiffEntryStatus::Unchanged => {
+                                "unchanged".to_string()
+                            }
+                            _ => "unknown".to_string(),
+                        },
+                    })
+                    .collect();
+
+                debug!(
+                    "Retrieved {} file(s) for PR #{} in {}/{}",
+                    files.len(),
+                    pr_number,
+                    repo_owner,
+                    repo_name
+                );
+
+                Ok(files)
+            }
+            Err(e) => {
+                log_octocrab_error("Failed to get pull request files", e);
+                Err(Error::InvalidResponse)
+            }
+        }
     }
 }
