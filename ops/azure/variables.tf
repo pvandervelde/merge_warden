@@ -64,3 +64,64 @@ variable "tags" {
   type        = map(string)
   default     = {}
 }
+
+#
+# BYPASS RULES
+#
+
+variable "bypass_rules_title_enabled" {
+  description = "Whether title validation bypass rules are enabled by default."
+  type        = bool
+  default     = true
+}
+
+variable "bypass_rules_title_users" {
+  description = "List of users who can bypass title validation by default."
+  type        = list(string)
+  default     = []
+}
+
+variable "bypass_rules_work_item_enabled" {
+  description = "Whether work item validation bypass rules are enabled by default."
+  type        = bool
+  default     = true
+}
+
+variable "bypass_rules_work_item_users" {
+  description = "List of users who can bypass work item validation by default."
+  type        = list(string)
+  default     = []
+}
+
+#
+# APPLICATION CONFIGURATION
+#
+
+variable "enforce_title_convention" {
+  description = "Whether to enforce pull request title convention validation."
+  type        = bool
+  default     = true
+}
+
+variable "require_work_items" {
+  description = "Whether to require work item references in pull requests."
+  type        = bool
+  default     = true
+}
+
+variable "log_level" {
+  description = "Application log level (trace, debug, info, warn, error)."
+  type        = string
+  default     = "info"
+
+  validation {
+    condition     = contains(["trace", "debug", "info", "warn", "error"], var.log_level)
+    error_message = "Log level must be one of: trace, debug, info, warn, error."
+  }
+}
+
+variable "rust_log" {
+  description = "Rust-specific logging configuration."
+  type        = string
+  default     = "info"
+}

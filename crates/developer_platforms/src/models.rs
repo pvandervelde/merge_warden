@@ -96,18 +96,24 @@ pub struct Organization {
 ///
 /// * `number` - The pull request number
 /// * `title` - The title of the pull request
+/// * `draft` - Whether the pull request is a draft
 /// * `body` - The description/body of the pull request, if any
+/// * `author` - The user who created the pull request, if available
 ///
 /// # Examples
 ///
 /// ```
-/// use merge_warden_developer_platforms::models::PullRequest;
+/// use merge_warden_developer_platforms::models::{PullRequest, User};
 ///
 /// let pr = PullRequest {
 ///     number: 123,
 ///     title: "feat(auth): add GitHub login".to_string(),
 ///     draft: false,
 ///     body: Some("This PR adds GitHub login functionality.\n\nFixes #42".to_string()),
+///     author: Some(User {
+///         id: 456,
+///         login: "developer123".to_string(),
+///     }),
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,6 +129,9 @@ pub struct PullRequest {
 
     /// The description/body of the pull request, if any
     pub body: Option<String>,
+
+    /// The user who created the pull request, if available
+    pub author: Option<User>,
 }
 
 #[derive(Deserialize)]
@@ -140,7 +149,7 @@ pub struct Review {
     pub user: User,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct User {
     pub id: u64,
     pub login: String,

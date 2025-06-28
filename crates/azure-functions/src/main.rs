@@ -7,7 +7,6 @@ use hmac::{Hmac, Mac};
 use merge_warden_core::{
     config::{
         load_merge_warden_config, ApplicationDefaults, CurrentPullRequestValidationConfiguration,
-        CONVENTIONAL_COMMIT_REGEX, WORK_ITEM_REGEX,
     },
     MergeWarden, WebhookPayload,
 };
@@ -24,24 +23,19 @@ use tracing::{debug, error, info, instrument, warn};
 mod errors;
 use errors::AzureFunctionsError;
 
+mod app_config_client;
 mod telemetry;
+
+use app_config_client::AppConfigClient;
 
 #[cfg(test)]
 #[path = "main_tests.rs"]
 mod tests;
 
-struct AppConfig {
+struct AppSecrets {
     app_id: u64,
     app_private_key: String,
     webhook_secret: String,
-    port_number: u16,
-    require_work_items: bool,
-    default_title_pattern: Option<String>,
-    default_invalid_title_label: Option<String>,
-
-    enforce_title_convention: bool,
-    default_work_item_pattern: Option<String>,
-    default_missing_work_item_label: Option<String>,
 }
 
 pub struct AppState {
@@ -98,11 +92,11 @@ pub struct AppState {
 ///     Ok(())
 /// }
 /// ```
-async fn create_github_app(config: &AppConfig) -> Result<(Octocrab, User), AzureFunctionsError> {
+async fn create_github_app(secrets: &AppSecrets) -> Result<(Octocrab, User), AzureFunctionsError> {
     info!("Creating GitHub app client");
     info!(message = "Using GitHub App authentication");
-    let app_id = config.app_id;
-    let app_key = config.app_private_key.as_str();
+    let app_id = secrets.app_id;
+    let app_key = secrets.app_private_key.as_str();
 
     let provider = create_app_client(app_id, app_key).await.map_err(|e| {
         AzureFunctionsError::AuthError(
@@ -114,7 +108,7 @@ async fn create_github_app(config: &AppConfig) -> Result<(Octocrab, User), Azure
     Ok(provider)
 }
 
-async fn get_azure_config() -> Result<AppConfig, AzureFunctionsError> {
+async fn get_azure_secrets() -> Result<AppSecrets, AzureFunctionsError> {
     let key_vault_name = env::var("KEY_VAULT_NAME").map_err(|e| {
         error!(
             error = e.to_string(),
@@ -128,7 +122,7 @@ async fn get_azure_config() -> Result<AppConfig, AzureFunctionsError> {
 
     info!(
         keyvault = key_vault_url.as_str(),
-        "Fetching configuration from Azure Key Vault",
+        "Fetching secrets from Azure Key Vault",
     );
     let app_id = get_secret_from_keyvault(key_vault_url.as_str(), "GithubAppId").await?;
     let app_private_key =
@@ -154,117 +148,60 @@ async fn get_azure_config() -> Result<AppConfig, AzureFunctionsError> {
         "Got webhook secret from Azure Key Vault",
     );
 
-    let port_key = "FUNCTIONS_CUSTOMHANDLER_PORT";
-    let port: u16 = match env::var(port_key) {
-        Ok(val) => val.parse().expect("Custom Handler port is not a number!"),
-        Err(_) => 3000,
-    };
-    debug!(port = port, "Got the port from the environment variables",);
-
-    let enforce_title_convention_key = "ENFORCE_TITLE_CONVENTION";
-    let enforce_title_convention = match env::var(enforce_title_convention_key) {
-        Ok(val) => match val.parse() {
-            Ok(b) => b,
-            Err(_) => {
-                error!(
-                    input = val,
-                    "Failed to parse the {} key", enforce_title_convention_key
-                );
-                false
-            }
-        },
-        Err(e) => {
-            error!(
-                error = e.to_string(),
-                "Failed to parse the {} key", enforce_title_convention_key
-            );
-            false
-        }
-    };
-
-    let title_convention_pattern_key = "TITLE_CONVENTION_PATTERN";
-    let title_convention_pattern = match env::var(title_convention_pattern_key) {
-        Ok(val) => Some(val),
-        Err(e) => {
-            info!(
-                error = e.to_string(),
-                "Failed to parse the {} key", title_convention_pattern_key
-            );
-            None
-        }
-    };
-
-    let missing_title_label_key = "MISSING_TITLE_LABEL";
-    let missing_title_label = match env::var(missing_title_label_key) {
-        Ok(val) => Some(val),
-        Err(e) => {
-            info!(
-                error = e.to_string(),
-                "Failed to parse the {} key", missing_title_label_key
-            );
-            None
-        }
-    };
-
-    let require_work_items_key = "REQUIRE_WORK_ITEMS";
-    let require_work_items = match env::var(require_work_items_key) {
-        Ok(val) => match val.parse() {
-            Ok(b) => b,
-            Err(_) => {
-                error!(
-                    input = val,
-                    "Failed to parse the {} key", require_work_items_key
-                );
-                false
-            }
-        },
-        Err(e) => {
-            error!(
-                error = e.to_string(),
-                "Failed to parse the {} key", require_work_items_key
-            );
-            false
-        }
-    };
-
-    let work_item_pattern_key = "WORK_ITEM_PATTERN";
-    let work_item_convention_pattern = match env::var(work_item_pattern_key) {
-        Ok(val) => Some(val),
-        Err(e) => {
-            info!(
-                error = e.to_string(),
-                "Failed to parse the {} key", work_item_pattern_key
-            );
-            None
-        }
-    };
-
-    let missing_work_item_label_key = "MISSING_WORK_ITEM_LABEL";
-    let missing_work_item_label = match env::var(missing_work_item_label_key) {
-        Ok(val) => Some(val),
-        Err(e) => {
-            info!(
-                error = e.to_string(),
-                "Failed to parse the {} key", missing_work_item_label_key
-            );
-            None
-        }
-    };
-
-    let config = AppConfig {
+    let secrets = AppSecrets {
         app_id: app_id_to_number,
         app_private_key,
         webhook_secret,
-        port_number: port,
-        enforce_title_convention,
-        default_title_pattern: title_convention_pattern,
-        default_invalid_title_label: missing_title_label,
-        require_work_items,
-        default_work_item_pattern: work_item_convention_pattern,
-        default_missing_work_item_label: missing_work_item_label,
     };
 
-    Ok(config)
+    Ok(secrets)
+}
+
+async fn get_application_config() -> Result<ApplicationDefaults, AzureFunctionsError> {
+    let app_config_endpoint = env::var("APP_CONFIG_ENDPOINT").map_err(|e| {
+        error!(
+            error = e.to_string(),
+            "Failed to get the App Configuration endpoint from the environment variables"
+        );
+        AzureFunctionsError::ConfigError(
+            "Failed to get the App Configuration endpoint from the environment variables"
+                .to_string(),
+        )
+    })?;
+
+    info!(
+        endpoint = app_config_endpoint.as_str(),
+        "Loading configuration from Azure App Configuration",
+    );
+
+    let app_config_client =
+        AppConfigClient::new(&app_config_endpoint, std::time::Duration::from_secs(600)).map_err(
+            |e| {
+                error!(
+                    error = e.to_string(),
+                    "Failed to create App Configuration client"
+                );
+                AzureFunctionsError::ConfigError(format!(
+                    "Failed to create App Configuration client: {}",
+                    e
+                ))
+            },
+        )?;
+
+    let application_defaults = app_config_client
+        .load_application_defaults()
+        .await
+        .map_err(|e| {
+            warn!(
+                error = e.to_string(),
+                "Failed to load configuration from App Configuration, using fallback defaults"
+            );
+            // Return default configuration instead of failing
+            AzureFunctionsError::ConfigError(format!("Failed to load configuration: {}", e))
+        })?;
+
+    info!("Successfully loaded configuration from Azure App Configuration");
+    Ok(application_defaults)
 }
 
 async fn get_secret_from_keyvault(
@@ -455,7 +392,7 @@ async fn handle_post_request(
                 "Loaded merge-warden config from {}",
                 merge_warden_config_path
             );
-            merge_warden_config.to_validation_config()
+            merge_warden_config.to_validation_config(&state.policies.bypass_rules)
         }
         Err(e) => {
             warn!(
@@ -469,6 +406,7 @@ async fn handle_post_request(
                 enforce_work_item_references: state.policies.enable_work_item_validation,
                 work_item_reference_pattern: state.policies.default_work_item_pattern.clone(),
                 missing_work_item_label: state.policies.default_missing_work_item_label.clone(),
+                bypass_rules: state.policies.bypass_rules.clone(),
             }
         }
     };
@@ -526,34 +464,34 @@ async fn main() -> Result<(), AzureFunctionsError> {
 
     info!("Starting application");
 
-    debug!("Loading Azure configs ...");
-    let app_config = get_azure_config().await?;
+    debug!("Loading Azure secrets ...");
+    let app_secrets = get_azure_secrets().await?;
 
-    let (octocrab, user) = create_github_app(&app_config).await?;
+    debug!("Loading application configuration ...");
+    let application_config = get_application_config().await.unwrap_or_else(|e| {
+        warn!(
+            error = e.to_string(),
+            "Failed to load configuration from App Configuration, using fallback defaults"
+        );
+        ApplicationDefaults::default()
+    });
 
-    let addr = format!("0.0.0.0:{}", app_config.port_number);
+    let (octocrab, user) = create_github_app(&app_secrets).await?;
+
+    let port_key = "FUNCTIONS_CUSTOMHANDLER_PORT";
+    let port: u16 = match env::var(port_key) {
+        Ok(val) => val.parse().expect("Custom Handler port is not a number!"),
+        Err(_) => 3000,
+    };
+    debug!(port = port, "Got the port from the environment variables");
+
+    let addr = format!("0.0.0.0:{}", port);
 
     let state = Arc::new(AppState {
         octocrab,
         user,
-        policies: ApplicationDefaults {
-            enable_title_validation: app_config.enforce_title_convention,
-            default_title_pattern: if let Some(pattern) = &app_config.default_title_pattern {
-                pattern.to_string()
-            } else {
-                CONVENTIONAL_COMMIT_REGEX.to_string()
-            },
-            default_invalid_title_label: app_config.default_invalid_title_label.clone(),
-            enable_work_item_validation: app_config.require_work_items,
-            default_work_item_pattern: if let Some(pattern) = &app_config.default_work_item_pattern
-            {
-                pattern.to_string()
-            } else {
-                WORK_ITEM_REGEX.to_string()
-            },
-            default_missing_work_item_label: app_config.default_missing_work_item_label.clone(),
-        },
-        webhook_secret: app_config.webhook_secret,
+        policies: application_config,
+        webhook_secret: app_secrets.webhook_secret,
     });
 
     let app = Router::new()

@@ -263,14 +263,9 @@ resource "azurerm_linux_function_app" "fa" {
   app_settings = {
     "FUNCTIONS_WORKER_RUNTIME" = "custom"
 
-    # App specific environment variables
-    "KEY_VAULT_NAME"           = azurerm_key_vault.kv.name
-    "ENFORCE_TITLE_CONVENTION" = "true"
-    "REQUIRE_WORK_ITEMS"       = "true"
-
-    # Log settings
-    "LOG_LEVEL" = "debug"
-    "RUST_LOG"  = "debug"
+    # Infrastructure connection settings
+    "KEY_VAULT_NAME"      = azurerm_key_vault.kv.name
+    "APP_CONFIG_ENDPOINT" = azurerm_app_configuration.app_config.endpoint
 
     # App insight environment variables
     "APPINSIGHTS_INSTRUMENTATIONKEY"        = azurerm_application_insights.appinsights.instrumentation_key
@@ -314,4 +309,92 @@ resource "azurerm_key_vault_access_policy" "function_app" {
   secret_permissions = [
     "Get",
   ]
+}
+
+#
+# App Configuration
+#
+
+## Azure App Configuration for centralized bypass rule storage
+resource "azurerm_app_configuration" "app_config" {
+  name                = "${local.name_prefix}-tf-${var.category}-appconfig"
+  location            = azurerm_resource_group.rg.location
+  resource_group_name = azurerm_resource_group.rg.name
+  sku                 = "free"
+
+  tags = merge(
+    local.common_tags,
+    local.extra_tags,
+    var.tags,
+    {
+      "purpose" = "centralized-configuration"
+    }
+  )
+}
+
+## Configuration keys for bypass rules
+resource "azurerm_app_configuration_key" "bypass_title_enabled" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "bypass_rules:title:enabled"
+  value                  = var.bypass_rules_title_enabled ? "true" : "false"
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "bypass_title_users" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "bypass_rules:title:users"
+  value                  = jsonencode(var.bypass_rules_title_users)
+  type                   = "kv"
+  content_type           = "application/json"
+}
+
+resource "azurerm_app_configuration_key" "bypass_work_item_enabled" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "bypass_rules:work_item:enabled"
+  value                  = var.bypass_rules_work_item_enabled ? "true" : "false"
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "bypass_work_item_users" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "bypass_rules:work_item:users"
+  value                  = jsonencode(var.bypass_rules_work_item_users)
+  type                   = "kv"
+  content_type           = "application/json"
+}
+
+## Application configuration keys
+resource "azurerm_app_configuration_key" "enforce_title_convention" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "application:enforce_title_convention"
+  value                  = var.enforce_title_convention ? "true" : "false"
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "require_work_items" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "application:require_work_items"
+  value                  = var.require_work_items ? "true" : "false"
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "log_level" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "logging:level"
+  value                  = var.log_level
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "rust_log" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "logging:rust_log"
+  value                  = var.rust_log
+  type                   = "kv"
+}
+
+## Grant Function App access to App Configuration
+resource "azurerm_role_assignment" "function_app_appconfig_reader" {
+  scope                = azurerm_app_configuration.app_config.id
+  role_definition_name = "App Configuration Data Reader"
+  principal_id         = azurerm_linux_function_app.fa.identity[0].principal_id
 }

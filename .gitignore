@@ -39,3 +39,5 @@ ops/azure/.terraform/
 
 # Ignore the Azure Function local settings file
 configs/az_func/local.settings.json
+
+.llm/

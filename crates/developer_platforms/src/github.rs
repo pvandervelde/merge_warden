@@ -358,6 +358,10 @@ impl PullRequestProvider for GitHubProvider {
                 title: pr.title.unwrap_or(String::new()),
                 draft: pr.draft.unwrap_or_default(),
                 body: pr.body,
+                author: pr.user.map(|user| User {
+                    id: user.id.0,
+                    login: user.login,
+                }),
             }),
             Err(e) => {
                 log_octocrab_error("Failed to get pull request information", e);

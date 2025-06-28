@@ -14,7 +14,7 @@
 //! use merge_warden_developer_platforms::PullRequestProvider;
 //! use merge_warden_core::{
 //!     MergeWarden,
-//!     config::{ CONVENTIONAL_COMMIT_REGEX, CurrentPullRequestValidationConfiguration, MISSING_WORK_ITEM_LABEL, TITLE_INVALID_LABEL, WORK_ITEM_REGEX }};
+//!     config::{ BypassRules, CONVENTIONAL_COMMIT_REGEX, CurrentPullRequestValidationConfiguration, MISSING_WORK_ITEM_LABEL, TITLE_INVALID_LABEL, WORK_ITEM_REGEX }};
 //! use anyhow::Result;
 //!
 //! async fn validate_pr<P: PullRequestProvider + std::fmt::Debug>(provider: P) -> Result<()> {
@@ -47,6 +47,7 @@
 //!         enforce_work_item_references: true,
 //!         work_item_reference_pattern: WORK_ITEM_REGEX.to_string(),
 //!         missing_work_item_label: Some(MISSING_WORK_ITEM_LABEL.to_string()),
+//!         bypass_rules: BypassRules::default(),
 //!     };
 //!
 //!     // Create a MergeWarden instance with custom configuration
@@ -75,6 +76,7 @@ use serde::Deserialize;
 use tracing::{debug, error, info, instrument, warn};
 
 pub mod labels;
+pub mod validation_result;
 
 #[cfg(test)]
 #[path = "lib_tests.rs"]
@@ -82,17 +84,21 @@ mod tests;
 
 /// Result of processing a pull request through Merge Warden.
 ///
-/// Contains information about the validation status and any labels that were added.
+/// Contains information about the validation status, any labels that were added,
+/// and details about any bypass rules that were used during validation.
 #[derive(Debug, Clone)]
 pub struct CheckResult {
-    /// Whether the PR title follows the Conventional Commits format
+    /// Whether the PR title follows the Conventional Commits format or was bypassed
     pub title_valid: bool,
 
-    /// Whether the PR description references a work item or issue
+    /// Whether the PR description references a work item or was bypassed
     pub work_item_referenced: bool,
 
     /// Labels that were added to the PR based on its content
     pub labels: Vec<String>,
+
+    /// Information about any bypasses that were used during validation
+    pub bypasses_used: Vec<validation_result::BypassInfo>,
 }
 
 #[derive(Deserialize)]
@@ -135,7 +141,8 @@ pub struct MergeWarden<P: PullRequestProvider + std::fmt::Debug> {
 impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     /// Checks if the PR title follows the Conventional Commits format.
     ///
-    /// This is a wrapper around the `checks::title::check_pr_title` function.
+    /// This is a wrapper around the `checks::check_pr_title` function that returns
+    /// detailed validation results including any bypass information.
     ///
     /// # Arguments
     ///
@@ -143,16 +150,21 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     ///
     /// # Returns
     ///
-    /// A `Result` containing a boolean indicating whether the title is valid
+    /// A `ValidationResult` containing validation status and bypass information
     #[instrument]
-    fn check_title(&self, pr: &PullRequest) -> bool {
-        debug!(pull_request = pr.number, "Checking PR title",);
-        checks::title::check_pr_title(pr)
+    fn check_title(&self, pr: &PullRequest) -> validation_result::ValidationResult {
+        debug!(pull_request = pr.number, "Checking PR title");
+        checks::check_pr_title(
+            pr,
+            &self.config.bypass_rules.title_convention(),
+            &self.config,
+        )
     }
 
     /// Checks if the PR description references a work item or issue.
     ///
-    /// This is a wrapper around the `checks::work_item::check_work_item_reference` function.
+    /// This is a wrapper around the `checks::check_work_item_reference` function that returns
+    /// detailed validation results including any bypass information.
     ///
     /// # Arguments
     ///
@@ -160,14 +172,18 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     ///
     /// # Returns
     ///
-    /// A `Result` containing a boolean indicating whether a work item is referenced
+    /// A `ValidationResult` containing validation status and bypass information
     #[instrument]
-    fn check_work_item_reference(&self, pr: &PullRequest) -> bool {
+    fn check_work_item_reference(&self, pr: &PullRequest) -> validation_result::ValidationResult {
         debug!(
             pull_request = pr.number,
             "Checking work item reference in PR description"
         );
-        checks::work_item::check_work_item_reference(pr)
+        checks::check_work_item_reference(
+            pr,
+            &self.config.bypass_rules.work_item_convention(),
+            &self.config,
+        )
     }
 
     /// Handles side effects for PR title validation.
@@ -175,30 +191,33 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     /// This method:
     /// - Adds or removes the invalid title label based on validation result
     /// - Adds or removes comments with suggestions for fixing the title
+    /// - Logs bypass usage for audit trails when applicable
     ///
     /// # Arguments
     ///
     /// * `repo_owner` - The owner of the repository
     /// * `repo_name` - The name of the repository
     /// * `pr` - The pull request to validate
-    /// * `is_valid_title` - Whether the PR title is valid
+    /// * `validation_result` - The result of title validation including bypass information
     ///
     /// # Returns
     ///
-    /// A `Result` indicating success or failure
+    /// A `String` containing the comment text that was generated
     #[instrument]
     async fn communicate_pr_title_validity_status(
         &self,
         repo_owner: &str,
         repo_name: &str,
         pr: &PullRequest,
-        is_valid_title: bool,
+        validation_result: &validation_result::ValidationResult,
     ) -> String {
         info!(
             repository_owner = repo_owner,
             repository = repo_name,
             pull_request = pr.number,
-            "Updating the pull request to indicate if the pull request has a valid title",
+            is_valid = validation_result.is_valid(),
+            bypass_used = validation_result.was_bypassed(),
+            "Updating the pull request to indicate title validation status",
         );
 
         // Skip if conventional commits are not enforced
@@ -212,7 +231,24 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
             return String::new();
         }
 
-        if !is_valid_title {
+        // Log bypass usage for audit trail
+        if let Some(bypass_info) = validation_result.bypass_info() {
+            info!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                pull_request = pr.number,
+                user = bypass_info.user,
+                rule_type = ?bypass_info.rule_type,
+                pr_title = pr.title,
+                pr_author = pr.author.as_ref().map(|u| &u.login),
+                "Validation bypass used"
+            );
+        }
+
+        let is_valid = validation_result.is_valid();
+        let was_bypassed = validation_result.was_bypassed();
+
+        if !is_valid {
             // Check if PR already has the invalid title label
             let labels = (self
                 .provider
@@ -317,6 +353,8 @@ Please update the PR title to match the conventional commit message guidelines."
 
             comment_text.to_string()
         } else {
+            // Title validation passed (either valid or bypassed)
+
             // Check if PR has the invalid title label to remove it
             let labels = (self
                 .provider
@@ -362,7 +400,7 @@ Please update the PR title to match the conventional commit message guidelines."
                 }
             }
 
-            // Find and remove the comment
+            // Find and remove any existing invalid title comments
             let comments = (self
                 .provider
                 .list_comments(repo_owner, repo_name, pr.number)
@@ -381,7 +419,7 @@ Please update the PR title to match the conventional commit message guidelines."
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
-                            "The pull request title is valid. Removed a comment that was indicating the issue."
+                            "Removed existing title validation comment."
                         );
                     } else {
                         let e = result.unwrap_err();
@@ -390,11 +428,66 @@ Please update the PR title to match the conventional commit message guidelines."
                             repository = repo_name,
                             pull_request = pr.number,
                             error = e.to_string(),
-                            "The pull request title is valid. Failed to remove a comment that was indicating the issue."
+                            "Failed to remove existing title validation comment."
+                        );
+                    }
+                    break;
+                }
+            }
+
+            // If validation was bypassed, add a bypass notification comment
+            if was_bypassed {
+                if let Some(bypass_info) = validation_result.bypass_info() {
+                    let bypass_comment_text = formatdoc!(
+                        r#"
+                        ⚠️ **Title Validation Bypassed**
+
+                        The PR title validation was bypassed for user `{user}`.
+                        - Original title: `{title}`
+                        - Bypass rule: {rule_type}
+                        - Bypassed by: {user}
+
+                        **Note**: This PR may not follow conventional commit format but was allowed due to bypass permissions.
+
+                        ---
+                        For more information about conventional commits, see: https://www.conventionalcommits.org/
+                        "#,
+                        user = bypass_info.user,
+                        title = pr.title,
+                        rule_type = bypass_info.rule_type
+                    );
+
+                    let comment = format!(
+                        "{prefix}{text}",
+                        prefix = TITLE_COMMENT_MARKER,
+                        text = bypass_comment_text
+                    );
+
+                    let result = self
+                        .provider
+                        .add_comment(repo_owner, repo_name, pr.number, &comment)
+                        .await;
+
+                    if result.is_ok() {
+                        info!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr.number,
+                            user = bypass_info.user,
+                            "Added bypass notification comment for title validation."
+                        );
+                    } else {
+                        let e = result.unwrap_err();
+                        warn!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr.number,
+                            error = e.to_string(),
+                            "Failed to add bypass notification comment."
                         );
                     }
 
-                    break;
+                    return bypass_comment_text;
                 }
             }
 
@@ -407,30 +500,33 @@ Please update the PR title to match the conventional commit message guidelines."
     /// This method:
     /// - Adds or removes the missing work item label based on validation result
     /// - Adds or removes comments with suggestions for adding work item references
+    /// - Logs bypass usage for audit trails when applicable
     ///
     /// # Arguments
     ///
     /// * `repo_owner` - The owner of the repository
     /// * `repo_name` - The name of the repository
     /// * `pr` - The pull request to validate
-    /// * `has_work_item` - Whether the PR references a work item
+    /// * `validation_result` - The result of work item validation including bypass information
     ///
     /// # Returns
     ///
-    /// A `Result` indicating success or failure
+    /// A `String` containing the comment text that was generated
     #[instrument]
     async fn communicate_pr_work_item_validity_status(
         &self,
         repo_owner: &str,
         repo_name: &str,
         pr: &PullRequest,
-        has_work_item: bool,
+        validation_result: &validation_result::ValidationResult,
     ) -> String {
         info!(
             repository_owner = repo_owner,
             repository = repo_name,
             pull_request = pr.number,
-            "Updating the pull request to indicate if the pull request description contains a work item reference",
+            is_valid = validation_result.is_valid(),
+            bypass_used = validation_result.was_bypassed(),
+            "Updating the pull request to indicate work item validation status",
         );
 
         // Skip if work item references are not required
@@ -438,7 +534,24 @@ Please update the PR title to match the conventional commit message guidelines."
             return String::new();
         }
 
-        if !has_work_item {
+        // Log bypass usage for audit trail
+        if let Some(bypass_info) = validation_result.bypass_info() {
+            info!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                pull_request = pr.number,
+                user = bypass_info.user,
+                rule_type = ?bypass_info.rule_type,
+                pr_title = pr.title,
+                pr_author = pr.author.as_ref().map(|u| &u.login),
+                "Validation bypass used"
+            );
+        }
+
+        let is_valid = validation_result.is_valid();
+        let was_bypassed = validation_result.was_bypassed();
+
+        if !is_valid {
             // Check if PR already has the missing work item label
             let labels = (self
                 .provider
@@ -551,6 +664,8 @@ Please update the PR body to include a valid work item reference."#;
 
             comment_text.to_string()
         } else {
+            // Work item validation passed (either valid or bypassed)
+
             // Check if PR has the missing work item label to remove it
             if let Some(work_item_label) = &self.config.missing_work_item_label {
                 let labels = (self
@@ -582,7 +697,7 @@ Please update the PR body to include a valid work item reference."#;
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
-                            "The pull request title has a work item reference. Removed a label that was indicating the issue."
+                            "The pull request has a work item reference. Removed a label that was indicating the issue."
                         );
                     } else {
                         let e = result.unwrap_err();
@@ -591,13 +706,13 @@ Please update the PR body to include a valid work item reference."#;
                             repository = repo_name,
                             pull_request = pr.number,
                             error = e.to_string(),
-                            "The pull request title has a work item reference. Failed to remove a label that was indicating the issue."
+                            "The pull request has a work item reference. Failed to remove a label that was indicating the issue."
                         );
                     }
                 }
             }
 
-            // Find and remove the comment
+            // Find and remove any existing missing work item comments
             let comments = (self
                 .provider
                 .list_comments(repo_owner, repo_name, pr.number)
@@ -616,7 +731,7 @@ Please update the PR body to include a valid work item reference."#;
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
-                            "The pull request title has a work item reference. Removed a comment that was indicating the issue."
+                            "Removed existing work item validation comment."
                         );
                     } else {
                         let e = result.unwrap_err();
@@ -625,11 +740,62 @@ Please update the PR body to include a valid work item reference."#;
                             repository = repo_name,
                             pull_request = pr.number,
                             error = e.to_string(),
-                            "The pull request title has a work item reference. Failed to remove a comment that was indicating the issue."
+                            "Failed to remove existing work item validation comment."
+                        );
+                    }
+                    break;
+                }
+            }
+
+            // If validation was bypassed, add a bypass notification comment
+            if was_bypassed {
+                if let Some(bypass_info) = validation_result.bypass_info() {
+                    let bypass_comment_text = formatdoc!(
+                        r#"
+                        ⚠️ **Work Item Validation Bypassed**
+
+                        The work item reference validation was bypassed for user `{user}`.
+                        - PR description may not contain required work item references
+                        - Bypass rule: {rule_type}
+                        - Bypassed by: {user}
+
+                        **Note**: This PR was allowed to proceed without work item references due to bypass permissions.
+                        "#,
+                        user = bypass_info.user,
+                        rule_type = bypass_info.rule_type
+                    );
+
+                    let comment = format!(
+                        "{prefix}{text}",
+                        prefix = WORK_ITEM_COMMENT_MARKER,
+                        text = bypass_comment_text
+                    );
+
+                    let result = self
+                        .provider
+                        .add_comment(repo_owner, repo_name, pr.number, &comment)
+                        .await;
+
+                    if result.is_ok() {
+                        info!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr.number,
+                            user = bypass_info.user,
+                            "Added bypass notification comment for work item validation."
+                        );
+                    } else {
+                        let e = result.unwrap_err();
+                        warn!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr.number,
+                            error = e.to_string(),
+                            "Failed to add bypass notification comment."
                         );
                     }
 
-                    break;
+                    return bypass_comment_text;
                 }
             }
 
@@ -836,7 +1002,7 @@ Please update the PR body to include a valid work item reference."#;
         );
 
         // If the pull request is a draft then we don't review it initially. We wait until it is ready for review
-        let check_title = "MergeWarden PR Validation";
+        let check_title = "Merge Warden";
         if pr.draft {
             info!(message = "Pull request is in draft mode. Will not review pull request until it is marked as ready for review.");
 
@@ -867,37 +1033,57 @@ Please update the PR body to include a valid work item reference."#;
                 title_valid: true,
                 work_item_referenced: true,
                 labels: Vec::<String>::new(),
+                bypasses_used: Vec::new(),
             });
         }
 
         // Check PR title follows the conventional commit structure if enabled
-        let is_title_valid = if self.config.enforce_title_convention {
+        let title_result = if self.config.enforce_title_convention {
             self.check_title(&pr)
         } else {
-            true
+            validation_result::ValidationResult::valid()
         };
 
         // Check that the PR body has a reference to a work item if enabled
-        let is_work_item_referenced = if self.config.enforce_work_item_references {
+        let work_item_result = if self.config.enforce_work_item_references {
             self.check_work_item_reference(&pr)
         } else {
-            true
+            validation_result::ValidationResult::valid()
         };
 
+        // Collect bypass information for audit trail
+        let mut bypasses_used = Vec::new();
+        if let Some(bypass_info) = title_result.bypass_info() {
+            bypasses_used.push(bypass_info.clone());
+        }
+        if let Some(bypass_info) = work_item_result.bypass_info() {
+            bypasses_used.push(bypass_info.clone());
+        }
+
+        // Extract validity flags for downstream logic
+        let is_title_valid = title_result.is_valid();
+        let is_work_item_referenced = work_item_result.is_valid();
+
         // Apply labels and comments based on the title validation results
-        let title_message = self
-            .communicate_pr_title_validity_status(repo_owner, repo_name, &pr, is_title_valid)
-            .await;
+        let title_message = if title_result.bypass_info().is_some() {
+            "Title validation bypassed".to_string()
+        } else {
+            self.communicate_pr_title_validity_status(repo_owner, repo_name, &pr, &title_result)
+                .await
+        };
 
         // Apply labels and comment based on the work item validation results
-        let work_item_message = self
-            .communicate_pr_work_item_validity_status(
+        let work_item_message = if work_item_result.bypass_info().is_some() {
+            "Work item validation bypassed".to_string()
+        } else {
+            self.communicate_pr_work_item_validity_status(
                 repo_owner,
                 repo_name,
                 &pr,
-                is_work_item_referenced,
+                &work_item_result,
             )
-            .await;
+            .await
+        };
 
         // Determine labels
         let labels = self.determine_labels(repo_owner, repo_name, &pr).await?;
@@ -909,24 +1095,42 @@ Please update the PR body to include a valid work item reference."#;
             "failure"
         };
 
+        // Enhanced check summary that includes bypass information
         let check_summary = if is_title_valid && is_work_item_referenced {
-            "All PR requirements satisfied."
+            if bypasses_used.is_empty() {
+                "All PR requirements satisfied.".to_string()
+            } else {
+                match bypasses_used.len() {
+                    1 => "All PR requirements satisfied (1 validation bypassed).".to_string(),
+                    n => format!(
+                        "All PR requirements satisfied ({} validations bypassed).",
+                        n
+                    ),
+                }
+            }
         } else if !is_title_valid && !is_work_item_referenced {
-            "PR title is invalid and work item reference is missing."
+            "PR title is invalid and work item reference is missing.".to_string()
         } else if !is_title_valid {
-            "PR title is invalid."
+            "PR title is invalid.".to_string()
         } else {
-            "Work item reference is missing."
+            "Work item reference is missing.".to_string()
         };
-        let text = formatdoc!(
-            "{title}
 
-            ---
+        // Smart text formatting that only includes separators when both sections have content
+        let text = match (title_message.is_empty(), work_item_message.is_empty()) {
+            (true, true) => String::new(),
+            (false, true) => title_message,
+            (true, false) => work_item_message,
+            (false, false) => formatdoc!(
+                "{title}
 
-            {work_item}",
-            title = title_message,
-            work_item = work_item_message
-        );
+                ---
+
+                {work_item}",
+                title = title_message,
+                work_item = work_item_message
+            ),
+        };
         self.provider
             .update_pr_check_status(
                 repo_owner,
@@ -934,7 +1138,7 @@ Please update the PR body to include a valid work item reference."#;
                 pr_number,
                 check_conclusion,
                 check_title,
-                check_summary,
+                &check_summary,
                 &text,
             )
             .await
@@ -954,6 +1158,7 @@ Please update the PR body to include a valid work item reference."#;
             title_valid: is_title_valid,
             work_item_referenced: is_work_item_referenced,
             labels,
+            bypasses_used,
         })
     }
 
@@ -974,8 +1179,12 @@ Please update the PR body to include a valid work item reference."#;
     /// use anyhow::Result;
     /// use async_trait::async_trait;
     /// use merge_warden_core::{
-    ///    MergeWarden,
-    ///    config::{ CONVENTIONAL_COMMIT_REGEX, CurrentPullRequestValidationConfiguration, MISSING_WORK_ITEM_LABEL, TITLE_INVALID_LABEL, WORK_ITEM_REGEX }};
+    ///     MergeWarden,
+    ///     config::{
+    ///         BypassRules, CONVENTIONAL_COMMIT_REGEX, CurrentPullRequestValidationConfiguration,
+    ///         MISSING_WORK_ITEM_LABEL, TITLE_INVALID_LABEL, WORK_ITEM_REGEX
+    ///     }
+    /// };
     /// use merge_warden_developer_platforms::PullRequestProvider;
     /// use merge_warden_developer_platforms::errors::Error;
     /// use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
@@ -1015,6 +1224,7 @@ Please update the PR body to include a valid work item reference."#;
     ///         enforce_work_item_references: true,
     ///         work_item_reference_pattern: WORK_ITEM_REGEX.to_string(),
     ///         missing_work_item_label: Some(MISSING_WORK_ITEM_LABEL.to_string()),
+    ///         bypass_rules: BypassRules::default(),
     ///     };
     ///
     ///     let warden = MergeWarden::with_config(provider, config);

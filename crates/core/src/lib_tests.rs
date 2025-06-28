@@ -1,9 +1,10 @@
 use crate::{
-    config::CurrentPullRequestValidationConfiguration,
     config::{
+        BypassRule, BypassRules, CurrentPullRequestValidationConfiguration,
         MISSING_WORK_ITEM_LABEL, TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL,
         WORK_ITEM_COMMENT_MARKER,
     },
+    validation_result::{BypassRuleType, ValidationResult},
     MergeWarden,
 };
 use async_trait::async_trait;
@@ -87,6 +88,10 @@ impl PullRequestProvider for ErrorMockGitProvider {
                 title: title.to_string(),
                 draft: false,
                 body: Some(body.to_string()),
+                author: Some(User {
+                    id: 456,
+                    login: "developer123".to_string(),
+                }),
             })
         }
     }
@@ -174,12 +179,24 @@ impl PullRequestProvider for ErrorMockGitProvider {
     }
 }
 
+#[derive(Debug, Clone)]
+struct CheckStatusUpdate {
+    repo_owner: String,
+    repo_name: String,
+    pr_number: u64,
+    conclusion: String,
+    title: String,
+    summary: String,
+    text: String,
+}
+
 // Mock implementation of PullRequestProvider that returns different PRs based on PR number
 #[derive(Debug)]
 struct DynamicMockGitProvider {
     pull_requests: HashMap<u64, PullRequest>,
     labels: Arc<Mutex<Vec<Label>>>,
     comments: Arc<Mutex<Vec<Comment>>>,
+    check_status_updates: Arc<Mutex<Vec<CheckStatusUpdate>>>,
 }
 
 impl DynamicMockGitProvider {
@@ -188,6 +205,7 @@ impl DynamicMockGitProvider {
             pull_requests: HashMap::new(),
             labels: Arc::new(Mutex::new(Vec::new())),
             comments: Arc::new(Mutex::new(Vec::new())),
+            check_status_updates: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -203,6 +221,11 @@ impl DynamicMockGitProvider {
     fn get_comments(&self) -> Vec<Comment> {
         let comments = self.comments.lock().unwrap().clone();
         comments
+    }
+
+    fn get_check_status_updates(&self) -> Vec<CheckStatusUpdate> {
+        let updates = self.check_status_updates.lock().unwrap().clone();
+        updates
     }
 }
 
@@ -301,14 +324,24 @@ impl PullRequestProvider for DynamicMockGitProvider {
 
     async fn update_pr_check_status(
         &self,
-        _repo_owner: &str,
-        _repo_name: &str,
-        _pr_number: u64,
-        _conclusion: &str,
-        _output_title: &str,
-        _output_summary: &str,
-        _output_text: &str,
+        repo_owner: &str,
+        repo_name: &str,
+        pr_number: u64,
+        conclusion: &str,
+        output_title: &str,
+        output_summary: &str,
+        output_text: &str,
     ) -> Result<(), Error> {
+        let mut updates = self.check_status_updates.lock().unwrap();
+        updates.push(CheckStatusUpdate {
+            repo_owner: repo_owner.to_string(),
+            repo_name: repo_name.to_string(),
+            pr_number,
+            conclusion: conclusion.to_string(),
+            title: output_title.to_string(),
+            summary: output_summary.to_string(),
+            text: output_text.to_string(),
+        });
         Ok(())
     }
 }
@@ -319,6 +352,7 @@ struct MockGitProvider {
     pull_request: Arc<Mutex<Option<PullRequest>>>,
     labels: Arc<Mutex<Vec<Label>>>,
     comments: Arc<Mutex<Vec<Comment>>>,
+    check_status_updates: Arc<Mutex<Vec<CheckStatusUpdate>>>,
 }
 
 impl MockGitProvider {
@@ -327,6 +361,7 @@ impl MockGitProvider {
             pull_request: Arc::new(Mutex::new(None)),
             labels: Arc::new(Mutex::new(Vec::new())),
             comments: Arc::new(Mutex::new(Vec::new())),
+            check_status_updates: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -343,6 +378,11 @@ impl MockGitProvider {
     fn get_comments(&self) -> Vec<Comment> {
         let comments = self.comments.lock().unwrap().clone();
         comments
+    }
+
+    fn get_check_status_updates(&self) -> Vec<CheckStatusUpdate> {
+        let updates = self.check_status_updates.lock().unwrap().clone();
+        updates
     }
 }
 
@@ -442,14 +482,24 @@ impl PullRequestProvider for MockGitProvider {
 
     async fn update_pr_check_status(
         &self,
-        _repo_owner: &str,
-        _repo_name: &str,
-        _pr_number: u64,
-        _conclusion: &str,
-        _output_title: &str,
-        _output_summary: &str,
-        _output_text: &str,
+        repo_owner: &str,
+        repo_name: &str,
+        pr_number: u64,
+        conclusion: &str,
+        output_title: &str,
+        output_summary: &str,
+        output_text: &str,
     ) -> Result<(), Error> {
+        let mut updates = self.check_status_updates.lock().unwrap();
+        updates.push(CheckStatusUpdate {
+            repo_owner: repo_owner.to_string(),
+            repo_name: repo_name.to_string(),
+            pr_number,
+            conclusion: conclusion.to_string(),
+            title: output_title.to_string(),
+            summary: output_summary.to_string(),
+            text: output_text.to_string(),
+        });
         Ok(())
     }
 }
@@ -476,9 +526,7 @@ async fn test_constructor_new() {
 #[test]
 async fn test_constructor_with_config() {
     // Create a mock provider
-    let provider = MockGitProvider::new();
-
-    // Create a custom configuration
+    let provider = MockGitProvider::new(); // Create a custom configuration
     let config = CurrentPullRequestValidationConfiguration {
         enforce_title_convention: false,
         title_pattern: "ab".to_string(),
@@ -486,6 +534,7 @@ async fn test_constructor_with_config() {
         enforce_work_item_references: true,
         work_item_reference_pattern: "cd".to_string(),
         missing_work_item_label: None,
+        bypass_rules: BypassRules::default(),
     };
 
     // Create a MergeWarden instance with custom config
@@ -513,6 +562,10 @@ async fn test_process_pull_request_valid() {
         title: "feat: add new feature".to_string(),
         draft: false,
         body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
     provider.set_pull_request(pr);
 
@@ -570,6 +623,10 @@ async fn test_process_pull_request_invalid_title() {
         title: "invalid title".to_string(), // Missing conventional commit format
         draft: false,
         body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
     provider.set_pull_request(pr);
 
@@ -617,6 +674,10 @@ async fn test_process_pull_request_missing_work_item() {
         title: "feat: add new feature".to_string(),
         draft: false,
         body: Some("No work item reference".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
     provider.set_pull_request(pr);
 
@@ -664,6 +725,10 @@ async fn test_process_pull_request_both_invalid() {
         title: "invalid title".to_string(), // Missing conventional commit format
         draft: false,
         body: Some("No work item reference".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
     provider.set_pull_request(pr);
 
@@ -740,11 +805,16 @@ async fn test_handle_title_validation_invalid_to_valid() {
         title: "feat: add new feature".to_string(),
         draft: false,
         body: Some("Test body".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     // Handle title validation with valid title
+    let validation_result = ValidationResult::valid();
     warden
-        .communicate_pr_title_validity_status("owner", "repo", &pr, true)
+        .communicate_pr_title_validity_status("owner", "repo", &pr, &validation_result)
         .await;
 
     // Verify the label was removed
@@ -775,10 +845,12 @@ async fn test_process_pull_request_custom_config_disabled_checks() {
         title: "invalid title".to_string(), // Missing conventional commit format
         draft: false,
         body: Some("No work item reference".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
-    provider.set_pull_request(pr);
-
-    // Create a custom configuration with disabled checks
+    provider.set_pull_request(pr); // Create a custom configuration with disabled checks
     let config = CurrentPullRequestValidationConfiguration {
         enforce_title_convention: false,
         title_pattern: "ab".to_string(),
@@ -786,6 +858,7 @@ async fn test_process_pull_request_custom_config_disabled_checks() {
         enforce_work_item_references: false,
         work_item_reference_pattern: "cd".to_string(),
         missing_work_item_label: None,
+        bypass_rules: BypassRules::default(),
     };
 
     // Create a MergeWarden instance with custom config
@@ -878,6 +951,10 @@ async fn test_process_pull_request_existing_labels_comments() {
         title: "feat: add new feature".to_string(),
         draft: false,
         body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
     provider.set_pull_request(pr);
 
@@ -941,6 +1018,10 @@ async fn test_process_pull_request_dynamic_provider() {
         title: "feat: add new feature".to_string(),
         draft: false,
         body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     let invalid_pr = PullRequest {
@@ -948,6 +1029,10 @@ async fn test_process_pull_request_dynamic_provider() {
         title: "invalid title".to_string(),
         draft: false,
         body: Some("No work item reference".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     provider.add_pull_request(valid_pr);
@@ -1095,11 +1180,16 @@ async fn test_handle_work_item_validation_missing_to_present() {
         title: "feat: add new feature".to_string(),
         draft: false,
         body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
     };
 
     // Handle work item validation with valid work item reference
+    let validation_result = ValidationResult::valid();
     warden
-        .communicate_pr_work_item_validity_status("owner", "repo", &pr, true)
+        .communicate_pr_work_item_validity_status("owner", "repo", &pr, &validation_result)
         .await;
 
     // Verify the label was removed
@@ -1116,5 +1206,466 @@ async fn test_handle_work_item_validation_missing_to_present() {
             .iter()
             .any(|c| c.body.contains(WORK_ITEM_COMMENT_MARKER)),
         "Work item comment should be removed"
+    );
+}
+
+#[test]
+async fn test_bypass_functionality_with_title_bypass() {
+    // Test the complete bypass flow: validation, logging, and comment generation
+    let provider = DynamicMockGitProvider::new();
+
+    // Create a PR with invalid title but user who can bypass
+    let pr = PullRequest {
+        number: 123,
+        title: "invalid title format".to_string(), // Invalid conventional commit format
+        draft: false,
+        body: Some("Fixes #456".to_string()), // Valid work item reference
+        author: Some(User {
+            id: 789,
+            login: "bypass-user".to_string(),
+        }),
+    };
+
+    // Add the PR to the mock provider
+    let mut provider_mut = provider;
+    provider_mut.add_pull_request(pr.clone());
+
+    // Create MergeWarden with bypass rules allowing "bypass-user" to bypass title validation
+    let config = CurrentPullRequestValidationConfiguration {
+        bypass_rules: BypassRules::new(
+            BypassRule::new(true, vec!["bypass-user".to_string()]), // Title bypass enabled
+            BypassRule::new(false, vec![]),                         // Work item bypass disabled
+        ),
+        ..Default::default()
+    };
+
+    let warden = MergeWarden::with_config(provider_mut, config);
+
+    // Process the pull request
+    let result = warden
+        .process_pull_request("owner", "repo", 123)
+        .await
+        .unwrap();
+
+    // Verify the result indicates success due to bypass
+    assert!(result.title_valid, "Title should be valid due to bypass");
+    assert!(
+        result.work_item_referenced,
+        "Work item should be naturally valid"
+    );
+
+    // Verify bypass information is recorded
+    assert_eq!(
+        result.bypasses_used.len(),
+        1,
+        "Should have one bypass recorded"
+    );
+    let bypass_info = &result.bypasses_used[0];
+    assert_eq!(bypass_info.user, "bypass-user");
+    assert_eq!(bypass_info.rule_type, BypassRuleType::TitleConvention);
+}
+
+#[test]
+async fn test_bypass_functionality_with_work_item_bypass() {
+    // Test bypass for work item validation
+    let provider = DynamicMockGitProvider::new();
+
+    // Create a PR with valid title but no work item reference, user who can bypass work item validation
+    let pr = PullRequest {
+        number: 124,
+        title: "feat: add new feature".to_string(), // Valid conventional commit format
+        draft: false,
+        body: Some("This is an emergency fix".to_string()), // No work item reference
+        author: Some(User {
+            id: 890,
+            login: "emergency-user".to_string(),
+        }),
+    };
+
+    // Add the PR to the mock provider
+    let mut provider_mut = provider;
+    provider_mut.add_pull_request(pr.clone());
+
+    // Create MergeWarden with bypass rules allowing "emergency-user" to bypass work item validation
+    let config = CurrentPullRequestValidationConfiguration {
+        bypass_rules: BypassRules::new(
+            BypassRule::new(false, vec![]), // Title bypass disabled
+            BypassRule::new(true, vec!["emergency-user".to_string()]), // Work item bypass enabled
+        ),
+        ..Default::default()
+    };
+
+    let warden = MergeWarden::with_config(provider_mut, config);
+
+    // Process the pull request
+    let result = warden
+        .process_pull_request("owner", "repo", 124)
+        .await
+        .unwrap();
+
+    // Verify the result indicates success due to bypass
+    assert!(result.title_valid, "Title should be naturally valid");
+    assert!(
+        result.work_item_referenced,
+        "Work item should be valid due to bypass"
+    );
+
+    // Verify bypass information is recorded
+    assert_eq!(
+        result.bypasses_used.len(),
+        1,
+        "Should have one bypass recorded"
+    );
+    let bypass_info = &result.bypasses_used[0];
+    assert_eq!(bypass_info.user, "emergency-user");
+    assert_eq!(bypass_info.rule_type, BypassRuleType::WorkItemReference);
+}
+
+#[test]
+async fn test_bypass_functionality_with_multiple_bypasses() {
+    // Test multiple bypasses in the same PR
+    let provider = DynamicMockGitProvider::new();
+
+    // Create a PR with both invalid title and no work item reference, user who can bypass both
+    let pr = PullRequest {
+        number: 125,
+        title: "urgent fix".to_string(), // Invalid conventional commit format
+        draft: false,
+        body: Some("Emergency production fix".to_string()), // No work item reference
+        author: Some(User {
+            id: 999,
+            login: "admin-user".to_string(),
+        }),
+    };
+
+    // Add the PR to the mock provider
+    let mut provider_mut = provider;
+    provider_mut.add_pull_request(pr.clone());
+
+    // Create MergeWarden with bypass rules allowing "admin-user" to bypass both validations
+    let config = CurrentPullRequestValidationConfiguration {
+        bypass_rules: BypassRules::new(
+            BypassRule::new(true, vec!["admin-user".to_string()]), // Title bypass enabled
+            BypassRule::new(true, vec!["admin-user".to_string()]), // Work item bypass enabled
+        ),
+        ..Default::default()
+    };
+
+    let warden = MergeWarden::with_config(provider_mut, config);
+
+    // Process the pull request
+    let result = warden
+        .process_pull_request("owner", "repo", 125)
+        .await
+        .unwrap();
+
+    // Verify the result indicates success due to bypasses
+    assert!(result.title_valid, "Title should be valid due to bypass");
+    assert!(
+        result.work_item_referenced,
+        "Work item should be valid due to bypass"
+    );
+
+    // Verify both bypasses are recorded
+    assert_eq!(
+        result.bypasses_used.len(),
+        2,
+        "Should have two bypasses recorded"
+    );
+
+    // Check that we have both bypass types
+    let bypass_types: std::collections::HashSet<_> = result
+        .bypasses_used
+        .iter()
+        .map(|info| &info.rule_type)
+        .collect();
+    assert!(bypass_types.contains(&BypassRuleType::TitleConvention));
+    assert!(bypass_types.contains(&BypassRuleType::WorkItemReference));
+
+    // Verify all bypasses are attributed to the same user
+    for bypass_info in &result.bypasses_used {
+        assert_eq!(bypass_info.user, "admin-user");
+    }
+}
+
+#[test]
+async fn test_no_bypass_when_user_not_authorized() {
+    // Test that bypasses are not applied when user is not in the allowed list
+    let provider = DynamicMockGitProvider::new();
+
+    // Create a PR with invalid title, user who CANNOT bypass
+    let pr = PullRequest {
+        number: 126,
+        title: "bad title".to_string(), // Invalid conventional commit format
+        draft: false,
+        body: Some("Fixes #789".to_string()), // Valid work item reference
+        author: Some(User {
+            id: 111,
+            login: "regular-user".to_string(),
+        }),
+    };
+
+    // Add the PR to the mock provider
+    let mut provider_mut = provider;
+    provider_mut.add_pull_request(pr.clone());
+
+    // Create MergeWarden with bypass rules NOT allowing "regular-user"
+    let config = CurrentPullRequestValidationConfiguration {
+        bypass_rules: BypassRules::new(
+            BypassRule::new(true, vec!["admin-user".to_string()]), // Only admin-user can bypass
+            BypassRule::new(false, vec![]),                        // Work item bypass disabled
+        ),
+        ..Default::default()
+    };
+
+    let warden = MergeWarden::with_config(provider_mut, config);
+
+    // Process the pull request
+    let result = warden
+        .process_pull_request("owner", "repo", 126)
+        .await
+        .unwrap();
+
+    // Verify the result shows validation failure (no bypass applied)
+    assert!(!result.title_valid, "Title should be invalid (no bypass)");
+    assert!(
+        result.work_item_referenced,
+        "Work item should be naturally valid"
+    );
+
+    // Verify no bypasses are recorded
+    assert_eq!(
+        result.bypasses_used.len(),
+        0,
+        "Should have no bypasses recorded"
+    );
+}
+
+#[test]
+async fn test_check_status_with_bypass_information() {
+    // Test that check status includes bypass information in the summary
+    let provider = DynamicMockGitProvider::new();
+
+    // Create a PR with invalid title and no work item reference, user who can bypass both
+    let pr = PullRequest {
+        number: 200,
+        title: "urgent fix".to_string(), // Invalid conventional commit format
+        draft: false,
+        body: Some("Emergency production fix".to_string()), // No work item reference
+        author: Some(User {
+            id: 200,
+            login: "emergency-admin".to_string(),
+        }),
+    };
+
+    // Add the PR to the mock provider
+    let mut provider_mut = provider;
+    provider_mut.add_pull_request(pr.clone());
+
+    // Create MergeWarden with bypass rules allowing "emergency-admin" to bypass both validations
+    let mut config = CurrentPullRequestValidationConfiguration::default();
+    config.bypass_rules = BypassRules::new(
+        BypassRule::new(true, vec!["emergency-admin".to_string()]), // Title bypass enabled
+        BypassRule::new(true, vec!["emergency-admin".to_string()]), // Work item bypass enabled
+    );
+
+    let warden = MergeWarden::with_config(provider_mut, config);
+
+    // Process the pull request
+    let result = warden
+        .process_pull_request("owner", "repo", 200)
+        .await
+        .unwrap();
+
+    // Verify the result indicates success due to bypass
+    assert!(result.title_valid, "Title should be valid due to bypass");
+    assert!(
+        result.work_item_referenced,
+        "Work item should be valid due to bypass"
+    );
+
+    // Verify bypass information is recorded
+    assert_eq!(
+        result.bypasses_used.len(),
+        2,
+        "Should have two bypasses recorded"
+    );
+
+    // Note: We can't directly test the check status text here since it's passed to the mock provider,
+    // but we can verify that the bypass information is properly collected and would be included
+    // in the summary based on our implementation.
+}
+
+#[test]
+async fn test_check_status_text_formatting() {
+    // Test the smart text formatting for check status
+    let provider = DynamicMockGitProvider::new();
+
+    // Create a PR that's valid (no comments needed)
+    let pr = PullRequest {
+        number: 201,
+        title: "feat: add new feature".to_string(), // Valid conventional commit format
+        draft: false,
+        body: Some("Fixes #123".to_string()), // Valid work item reference
+        author: Some(User {
+            id: 201,
+            login: "regular-dev".to_string(),
+        }),
+    };
+
+    // Add the PR to the mock provider
+    let mut provider_mut = provider;
+    provider_mut.add_pull_request(pr.clone());
+
+    // Create MergeWarden with default config (no bypasses)
+    let config = CurrentPullRequestValidationConfiguration::default();
+    let warden = MergeWarden::with_config(provider_mut, config);
+
+    // Process the pull request
+    let result = warden
+        .process_pull_request("owner", "repo", 201)
+        .await
+        .unwrap();
+
+    // Verify the result indicates success without bypasses
+    assert!(result.title_valid, "Title should be naturally valid");
+    assert!(
+        result.work_item_referenced,
+        "Work item should be naturally valid"
+    );
+    assert_eq!(
+        result.bypasses_used.len(),
+        0,
+        "Should have no bypasses recorded"
+    );
+
+    // The check status should show "All PR requirements satisfied." without bypass mention
+    // since no bypasses were used
+}
+
+#[tokio::test]
+async fn test_check_status_bypass_information_formatting() {
+    // Test the specific messages included in check status when bypasses are used
+    let provider = DynamicMockGitProvider::new();
+
+    // Create a PR with invalid title but author who can bypass
+    let pr = PullRequest {
+        number: 301,
+        title: "invalid title format".to_string(), // Invalid conventional commit format
+        draft: false,
+        body: Some("Fixes #123".to_string()), // Valid work item reference
+        author: Some(User {
+            id: 301,
+            login: "bypass-user".to_string(),
+        }),
+    };
+
+    // Add the PR to the mock provider
+    let mut provider_mut = provider;
+    provider_mut.add_pull_request(pr.clone());
+
+    // Create MergeWarden with bypass enabled for title validation for this user
+    let mut config = CurrentPullRequestValidationConfiguration::default();
+    config.bypass_rules = BypassRules::new(
+        BypassRule::new(true, vec!["bypass-user".to_string()]),
+        BypassRule::new(false, vec![]),
+    );
+
+    let warden = MergeWarden::with_config(provider_mut, config);
+
+    // Process the pull request
+    let result = warden
+        .process_pull_request("owner", "repo", 301)
+        .await
+        .unwrap();
+
+    // Verify the result indicates one bypass was used
+    assert!(result.title_valid, "Title should be valid due to bypass");
+    assert!(
+        result.work_item_referenced,
+        "Work item should be naturally valid"
+    );
+    assert_eq!(
+        result.bypasses_used.len(),
+        1,
+        "Should have one bypass recorded"
+    );
+    assert_eq!(
+        result.bypasses_used[0].rule_type,
+        BypassRuleType::TitleConvention
+    );
+    assert_eq!(result.bypasses_used[0].user_login(), Some("bypass-user"));
+
+    // Verify check was marked as successful with bypass indication
+    let updates = warden.provider.get_check_status_updates();
+    assert_eq!(updates.len(), 1, "Should have one check status update");
+
+    let update = &updates[0];
+    assert_eq!(update.conclusion, "success");
+    assert_eq!(update.title, "Merge Warden");
+    assert_eq!(
+        update.summary,
+        "All PR requirements satisfied (1 validation bypassed)."
+    );
+}
+
+#[tokio::test]
+async fn test_check_status_multiple_bypasses_formatting() {
+    // Test the message when multiple bypasses are used
+    let provider = DynamicMockGitProvider::new();
+
+    // Create a PR with invalid title and missing work item but author who can bypass both
+    let pr = PullRequest {
+        number: 302,
+        title: "invalid title format".to_string(), // Invalid conventional commit format
+        draft: false,
+        body: Some("No work item reference here".to_string()), // No work item reference
+        author: Some(User {
+            id: 302,
+            login: "super-bypass-user".to_string(),
+        }),
+    };
+
+    // Add the PR to the mock provider
+    let mut provider_mut = provider;
+    provider_mut.add_pull_request(pr.clone());
+
+    // Create MergeWarden with bypasses enabled for both title and work item validation
+    let mut config = CurrentPullRequestValidationConfiguration::default();
+    config.bypass_rules = BypassRules::new(
+        BypassRule::new(true, vec!["super-bypass-user".to_string()]),
+        BypassRule::new(true, vec!["super-bypass-user".to_string()]),
+    );
+
+    let warden = MergeWarden::with_config(provider_mut, config);
+
+    // Process the pull request
+    let result = warden
+        .process_pull_request("owner", "repo", 302)
+        .await
+        .unwrap();
+
+    // Verify the result indicates two bypasses were used
+    assert!(result.title_valid, "Title should be valid due to bypass");
+    assert!(
+        result.work_item_referenced,
+        "Work item should be valid due to bypass"
+    );
+    assert_eq!(
+        result.bypasses_used.len(),
+        2,
+        "Should have two bypasses recorded"
+    );
+
+    // Verify check was marked as successful with multiple bypass indication
+    let updates = warden.provider.get_check_status_updates();
+    assert_eq!(updates.len(), 1, "Should have one check status update");
+
+    let update = &updates[0];
+    assert_eq!(update.conclusion, "success");
+    assert_eq!(update.title, "Merge Warden");
+    assert_eq!(
+        update.summary,
+        "All PR requirements satisfied (2 validations bypassed)."
     );
 }

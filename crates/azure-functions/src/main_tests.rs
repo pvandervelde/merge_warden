@@ -3,7 +3,7 @@ use crate::AppState;
 use super::{handle_post_request, verify_github_signature};
 use axum::{extract::State, http::HeaderMap};
 use hmac::{Hmac, Mac};
-use merge_warden_core::config::ApplicationDefaults;
+use merge_warden_core::config::{ApplicationDefaults, BypassRules};
 use merge_warden_developer_platforms::models::User;
 use octocrab::Octocrab;
 use sha2::Sha256;
@@ -24,6 +24,7 @@ async fn test_handle_webhook() {
             enable_work_item_validation: false,
             default_work_item_pattern: "cd".to_string(),
             default_missing_work_item_label: None,
+            bypass_rules: BypassRules::default(),
         },
         webhook_secret: "test_secret".to_string(),
     });
@@ -103,27 +104,20 @@ fn test_verify_github_signature_missing_header() {
 }
 
 #[tokio::test]
-async fn test_get_azure_config_missing_env_vars() {
+async fn test_get_azure_secrets_missing_env_vars() {
     std::env::remove_var("KEY_VAULT_NAME");
-    let result = super::get_azure_config().await;
+    let result = super::get_azure_secrets().await;
     assert!(result.is_err());
 }
 
 #[tokio::test]
 async fn test_create_github_app_invalid_key() {
-    let config = super::AppConfig {
+    let secrets = super::AppSecrets {
         app_id: 123,
         app_private_key: "invalid".to_string(),
         webhook_secret: "secret".to_string(),
-        port_number: 3000,
-        enforce_title_convention: false,
-        default_title_pattern: Some("ab".to_string()),
-        default_invalid_title_label: None,
-        require_work_items: false,
-        default_work_item_pattern: Some("cd".to_string()),
-        default_missing_work_item_label: None,
     };
-    let result = super::create_github_app(&config).await;
+    let result = super::create_github_app(&secrets).await;
     assert!(result.is_err());
 }
 
