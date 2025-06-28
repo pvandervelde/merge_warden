@@ -164,7 +164,8 @@ async fn get_application_config() -> Result<ApplicationDefaults, AzureFunctionsE
             "Failed to get the App Configuration endpoint from the environment variables"
         );
         AzureFunctionsError::ConfigError(
-            "Failed to get the App Configuration endpoint from the environment variables".to_string(),
+            "Failed to get the App Configuration endpoint from the environment variables"
+                .to_string(),
         )
     })?;
 
@@ -173,22 +174,31 @@ async fn get_application_config() -> Result<ApplicationDefaults, AzureFunctionsE
         "Loading configuration from Azure App Configuration",
     );
 
-    let app_config_client = AppConfigClient::new(&app_config_endpoint, std::time::Duration::from_secs(600)).map_err(|e| {
-        error!(
-            error = e.to_string(),
-            "Failed to create App Configuration client"
-        );
-        AzureFunctionsError::ConfigError(format!("Failed to create App Configuration client: {}", e))
-    })?;
+    let app_config_client =
+        AppConfigClient::new(&app_config_endpoint, std::time::Duration::from_secs(600)).map_err(
+            |e| {
+                error!(
+                    error = e.to_string(),
+                    "Failed to create App Configuration client"
+                );
+                AzureFunctionsError::ConfigError(format!(
+                    "Failed to create App Configuration client: {}",
+                    e
+                ))
+            },
+        )?;
 
-    let application_defaults = app_config_client.load_application_defaults().await.map_err(|e| {
-        warn!(
-            error = e.to_string(),
-            "Failed to load configuration from App Configuration, using fallback defaults"
-        );
-        // Return default configuration instead of failing
-        AzureFunctionsError::ConfigError(format!("Failed to load configuration: {}", e))
-    })?;
+    let application_defaults = app_config_client
+        .load_application_defaults()
+        .await
+        .map_err(|e| {
+            warn!(
+                error = e.to_string(),
+                "Failed to load configuration from App Configuration, using fallback defaults"
+            );
+            // Return default configuration instead of failing
+            AzureFunctionsError::ConfigError(format!("Failed to load configuration: {}", e))
+        })?;
 
     info!("Successfully loaded configuration from Azure App Configuration");
     Ok(application_defaults)

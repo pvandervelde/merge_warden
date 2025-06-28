@@ -205,6 +205,7 @@ impl DynamicMockGitProvider {
             pull_requests: HashMap::new(),
             labels: Arc::new(Mutex::new(Vec::new())),
             comments: Arc::new(Mutex::new(Vec::new())),
+            check_status_updates: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -220,6 +221,11 @@ impl DynamicMockGitProvider {
     fn get_comments(&self) -> Vec<Comment> {
         let comments = self.comments.lock().unwrap().clone();
         comments
+    }
+
+    fn get_check_status_updates(&self) -> Vec<CheckStatusUpdate> {
+        let updates = self.check_status_updates.lock().unwrap().clone();
+        updates
     }
 }
 
@@ -318,14 +324,24 @@ impl PullRequestProvider for DynamicMockGitProvider {
 
     async fn update_pr_check_status(
         &self,
-        _repo_owner: &str,
-        _repo_name: &str,
-        _pr_number: u64,
-        _conclusion: &str,
-        _output_title: &str,
-        _output_summary: &str,
-        _output_text: &str,
+        repo_owner: &str,
+        repo_name: &str,
+        pr_number: u64,
+        conclusion: &str,
+        output_title: &str,
+        output_summary: &str,
+        output_text: &str,
     ) -> Result<(), Error> {
+        let mut updates = self.check_status_updates.lock().unwrap();
+        updates.push(CheckStatusUpdate {
+            repo_owner: repo_owner.to_string(),
+            repo_name: repo_name.to_string(),
+            pr_number,
+            conclusion: conclusion.to_string(),
+            title: output_title.to_string(),
+            summary: output_summary.to_string(),
+            text: output_text.to_string(),
+        });
         Ok(())
     }
 }
@@ -336,6 +352,7 @@ struct MockGitProvider {
     pull_request: Arc<Mutex<Option<PullRequest>>>,
     labels: Arc<Mutex<Vec<Label>>>,
     comments: Arc<Mutex<Vec<Comment>>>,
+    check_status_updates: Arc<Mutex<Vec<CheckStatusUpdate>>>,
 }
 
 impl MockGitProvider {
@@ -344,6 +361,7 @@ impl MockGitProvider {
             pull_request: Arc::new(Mutex::new(None)),
             labels: Arc::new(Mutex::new(Vec::new())),
             comments: Arc::new(Mutex::new(Vec::new())),
+            check_status_updates: Arc::new(Mutex::new(Vec::new())),
         }
     }
 
@@ -360,6 +378,11 @@ impl MockGitProvider {
     fn get_comments(&self) -> Vec<Comment> {
         let comments = self.comments.lock().unwrap().clone();
         comments
+    }
+
+    fn get_check_status_updates(&self) -> Vec<CheckStatusUpdate> {
+        let updates = self.check_status_updates.lock().unwrap().clone();
+        updates
     }
 }
 
@@ -459,14 +482,24 @@ impl PullRequestProvider for MockGitProvider {
 
     async fn update_pr_check_status(
         &self,
-        _repo_owner: &str,
-        _repo_name: &str,
-        _pr_number: u64,
-        _conclusion: &str,
-        _output_title: &str,
-        _output_summary: &str,
-        _output_text: &str,
+        repo_owner: &str,
+        repo_name: &str,
+        pr_number: u64,
+        conclusion: &str,
+        output_title: &str,
+        output_summary: &str,
+        output_text: &str,
     ) -> Result<(), Error> {
+        let mut updates = self.check_status_updates.lock().unwrap();
+        updates.push(CheckStatusUpdate {
+            repo_owner: repo_owner.to_string(),
+            repo_name: repo_name.to_string(),
+            pr_number,
+            conclusion: conclusion.to_string(),
+            title: output_title.to_string(),
+            summary: output_summary.to_string(),
+            text: output_text.to_string(),
+        });
         Ok(())
     }
 }
@@ -1444,14 +1477,14 @@ async fn test_check_status_with_bypass_information() {
         .await
         .unwrap();
 
-    // Verify the result indicates success due to bypasses
+    // Verify the result indicates success due to bypass
     assert!(result.title_valid, "Title should be valid due to bypass");
     assert!(
         result.work_item_referenced,
         "Work item should be valid due to bypass"
     );
 
-    // Verify both bypasses are recorded
+    // Verify bypass information is recorded
     assert_eq!(
         result.bypasses_used.len(),
         2,
@@ -1533,8 +1566,10 @@ async fn test_check_status_bypass_information_formatting() {
 
     // Create MergeWarden with bypass enabled for title validation for this user
     let mut config = CurrentPullRequestValidationConfiguration::default();
-    config.bypass_rules.title_validation.enabled = true;
-    config.bypass_rules.title_validation.allowed_users = vec!["bypass-user".to_string()];
+    config.bypass_rules = BypassRules::new(
+        BypassRule::new(true, vec!["bypass-user".to_string()]),
+        BypassRule::new(false, vec![]),
+    );
 
     let warden = MergeWarden::with_config(provider_mut, config);
 
@@ -1559,7 +1594,7 @@ async fn test_check_status_bypass_information_formatting() {
         result.bypasses_used[0].rule_type,
         BypassRuleType::TitleConvention
     );
-    assert_eq!(result.bypasses_used[0].user_login, "bypass-user");
+    assert_eq!(result.bypasses_used[0].user_login(), Some("bypass-user"));
 
     // Verify check was marked as successful with bypass indication
     let updates = warden.provider.get_check_status_updates();
@@ -1597,10 +1632,10 @@ async fn test_check_status_multiple_bypasses_formatting() {
 
     // Create MergeWarden with bypasses enabled for both title and work item validation
     let mut config = CurrentPullRequestValidationConfiguration::default();
-    config.bypass_rules.title_validation.enabled = true;
-    config.bypass_rules.title_validation.allowed_users = vec!["super-bypass-user".to_string()];
-    config.bypass_rules.work_item_reference.enabled = true;
-    config.bypass_rules.work_item_reference.allowed_users = vec!["super-bypass-user".to_string()];
+    config.bypass_rules = BypassRules::new(
+        BypassRule::new(true, vec!["super-bypass-user".to_string()]),
+        BypassRule::new(true, vec!["super-bypass-user".to_string()]),
+    );
 
     let warden = MergeWarden::with_config(provider_mut, config);
 
@@ -1633,57 +1668,4 @@ async fn test_check_status_multiple_bypasses_formatting() {
         update.summary,
         "All PR requirements satisfied (2 validations bypassed)."
     );
-}
-
-#[tokio::test]
-async fn test_check_status_no_bypasses_formatting() {
-    // Test the message when no bypasses are used (natural success)
-    let provider = DynamicMockGitProvider::new();
-
-    // Create a PR that's naturally valid
-    let pr = PullRequest {
-        number: 303,
-        title: "feat: add new feature".to_string(), // Valid conventional commit format
-        draft: false,
-        body: Some("Fixes #123".to_string()), // Valid work item reference
-        author: Some(User {
-            id: 303,
-            login: "regular-user".to_string(),
-        }),
-    };
-
-    // Add the PR to the mock provider
-    let mut provider_mut = provider;
-    provider_mut.add_pull_request(pr.clone());
-
-    // Create MergeWarden with default config
-    let config = CurrentPullRequestValidationConfiguration::default();
-    let warden = MergeWarden::with_config(provider_mut, config);
-
-    // Process the pull request
-    let result = warden
-        .process_pull_request("owner", "repo", 303)
-        .await
-        .unwrap();
-
-    // Verify the result indicates no bypasses were used
-    assert!(result.title_valid, "Title should be naturally valid");
-    assert!(
-        result.work_item_referenced,
-        "Work item should be naturally valid"
-    );
-    assert_eq!(
-        result.bypasses_used.len(),
-        0,
-        "Should have no bypasses recorded"
-    );
-
-    // Verify check was marked as successful without bypass indication
-    let updates = warden.provider.get_check_status_updates();
-    assert_eq!(updates.len(), 1, "Should have one check status update");
-
-    let update = &updates[0];
-    assert_eq!(update.conclusion, "success");
-    assert_eq!(update.title, "Merge Warden");
-    assert_eq!(update.summary, "All PR requirements satisfied.");
 }

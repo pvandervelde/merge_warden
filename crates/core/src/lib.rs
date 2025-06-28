@@ -1002,7 +1002,7 @@ Please update the PR body to include a valid work item reference."#;
         );
 
         // If the pull request is a draft then we don't review it initially. We wait until it is ready for review
-        let check_title = "MergeWarden PR Validation";
+        let check_title = "Merge Warden";
         if pr.draft {
             info!(message = "Pull request is in draft mode. Will not review pull request until it is marked as ready for review.");
 
@@ -1076,8 +1076,13 @@ Please update the PR body to include a valid work item reference."#;
         let work_item_message = if work_item_result.bypass_info().is_some() {
             "Work item validation bypassed".to_string()
         } else {
-            self.communicate_pr_work_item_validity_status(repo_owner, repo_name, &pr, &work_item_result)
-                .await
+            self.communicate_pr_work_item_validity_status(
+                repo_owner,
+                repo_name,
+                &pr,
+                &work_item_result,
+            )
+            .await
         };
 
         // Determine labels
