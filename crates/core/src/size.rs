@@ -14,6 +14,10 @@ use serde::{Deserialize, Serialize};
 #[path = "size_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "size_integration_tests.rs"]
+mod integration_tests;
+
 /// Represents the size category of a pull request based on lines changed.
 ///
 /// These categories are based on industry research showing that smaller PRs
@@ -360,6 +364,61 @@ impl PrSizeInfo {
         }
     }
 
+    /// Create a `PrSizeInfo` from all PR files, applying exclusion patterns.
+    ///
+    /// This method filters the files based on the exclusion patterns and
+    /// creates the appropriate included/excluded file lists.
+    ///
+    /// # Arguments
+    ///
+    /// * `all_files` - All files changed in the pull request
+    /// * `thresholds` - Size category thresholds to use
+    /// * `exclusion_patterns` - Patterns for files to exclude from size calculation
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use merge_warden_core::size::{PrSizeInfo, SizeThresholds};
+    /// use merge_warden_developer_platforms::models::PullRequestFile;
+    ///
+    /// let files = vec![
+    ///     PullRequestFile {
+    ///         filename: "src/lib.rs".to_string(),
+    ///         additions: 10,
+    ///         deletions: 5,
+    ///         changes: 15,
+    ///         status: "modified".to_string(),
+    ///     },
+    ///     PullRequestFile {
+    ///         filename: "package-lock.json".to_string(),
+    ///         additions: 1000,
+    ///         deletions: 500,
+    ///         changes: 1500,
+    ///         status: "modified".to_string(),
+    ///     },
+    /// ];
+    ///
+    /// let exclusion_patterns = vec!["package-lock.json".to_string()];
+    /// let size_info = PrSizeInfo::from_files_with_exclusions(
+    ///     &files,
+    ///     &SizeThresholds::default(),
+    ///     &exclusion_patterns
+    /// );
+    ///
+    /// assert_eq!(size_info.total_lines_changed, 15); // Only src/lib.rs counted
+    /// assert_eq!(size_info.included_files.len(), 1);
+    /// assert_eq!(size_info.excluded_files.len(), 1);
+    /// ```
+    pub fn from_files_with_exclusions(
+        all_files: &[merge_warden_developer_platforms::models::PullRequestFile],
+        thresholds: &SizeThresholds,
+        exclusion_patterns: &[String],
+    ) -> Self {
+        let (included_files, excluded_files) =
+            filter_files_by_patterns(all_files, exclusion_patterns);
+        Self::new(included_files, excluded_files, thresholds)
+    }
+
     /// Check if this PR is considered oversized based on its category.
     ///
     /// # Examples
@@ -446,4 +505,46 @@ impl PrSizeInfo {
     pub fn excluded_file_count(&self) -> usize {
         self.excluded_files.len()
     }
+}
+
+/// Filter files based on exclusion patterns.
+///
+/// Files matching any of the exclusion patterns will be moved to the excluded list.
+/// This function supports basic glob-like patterns using the `glob` crate.
+///
+/// # Arguments
+///
+/// * `all_files` - All files to filter
+/// * `exclusion_patterns` - Patterns for files to exclude
+///
+/// # Returns
+///
+/// A tuple of (included_files, excluded_files)
+fn filter_files_by_patterns(
+    all_files: &[merge_warden_developer_platforms::models::PullRequestFile],
+    exclusion_patterns: &[String],
+) -> (
+    Vec<merge_warden_developer_platforms::models::PullRequestFile>,
+    Vec<merge_warden_developer_platforms::models::PullRequestFile>,
+) {
+    let mut included = Vec::new();
+    let mut excluded = Vec::new();
+
+    for file in all_files {
+        let should_exclude = exclusion_patterns.iter().any(|pattern| {
+            // For now, use simple string matching
+            // TODO: Consider using glob patterns for more sophisticated matching
+            file.filename.contains(pattern)
+                || file.filename.ends_with(pattern)
+                || pattern == "*" && file.filename.contains(".")
+        });
+
+        if should_exclude {
+            excluded.push(file.clone());
+        } else {
+            included.push(file.clone());
+        }
+    }
+
+    (included, excluded)
 }

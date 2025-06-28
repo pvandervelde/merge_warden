@@ -48,6 +48,7 @@
 //!         work_item_reference_pattern: WORK_ITEM_REGEX.to_string(),
 //!         missing_work_item_label: Some(MISSING_WORK_ITEM_LABEL.to_string()),
 //!         bypass_rules: BypassRules::default(),
+//!         pr_size_check: Default::default(),
 //!     };
 //!
 //!     // Create a MergeWarden instance with custom configuration
@@ -94,6 +95,9 @@ pub struct CheckResult {
 
     /// Whether the PR description references a work item or was bypassed
     pub work_item_referenced: bool,
+
+    /// Whether the PR size validation passed
+    pub size_valid: bool,
 
     /// Labels that were added to the PR based on its content
     pub labels: Vec<String>,
@@ -185,6 +189,27 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
             &self.config.bypass_rules.work_item_convention(),
             &self.config,
         )
+    }
+
+    /// Checks the size of the PR based on file changes.
+    ///
+    /// This is a wrapper around the `checks::check_pr_size` function that returns
+    /// detailed validation results.
+    ///
+    /// # Arguments
+    ///
+    /// * `pr_files` - List of files changed in the pull request
+    ///
+    /// # Returns
+    ///
+    /// A `ValidationResult` containing size validation status
+    #[instrument]
+    fn check_pr_size(
+        &self,
+        pr_files: &[merge_warden_developer_platforms::models::PullRequestFile],
+    ) -> validation_result::ValidationResult {
+        debug!("Checking PR size");
+        checks::check_pr_size(pr_files, &config::BypassRule::default(), &self.config)
     }
 
     /// Handles side effects for PR title validation.
@@ -804,6 +829,113 @@ Please update the PR body to include a valid work item reference."#;
         }
     }
 
+    /// Handles size labeling and comments for a pull request.
+    ///
+    /// This method:
+    /// - Calculates PR size based on file changes
+    /// - Applies appropriate size labels
+    /// - Adds educational comments for oversized PRs if configured
+    /// - Returns a status message for inclusion in the check status
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner` - The owner of the repository
+    /// * `repo_name` - The name of the repository
+    /// * `pr_number` - The pull request number
+    /// * `pr_files` - List of files changed in the PR
+    ///
+    /// # Returns
+    ///
+    /// A status message describing the size analysis result
+    #[instrument]
+    async fn communicate_pr_size_status(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr_number: u64,
+        pr_files: &[merge_warden_developer_platforms::models::PullRequestFile],
+    ) -> String {
+        // Calculate size info
+        let size_info = crate::size::PrSizeInfo::from_files_with_exclusions(
+            pr_files,
+            &self.config.pr_size_check.get_effective_thresholds(),
+            &self.config.pr_size_check.excluded_file_patterns,
+        );
+
+        // Apply size label
+        let label_result = labels::manage_size_labels(
+            &self.provider,
+            repo_owner,
+            repo_name,
+            pr_number,
+            &size_info,
+            &self.config.pr_size_check.label_prefix,
+        )
+        .await;
+
+        match label_result {
+            Ok(Some(label)) => {
+                debug!(
+                    repository_owner = repo_owner,
+                    repository = repo_name,
+                    pull_request = pr_number,
+                    label = label,
+                    "Applied size label"
+                );
+            }
+            Err(e) => {
+                warn!(
+                    repository_owner = repo_owner,
+                    repository = repo_name,
+                    pull_request = pr_number,
+                    error = e.to_string(),
+                    "Failed to apply size label"
+                );
+            }
+            _ => {}
+        }
+
+        // Add comment for oversized PRs if configured
+        if self.config.pr_size_check.add_comment && size_info.is_oversized() {
+            let comment = labels::generate_oversized_pr_comment(
+                &size_info,
+                &self.config.pr_size_check.label_prefix,
+            );
+
+            match self
+                .provider
+                .add_comment(repo_owner, repo_name, pr_number, &comment)
+                .await
+            {
+                Ok(_) => {
+                    info!(
+                        repository_owner = repo_owner,
+                        repository = repo_name,
+                        pull_request = pr_number,
+                        "Added oversized PR comment"
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        repository_owner = repo_owner,
+                        repository = repo_name,
+                        pull_request = pr_number,
+                        error = e.to_string(),
+                        "Failed to add oversized PR comment"
+                    );
+                }
+            }
+        }
+
+        // Return status message
+        format!(
+            "PR size: {} ({} lines across {} files)",
+            size_info.size_category.as_str().to_uppercase(),
+            size_info.total_lines_changed,
+            size_info.included_files.len()
+        )
+    }
+
     /// Determines and adds labels to a PR based on its content.
     ///
     /// This method analyzes the PR title and body to determine appropriate labels
@@ -1035,6 +1167,7 @@ Please update the PR body to include a valid work item reference."#;
             return Ok(CheckResult {
                 title_valid: true,
                 work_item_referenced: true,
+                size_valid: true,
                 labels: Vec::<String>::new(),
                 bypasses_used: Vec::new(),
             });
@@ -1054,6 +1187,29 @@ Please update the PR body to include a valid work item reference."#;
             validation_result::ValidationResult::valid()
         };
 
+        // Fetch PR files for size analysis if size checking is enabled
+        let (size_result, pr_files) = if self.config.pr_size_check.enabled {
+            let files = self
+                .provider
+                .get_pull_request_files(repo_owner, repo_name, pr_number)
+                .await
+                .map_err(|e| {
+                    error!(
+                        repository_owner = repo_owner,
+                        repository = repo_name,
+                        pull_request = pr_number,
+                        error = e.to_string(),
+                        "Failed to fetch PR files for size analysis"
+                    );
+                    MergeWardenError::GitProviderError("Failed to fetch PR files".to_string())
+                })?;
+
+            let result = self.check_pr_size(&files);
+            (result, Some(files))
+        } else {
+            (validation_result::ValidationResult::valid(), None)
+        };
+
         // Collect bypass information for audit trail
         let mut bypasses_used = Vec::new();
         if let Some(bypass_info) = title_result.bypass_info() {
@@ -1062,10 +1218,14 @@ Please update the PR body to include a valid work item reference."#;
         if let Some(bypass_info) = work_item_result.bypass_info() {
             bypasses_used.push(bypass_info.clone());
         }
+        if let Some(bypass_info) = size_result.bypass_info() {
+            bypasses_used.push(bypass_info.clone());
+        }
 
         // Extract validity flags for downstream logic
         let is_title_valid = title_result.is_valid();
         let is_work_item_referenced = work_item_result.is_valid();
+        let is_size_valid = size_result.is_valid();
 
         // Apply labels and comments based on the title validation results
         let title_message = if title_result.bypass_info().is_some() {
@@ -1088,18 +1248,43 @@ Please update the PR body to include a valid work item reference."#;
             .await
         };
 
+        // Handle size labeling and comments if size checking is enabled
+        let size_message = if self.config.pr_size_check.enabled {
+            if let Some(files) = &pr_files {
+                self.communicate_pr_size_status(repo_owner, repo_name, pr_number, files)
+                    .await
+            } else {
+                String::new()
+            }
+        } else {
+            String::new()
+        };
+
         // Determine labels
         let labels = self.determine_labels(repo_owner, repo_name, &pr).await?;
 
-        // New: Update GitHub check run status
-        let check_conclusion = if is_title_valid && is_work_item_referenced {
-            "success"
+        // Determine check conclusion - fail if any validation fails or if size is oversized and fail_on_oversized is true
+        let should_fail_on_size = if let Some(files) = &pr_files {
+            let size_info = crate::size::PrSizeInfo::from_files_with_exclusions(
+                files,
+                &self.config.pr_size_check.get_effective_thresholds(),
+                &self.config.pr_size_check.excluded_file_patterns,
+            );
+            self.config.pr_size_check.fail_on_oversized && size_info.is_oversized()
         } else {
-            "failure"
+            false
         };
 
-        // Enhanced check summary that includes bypass information
-        let check_summary = if is_title_valid && is_work_item_referenced {
+        let check_conclusion =
+            if is_title_valid && is_work_item_referenced && (is_size_valid || !should_fail_on_size)
+            {
+                "success"
+            } else {
+                "failure"
+            };
+
+        // Enhanced check summary that includes all validation results and bypass information
+        let check_summary = if is_title_valid && is_work_item_referenced && is_size_valid {
             if bypasses_used.is_empty() {
                 "All PR requirements satisfied.".to_string()
             } else {
@@ -1111,28 +1296,38 @@ Please update the PR body to include a valid work item reference."#;
                     ),
                 }
             }
-        } else if !is_title_valid && !is_work_item_referenced {
-            "PR title is invalid and work item reference is missing.".to_string()
-        } else if !is_title_valid {
-            "PR title is invalid.".to_string()
         } else {
-            "Work item reference is missing.".to_string()
+            let mut issues = Vec::new();
+            if !is_title_valid {
+                issues.push("title is invalid");
+            }
+            if !is_work_item_referenced {
+                issues.push("work item reference is missing");
+            }
+            if !is_size_valid {
+                issues.push("PR size exceeds threshold");
+            }
+
+            match issues.len() {
+                1 => format!("PR {}.", issues[0]),
+                2 => format!("PR {} and {}.", issues[0], issues[1]),
+                _ => format!("PR {}, {}, and {}.", issues[0], issues[1], issues[2]),
+            }
         };
 
-        // Smart text formatting that only includes separators when both sections have content
-        let text = match (title_message.is_empty(), work_item_message.is_empty()) {
-            (true, true) => String::new(),
-            (false, true) => title_message,
-            (true, false) => work_item_message,
-            (false, false) => formatdoc!(
-                "{title}
-
-                ---
-
-                {work_item}",
-                title = title_message,
-                work_item = work_item_message
-            ),
+        // Smart text formatting that includes all messages with separators when content exists
+        let text = {
+            let mut messages = Vec::new();
+            if !title_message.is_empty() {
+                messages.push(title_message);
+            }
+            if !work_item_message.is_empty() {
+                messages.push(work_item_message);
+            }
+            if !size_message.is_empty() {
+                messages.push(size_message);
+            }
+            messages.join("\n\n---\n\n")
         };
         self.provider
             .update_pr_check_status(
@@ -1160,6 +1355,7 @@ Please update the PR body to include a valid work item reference."#;
         Ok(CheckResult {
             title_valid: is_title_valid,
             work_item_referenced: is_work_item_referenced,
+            size_valid: is_size_valid,
             labels,
             bypasses_used,
         })
@@ -1229,6 +1425,7 @@ Please update the PR body to include a valid work item reference."#;
     ///         work_item_reference_pattern: WORK_ITEM_REGEX.to_string(),
     ///         missing_work_item_label: Some(MISSING_WORK_ITEM_LABEL.to_string()),
     ///         bypass_rules: BypassRules::default(),
+    ///         pr_size_check: Default::default(),
     ///     };
     ///
     ///     let warden = MergeWarden::with_config(provider, config);
