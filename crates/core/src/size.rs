@@ -238,6 +238,31 @@ impl Default for SizeThresholds {
     }
 }
 
+impl SizeThresholds {
+    /// Create new size thresholds with custom values.
+    ///
+    /// # Arguments
+    ///
+    /// * `xs` - Maximum lines for XS category
+    /// * `s` - Maximum lines for S category
+    /// * `m` - Maximum lines for M category
+    /// * `l` - Maximum lines for L category
+    /// * `xl` - Maximum lines for XL category
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use merge_warden_core::size::SizeThresholds;
+    ///
+    /// let custom = SizeThresholds::new(5, 25, 75, 150, 300);
+    /// assert_eq!(custom.xs, 5);
+    /// assert_eq!(custom.s, 25);
+    /// ```
+    pub fn new(xs: u32, s: u32, m: u32, l: u32, xl: u32) -> Self {
+        Self { xs, s, m, l, xl }
+    }
+}
+
 /// Comprehensive information about a pull request's size and file changes.
 ///
 /// Contains the calculated size metrics, categorization, and detailed

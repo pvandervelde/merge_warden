@@ -24,3 +24,28 @@ required = true
 # Define the label that will be applied to the pull request if it does not contain a work item reference.
 # If the label is not specified, no label will be applied.
 label_if_missing = "pr-issue: missing-work-item"
+
+[policies.pullRequests.prSize]
+# Enable PR size checking and labeling
+enabled = false
+
+# Fail the check for oversized PRs (XXL category - 500+ lines)
+fail_on_oversized = false
+
+# File patterns to exclude from size calculations (supports glob patterns)
+excluded_file_patterns = ["*.md", "*.txt", "docs/*"]
+
+# Prefix for size labels (will create labels like "size/XS", "size/S", etc.)
+label_prefix = "size/"
+
+# Add educational comments for oversized PRs
+add_comment = true
+
+# Optional: Custom size thresholds (uncomment to override defaults)
+# [policies.pullRequests.prSize.thresholds]
+# xs = 10    # 1-10 lines
+# s = 50     # 11-50 lines
+# m = 100    # 51-100 lines
+# l = 250    # 101-250 lines
+# xl = 500   # 251-500 lines
+# xxl = 501+ lines (anything above xl)

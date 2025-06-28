@@ -387,6 +387,7 @@ async fn handle_webhook(
                     .policies
                     .default_missing_work_item_label
                     .clone(),
+                pr_size_check: merge_warden_core::config::PrSizeCheckConfig::default(),
                 bypass_rules: state.config.policies.bypass_rules.clone(),
             }
         }
