@@ -273,6 +273,7 @@ impl AppConfigClient {
             default_work_item_pattern: defaults.default_work_item_pattern,
             default_missing_work_item_label: defaults.default_missing_work_item_label,
             bypass_rules,
+            pr_size_check: defaults.pr_size_check,
         };
 
         info!(

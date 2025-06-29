@@ -275,6 +275,10 @@ pub struct ApplicationDefaults {
     /// Bypass rules for allowing specific users to skip validation
     #[serde(rename = "bypassRules", default)]
     pub bypass_rules: BypassRules,
+
+    /// Configuration for PR size checking
+    #[serde(rename = "prSize", default)]
+    pub pr_size_check: PrSizeCheckConfig,
 }
 
 impl ApplicationDefaults {
@@ -313,6 +317,7 @@ impl Default for ApplicationDefaults {
             default_work_item_pattern: ApplicationDefaults::default_work_item_pattern(),
             default_missing_work_item_label: ApplicationDefaults::default_work_item_missing_label(),
             bypass_rules: BypassRules::default(),
+            pr_size_check: PrSizeCheckConfig::default(),
         }
     }
 }
@@ -921,6 +926,16 @@ pub async fn load_merge_warden_config(
             .label_if_missing = app_defaults.default_missing_work_item_label.clone();
     }
 
+    // Merge PR size configuration from app defaults
+    if app_defaults.pr_size_check.enabled {
+        config.policies.pull_requests.size_policies.enabled = true;
+    }
+
+    // Use app defaults for any unspecified PR size config values
+    if !config.policies.pull_requests.size_policies.enabled {
+        config.policies.pull_requests.size_policies = app_defaults.pr_size_check.clone();
+    }
+
     info!(
         enable_title_validation = config.policies.pull_requests.title_policies.required,
         title_validation_pattern = config.policies.pull_requests.title_policies.pattern.clone(),
@@ -945,6 +960,13 @@ pub async fn load_merge_warden_config(
             .label_if_missing
             .clone()
             .unwrap_or_default(),
+        enable_pr_size_checking = config.policies.pull_requests.size_policies.enabled,
+        pr_size_fail_on_oversized = config
+            .policies
+            .pull_requests
+            .size_policies
+            .fail_on_oversized,
+        pr_size_label_prefix = config.policies.pull_requests.size_policies.label_prefix,
         "Configuration loaded"
     );
 
