@@ -8,7 +8,8 @@
 
 use azure_core::credentials::TokenCredential;
 use azure_identity::{ManagedIdentityCredential, ManagedIdentityCredentialOptions};
-use merge_warden_core::config::{ApplicationDefaults, BypassRule, BypassRules};
+use merge_warden_core::config::{ApplicationDefaults, BypassRule, BypassRules, PrSizeCheckConfig};
+use merge_warden_core::size::SizeThresholds;
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -242,10 +243,18 @@ impl AppConfigClient {
             .get_values_by_prefix("application:", None)
             .await
             .unwrap_or_default();
+        let pr_size_values = self
+            .get_values_by_prefix("pr_size:", None)
+            .await
+            .unwrap_or_default();
 
         // Convert to map for easier lookup
         let mut config_map = HashMap::new();
-        for value in bypass_values.into_iter().chain(app_values.into_iter()) {
+        for value in bypass_values
+            .into_iter()
+            .chain(app_values.into_iter())
+            .chain(pr_size_values.into_iter())
+        {
             config_map.insert(value.key.clone(), value);
         }
 
@@ -261,6 +270,9 @@ impl AppConfigClient {
             .parse_bool_value(&config_map, "application:require_work_items")
             .unwrap_or(false);
 
+        // Parse PR size configuration
+        let pr_size_check = self.parse_pr_size_config(&config_map)?;
+
         // For patterns and labels, we fall back to the ApplicationDefaults::default() values
         // if they're not present in App Configuration yet
         let defaults = ApplicationDefaults::default();
@@ -273,12 +285,13 @@ impl AppConfigClient {
             default_work_item_pattern: defaults.default_work_item_pattern,
             default_missing_work_item_label: defaults.default_missing_work_item_label,
             bypass_rules,
-            pr_size_check: defaults.pr_size_check,
+            pr_size_check: pr_size_check.clone(),
         };
 
         info!(
             enable_title_validation = enable_title_validation,
             enable_work_item_validation = enable_work_item_validation,
+            enable_pr_size_checking = pr_size_check.enabled,
             "Application configuration loaded successfully"
         );
 
@@ -387,6 +400,76 @@ impl AppConfigClient {
                 expires_at: Instant::now() + self.cache_ttl,
             },
         );
+    }
+
+    /// Parses PR size configuration from the configuration map
+    fn parse_pr_size_config(
+        &self,
+        config_map: &HashMap<String, ConfigValue>,
+    ) -> Result<PrSizeCheckConfig, AppConfigError> {
+        let enabled = self
+            .parse_bool_value(config_map, "pr_size:enabled")
+            .unwrap_or(false);
+
+        let fail_on_oversized = self
+            .parse_bool_value(config_map, "pr_size:fail_on_oversized")
+            .unwrap_or(false);
+
+        let label_prefix = config_map
+            .get("pr_size:label_prefix")
+            .map(|v| v.value.clone())
+            .unwrap_or_else(|| "size/".to_string());
+
+        let add_comment = self
+            .parse_bool_value(config_map, "pr_size:add_comment")
+            .unwrap_or(true);
+
+        let excluded_file_patterns = self
+            .parse_json_array_value(config_map, "pr_size:excluded_file_patterns")
+            .unwrap_or_default();
+
+        // Parse size thresholds if provided
+        let thresholds = self.parse_size_thresholds(config_map);
+
+        Ok(PrSizeCheckConfig {
+            enabled,
+            thresholds,
+            fail_on_oversized,
+            excluded_file_patterns,
+            label_prefix,
+            add_comment,
+        })
+    }
+
+    /// Parses size thresholds from the configuration map
+    fn parse_size_thresholds(
+        &self,
+        config_map: &HashMap<String, ConfigValue>,
+    ) -> Option<SizeThresholds> {
+        let xs = self.parse_u32_value(config_map, "pr_size:thresholds:xs");
+        let s = self.parse_u32_value(config_map, "pr_size:thresholds:small");
+        let m = self.parse_u32_value(config_map, "pr_size:thresholds:medium");
+        let l = self.parse_u32_value(config_map, "pr_size:thresholds:large");
+        let xl = self.parse_u32_value(config_map, "pr_size:thresholds:extra_large");
+
+        // Only create SizeThresholds if at least one threshold is provided
+        if xs.is_some() || s.is_some() || m.is_some() || l.is_some() || xl.is_some() {
+            let default_thresholds = SizeThresholds::default();
+            Some(SizeThresholds {
+                xs: xs.unwrap_or(default_thresholds.xs),
+                s: s.unwrap_or(default_thresholds.s),
+                m: m.unwrap_or(default_thresholds.m),
+                l: l.unwrap_or(default_thresholds.l),
+                xl: xl.unwrap_or(default_thresholds.xl),
+            })
+        } else {
+            None
+        }
+    }
+
+    /// Parses a u32 value from the configuration map
+    fn parse_u32_value(&self, config_map: &HashMap<String, ConfigValue>, key: &str) -> Option<u32> {
+        config_map.get(key)?.value.parse().ok()
     }
 
     /// Parses bypass rules from the configuration map

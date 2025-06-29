@@ -109,6 +109,71 @@ variable "require_work_items" {
   default     = true
 }
 
+#
+# PR SIZE CHECKING CONFIGURATION
+#
+
+variable "pr_size_enabled" {
+  description = "Whether PR size checking is enabled."
+  type        = bool
+  default     = false
+}
+
+variable "pr_size_fail_on_oversized" {
+  description = "Whether to fail the check for oversized PRs (XXL category)."
+  type        = bool
+  default     = false
+}
+
+variable "pr_size_label_prefix" {
+  description = "Label prefix for size labels (defaults to 'size/')."
+  type        = string
+  default     = "size/"
+}
+
+variable "pr_size_add_comment" {
+  description = "Whether to add educational comments for oversized PRs."
+  type        = bool
+  default     = true
+}
+
+variable "pr_size_excluded_file_patterns" {
+  description = "File patterns to exclude from size calculations (e.g., ['*.md', '*.txt'])."
+  type        = list(string)
+  default     = []
+}
+
+# Size thresholds (optional - uses defaults if not specified)
+variable "pr_size_xs_threshold" {
+  description = "Threshold for extra small PRs (lines of code). Leave null to use default."
+  type        = number
+  default     = null
+}
+
+variable "pr_size_small_threshold" {
+  description = "Threshold for small PRs (lines of code). Leave null to use default."
+  type        = number
+  default     = null
+}
+
+variable "pr_size_medium_threshold" {
+  description = "Threshold for medium PRs (lines of code). Leave null to use default."
+  type        = number
+  default     = null
+}
+
+variable "pr_size_large_threshold" {
+  description = "Threshold for large PRs (lines of code). Leave null to use default."
+  type        = number
+  default     = null
+}
+
+variable "pr_size_extra_large_threshold" {
+  description = "Threshold for extra large PRs (lines of code). Leave null to use default."
+  type        = number
+  default     = null
+}
+
 variable "log_level" {
   description = "Application log level (trace, debug, info, warn, error)."
   type        = string
