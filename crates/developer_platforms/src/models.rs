@@ -79,6 +79,9 @@ pub struct Installation {
 pub struct Label {
     /// The name of the label
     pub name: String,
+
+    /// The description of the label (optional)
+    pub description: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

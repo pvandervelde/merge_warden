@@ -535,7 +535,51 @@ impl PullRequestProvider for GitHubProvider {
             current_page = new_page;
         }
 
-        let result = labels.into_iter().map(|l| Label { name: l.name }).collect();
+        let result = labels
+            .into_iter()
+            .map(|l| Label {
+                name: l.name,
+                description: l.description,
+            })
+            .collect();
+
+        Ok(result)
+    }
+
+    #[instrument]
+    async fn list_repository_labels(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+    ) -> Result<Vec<Label>, Error> {
+        let mut current_page = match self
+            .client
+            .issues(repo_owner, repo_name)
+            .list_labels_for_repo()
+            .send()
+            .await
+        {
+            Ok(p) => p,
+            Err(e) => {
+                log_octocrab_error("Failed to list all repository labels", e);
+                return Err(Error::InvalidResponse);
+            }
+        };
+
+        let mut labels = current_page.take_items();
+        while let Ok(Some(mut new_page)) = self.client.get_page(&current_page.next).await {
+            labels.extend(new_page.take_items());
+
+            current_page = new_page;
+        }
+
+        let result = labels
+            .into_iter()
+            .map(|l| Label {
+                name: l.name,
+                description: l.description,
+            })
+            .collect();
 
         Ok(result)
     }

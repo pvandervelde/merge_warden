@@ -12,9 +12,10 @@
 use crate::config::CONVENTIONAL_COMMIT_REGEX;
 use crate::errors::MergeWardenError;
 use crate::size::{PrSizeCategory, PrSizeInfo};
-use merge_warden_developer_platforms::models::PullRequest;
+use merge_warden_developer_platforms::models::{Label, PullRequest};
 use merge_warden_developer_platforms::PullRequestProvider;
 use regex::Regex;
+use tracing::warn;
 
 #[cfg(test)]
 #[path = "labels_tests.rs"]
@@ -147,11 +148,13 @@ pub async fn set_pull_request_labels<P: PullRequestProvider>(
     Ok(labels)
 }
 
-/// Manages size labels for a pull request based on file changes.
+/// Manages size labels for a pull request based on file changes using smart label discovery.
 ///
-/// This function calculates the PR size, removes any existing size labels with the
-/// configured prefix, and applies the appropriate size label based on the PR's
-/// line count.
+/// This function implements the smart label discovery strategy from the spec:
+/// 1. Discovers existing size labels in the repository using multiple detection patterns
+/// 2. Removes any existing size labels (exclusive labeling)
+/// 3. Applies the appropriate size label based on the PR's categorization
+/// 4. Falls back to creating new labels if none are found
 ///
 /// # Arguments
 ///
@@ -160,11 +163,10 @@ pub async fn set_pull_request_labels<P: PullRequestProvider>(
 /// * `repo` - The name of the repository
 /// * `pr_number` - The PR number
 /// * `size_info` - Information about the PR's size and categorization
-/// * `label_prefix` - The prefix for size labels (e.g., "size/")
 ///
 /// # Returns
 ///
-/// A `Result` containing the size label that was applied, or None if size labeling is disabled
+/// A `Result` containing the size label that was applied, or None if size labeling failed
 ///
 /// # Examples
 ///
@@ -194,7 +196,6 @@ pub async fn set_pull_request_labels<P: PullRequestProvider>(
 ///         "repo",
 ///         123,
 ///         &size_info,
-///         "size/"
 ///     ).await?;
 ///
 ///     println!("Applied size label: {:?}", label);
@@ -207,23 +208,26 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
     repo: &str,
     pr_number: u64,
     size_info: &PrSizeInfo,
-    label_prefix: &str,
 ) -> Result<Option<String>, MergeWardenError> {
-    // First, remove any existing size labels with this prefix
-    let existing_labels = provider
+    // Step 1: Discover existing size labels in the repository
+    let discovered_labels = LabelDiscovery::discover_size_labels(provider, owner, repo).await?;
+
+    // Step 2: Get current labels on the PR
+    let current_pr_labels = provider
         .list_labels(owner, repo, pr_number)
         .await
         .map_err(|_| {
             MergeWardenError::FailedToUpdatePullRequest(
-                "Failed to list existing labels".to_string(),
+                "Failed to list current PR labels".to_string(),
             )
         })?;
 
-    // Remove existing size labels
-    for label in existing_labels {
-        if label.name.starts_with(label_prefix) {
+    // Step 3: Remove any existing size labels (exclusive labeling)
+    for existing_label in &current_pr_labels {
+        // Check if this label is one of our discovered size labels
+        if discovered_labels.all_discovered_labels().contains(&&existing_label.name) {
             provider
-                .remove_label(owner, repo, pr_number, &label.name)
+                .remove_label(owner, repo, pr_number, &existing_label.name)
                 .await
                 .map_err(|_| {
                     MergeWardenError::FailedToUpdatePullRequest(
@@ -233,16 +237,43 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
         }
     }
 
-    // Add the new size label
-    let size_label = format!("{}{}", label_prefix, size_info.size_category.as_str());
-    provider
-        .add_labels(owner, repo, pr_number, &[size_label.clone()])
-        .await
-        .map_err(|_| {
-            MergeWardenError::FailedToUpdatePullRequest("Failed to add size label".to_string())
-        })?;
+    // Step 4: Apply the new size label
+    if let Some(label_name) = discovered_labels.get_label_for_category(&size_info.size_category) {
+        // Use discovered label
+        provider
+            .add_labels(owner, repo, pr_number, &[label_name.clone()])
+            .await
+            .map_err(|_| {
+                MergeWardenError::FailedToUpdatePullRequest("Failed to add size label".to_string())
+            })?;
 
-    Ok(Some(size_label))
+        Ok(Some(label_name.clone()))
+    } else {
+        // Fallback: create new label with standard format
+        let fallback_label = format!("size: {}", size_info.size_category.as_str());
+        
+        // Log that we're falling back to creating a new label
+        // In a real implementation, we might want to check if the repository allows
+        // label creation or provide more sophisticated fallback logic
+        warn!(
+            "No existing size label found for category '{}' in repository {}/{}. Using fallback label: '{}'",
+            size_info.size_category.as_str(),
+            owner,
+            repo,
+            fallback_label
+        );
+
+        provider
+            .add_labels(owner, repo, pr_number, &[fallback_label.clone()])
+            .await
+            .map_err(|_| {
+                MergeWardenError::FailedToUpdatePullRequest(
+                    "Failed to add fallback size label".to_string(),
+                )
+            })?;
+
+        Ok(Some(fallback_label))
+    }
 }
 
 /// Generates an educational comment for oversized pull requests.
@@ -254,7 +285,6 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
 /// # Arguments
 ///
 /// * `size_info` - Information about the PR's size and categorization
-/// * `label_prefix` - The prefix used for size labels
 ///
 /// # Returns
 ///
@@ -279,15 +309,15 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
 /// let thresholds = SizeThresholds::default();
 /// let size_info = PrSizeInfo::from_files_with_exclusions(&files, &thresholds, &[]);
 ///
-/// let comment = generate_oversized_pr_comment(&size_info, "size/");
+/// let comment = generate_oversized_pr_comment(&size_info);
 /// assert!(comment.contains("XXL"));
 /// assert!(comment.contains("550 lines"));
 /// ```
-pub fn generate_oversized_pr_comment(size_info: &PrSizeInfo, label_prefix: &str) -> String {
+pub fn generate_oversized_pr_comment(size_info: &PrSizeInfo) -> String {
     format!(
         r#"## 📏 Pull Request Size Notice
 
-This PR has been labeled as `{prefix}{category}` as it contains **{total_lines} lines** of changes across {file_count} files.
+This PR has been labeled as `{category}` as it contains **{total_lines} lines** of changes across {file_count} files.
 
 ### Why does PR size matter?
 
@@ -312,7 +342,6 @@ Large PRs can be challenging to review effectively. Consider:
 - **Category**: {category} ({category_description})
 
 *This is an automated message to help improve code review quality. If you believe this PR cannot be reasonably split, please add a comment explaining why.*"#,
-        prefix = label_prefix,
         category = size_info.size_category.as_str(),
         total_lines = size_info.total_lines_changed,
         file_count = size_info.included_files.len(),
@@ -329,5 +358,165 @@ fn get_category_description(category: &PrSizeCategory) -> &'static str {
         PrSizeCategory::L => "Large - Approaching review complexity limits",
         PrSizeCategory::XL => "Extra Large - Difficult to review effectively",
         PrSizeCategory::XXL => "Extra Extra Large - Should be split for better reviewability",
+    }
+}
+
+/// Discovered size labels in the repository using smart discovery
+#[derive(Debug, Clone)]
+pub struct DiscoveredSizeLabels {
+    pub xs: Option<String>,
+    pub s: Option<String>,
+    pub m: Option<String>,
+    pub l: Option<String>,
+    pub xl: Option<String>,
+    pub xxl: Option<String>,
+}
+
+impl DiscoveredSizeLabels {
+    /// Create a new empty discovery result
+    pub fn new() -> Self {
+        Self {
+            xs: None,
+            s: None,
+            m: None,
+            l: None,
+            xl: None,
+            xxl: None,
+        }
+    }
+
+    /// Get the label name for a specific size category
+    pub fn get_label_for_category(&self, category: &PrSizeCategory) -> Option<&String> {
+        match category {
+            PrSizeCategory::XS => self.xs.as_ref(),
+            PrSizeCategory::S => self.s.as_ref(),
+            PrSizeCategory::M => self.m.as_ref(),
+            PrSizeCategory::L => self.l.as_ref(),
+            PrSizeCategory::XL => self.xl.as_ref(),
+            PrSizeCategory::XXL => self.xxl.as_ref(),
+        }
+    }
+
+    /// Get all discovered labels that might be size labels
+    pub fn all_discovered_labels(&self) -> Vec<&String> {
+        [&self.xs, &self.s, &self.m, &self.l, &self.xl, &self.xxl]
+            .iter()
+            .filter_map(|opt| opt.as_ref())
+            .collect()
+    }
+}
+
+/// Label discovery system that implements smart label detection
+pub struct LabelDiscovery;
+
+impl LabelDiscovery {
+    /// Discover existing size labels in the repository using smart detection algorithms
+    ///
+    /// This implements the label detection algorithm from the spec:
+    /// 1. Name-based detection using regex patterns
+    /// 2. Description-based detection for metadata
+    /// 3. Priority-based selection
+    pub async fn discover_size_labels<P: PullRequestProvider>(
+        provider: &P,
+        owner: &str,
+        repo: &str,
+    ) -> Result<DiscoveredSizeLabels, MergeWardenError> {
+        let all_labels = provider
+            .list_repository_labels(owner, repo)
+            .await
+            .map_err(|_| {
+                MergeWardenError::FailedToUpdatePullRequest(
+                    "Failed to fetch repository labels".to_string(),
+                )
+            })?;
+
+        let mut discovered = DiscoveredSizeLabels::new();
+
+        // Define the size categories we're looking for
+        let categories = ["XS", "S", "M", "L", "XL", "XXL"];
+
+        for category in &categories {
+            let best_label = Self::find_best_label_for_category(&all_labels, category);
+            match category {
+                &"XS" => discovered.xs = best_label,
+                &"S" => discovered.s = best_label,
+                &"M" => discovered.m = best_label,
+                &"L" => discovered.l = best_label,
+                &"XL" => discovered.xl = best_label,
+                &"XXL" => discovered.xxl = best_label,
+                _ => {}
+            }
+        }
+
+        Ok(discovered)
+    }
+
+    /// Find the best matching label for a size category using priority-based selection
+    fn find_best_label_for_category(labels: &[Label], category: &str) -> Option<String> {
+        // Priority 1: Exact size match - size/XS, size/S, etc.
+        if let Some(label) = Self::find_exact_size_match(labels, category) {
+            return Some(label.name.clone());
+        }
+
+        // Priority 2: Size with separator - size-M, size_L, size: M, etc.
+        if let Some(label) = Self::find_size_with_separator(labels, category) {
+            return Some(label.name.clone());
+        }
+
+        // Priority 3: Standalone size - XS, M, XXL, etc.
+        if let Some(label) = Self::find_standalone_size(labels, category) {
+            return Some(label.name.clone());
+        }
+
+        // Priority 4: Description-based - any label with (size: M) in description
+        if let Some(label) = Self::find_description_based(labels, category) {
+            return Some(label.name.clone());
+        }
+
+        None
+    }
+
+    /// Find exact size match: size/XS, size/S, etc.
+    fn find_exact_size_match<'a>(labels: &'a [Label], category: &str) -> Option<&'a Label> {
+        let pattern = format!(r"^size/{}$", regex::escape(category));
+        let regex = Regex::new(&pattern).ok()?;
+
+        labels
+            .iter()
+            .find(|label| regex.is_match(&label.name.to_uppercase()))
+    }
+
+    /// Find size with separator: size-M, size_L, size: M, etc.
+    fn find_size_with_separator<'a>(labels: &'a [Label], category: &str) -> Option<&'a Label> {
+        let pattern = format!(r"^size[_\-:\s]+{}$", regex::escape(category));
+        let regex = Regex::new(&pattern).ok()?;
+
+        labels
+            .iter()
+            .find(|label| regex.is_match(&label.name.to_uppercase()))
+    }
+
+    /// Find standalone size: XS, M, XXL, etc.
+    fn find_standalone_size<'a>(labels: &'a [Label], category: &str) -> Option<&'a Label> {
+        let pattern = format!(r"^{}$", regex::escape(category));
+        let regex = Regex::new(&pattern).ok()?;
+
+        labels
+            .iter()
+            .find(|label| regex.is_match(&label.name.to_uppercase()))
+    }
+
+    /// Find description-based: any label with (size: M) in description
+    fn find_description_based<'a>(labels: &'a [Label], category: &str) -> Option<&'a Label> {
+        let pattern = format!(r"\(size:\s*{}\)", regex::escape(category));
+        let regex = Regex::new(&pattern).ok()?;
+
+        labels.iter().find(|label| {
+            if let Some(description) = &label.description {
+                regex.is_match(&description.to_uppercase())
+            } else {
+                false
+            }
+        })
     }
 }

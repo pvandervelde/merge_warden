@@ -165,6 +165,14 @@ impl PullRequestProvider for ErrorMockGitProvider {
         Ok(Vec::new())
     }
 
+    async fn list_repository_labels(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+    ) -> Result<Vec<Label>, Error> {
+        Ok(Vec::new())
+    }
+
     async fn update_pr_check_status(
         &self,
         _repo_owner: &str,
@@ -329,6 +337,14 @@ impl PullRequestProvider for DynamicMockGitProvider {
     ) -> Result<Vec<Label>, Error> {
         let labels = self.labels.lock().unwrap();
         Ok(labels.clone())
+    }
+
+    async fn list_repository_labels(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+    ) -> Result<Vec<Label>, Error> {
+        Ok(Vec::new())
     }
 
     async fn update_pr_check_status(
@@ -496,6 +512,14 @@ impl PullRequestProvider for MockGitProvider {
     ) -> Result<Vec<Label>, Error> {
         let labels = self.labels.lock().unwrap();
         Ok(labels.clone())
+    }
+
+    async fn list_repository_labels(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+    ) -> Result<Vec<Label>, Error> {
+        Ok(Vec::new())
     }
 
     async fn update_pr_check_status(

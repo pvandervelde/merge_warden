@@ -869,7 +869,6 @@ Please update the PR body to include a valid work item reference."#;
             repo_name,
             pr_number,
             &size_info,
-            &self.config.pr_size_check.label_prefix,
         )
         .await;
 
@@ -897,10 +896,7 @@ Please update the PR body to include a valid work item reference."#;
 
         // Add comment for oversized PRs if configured
         if self.config.pr_size_check.add_comment && size_info.is_oversized() {
-            let comment = labels::generate_oversized_pr_comment(
-                &size_info,
-                &self.config.pr_size_check.label_prefix,
-            );
+            let comment = labels::generate_oversized_pr_comment(&size_info);
 
             match self
                 .provider

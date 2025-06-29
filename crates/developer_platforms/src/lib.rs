@@ -248,6 +248,25 @@ pub trait PullRequestProvider {
         pr_number: u64,
     ) -> Result<Vec<Label>, Error>;
 
+    /// Lists all available labels in the repository.
+    ///
+    /// This method fetches all labels that are available in the repository,
+    /// which is needed for smart label discovery in size labeling.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner` - The owner of the repository
+    /// * `repo_name` - The name of the repository
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a vector of all repository labels
+    async fn list_repository_labels(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+    ) -> Result<Vec<Label>, Error>;
+
     /// Updates the GitHub check run status for the pull request. This should be used to report
     /// the result of MergeWarden's validation as a GitHub check (success/failure, with details).
     ///
