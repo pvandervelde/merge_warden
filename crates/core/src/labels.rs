@@ -15,7 +15,7 @@ use crate::size::{PrSizeCategory, PrSizeInfo};
 use merge_warden_developer_platforms::models::{Label, PullRequest};
 use merge_warden_developer_platforms::PullRequestProvider;
 use regex::Regex;
-use tracing::warn;
+use tracing::{debug, info, warn};
 
 #[cfg(test)]
 #[path = "labels_tests.rs"]
@@ -209,10 +209,31 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
     pr_number: u64,
     size_info: &PrSizeInfo,
 ) -> Result<Option<String>, MergeWardenError> {
+    info!(
+        "Starting size label management for PR {}/{}/{}. Size category: {}, Total changes: {}",
+        owner,
+        repo,
+        pr_number,
+        size_info.size_category.as_str(),
+        size_info.total_lines_changed
+    );
+
     // Step 1: Discover existing size labels in the repository
+    debug!(
+        "Step 1: Discovering existing size labels in repository {}/{}",
+        owner, repo
+    );
     let discovered_labels = LabelDiscovery::discover_size_labels(provider, owner, repo).await?;
+    info!(
+        "Label discovery completed. Found {} discovered labels",
+        discovered_labels.count_discovered()
+    );
 
     // Step 2: Get current labels on the PR
+    debug!(
+        "Step 2: Getting current labels on PR {}/{}/{}",
+        owner, repo, pr_number
+    );
     let current_pr_labels = provider
         .list_labels(owner, repo, pr_number)
         .await
@@ -222,10 +243,25 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
             )
         })?;
 
+    debug!(
+        "Found {} current labels on PR: {:?}",
+        current_pr_labels.len(),
+        current_pr_labels
+            .iter()
+            .map(|l| &l.name)
+            .collect::<Vec<_>>()
+    );
+
     // Step 3: Remove any existing size labels (exclusive labeling)
+    debug!("Step 3: Removing any existing size labels from PR");
+    let mut removed_labels = Vec::new();
     for existing_label in &current_pr_labels {
         // Check if this label is one of our discovered size labels
-        if discovered_labels.all_discovered_labels().contains(&&existing_label.name) {
+        if discovered_labels
+            .all_discovered_labels()
+            .contains(&&existing_label.name)
+        {
+            debug!("Removing existing size label: {}", existing_label.name);
             provider
                 .remove_label(owner, repo, pr_number, &existing_label.name)
                 .await
@@ -234,12 +270,31 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
                         "Failed to remove existing size label".to_string(),
                     )
                 })?;
+            removed_labels.push(&existing_label.name);
         }
+    }
+    if !removed_labels.is_empty() {
+        info!(
+            "Removed {} existing size labels: {:?}",
+            removed_labels.len(),
+            removed_labels
+        );
+    } else {
+        debug!("No existing size labels found to remove");
     }
 
     // Step 4: Apply the new size label
+    debug!(
+        "Step 4: Applying new size label for category: {}",
+        size_info.size_category.as_str()
+    );
     if let Some(label_name) = discovered_labels.get_label_for_category(&size_info.size_category) {
         // Use discovered label
+        info!(
+            "Using discovered label '{}' for size category '{}'",
+            label_name,
+            size_info.size_category.as_str()
+        );
         provider
             .add_labels(owner, repo, pr_number, &[label_name.clone()])
             .await
@@ -247,11 +302,12 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
                 MergeWardenError::FailedToUpdatePullRequest("Failed to add size label".to_string())
             })?;
 
+        info!("Successfully applied size label: {}", label_name);
         Ok(Some(label_name.clone()))
     } else {
         // Fallback: create new label with standard format
         let fallback_label = format!("size: {}", size_info.size_category.as_str());
-        
+
         // Log that we're falling back to creating a new label
         // In a real implementation, we might want to check if the repository allows
         // label creation or provide more sophisticated fallback logic
@@ -272,6 +328,10 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
                 )
             })?;
 
+        info!(
+            "Successfully applied fallback size label: {}",
+            fallback_label
+        );
         Ok(Some(fallback_label))
     }
 }
@@ -404,6 +464,11 @@ impl DiscoveredSizeLabels {
             .filter_map(|opt| opt.as_ref())
             .collect()
     }
+
+    /// Count how many size labels were discovered
+    pub fn count_discovered(&self) -> usize {
+        self.all_discovered_labels().len()
+    }
 }
 
 /// Label discovery system that implements smart label detection
@@ -421,6 +486,12 @@ impl LabelDiscovery {
         owner: &str,
         repo: &str,
     ) -> Result<DiscoveredSizeLabels, MergeWardenError> {
+        info!(
+            repository_owner = owner,
+            repository = repo,
+            "Starting smart label discovery for size labels"
+        );
+
         let all_labels = provider
             .list_repository_labels(owner, repo)
             .await
@@ -430,13 +501,56 @@ impl LabelDiscovery {
                 )
             })?;
 
+        info!(
+            repository_owner = owner,
+            repository = repo,
+            total_labels = all_labels.len(),
+            "Retrieved repository labels for analysis"
+        );
+
+        // Log all labels for debugging
+        for label in &all_labels {
+            debug!(
+                repository_owner = owner,
+                repository = repo,
+                label_name = %label.name,
+                label_description = ?label.description,
+                "Processing repository label"
+            );
+        }
+
         let mut discovered = DiscoveredSizeLabels::new();
 
         // Define the size categories we're looking for
         let categories = ["XS", "S", "M", "L", "XL", "XXL"];
 
         for category in &categories {
-            let best_label = Self::find_best_label_for_category(&all_labels, category);
+            debug!(
+                repository_owner = owner,
+                repository = repo,
+                category = category,
+                "Searching for size labels matching category"
+            );
+
+            let best_label = Self::find_best_label_for_category(&all_labels, category, owner, repo);
+
+            if let Some(ref label_name) = best_label {
+                info!(
+                    repository_owner = owner,
+                    repository = repo,
+                    category = category,
+                    discovered_label = %label_name,
+                    "Found size label for category"
+                );
+            } else {
+                warn!(
+                    repository_owner = owner,
+                    repository = repo,
+                    category = category,
+                    "No size label found for category"
+                );
+            }
+
             match category {
                 &"XS" => discovered.xs = best_label,
                 &"S" => discovered.s = best_label,
@@ -448,30 +562,101 @@ impl LabelDiscovery {
             }
         }
 
+        let total_discovered = discovered.all_discovered_labels().len();
+        info!(
+            repository_owner = owner,
+            repository = repo,
+            total_discovered_labels = total_discovered,
+            discovered_xs = ?discovered.xs,
+            discovered_s = ?discovered.s,
+            discovered_m = ?discovered.m,
+            discovered_l = ?discovered.l,
+            discovered_xl = ?discovered.xl,
+            discovered_xxl = ?discovered.xxl,
+            "Completed smart label discovery"
+        );
+
         Ok(discovered)
     }
 
     /// Find the best matching label for a size category using priority-based selection
-    fn find_best_label_for_category(labels: &[Label], category: &str) -> Option<String> {
+    fn find_best_label_for_category(
+        labels: &[Label],
+        category: &str,
+        owner: &str,
+        repo: &str,
+    ) -> Option<String> {
+        debug!(
+            repository_owner = owner,
+            repository = repo,
+            category = category,
+            "Starting priority-based label search"
+        );
+
         // Priority 1: Exact size match - size/XS, size/S, etc.
         if let Some(label) = Self::find_exact_size_match(labels, category) {
+            info!(
+                repository_owner = owner,
+                repository = repo,
+                category = category,
+                found_label = %label.name,
+                detection_method = "exact_size_match",
+                pattern = format!("^size/{}$", category),
+                "Found size label using exact match"
+            );
             return Some(label.name.clone());
         }
 
         // Priority 2: Size with separator - size-M, size_L, size: M, etc.
         if let Some(label) = Self::find_size_with_separator(labels, category) {
+            info!(
+                repository_owner = owner,
+                repository = repo,
+                category = category,
+                found_label = %label.name,
+                detection_method = "size_with_separator",
+                pattern = format!("^size[_\\-:\\s]+{}$", category),
+                "Found size label using separator match"
+            );
             return Some(label.name.clone());
         }
 
         // Priority 3: Standalone size - XS, M, XXL, etc.
         if let Some(label) = Self::find_standalone_size(labels, category) {
+            info!(
+                repository_owner = owner,
+                repository = repo,
+                category = category,
+                found_label = %label.name,
+                detection_method = "standalone_size",
+                pattern = format!("^{}$", category),
+                "Found size label using standalone match"
+            );
             return Some(label.name.clone());
         }
 
         // Priority 4: Description-based - any label with (size: M) in description
         if let Some(label) = Self::find_description_based(labels, category) {
+            info!(
+                repository_owner = owner,
+                repository = repo,
+                category = category,
+                found_label = %label.name,
+                detection_method = "description_based",
+                pattern = format!("\\(size:\\s*{}\\)", category),
+                label_description = ?label.description,
+                "Found size label using description match"
+            );
             return Some(label.name.clone());
         }
+
+        debug!(
+            repository_owner = owner,
+            repository = repo,
+            category = category,
+            total_labels_checked = labels.len(),
+            "No matching size label found for category after checking all patterns"
+        );
 
         None
     }
@@ -481,9 +666,26 @@ impl LabelDiscovery {
         let pattern = format!(r"^size/{}$", regex::escape(category));
         let regex = Regex::new(&pattern).ok()?;
 
-        labels
-            .iter()
-            .find(|label| regex.is_match(&label.name.to_uppercase()))
+        debug!(
+            "Checking exact size match pattern: '{}' against {} labels",
+            pattern,
+            labels.len()
+        );
+
+        for label in labels {
+            let matches = regex.is_match(&label.name.to_uppercase());
+            debug!(
+                "Exact size match check: label '{}' against pattern '{}' = {}",
+                label.name, pattern, matches
+            );
+            if matches {
+                debug!("Found exact size match: {}", label.name);
+                return Some(label);
+            }
+        }
+
+        debug!("No exact size match found for pattern: {}", pattern);
+        None
     }
 
     /// Find size with separator: size-M, size_L, size: M, etc.
@@ -491,9 +693,29 @@ impl LabelDiscovery {
         let pattern = format!(r"^size[_\-:\s]+{}$", regex::escape(category));
         let regex = Regex::new(&pattern).ok()?;
 
-        labels
-            .iter()
-            .find(|label| regex.is_match(&label.name.to_uppercase()))
+        debug!(
+            "Checking size with separator pattern: '{}' against {} labels",
+            pattern,
+            labels.len()
+        );
+
+        for label in labels {
+            let matches = regex.is_match(&label.name.to_uppercase());
+            debug!(
+                "Size with separator check: label '{}' against pattern '{}' = {}",
+                label.name, pattern, matches
+            );
+            if matches {
+                debug!("Found size with separator match: {}", label.name);
+                return Some(label);
+            }
+        }
+
+        debug!(
+            "No size with separator match found for pattern: {}",
+            pattern
+        );
+        None
     }
 
     /// Find standalone size: XS, M, XXL, etc.
@@ -501,22 +723,62 @@ impl LabelDiscovery {
         let pattern = format!(r"^{}$", regex::escape(category));
         let regex = Regex::new(&pattern).ok()?;
 
-        labels
-            .iter()
-            .find(|label| regex.is_match(&label.name.to_uppercase()))
+        debug!(
+            "Checking standalone size pattern: '{}' against {} labels",
+            pattern,
+            labels.len()
+        );
+
+        for label in labels {
+            let matches = regex.is_match(&label.name.to_uppercase());
+            debug!(
+                "Standalone size check: label '{}' against pattern '{}' = {}",
+                label.name, pattern, matches
+            );
+            if matches {
+                debug!("Found standalone size match: {}", label.name);
+                return Some(label);
+            }
+        }
+
+        debug!("No standalone size match found for pattern: {}", pattern);
+        None
     }
 
     /// Find description-based: any label with (size: M) in description
     fn find_description_based<'a>(labels: &'a [Label], category: &str) -> Option<&'a Label> {
-        let pattern = format!(r"\(size:\s*{}\)", regex::escape(category));
+        let pattern = format!(r"(?i)\(size:\s*{}\)", regex::escape(category));
         let regex = Regex::new(&pattern).ok()?;
 
-        labels.iter().find(|label| {
+        debug!(
+            "Checking description-based pattern: '{}' against {} labels",
+            pattern,
+            labels.len()
+        );
+
+        for label in labels {
             if let Some(description) = &label.description {
-                regex.is_match(&description.to_uppercase())
+                let matches = regex.is_match(description);
+                debug!(
+                    "Description-based check: label '{}' (description: '{}') against pattern '{}' = {}",
+                    label.name, description, pattern, matches
+                );
+                if matches {
+                    debug!(
+                        "Found description-based match: {} (description: {})",
+                        label.name, description
+                    );
+                    return Some(label);
+                }
             } else {
-                false
+                debug!(
+                    "Description-based check: label '{}' has no description, skipping",
+                    label.name
+                );
             }
-        })
+        }
+
+        debug!("No description-based match found for pattern: {}", pattern);
+        None
     }
 }
