@@ -73,6 +73,7 @@ pub struct Installation {
 ///
 /// let label = Label {
 ///     name: "bug".to_string(),
+///     description: None,
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]

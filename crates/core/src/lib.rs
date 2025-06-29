@@ -93,7 +93,7 @@ pub struct CheckResult {
     /// Whether the PR title follows the Conventional Commits format or was bypassed
     pub title_valid: bool,
 
-    /// Whether the PR description references a work item or was bypassed
+    /// Whether the PR description references a work item or issue
     pub work_item_referenced: bool,
 
     /// Whether the PR size validation passed
@@ -997,6 +997,7 @@ Please update the PR body to include a valid work item reference."#;
     ///     # async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
     ///     # async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<Comment>, Error> { unimplemented!() }
+    ///     # async fn list_repository_labels(&self, _: &str, _: &str) -> Result<Vec<Label>, Error> { unimplemented!() }
     ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
     ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
@@ -1067,6 +1068,7 @@ Please update the PR body to include a valid work item reference."#;
     ///     # async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
     ///     # async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<Comment>, Error> { unimplemented!() }
+    ///     # async fn list_repository_labels(&self, _: &str, _: &str) -> Result<Vec<Label>, Error> { unimplemented!() }
     ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
     ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
@@ -1404,6 +1406,7 @@ Please update the PR body to include a valid work item reference."#;
     ///     # async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
     ///     # async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<Comment>, Error> { unimplemented!() }
+    ///     # async fn list_repository_labels(&self, _: &str, _: &str) -> Result<Vec<Label>, Error> { unimplemented!() }
     ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
     ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }

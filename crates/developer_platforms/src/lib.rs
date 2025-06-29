@@ -56,10 +56,12 @@ pub trait ConfigFetcher: Sync + Send {
 ///     # async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
 ///     # async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
 ///     # async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<Comment>, Error> { unimplemented!() }
+///     # async fn list_repository_labels(&self, _: &str, _: &str) -> Result<Vec<Label>, Error> { unimplemented!() }
 ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
 ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
 ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
 ///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
+///     # async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
 /// }
 /// ```
 #[async_trait]
@@ -111,6 +113,7 @@ pub trait PullRequestProvider {
     /// #     async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
     /// #     async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
     /// #     async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Comment>, Error> { unimplemented!() }
+    /// #     async fn list_repository_labels(&self, _: &str, _: &str) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
     /// #     async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
     /// #     async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
     /// #     async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }

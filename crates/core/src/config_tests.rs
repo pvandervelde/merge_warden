@@ -698,6 +698,7 @@ fn test_application_defaults_bypass_rules_serialization() {
         enable_work_item_validation: true,
         default_work_item_pattern: "pattern".to_string(),
         default_missing_work_item_label: Some("missing".to_string()),
+        pr_size_check: PrSizeCheckConfig::default(),
         bypass_rules: BypassRules {
             title_convention: BypassRule {
                 enabled: true,

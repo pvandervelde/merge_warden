@@ -41,6 +41,7 @@ fn test_label_serialization() {
     // Create a label
     let label = Label {
         name: "bug".to_string(),
+        description: None,
     };
 
     // Serialize to JSON

@@ -312,6 +312,7 @@ impl PullRequestProvider for DynamicMockGitProvider {
         for label in labels {
             current_labels.push(Label {
                 name: label.clone(),
+                description: None,
             });
         }
         Ok(())
@@ -487,6 +488,7 @@ impl PullRequestProvider for MockGitProvider {
         for label in labels {
             current_labels.push(Label {
                 name: label.clone(),
+                description: None,
             });
         }
         Ok(())
