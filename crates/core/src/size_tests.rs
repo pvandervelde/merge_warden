@@ -40,7 +40,10 @@ fn test_pr_size_category_from_line_count_xl() {
 fn test_pr_size_category_from_line_count_xxl() {
     assert_eq!(PrSizeCategory::from_line_count(501), PrSizeCategory::XXL);
     assert_eq!(PrSizeCategory::from_line_count(1000), PrSizeCategory::XXL);
-    assert_eq!(PrSizeCategory::from_line_count(u32::MAX), PrSizeCategory::XXL);
+    assert_eq!(
+        PrSizeCategory::from_line_count(u32::MAX),
+        PrSizeCategory::XXL
+    );
 }
 
 #[test]
@@ -53,14 +56,38 @@ fn test_pr_size_category_from_line_count_with_custom_thresholds() {
         xl: 200,
     };
 
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(3, &custom_thresholds), PrSizeCategory::XS);
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(5, &custom_thresholds), PrSizeCategory::XS);
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(6, &custom_thresholds), PrSizeCategory::S);
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(20, &custom_thresholds), PrSizeCategory::S);
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(25, &custom_thresholds), PrSizeCategory::M);
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(75, &custom_thresholds), PrSizeCategory::L);
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(150, &custom_thresholds), PrSizeCategory::XL);
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(250, &custom_thresholds), PrSizeCategory::XXL);
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(3, &custom_thresholds),
+        PrSizeCategory::XS
+    );
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(5, &custom_thresholds),
+        PrSizeCategory::XS
+    );
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(6, &custom_thresholds),
+        PrSizeCategory::S
+    );
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(20, &custom_thresholds),
+        PrSizeCategory::S
+    );
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(25, &custom_thresholds),
+        PrSizeCategory::M
+    );
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(75, &custom_thresholds),
+        PrSizeCategory::L
+    );
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(150, &custom_thresholds),
+        PrSizeCategory::XL
+    );
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(250, &custom_thresholds),
+        PrSizeCategory::XXL
+    );
 }
 
 #[test]
@@ -124,11 +151,26 @@ fn test_size_thresholds_custom() {
     };
 
     // Test boundaries with custom thresholds
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(5, &thresholds), PrSizeCategory::XS);
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(6, &thresholds), PrSizeCategory::S);
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(25, &thresholds), PrSizeCategory::S);
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(26, &thresholds), PrSizeCategory::M);
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(401, &thresholds), PrSizeCategory::XXL);
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(5, &thresholds),
+        PrSizeCategory::XS
+    );
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(6, &thresholds),
+        PrSizeCategory::S
+    );
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(25, &thresholds),
+        PrSizeCategory::S
+    );
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(26, &thresholds),
+        PrSizeCategory::M
+    );
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(401, &thresholds),
+        PrSizeCategory::XXL
+    );
 }
 
 #[test]
@@ -198,15 +240,13 @@ fn test_pr_size_info_new_multiple_files() {
 
 #[test]
 fn test_pr_size_info_new_with_excluded_files() {
-    let included_files = vec![
-        PullRequestFile {
-            filename: "src/main.rs".to_string(),
-            additions: 10,
-            deletions: 5,
-            changes: 15,
-            status: "modified".to_string(),
-        },
-    ];
+    let included_files = vec![PullRequestFile {
+        filename: "src/main.rs".to_string(),
+        additions: 10,
+        deletions: 5,
+        changes: 15,
+        status: "modified".to_string(),
+    }];
 
     let excluded_files = vec![
         PullRequestFile {
@@ -237,15 +277,13 @@ fn test_pr_size_info_new_with_excluded_files() {
 
 #[test]
 fn test_pr_size_info_oversized() {
-    let files = vec![
-        PullRequestFile {
-            filename: "src/large_file.rs".to_string(),
-            additions: 400,
-            deletions: 200,
-            changes: 600,
-            status: "modified".to_string(),
-        },
-    ];
+    let files = vec![PullRequestFile {
+        filename: "src/large_file.rs".to_string(),
+        additions: 400,
+        deletions: 200,
+        changes: 600,
+        status: "modified".to_string(),
+    }];
 
     let size_info = PrSizeInfo::new(files, vec![], &SizeThresholds::default());
 
@@ -265,15 +303,13 @@ fn test_pr_size_info_with_custom_thresholds() {
         xl: 120,
     };
 
-    let files = vec![
-        PullRequestFile {
-            filename: "src/file.rs".to_string(),
-            additions: 20,
-            deletions: 10,
-            changes: 30,
-            status: "modified".to_string(),
-        },
-    ];
+    let files = vec![PullRequestFile {
+        filename: "src/file.rs".to_string(),
+        additions: 20,
+        deletions: 10,
+        changes: 30,
+        status: "modified".to_string(),
+    }];
 
     let size_info = PrSizeInfo::new(files, vec![], &custom_thresholds);
 
@@ -289,7 +325,8 @@ fn test_pr_size_category_serialization() {
 
     let category = PrSizeCategory::M;
     let json_str = to_string(&category).expect("Failed to serialize PrSizeCategory");
-    let deserialized: PrSizeCategory = from_str(&json_str).expect("Failed to deserialize PrSizeCategory");
+    let deserialized: PrSizeCategory =
+        from_str(&json_str).expect("Failed to deserialize PrSizeCategory");
 
     assert_eq!(category, deserialized);
 }
@@ -308,7 +345,8 @@ fn test_size_thresholds_serialization() {
     };
 
     let json_str = to_string(&thresholds).expect("Failed to serialize SizeThresholds");
-    let deserialized: SizeThresholds = from_str(&json_str).expect("Failed to deserialize SizeThresholds");
+    let deserialized: SizeThresholds =
+        from_str(&json_str).expect("Failed to deserialize SizeThresholds");
 
     assert_eq!(thresholds, deserialized);
 }
@@ -319,24 +357,54 @@ fn test_boundary_conditions() {
     let thresholds = SizeThresholds::default();
 
     // Test XS/S boundary
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(10, &thresholds), PrSizeCategory::XS);
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(11, &thresholds), PrSizeCategory::S);
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(10, &thresholds),
+        PrSizeCategory::XS
+    );
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(11, &thresholds),
+        PrSizeCategory::S
+    );
 
     // Test S/M boundary
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(50, &thresholds), PrSizeCategory::S);
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(51, &thresholds), PrSizeCategory::M);
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(50, &thresholds),
+        PrSizeCategory::S
+    );
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(51, &thresholds),
+        PrSizeCategory::M
+    );
 
     // Test M/L boundary
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(100, &thresholds), PrSizeCategory::M);
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(101, &thresholds), PrSizeCategory::L);
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(100, &thresholds),
+        PrSizeCategory::M
+    );
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(101, &thresholds),
+        PrSizeCategory::L
+    );
 
     // Test L/XL boundary
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(250, &thresholds), PrSizeCategory::L);
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(251, &thresholds), PrSizeCategory::XL);
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(250, &thresholds),
+        PrSizeCategory::L
+    );
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(251, &thresholds),
+        PrSizeCategory::XL
+    );
 
     // Test XL/XXL boundary
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(500, &thresholds), PrSizeCategory::XL);
-    assert_eq!(PrSizeCategory::from_line_count_with_thresholds(501, &thresholds), PrSizeCategory::XXL);
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(500, &thresholds),
+        PrSizeCategory::XL
+    );
+    assert_eq!(
+        PrSizeCategory::from_line_count_with_thresholds(501, &thresholds),
+        PrSizeCategory::XXL
+    );
 }
 
 #[test]
