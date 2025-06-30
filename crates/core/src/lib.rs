@@ -161,7 +161,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
         debug!(pull_request = pr.number, "Checking PR title");
         checks::check_pr_title(
             pr,
-            &self.config.bypass_rules.title_convention(),
+            self.config.bypass_rules.title_convention(),
             &self.config,
         )
     }
@@ -186,7 +186,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
         );
         checks::check_work_item_reference(
             pr,
-            &self.config.bypass_rules.work_item_convention(),
+            self.config.bypass_rules.work_item_convention(),
             &self.config,
         )
     }
@@ -199,6 +199,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     /// # Arguments
     ///
     /// * `pr_files` - List of files changed in the pull request
+    /// * `user` - The user who created the pull request (for bypass checking)
     ///
     /// # Returns
     ///
@@ -207,9 +208,15 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     fn check_pr_size(
         &self,
         pr_files: &[merge_warden_developer_platforms::models::PullRequestFile],
+        user: Option<&merge_warden_developer_platforms::models::User>,
     ) -> validation_result::ValidationResult {
         debug!("Checking PR size");
-        checks::check_pr_size(pr_files, &config::BypassRule::default(), &self.config)
+        checks::check_pr_size(
+            pr_files,
+            user,
+            self.config.bypass_rules.size(),
+            &self.config,
+        )
     }
 
     /// Handles side effects for PR title validation.
@@ -1202,7 +1209,7 @@ Please update the PR body to include a valid work item reference."#;
                     MergeWardenError::GitProviderError("Failed to fetch PR files".to_string())
                 })?;
 
-            let result = self.check_pr_size(&files);
+            let result = self.check_pr_size(&files, pr.author.as_ref());
             (result, Some(files))
         } else {
             (validation_result::ValidationResult::valid(), None)

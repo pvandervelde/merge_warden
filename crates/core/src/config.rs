@@ -3,7 +3,6 @@
 //! This module centralizes configuration constants and settings used throughout
 //! the crate, making it easier to modify behavior in one place.
 use merge_warden_developer_platforms::{models::User, ConfigFetcher};
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 
@@ -442,6 +441,10 @@ pub struct BypassRules {
     /// Bypass rule for work item validation
     #[serde(default)]
     work_items: BypassRule,
+
+    /// Bypass rule for PR size validation
+    #[serde(default)]
+    size: BypassRule,
 }
 
 impl BypassRules {
@@ -449,6 +452,19 @@ impl BypassRules {
         Self {
             title_convention,
             work_items,
+            size: BypassRule::default(),
+        }
+    }
+
+    pub fn new_with_size(
+        title_convention: BypassRule,
+        work_items: BypassRule,
+        size: BypassRule,
+    ) -> Self {
+        Self {
+            title_convention,
+            work_items,
+            size,
         }
     }
 
@@ -458,6 +474,10 @@ impl BypassRules {
 
     pub fn work_item_convention(&self) -> &BypassRule {
         &self.work_items
+    }
+
+    pub fn size(&self) -> &BypassRule {
+        &self.size
     }
 }
 
@@ -489,6 +509,8 @@ pub struct CurrentPullRequestValidationConfiguration {
 }
 
 impl CurrentPullRequestValidationConfiguration {
+    #[cfg(test)]
+    #[allow(clippy::too_many_arguments)]
     fn new(
         enforce_title_convention: bool,
         title_pattern: Option<String>,

@@ -6,6 +6,7 @@ use crate::size::SizeThresholds;
 use async_trait::async_trait;
 use merge_warden_developer_platforms::errors::Error;
 use proptest::prelude::*;
+use regex::Regex;
 
 use super::*;
 
@@ -640,6 +641,10 @@ fn test_bypass_rules_serialization() {
             enabled: false,
             users: vec![],
         },
+        size: BypassRule {
+            enabled: false,
+            users: vec![],
+        },
     };
 
     let serialized = serde_json::to_string(&rules).expect("Failed to serialize BypassRules");
@@ -705,6 +710,7 @@ fn test_application_defaults_bypass_rules_serialization() {
                 users: vec!["admin".to_string()],
             },
             work_items: BypassRule::default(),
+            size: BypassRule::default(),
         },
     };
 
