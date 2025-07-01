@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 
 use crate::errors::ConfigLoadError;
-use crate::size::SizeThresholds;
 
 #[cfg(test)]
 #[path = "config_tests.rs"]
@@ -274,10 +273,6 @@ pub struct ApplicationDefaults {
     /// Bypass rules for allowing specific users to skip validation
     #[serde(rename = "bypassRules", default)]
     pub bypass_rules: BypassRules,
-
-    /// Configuration for PR size checking
-    #[serde(rename = "prSize", default)]
-    pub pr_size_check: PrSizeCheckConfig,
 }
 
 impl ApplicationDefaults {
@@ -316,7 +311,6 @@ impl Default for ApplicationDefaults {
             default_work_item_pattern: ApplicationDefaults::default_work_item_pattern(),
             default_missing_work_item_label: ApplicationDefaults::default_work_item_missing_label(),
             bypass_rules: BypassRules::default(),
-            pr_size_check: PrSizeCheckConfig::default(),
         }
     }
 }
@@ -441,10 +435,6 @@ pub struct BypassRules {
     /// Bypass rule for work item validation
     #[serde(default)]
     work_items: BypassRule,
-
-    /// Bypass rule for PR size validation
-    #[serde(default)]
-    size: BypassRule,
 }
 
 impl BypassRules {
@@ -452,19 +442,6 @@ impl BypassRules {
         Self {
             title_convention,
             work_items,
-            size: BypassRule::default(),
-        }
-    }
-
-    pub fn new_with_size(
-        title_convention: BypassRule,
-        work_items: BypassRule,
-        size: BypassRule,
-    ) -> Self {
-        Self {
-            title_convention,
-            work_items,
-            size,
         }
     }
 
@@ -474,10 +451,6 @@ impl BypassRules {
 
     pub fn work_item_convention(&self) -> &BypassRule {
         &self.work_items
-    }
-
-    pub fn size(&self) -> &BypassRule {
-        &self.size
     }
 }
 
@@ -501,16 +474,12 @@ pub struct CurrentPullRequestValidationConfiguration {
     /// The label to apply when no work item reference is found. No label will be applied if set to `None`.
     pub missing_work_item_label: Option<String>,
 
-    /// Configuration for PR size checking
-    pub pr_size_check: PrSizeCheckConfig,
-
     /// Rules for bypassing validation checks
     pub bypass_rules: BypassRules,
 }
 
 impl CurrentPullRequestValidationConfiguration {
-    #[cfg(test)]
-    #[allow(clippy::too_many_arguments)]
+    #[allow(dead_code)]
     fn new(
         enforce_title_convention: bool,
         title_pattern: Option<String>,
@@ -518,7 +487,6 @@ impl CurrentPullRequestValidationConfiguration {
         enforce_work_item_references: bool,
         work_item_reference_pattern: Option<String>,
         missing_work_item_label: Option<String>,
-        pr_size_check: Option<PrSizeCheckConfig>,
         bypass_rules: Option<BypassRules>,
     ) -> Self {
         Self {
@@ -536,7 +504,6 @@ impl CurrentPullRequestValidationConfiguration {
                 WORK_ITEM_REGEX.to_string()
             },
             missing_work_item_label,
-            pr_size_check: pr_size_check.unwrap_or_default(),
             bypass_rules: bypass_rules.unwrap_or_default(),
         }
     }
@@ -551,7 +518,6 @@ impl Default for CurrentPullRequestValidationConfiguration {
             enforce_work_item_references: true,
             work_item_reference_pattern: WORK_ITEM_REGEX.to_string(),
             missing_work_item_label: Some(MISSING_WORK_ITEM_LABEL.to_string()),
-            pr_size_check: PrSizeCheckConfig::default(),
             bypass_rules: BypassRules::default(),
         }
     }
@@ -572,9 +538,6 @@ pub struct PullRequestsPoliciesConfig {
 
     #[serde(default, rename = "workItem")]
     pub work_item_policies: WorkItemPolicyConfig,
-
-    #[serde(default, rename = "prSize")]
-    pub size_policies: PrSizeCheckConfig,
 }
 
 /// Configuration for PR title policy
@@ -661,7 +624,7 @@ impl RepositoryProvidedConfig {
         &self,
         bypass_rules: &BypassRules,
     ) -> CurrentPullRequestValidationConfiguration {
-        // For now, only support the main PR policies (title, work item, size)
+        // For now, only support the main PR policies (title, work item)
         let pr_policies = &self.policies.pull_requests;
 
         let enforce_title_convention = pr_policies.title_policies.required;
@@ -671,9 +634,6 @@ impl RepositoryProvidedConfig {
         let enforce_work_item_references = pr_policies.work_item_policies.required;
         let work_item_reference_pattern = pr_policies.work_item_policies.pattern.clone();
         let missing_work_item_label = pr_policies.work_item_policies.label_if_missing.clone();
-
-        let pr_size_check = pr_policies.size_policies.clone();
-
         CurrentPullRequestValidationConfiguration {
             enforce_title_convention,
             title_pattern,
@@ -681,7 +641,6 @@ impl RepositoryProvidedConfig {
             enforce_work_item_references,
             work_item_reference_pattern,
             missing_work_item_label,
-            pr_size_check,
             bypass_rules: bypass_rules.clone(),
         }
     }
@@ -734,101 +693,6 @@ impl Default for WorkItemPolicyConfig {
             label_if_missing: Self::default_label(),
         }
     }
-}
-
-/// Configuration for PR size policy
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub struct PrSizeCheckConfig {
-    /// Whether PR size checking is enabled
-    #[serde(default = "PrSizeCheckConfig::default_enabled")]
-    pub enabled: bool,
-
-    /// Custom size thresholds (optional - uses defaults if not specified)
-    #[serde(default)]
-    pub thresholds: Option<SizeThresholds>,
-
-    /// Whether to fail the check for oversized PRs (XXL category)
-    #[serde(default = "PrSizeCheckConfig::default_fail_on_oversized")]
-    pub fail_on_oversized: bool,
-
-    /// File patterns to exclude from size calculations (e.g., ["*.md", "*.txt"])
-    #[serde(default)]
-    pub excluded_file_patterns: Vec<String>,
-
-    /// Label prefix for size labels (defaults to "size/")
-    #[serde(default = "PrSizeCheckConfig::default_label_prefix")]
-    pub label_prefix: String,
-
-    /// Whether to add educational comments for oversized PRs
-    #[serde(default = "PrSizeCheckConfig::default_add_comment")]
-    pub add_comment: bool,
-}
-
-impl PrSizeCheckConfig {
-    fn default_enabled() -> bool {
-        false
-    }
-
-    fn default_fail_on_oversized() -> bool {
-        false
-    }
-
-    fn default_label_prefix() -> String {
-        "size/".to_string()
-    }
-
-    fn default_add_comment() -> bool {
-        true
-    }
-
-    /// Get the effective size thresholds, using defaults if not configured
-    pub fn get_effective_thresholds(&self) -> SizeThresholds {
-        self.thresholds.clone().unwrap_or_default()
-    }
-
-    /// Check if a file should be excluded from size calculations
-    pub fn should_exclude_file(&self, file_path: &str) -> bool {
-        if self.excluded_file_patterns.is_empty() {
-            return false;
-        }
-
-        // Simple glob-like pattern matching
-        for pattern in &self.excluded_file_patterns {
-            if pattern_matches(pattern, file_path) {
-                return true;
-            }
-        }
-        false
-    }
-}
-
-impl Default for PrSizeCheckConfig {
-    fn default() -> Self {
-        Self {
-            enabled: Self::default_enabled(),
-            thresholds: None,
-            fail_on_oversized: Self::default_fail_on_oversized(),
-            excluded_file_patterns: Vec::new(),
-            label_prefix: Self::default_label_prefix(),
-            add_comment: Self::default_add_comment(),
-        }
-    }
-}
-
-/// Simple pattern matching for file exclusions
-/// Supports basic glob patterns with * wildcards
-pub(crate) fn pattern_matches(pattern: &str, file_path: &str) -> bool {
-    // Convert glob pattern to regex-like matching
-    if pattern.contains('*') {
-        // Simple implementation: convert * to .* for regex-style matching
-        let regex_pattern = pattern.replace("*", ".*");
-        if let Ok(regex) = regex::Regex::new(&format!("^{}$", regex_pattern)) {
-            return regex.is_match(file_path);
-        }
-    }
-
-    // Exact match fallback
-    pattern == file_path
 }
 
 /// Loads the merge-warden configuration from the given path.
@@ -948,16 +812,6 @@ pub async fn load_merge_warden_config(
             .label_if_missing = app_defaults.default_missing_work_item_label.clone();
     }
 
-    // Merge PR size configuration from app defaults
-    if app_defaults.pr_size_check.enabled {
-        config.policies.pull_requests.size_policies.enabled = true;
-    }
-
-    // Use app defaults for any unspecified PR size config values
-    if !config.policies.pull_requests.size_policies.enabled {
-        config.policies.pull_requests.size_policies = app_defaults.pr_size_check.clone();
-    }
-
     info!(
         enable_title_validation = config.policies.pull_requests.title_policies.required,
         title_validation_pattern = config.policies.pull_requests.title_policies.pattern.clone(),
@@ -982,13 +836,6 @@ pub async fn load_merge_warden_config(
             .label_if_missing
             .clone()
             .unwrap_or_default(),
-        enable_pr_size_checking = config.policies.pull_requests.size_policies.enabled,
-        pr_size_fail_on_oversized = config
-            .policies
-            .pull_requests
-            .size_policies
-            .fail_on_oversized,
-        pr_size_label_prefix = config.policies.pull_requests.size_policies.label_prefix,
         "Configuration loaded"
     );
 

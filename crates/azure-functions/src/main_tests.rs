@@ -25,7 +25,6 @@ async fn test_handle_webhook() {
             default_work_item_pattern: "cd".to_string(),
             default_missing_work_item_label: None,
             bypass_rules: BypassRules::default(),
-            pr_size_check: Default::default(),
         },
         webhook_secret: "test_secret".to_string(),
     });

@@ -144,12 +144,6 @@ variable "pr_size_excluded_file_patterns" {
 }
 
 # Size thresholds (optional - uses defaults if not specified)
-variable "pr_size_xs_threshold" {
-  description = "Threshold for extra small PRs (lines of code). Leave null to use default."
-  type        = number
-  default     = null
-}
-
 variable "pr_size_small_threshold" {
   description = "Threshold for small PRs (lines of code). Leave null to use default."
   type        = number

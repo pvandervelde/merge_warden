@@ -73,15 +73,6 @@ impl PullRequestProvider for MockGitProvider {
         unimplemented!("Not needed for this test")
     }
 
-    async fn list_repository_labels(
-        &self,
-        _repo_owner: &str,
-        _repo_name: &str,
-    ) -> Result<Vec<Label>, Error> {
-        // For tests, return empty vector or predefined labels
-        Ok(vec![])
-    }
-
     async fn add_labels(
         &self,
         _repo_owner: &str,
@@ -93,7 +84,6 @@ impl PullRequestProvider for MockGitProvider {
         for label in labels {
             current_labels.push(Label {
                 name: label.clone(),
-                description: None,
             });
         }
         Ok(())
@@ -129,15 +119,6 @@ impl PullRequestProvider for MockGitProvider {
         _output_summary: &str,
         _output_text: &str,
     ) -> Result<(), Error> {
-        unimplemented!("Not needed for this test")
-    }
-
-    async fn get_pull_request_files(
-        &self,
-        _repo_owner: &str,
-        _repo_name: &str,
-        _pr_number: u64,
-    ) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> {
         unimplemented!("Not needed for this test")
     }
 }
@@ -221,23 +202,6 @@ impl PullRequestProvider for ErrorMockGitProvider {
         _output_text: &str,
     ) -> Result<(), Error> {
         unimplemented!("Not needed for this test")
-    }
-
-    async fn get_pull_request_files(
-        &self,
-        _repo_owner: &str,
-        _repo_name: &str,
-        _pr_number: u64,
-    ) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> {
-        unimplemented!("Not needed for this test")
-    }
-
-    async fn list_repository_labels(
-        &self,
-        _repo_owner: &str,
-        _repo_name: &str,
-    ) -> Result<Vec<Label>, Error> {
-        Err(Error::FailedToUpdatePullRequest("Failed".to_string()))
     }
 }
 

@@ -6,7 +6,7 @@ pub mod github;
 
 pub mod models;
 use errors::Error;
-use models::{Comment, Label, PullRequest, PullRequestFile};
+use models::{Comment, Label, PullRequest};
 
 /// Trait to fetch configuration files from remote repositories.
 #[async_trait]
@@ -56,12 +56,10 @@ pub trait ConfigFetcher: Sync + Send {
 ///     # async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
 ///     # async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
 ///     # async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<Comment>, Error> { unimplemented!() }
-///     # async fn list_repository_labels(&self, _: &str, _: &str) -> Result<Vec<Label>, Error> { unimplemented!() }
 ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
 ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
 ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
 ///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
-///     # async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
 /// }
 /// ```
 #[async_trait]
@@ -83,59 +81,6 @@ pub trait PullRequestProvider {
         repo_name: &str,
         pr_number: u64,
     ) -> Result<PullRequest, Error>;
-
-    /// Gets the list of files changed in a pull request.
-    ///
-    /// This method fetches all files that have been modified, added, deleted, or renamed
-    /// as part of the pull request. The returned data includes line change counts and
-    /// file status information needed for PR size analysis.
-    ///
-    /// # Arguments
-    ///
-    /// * `repo_owner` - The owner of the repository
-    /// * `repo_name` - The name of the repository
-    /// * `pr_number` - The pull request number
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing a vector of file changes
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use merge_warden_developer_platforms::{PullRequestProvider, models::PullRequestFile};
-    /// # use merge_warden_developer_platforms::errors::Error;
-    /// # use async_trait::async_trait;
-    /// # struct MyProvider;
-    /// # #[async_trait]
-    /// # impl PullRequestProvider for MyProvider {
-    /// #     async fn get_pull_request(&self, _: &str, _: &str, _: u64) -> Result<merge_warden_developer_platforms::models::PullRequest, Error> { unimplemented!() }
-    /// #     async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
-    /// #     async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
-    /// #     async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Comment>, Error> { unimplemented!() }
-    /// #     async fn list_repository_labels(&self, _: &str, _: &str) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
-    /// #     async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
-    /// #     async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
-    /// #     async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
-    /// #     async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
-    ///
-    /// async fn get_pull_request_files(
-    ///     &self,
-    ///     repo_owner: &str,
-    ///     repo_name: &str,
-    ///     pr_number: u64,
-    /// ) -> Result<Vec<PullRequestFile>, Error> {
-    ///     // Implementation to fetch file changes from the Git provider
-    ///     # unimplemented!()
-    /// }
-    /// # }
-    /// ```
-    async fn get_pull_request_files(
-        &self,
-        repo_owner: &str,
-        repo_name: &str,
-        pr_number: u64,
-    ) -> Result<Vec<PullRequestFile>, Error>;
 
     /// Adds a comment to a pull request.
     ///
@@ -249,25 +194,6 @@ pub trait PullRequestProvider {
         repo_owner: &str,
         repo_name: &str,
         pr_number: u64,
-    ) -> Result<Vec<Label>, Error>;
-
-    /// Lists all available labels in the repository.
-    ///
-    /// This method fetches all labels that are available in the repository,
-    /// which is needed for smart label discovery in size labeling.
-    ///
-    /// # Arguments
-    ///
-    /// * `repo_owner` - The owner of the repository
-    /// * `repo_name` - The name of the repository
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing a vector of all repository labels
-    async fn list_repository_labels(
-        &self,
-        repo_owner: &str,
-        repo_name: &str,
     ) -> Result<Vec<Label>, Error>;
 
     /// Updates the GitHub check run status for the pull request. This should be used to report

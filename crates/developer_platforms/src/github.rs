@@ -8,7 +8,7 @@ use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
     errors::Error,
-    models::{Comment, Label, PullRequest, PullRequestFile, User},
+    models::{Comment, Label, PullRequest, User},
     ConfigFetcher, PullRequestProvider,
 };
 
@@ -535,51 +535,7 @@ impl PullRequestProvider for GitHubProvider {
             current_page = new_page;
         }
 
-        let result = labels
-            .into_iter()
-            .map(|l| Label {
-                name: l.name,
-                description: l.description,
-            })
-            .collect();
-
-        Ok(result)
-    }
-
-    #[instrument]
-    async fn list_repository_labels(
-        &self,
-        repo_owner: &str,
-        repo_name: &str,
-    ) -> Result<Vec<Label>, Error> {
-        let mut current_page = match self
-            .client
-            .issues(repo_owner, repo_name)
-            .list_labels_for_repo()
-            .send()
-            .await
-        {
-            Ok(p) => p,
-            Err(e) => {
-                log_octocrab_error("Failed to list all repository labels", e);
-                return Err(Error::InvalidResponse);
-            }
-        };
-
-        let mut labels = current_page.take_items();
-        while let Ok(Some(mut new_page)) = self.client.get_page(&current_page.next).await {
-            labels.extend(new_page.take_items());
-
-            current_page = new_page;
-        }
-
-        let result = labels
-            .into_iter()
-            .map(|l| Label {
-                name: l.name,
-                description: l.description,
-            })
-            .collect();
+        let result = labels.into_iter().map(|l| Label { name: l.name }).collect();
 
         Ok(result)
     }
@@ -628,69 +584,5 @@ impl PullRequestProvider for GitHubProvider {
             Error::FailedToUpdatePullRequest("Failed to create/update check run".to_string())
         })?;
         Ok(())
-    }
-
-    #[instrument]
-    async fn get_pull_request_files(
-        &self,
-        repo_owner: &str,
-        repo_name: &str,
-        pr_number: u64,
-    ) -> Result<Vec<PullRequestFile>, Error> {
-        match self
-            .client
-            .pulls(repo_owner, repo_name)
-            .list_files(pr_number)
-            .await
-        {
-            Ok(response) => {
-                let files: Vec<PullRequestFile> = response
-                    .items
-                    .into_iter()
-                    .map(|file| PullRequestFile {
-                        filename: file.filename,
-                        additions: file.additions as u32,
-                        deletions: file.deletions as u32,
-                        changes: file.changes as u32,
-                        status: match file.status {
-                            octocrab::models::repos::DiffEntryStatus::Added => "added".to_string(),
-                            octocrab::models::repos::DiffEntryStatus::Removed => {
-                                "removed".to_string()
-                            }
-                            octocrab::models::repos::DiffEntryStatus::Modified => {
-                                "modified".to_string()
-                            }
-                            octocrab::models::repos::DiffEntryStatus::Renamed => {
-                                "renamed".to_string()
-                            }
-                            octocrab::models::repos::DiffEntryStatus::Copied => {
-                                "copied".to_string()
-                            }
-                            octocrab::models::repos::DiffEntryStatus::Changed => {
-                                "changed".to_string()
-                            }
-                            octocrab::models::repos::DiffEntryStatus::Unchanged => {
-                                "unchanged".to_string()
-                            }
-                            _ => "unknown".to_string(),
-                        },
-                    })
-                    .collect();
-
-                debug!(
-                    "Retrieved {} file(s) for PR #{} in {}/{}",
-                    files.len(),
-                    pr_number,
-                    repo_owner,
-                    repo_name
-                );
-
-                Ok(files)
-            }
-            Err(e) => {
-                log_octocrab_error("Failed to get pull request files", e);
-                Err(Error::InvalidResponse)
-            }
-        }
     }
 }

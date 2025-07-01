@@ -7,7 +7,6 @@ repository configuration. It supports features like PR title validation, work it
 
 * **Pull Request Title Validation**: Enforces conventional commit formats for PR titles.
 * **Work Item References**: Ensures PR descriptions include references to work items (e.g., issue numbers).
-* **Automatic PR Size Labeling**: Automatically labels PRs based on the number of lines changed, with optional check failure for oversized PRs.
 
 ## Configuration: merge-warden Rules
 
@@ -48,54 +47,21 @@ pattern = "(?i)(fixes|closes|resolves|references|relates to)\\s+(#\\d+|GH-\\d+|h
 # Define the label that will be applied to the pull request if it does not contain a work item reference.
 # If the label is not specified, no label will be applied.
 label_if_missing = "missing-work-item"
-
-# Define the pull request size checking policies.
-[policies.pullRequests.prSize]
-# Enable or disable PR size checking.
-enabled = true
-# Define custom size thresholds (optional). If not specified, defaults are used.
-# [policies.pullRequests.prSize.thresholds]
-# xs = 10    # 1-10 lines
-# s = 50     # 11-50 lines
-# m = 100    # 51-100 lines
-# l = 250    # 101-250 lines
-# xl = 500   # 251-500 lines
-# xxl = 501  # 501+ lines (oversized)
-# Whether to fail the check for oversized PRs (XXL category).
-fail_on_oversized = false
-# File patterns to exclude from size calculation (e.g., generated files).
-excluded_file_patterns = ["package-lock.json", "yarn.lock", "*.generated.*"]
-# Prefix for size labels applied to PRs.
-label_prefix = "size/"
-# Whether to add educational comments for oversized PRs.
-add_comment = true
 ```
 
 ### Schema Description
 
 * `schemaVersion` (integer): Version of the configuration schema. Used for backward compatibility.
 * `[policies.pullRequests.prTitle]`:
-  * `required` (bool): Whether PR title validation is enforced. Default: `true`.
-  * `pattern` (string): Regex pattern for PR title format. Default: conventional commits pattern.
-  * `label_if_missing` (string): Label applied when title is invalid. Optional.
+  * `format` (string): PR title format. Supported: `conventional-commits` (default).
 * `[policies.pullRequests.workItem]`:
   * `required` (bool): Whether a work item reference is required in the PR description. Default: `true`.
   * `pattern` (string): Regex pattern for work item references. Default: `#\\d+` (e.g., `#123`).
-  * `label_if_missing` (string): Label applied when work item is missing. Optional.
-* `[policies.pullRequests.prSize]`:
-  * `enabled` (bool): Whether PR size checking is enabled. Default: `false`.
-  * `fail_on_oversized` (bool): Whether to fail check for oversized PRs. Default: `false`.
-  * `excluded_file_patterns` (array): File patterns to exclude from size calculation. Default: `[]`.
-  * `label_prefix` (string): Prefix for size labels. Default: `"size/"`.
-  * `add_comment` (bool): Whether to add comments for oversized PRs. Default: `true`.
-  * `[policies.pullRequests.prSize.thresholds]`: Custom size thresholds (optional).
-    * `xs`, `s`, `m`, `l`, `xl`, `xxl` (integers): Line count thresholds for each size category.
 
 ### Default Behavior
 
 * PR title must follow the conventional commit format.
 * PR description must contain a work item reference matching `#<number>`.
-* PR size checking is disabled by default for backward compatibility.
 
 ### Notes
 
