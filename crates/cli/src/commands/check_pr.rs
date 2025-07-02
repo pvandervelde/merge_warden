@@ -280,6 +280,7 @@ async fn handle_webhook(
         && action != "ready_for_review"
         && action != "reopened"
         && action != "unlocked"
+        && action != "synchronize"
     {
         info!(
             action = payload.action.as_str(),

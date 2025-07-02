@@ -307,6 +307,7 @@ async fn handle_post_request(
         && action != "ready_for_review"
         && action != "reopened"
         && action != "unlocked"
+        && action != "synchronize"
     {
         info!(
             action = payload.action.as_str(),
