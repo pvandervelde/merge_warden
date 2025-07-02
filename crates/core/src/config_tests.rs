@@ -1,7 +1,8 @@
 use crate::config::{
-    BypassRule, BypassRules, CurrentPullRequestValidationConfiguration, CONVENTIONAL_COMMIT_REGEX,
-    WORK_ITEM_REGEX,
+    BypassRule, BypassRules, CurrentPullRequestValidationConfiguration, PrSizeCheckConfig,
+    CONVENTIONAL_COMMIT_REGEX, WORK_ITEM_REGEX,
 };
+use crate::size::SizeThresholds;
 use async_trait::async_trait;
 use merge_warden_developer_platforms::errors::Error;
 use proptest::prelude::*;
@@ -143,6 +144,7 @@ fn test_current_pr_validation_config_new() {
         false,
         Some("custom-work-item".to_string()),
         Some("custom-missing-label".to_string()),
+        Some(PrSizeCheckConfig::default()),
         Some(BypassRules::default()),
     );
     assert!(config.enforce_title_convention);
@@ -175,6 +177,7 @@ fn test_custom_regex_patterns_are_used() {
                     pattern: String::from(r"CUSTOM-\d+"),
                     label_if_missing: Some("custom-missing".to_string()),
                 },
+                size_policies: PrSizeCheckConfig::default(),
             },
         },
     };
@@ -428,6 +431,7 @@ fn test_merge_warden_config_to_validation_config_conventional_commits_and_work_i
                     pattern: WORK_ITEM_REGEX.to_string(),
                     label_if_missing: Some(MISSING_WORK_ITEM_LABEL.to_string()),
                 },
+                size_policies: PrSizeCheckConfig::default(),
             },
         },
     };
@@ -460,6 +464,7 @@ fn test_merge_warden_config_to_validation_config_non_conventional_commits() {
                     pattern: "".to_string(),
                     label_if_missing: None,
                 },
+                size_policies: PrSizeCheckConfig::default(),
             },
         },
     };
@@ -636,6 +641,10 @@ fn test_bypass_rules_serialization() {
             enabled: false,
             users: vec![],
         },
+        size: BypassRule {
+            enabled: false,
+            users: vec![],
+        },
     };
 
     let serialized = serde_json::to_string(&rules).expect("Failed to serialize BypassRules");
@@ -694,12 +703,14 @@ fn test_application_defaults_bypass_rules_serialization() {
         enable_work_item_validation: true,
         default_work_item_pattern: "pattern".to_string(),
         default_missing_work_item_label: Some("missing".to_string()),
+        pr_size_check: PrSizeCheckConfig::default(),
         bypass_rules: BypassRules {
             title_convention: BypassRule {
                 enabled: true,
                 users: vec!["admin".to_string()],
             },
             work_items: BypassRule::default(),
+            size: BypassRule::default(),
         },
     };
 
@@ -714,4 +725,199 @@ fn test_application_defaults_bypass_rules_serialization() {
         parsed["bypassRules"]["title_convention"]["users"][0],
         "admin"
     );
+}
+
+#[test]
+fn test_pr_size_check_config_defaults() {
+    let config = PrSizeCheckConfig::default();
+    assert!(!config.enabled);
+    assert!(config.thresholds.is_none());
+    assert!(!config.fail_on_oversized);
+    assert!(config.excluded_file_patterns.is_empty());
+    assert_eq!(config.label_prefix, "size/");
+    assert!(config.add_comment);
+}
+
+#[test]
+fn test_pr_size_check_config_effective_thresholds() {
+    let config = PrSizeCheckConfig::default();
+    let thresholds = config.get_effective_thresholds();
+    assert_eq!(thresholds, SizeThresholds::default());
+
+    let custom_thresholds = SizeThresholds::new(5, 25, 75, 150, 300);
+    let config_with_custom = PrSizeCheckConfig {
+        enabled: true,
+        thresholds: Some(custom_thresholds.clone()),
+        fail_on_oversized: false,
+        excluded_file_patterns: vec![],
+        label_prefix: "size/".to_string(),
+        add_comment: true,
+    };
+    assert_eq!(
+        config_with_custom.get_effective_thresholds(),
+        custom_thresholds
+    );
+}
+
+#[test]
+fn test_pr_size_check_file_exclusion_patterns() {
+    let config = PrSizeCheckConfig {
+        enabled: true,
+        thresholds: None,
+        fail_on_oversized: false,
+        excluded_file_patterns: vec![
+            "*.md".to_string(),
+            "*.txt".to_string(),
+            "docs/*".to_string(),
+        ],
+        label_prefix: "size/".to_string(),
+        add_comment: true,
+    };
+
+    // Test exclusion patterns
+    assert!(config.should_exclude_file("README.md"));
+    assert!(config.should_exclude_file("CHANGELOG.md"));
+    assert!(config.should_exclude_file("notes.txt"));
+    assert!(config.should_exclude_file("docs/api.md"));
+    assert!(config.should_exclude_file("docs/guide/setup.md"));
+
+    // Test non-excluded files
+    assert!(!config.should_exclude_file("src/main.rs"));
+    assert!(!config.should_exclude_file("tests/integration.rs"));
+    assert!(!config.should_exclude_file("Cargo.toml"));
+}
+
+#[test]
+fn test_pr_size_check_no_exclusion_patterns() {
+    let config = PrSizeCheckConfig::default();
+
+    // No patterns means no files are excluded
+    assert!(!config.should_exclude_file("README.md"));
+    assert!(!config.should_exclude_file("src/main.rs"));
+    assert!(!config.should_exclude_file("docs/api.md"));
+}
+
+#[test]
+fn test_pattern_matches_function() {
+    use crate::config::pattern_matches;
+
+    // Test exact matches
+    assert!(pattern_matches("exact.txt", "exact.txt"));
+    assert!(!pattern_matches("exact.txt", "other.txt"));
+
+    // Test wildcard patterns
+    assert!(pattern_matches("*.md", "README.md"));
+    assert!(pattern_matches("*.md", "docs.md"));
+    assert!(!pattern_matches("*.md", "main.rs"));
+
+    // Test directory patterns
+    assert!(pattern_matches("docs/*", "docs/api.md"));
+    assert!(pattern_matches("docs/*", "docs/guide.txt"));
+    assert!(!pattern_matches("docs/*", "src/main.rs"));
+
+    // Test complex patterns
+    assert!(pattern_matches("test_*.rs", "test_main.rs"));
+    assert!(pattern_matches("test_*.rs", "test_helper.rs"));
+    assert!(!pattern_matches("test_*.rs", "main.rs"));
+}
+
+#[test]
+fn test_pr_size_config_serialization() {
+    let config = PrSizeCheckConfig {
+        enabled: true,
+        thresholds: Some(SizeThresholds::new(5, 25, 75, 150, 300)),
+        fail_on_oversized: true,
+        excluded_file_patterns: vec!["*.md".to_string(), "docs/*".to_string()],
+        label_prefix: "pr-size/".to_string(),
+        add_comment: false,
+    };
+
+    // Test that serialization works (this is important for TOML config)
+    let serialized = toml::to_string(&config).expect("Should serialize");
+    let deserialized: PrSizeCheckConfig = toml::from_str(&serialized).expect("Should deserialize");
+
+    assert_eq!(config.enabled, deserialized.enabled);
+    assert_eq!(config.fail_on_oversized, deserialized.fail_on_oversized);
+    assert_eq!(
+        config.excluded_file_patterns,
+        deserialized.excluded_file_patterns
+    );
+    assert_eq!(config.label_prefix, deserialized.label_prefix);
+    assert_eq!(config.add_comment, deserialized.add_comment);
+
+    // Note: We can't directly compare thresholds due to Option<SizeThresholds>
+    assert_eq!(
+        config.get_effective_thresholds(),
+        deserialized.get_effective_thresholds()
+    );
+}
+
+#[test]
+fn test_repository_config_with_pr_size() {
+    let toml_content = r#"
+        schemaVersion = 1
+
+        [policies.pullRequests.prSize]
+        enabled = true
+        fail_on_oversized = true
+        excluded_file_patterns = ["*.md", "*.txt"]
+        label_prefix = "pr-size/"
+        add_comment = false
+
+        [policies.pullRequests.prSize.thresholds]
+        xs = 5
+        s = 25
+        m = 75
+        l = 150
+        xl = 300
+    "#;
+
+    let config: RepositoryProvidedConfig = toml::from_str(toml_content).expect("Should parse TOML");
+    assert_eq!(config.schema_version, 1);
+
+    let size_config = &config.policies.pull_requests.size_policies;
+    assert!(size_config.enabled);
+    assert!(size_config.fail_on_oversized);
+    assert_eq!(size_config.excluded_file_patterns, vec!["*.md", "*.txt"]);
+    assert_eq!(size_config.label_prefix, "pr-size/");
+    assert!(!size_config.add_comment);
+
+    let thresholds = size_config.get_effective_thresholds();
+    assert_eq!(thresholds.xs, 5);
+    assert_eq!(thresholds.s, 25);
+    assert_eq!(thresholds.m, 75);
+    assert_eq!(thresholds.l, 150);
+    assert_eq!(thresholds.xl, 300);
+}
+
+#[test]
+fn test_validation_config_includes_pr_size() {
+    let repo_config = RepositoryProvidedConfig {
+        schema_version: 1,
+        policies: PoliciesConfig {
+            pull_requests: PullRequestsPoliciesConfig {
+                title_policies: PullRequestsTitlePolicyConfig::default(),
+                work_item_policies: WorkItemPolicyConfig::default(),
+                size_policies: PrSizeCheckConfig {
+                    enabled: true,
+                    thresholds: None,
+                    fail_on_oversized: true,
+                    excluded_file_patterns: vec!["*.md".to_string()],
+                    label_prefix: "custom/".to_string(),
+                    add_comment: false,
+                },
+            },
+        },
+    };
+
+    let validation = repo_config.to_validation_config(&BypassRules::default());
+
+    assert!(validation.pr_size_check.enabled);
+    assert!(validation.pr_size_check.fail_on_oversized);
+    assert_eq!(
+        validation.pr_size_check.excluded_file_patterns,
+        vec!["*.md"]
+    );
+    assert_eq!(validation.pr_size_check.label_prefix, "custom/");
+    assert!(!validation.pr_size_check.add_comment);
 }

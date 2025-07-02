@@ -34,6 +34,9 @@ pub enum AuthCommands {
 pub async fn execute(cmd: AuthCommands) -> Result<(), CliError> {
     match cmd {
         AuthCommands::GitHub { method } => auth_github(&method).await,
+        _ => Err(CliError::InvalidArguments(
+            "Unknown authentication type.".to_string(),
+        )),
     }
 }
 

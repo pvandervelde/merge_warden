@@ -19,13 +19,12 @@ use crate::errors::AzureFunctionsError;
 #[path = "telemetry_tests.rs"]
 mod tests;
 
-#[allow(dead_code)]
 fn init_logs(exporter: Exporter<Client>) -> Result<(), AzureFunctionsError> {
     let logger_provider = SdkLoggerProvider::builder()
         .with_batch_exporter(exporter)
         .build();
     let otel_log_appender = OpenTelemetryLogBridge::new(&logger_provider);
-    log::set_boxed_logger(Box::new(otel_log_appender)).map_err(|_e| {
+    log::set_boxed_logger(Box::new(otel_log_appender)).map_err(|e| {
         AzureFunctionsError::ConfigError("Failed to set the log provider.".to_string())
     })?;
     log::set_max_level(Level::Trace.to_level_filter());
@@ -68,7 +67,7 @@ fn init_tracing(azure_monitor_exporter: Exporter<Client>) -> Result<(), AzureFun
 
     // Bridge log crate events to tracing
     tracing_log::LogTracer::init()
-        .map_err(|_e| AzureFunctionsError::ConfigError("Failed to set log tracer".to_string()))?;
+        .map_err(|e| AzureFunctionsError::ConfigError("Failed to set log tracer".to_string()))?;
 
     // Add a console logging layer so logs are streamed to the console
     let fmt_layer = tracing_subscriber::fmt::layer().with_ansi(true);

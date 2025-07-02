@@ -226,7 +226,7 @@ pub async fn execute(args: CheckPrArgs) -> Result<(), CliError> {
     let config = AppConfig::load(&config_path)
         .map_err(|e| CliError::ConfigError(format!("Failed to load configuration: {}", e)))?;
 
-    let (octocrab, _user) = create_github_app(&config).await?;
+    let (octocrab, user) = create_github_app(&config).await?;
     let webhook_secret = retrieve_webhook_secret()?;
 
     let addr = format!("0.0.0.0:{}", config.webhooks.port);
@@ -388,6 +388,7 @@ async fn handle_webhook(
                     .policies
                     .default_missing_work_item_label
                     .clone(),
+                pr_size_check: merge_warden_core::config::PrSizeCheckConfig::default(),
                 bypass_rules: state.config.policies.bypass_rules.clone(),
             }
         }
@@ -469,7 +470,7 @@ fn verify_github_signature(secret: &str, headers: &HeaderMap, payload: &[u8]) ->
     //debug!("Expected signature: {}", hex::encode(expected_bytes));
     //debug!("Received signature: {}", received_sig);
 
-    let _result = expected_bytes.as_slice() == received_bytes;
+    let result = expected_bytes.as_slice() == received_bytes;
     //debug!("Match result: {}", result);
 
     // For now just return true. If you're running this as a CLI it is likely that
