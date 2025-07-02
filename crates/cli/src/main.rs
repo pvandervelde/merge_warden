@@ -62,19 +62,19 @@ async fn main() -> Result<(), CliError> {
             }
             Err(e) => {
                 error!("Error validating pull requests: {}", e);
-                return Err(e.into());
+                return Err(e);
             }
         },
         Commands::Config(cmd) => {
             if let Err(e) = commands::config_cmd::execute(cmd).await {
                 error!("Error executing config command: {}", e);
-                return Err(e.into());
+                return Err(e);
             }
         }
         Commands::Auth(cmd) => {
             if let Err(e) = commands::auth::execute(cmd).await {
                 error!("Error executing auth command: {}", e);
-                return Err(e.into());
+                return Err(e);
             }
         }
     }

@@ -51,7 +51,6 @@ impl ErrorMockGitProvider {
         self.error_on_get_pr = true;
     }
 
-    #[allow(dead_code)]
     fn with_invalid_pr_body(&mut self) {
         self.invalid_pr_body = true;
     }
@@ -166,6 +165,14 @@ impl PullRequestProvider for ErrorMockGitProvider {
         Ok(Vec::new())
     }
 
+    async fn list_repository_labels(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+    ) -> Result<Vec<Label>, Error> {
+        Ok(Vec::new())
+    }
+
     async fn update_pr_check_status(
         &self,
         _repo_owner: &str,
@@ -178,10 +185,18 @@ impl PullRequestProvider for ErrorMockGitProvider {
     ) -> Result<(), Error> {
         Ok(())
     }
+
+    async fn get_pull_request_files(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _pr_number: u64,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> {
+        Ok(vec![])
+    }
 }
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct CheckStatusUpdate {
     repo_owner: String,
     repo_name: String,
@@ -220,7 +235,6 @@ impl DynamicMockGitProvider {
         labels
     }
 
-    #[allow(dead_code)]
     fn get_comments(&self) -> Vec<Comment> {
         let comments = self.comments.lock().unwrap().clone();
         comments
@@ -298,6 +312,7 @@ impl PullRequestProvider for DynamicMockGitProvider {
         for label in labels {
             current_labels.push(Label {
                 name: label.clone(),
+                description: None,
             });
         }
         Ok(())
@@ -325,6 +340,14 @@ impl PullRequestProvider for DynamicMockGitProvider {
         Ok(labels.clone())
     }
 
+    async fn list_repository_labels(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+    ) -> Result<Vec<Label>, Error> {
+        Ok(Vec::new())
+    }
+
     async fn update_pr_check_status(
         &self,
         repo_owner: &str,
@@ -346,6 +369,15 @@ impl PullRequestProvider for DynamicMockGitProvider {
             text: output_text.to_string(),
         });
         Ok(())
+    }
+
+    async fn get_pull_request_files(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _pr_number: u64,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> {
+        Ok(vec![])
     }
 }
 
@@ -383,7 +415,6 @@ impl MockGitProvider {
         comments
     }
 
-    #[allow(dead_code)]
     fn get_check_status_updates(&self) -> Vec<CheckStatusUpdate> {
         let updates = self.check_status_updates.lock().unwrap().clone();
         updates
@@ -457,6 +488,7 @@ impl PullRequestProvider for MockGitProvider {
         for label in labels {
             current_labels.push(Label {
                 name: label.clone(),
+                description: None,
             });
         }
         Ok(())
@@ -484,6 +516,14 @@ impl PullRequestProvider for MockGitProvider {
         Ok(labels.clone())
     }
 
+    async fn list_repository_labels(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+    ) -> Result<Vec<Label>, Error> {
+        Ok(Vec::new())
+    }
+
     async fn update_pr_check_status(
         &self,
         repo_owner: &str,
@@ -505,6 +545,15 @@ impl PullRequestProvider for MockGitProvider {
             text: output_text.to_string(),
         });
         Ok(())
+    }
+
+    async fn get_pull_request_files(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _pr_number: u64,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> {
+        Ok(vec![])
     }
 }
 
@@ -538,6 +587,7 @@ async fn test_constructor_with_config() {
         enforce_work_item_references: true,
         work_item_reference_pattern: "cd".to_string(),
         missing_work_item_label: None,
+        pr_size_check: crate::config::PrSizeCheckConfig::default(),
         bypass_rules: BypassRules::default(),
     };
 
@@ -862,6 +912,7 @@ async fn test_process_pull_request_custom_config_disabled_checks() {
         enforce_work_item_references: false,
         work_item_reference_pattern: "cd".to_string(),
         missing_work_item_label: None,
+        pr_size_check: crate::config::PrSizeCheckConfig::default(),
         bypass_rules: BypassRules::default(),
     };
 

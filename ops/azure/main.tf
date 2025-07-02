@@ -430,6 +430,14 @@ resource "azurerm_app_configuration_key" "pr_size_excluded_file_patterns" {
 }
 
 # Size thresholds (only create if values are provided)
+resource "azurerm_app_configuration_key" "pr_size_xs_threshold" {
+  count                  = var.pr_size_xs_threshold != null ? 1 : 0
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "pr_size:thresholds:xs"
+  value                  = tostring(var.pr_size_xs_threshold)
+  type                   = "kv"
+}
+
 resource "azurerm_app_configuration_key" "pr_size_small_threshold" {
   count                  = var.pr_size_small_threshold != null ? 1 : 0
   configuration_store_id = azurerm_app_configuration.app_config.id

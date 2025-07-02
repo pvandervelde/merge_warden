@@ -11,9 +11,10 @@
 
 use crate::{
     config::{BypassRule, CurrentPullRequestValidationConfiguration},
+    size::PrSizeInfo,
     validation_result::{BypassInfo, BypassRuleType, ValidationResult},
 };
-use merge_warden_developer_platforms::models::PullRequest;
+use merge_warden_developer_platforms::models::{PullRequest, PullRequestFile, User};
 use regex::Regex;
 
 #[cfg(test)]
@@ -92,7 +93,7 @@ pub fn check_pr_title(
     }
 
     // Otherwise, perform normal validation
-    let regex = match Regex::new(current_configuration.title_pattern.as_str()) {
+    let regex = match Regex::new(&current_configuration.title_pattern) {
         Ok(r) => r,
         Err(_) => return ValidationResult::invalid(),
     };
@@ -182,5 +183,91 @@ pub fn check_work_item_reference(
             }
         }
         None => ValidationResult::invalid(),
+    }
+}
+
+/// Validates PR size based on file changes and configuration.
+///
+/// This function analyzes the size of a pull request by examining the files changed
+/// and calculating the total lines modified. It supports file exclusion patterns,
+/// can optionally fail the check for oversized PRs, and supports bypass rules for
+/// automated tools that may legitimately create large PRs.
+///
+/// # Arguments
+///
+/// * `pr_files` - List of files changed in the pull request
+/// * `user` - The user who created the pull request (for bypass checking)
+/// * `bypass_rule` - Bypass rule for size validation (allows specific users to bypass size checks)
+/// * `config` - Current validation configuration containing size check settings
+///
+/// # Returns
+///
+/// A `ValidationResult` indicating the size validation status
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_developer_platforms::models::{PullRequestFile, User};
+/// use merge_warden_core::checks::check_pr_size;
+/// use merge_warden_core::config::{BypassRule, CurrentPullRequestValidationConfiguration, PrSizeCheckConfig};
+///
+/// let files = vec![
+///     PullRequestFile {
+///         filename: "src/main.rs".to_string(),
+///         additions: 10,
+///         deletions: 5,
+///         changes: 15,
+///         status: "modified".to_string(),
+///     },
+///     PullRequestFile {
+///         filename: "README.md".to_string(),
+///         additions: 2,
+///         deletions: 1,
+///         changes: 3,
+///         status: "modified".to_string(),
+///     },
+/// ];
+///
+/// let user = User {
+///     login: "developer".to_string(),
+///     id: 123,
+/// };
+/// let bypass_rule = BypassRule::default();
+/// let mut config = CurrentPullRequestValidationConfiguration::default();
+/// config.pr_size_check.enabled = true;
+/// config.pr_size_check.excluded_file_patterns = vec!["*.md".to_string()];
+///
+/// let result = check_pr_size(&files, Some(&user), &bypass_rule, &config);
+/// // Only src/main.rs counts (15 lines), README.md is excluded
+/// assert!(result.is_valid()); // 15 lines is XS, should be valid
+/// ```
+pub fn check_pr_size(
+    pr_files: &[PullRequestFile],
+    user: Option<&User>,
+    bypass_rule: &BypassRule,
+    config: &CurrentPullRequestValidationConfiguration,
+) -> ValidationResult {
+    // If size checking is disabled, always return valid
+    if !config.pr_size_check.enabled {
+        return ValidationResult::valid();
+    }
+
+    // Check if the user can bypass size validation
+    if bypass_rule.can_bypass_validation(user) {
+        return ValidationResult::valid();
+    }
+
+    // Calculate size info with file exclusions
+    let size_info = PrSizeInfo::from_files_with_exclusions(
+        pr_files,
+        &config.pr_size_check.get_effective_thresholds(),
+        &config.pr_size_check.excluded_file_patterns,
+    );
+
+    // Check if we should fail for oversized PRs
+    if config.pr_size_check.fail_on_oversized && size_info.is_oversized() {
+        ValidationResult::invalid()
+    } else {
+        ValidationResult::valid()
     }
 }

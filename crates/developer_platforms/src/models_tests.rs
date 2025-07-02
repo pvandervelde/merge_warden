@@ -41,6 +41,7 @@ fn test_label_serialization() {
     // Create a label
     let label = Label {
         name: "bug".to_string(),
+        description: None,
     };
 
     // Serialize to JSON
@@ -298,4 +299,139 @@ fn test_pull_request_missing_author_field_backwards_compatibility() {
     assert!(!pr.draft);
     assert_eq!(pr.body, Some("New feature description".to_string()));
     assert_eq!(pr.author, None); // Should default to None
+}
+
+#[test]
+fn test_pull_request_file_serialization() {
+    // Create a pull request file
+    let file = PullRequestFile {
+        filename: "src/main.rs".to_string(),
+        additions: 15,
+        deletions: 5,
+        changes: 20,
+        status: "modified".to_string(),
+    };
+
+    // Serialize to JSON
+    let json_str = to_string(&file).expect("Failed to serialize PullRequestFile");
+
+    // Verify JSON structure
+    let parsed: serde_json::Value = serde_json::from_str(&json_str).expect("Failed to parse JSON");
+    assert_eq!(parsed["filename"], "src/main.rs");
+    assert_eq!(parsed["additions"], 15);
+    assert_eq!(parsed["deletions"], 5);
+    assert_eq!(parsed["changes"], 20);
+    assert_eq!(parsed["status"], "modified");
+}
+
+#[test]
+fn test_pull_request_file_deserialization() {
+    // Create JSON
+    let json_str = r#"{"filename": "tests/test.rs", "additions": 25, "deletions": 10, "changes": 35, "status": "added"}"#;
+
+    // Deserialize from JSON
+    let file: PullRequestFile = from_str(json_str).expect("Failed to deserialize PullRequestFile");
+
+    // Verify fields
+    assert_eq!(file.filename, "tests/test.rs");
+    assert_eq!(file.additions, 25);
+    assert_eq!(file.deletions, 10);
+    assert_eq!(file.changes, 35);
+    assert_eq!(file.status, "added");
+}
+
+#[test]
+fn test_pull_request_file_zero_changes() {
+    // Test file with no changes (edge case)
+    let file = PullRequestFile {
+        filename: "README.md".to_string(),
+        additions: 0,
+        deletions: 0,
+        changes: 0,
+        status: "unchanged".to_string(),
+    };
+
+    // Serialize and deserialize
+    let json_str = to_string(&file).expect("Failed to serialize PullRequestFile");
+    let deserialized: PullRequestFile =
+        from_str(&json_str).expect("Failed to deserialize PullRequestFile");
+
+    // Verify fields remain correct
+    assert_eq!(deserialized.filename, "README.md");
+    assert_eq!(deserialized.additions, 0);
+    assert_eq!(deserialized.deletions, 0);
+    assert_eq!(deserialized.changes, 0);
+    assert_eq!(deserialized.status, "unchanged");
+}
+
+#[test]
+fn test_pull_request_file_large_changes() {
+    // Test file with large number of changes
+    let file = PullRequestFile {
+        filename: "src/generated/large_file.rs".to_string(),
+        additions: 1000,
+        deletions: 500,
+        changes: 1500,
+        status: "modified".to_string(),
+    };
+
+    // Serialize and deserialize
+    let json_str = to_string(&file).expect("Failed to serialize PullRequestFile");
+    let deserialized: PullRequestFile =
+        from_str(&json_str).expect("Failed to deserialize PullRequestFile");
+
+    // Verify fields remain correct
+    assert_eq!(deserialized.filename, "src/generated/large_file.rs");
+    assert_eq!(deserialized.additions, 1000);
+    assert_eq!(deserialized.deletions, 500);
+    assert_eq!(deserialized.changes, 1500);
+    assert_eq!(deserialized.status, "modified");
+}
+
+#[test]
+fn test_pull_request_file_different_statuses() {
+    // Test different file statuses
+    let statuses = vec!["added", "modified", "deleted", "renamed", "copied"];
+
+    for status in statuses {
+        let file = PullRequestFile {
+            filename: format!("file_{}.rs", status),
+            additions: 10,
+            deletions: 5,
+            changes: 15,
+            status: status.to_string(),
+        };
+
+        // Serialize and deserialize
+        let json_str = to_string(&file).expect("Failed to serialize PullRequestFile");
+        let deserialized: PullRequestFile =
+            from_str(&json_str).expect("Failed to deserialize PullRequestFile");
+
+        // Verify status is preserved
+        assert_eq!(deserialized.status, status);
+        assert_eq!(deserialized.filename, format!("file_{}.rs", status));
+    }
+}
+
+#[test]
+fn test_pull_request_file_special_characters_in_filename() {
+    // Test filename with special characters, spaces, and Unicode
+    let file = PullRequestFile {
+        filename: "src/files with spaces/特殊文字/file-name_with.dots.rs".to_string(),
+        additions: 5,
+        deletions: 2,
+        changes: 7,
+        status: "modified".to_string(),
+    };
+
+    // Serialize and deserialize
+    let json_str = to_string(&file).expect("Failed to serialize PullRequestFile");
+    let deserialized: PullRequestFile =
+        from_str(&json_str).expect("Failed to deserialize PullRequestFile");
+
+    // Verify filename is preserved correctly
+    assert_eq!(
+        deserialized.filename,
+        "src/files with spaces/特殊文字/file-name_with.dots.rs"
+    );
 }
