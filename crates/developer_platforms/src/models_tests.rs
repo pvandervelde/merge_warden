@@ -249,7 +249,7 @@ fn test_pull_request_with_author_deserialization() {
     // Verify fields
     assert_eq!(pr.number, 999);
     assert_eq!(pr.title, "fix: critical bug");
-    assert_eq!(pr.draft, true);
+    assert!(pr.draft);
     assert_eq!(pr.body, None);
     assert!(pr.author.is_some());
     let author = pr.author.unwrap();

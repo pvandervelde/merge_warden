@@ -2,9 +2,7 @@
 //!
 //! This module centralizes configuration constants and settings used throughout
 //! the crate, making it easier to modify behavior in one place.
-use lazy_static::lazy_static;
 use merge_warden_developer_platforms::{models::User, ConfigFetcher};
-use regex::Regex;
 use serde::{Deserialize, Serialize};
 use tracing::{error, info, warn};
 
@@ -481,6 +479,7 @@ pub struct CurrentPullRequestValidationConfiguration {
 }
 
 impl CurrentPullRequestValidationConfiguration {
+    #[allow(dead_code)]
     fn new(
         enforce_title_convention: bool,
         title_pattern: Option<String>,

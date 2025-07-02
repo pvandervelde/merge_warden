@@ -79,7 +79,7 @@ pub async fn set_pull_request_labels<P: PullRequestProvider>(
     // Extract type from PR title using pre-compiled regex
     let regex = match Regex::new(CONVENTIONAL_COMMIT_REGEX) {
         Ok(r) => r,
-        Err(e) => {
+        Err(_e) => {
             return Err(MergeWardenError::ConfigError(
                 "Failed to create a title extraction regex.".to_string(),
             ))

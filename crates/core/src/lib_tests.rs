@@ -51,6 +51,7 @@ impl ErrorMockGitProvider {
         self.error_on_get_pr = true;
     }
 
+    #[allow(dead_code)]
     fn with_invalid_pr_body(&mut self) {
         self.invalid_pr_body = true;
     }
@@ -180,6 +181,7 @@ impl PullRequestProvider for ErrorMockGitProvider {
 }
 
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct CheckStatusUpdate {
     repo_owner: String,
     repo_name: String,
@@ -218,6 +220,7 @@ impl DynamicMockGitProvider {
         labels
     }
 
+    #[allow(dead_code)]
     fn get_comments(&self) -> Vec<Comment> {
         let comments = self.comments.lock().unwrap().clone();
         comments
@@ -380,6 +383,7 @@ impl MockGitProvider {
         comments
     }
 
+    #[allow(dead_code)]
     fn get_check_status_updates(&self) -> Vec<CheckStatusUpdate> {
         let updates = self.check_status_updates.lock().unwrap().clone();
         updates

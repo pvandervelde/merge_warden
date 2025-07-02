@@ -156,7 +156,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
         debug!(pull_request = pr.number, "Checking PR title");
         checks::check_pr_title(
             pr,
-            &self.config.bypass_rules.title_convention(),
+            self.config.bypass_rules.title_convention(),
             &self.config,
         )
     }
@@ -181,7 +181,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
         );
         checks::check_work_item_reference(
             pr,
-            &self.config.bypass_rules.work_item_convention(),
+            self.config.bypass_rules.work_item_convention(),
             &self.config,
         )
     }

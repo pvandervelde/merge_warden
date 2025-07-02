@@ -392,6 +392,76 @@ resource "azurerm_app_configuration_key" "rust_log" {
   type                   = "kv"
 }
 
+## PR Size checking configuration keys
+resource "azurerm_app_configuration_key" "pr_size_enabled" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "pr_size:enabled"
+  value                  = var.pr_size_enabled ? "true" : "false"
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "pr_size_fail_on_oversized" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "pr_size:fail_on_oversized"
+  value                  = var.pr_size_fail_on_oversized ? "true" : "false"
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "pr_size_label_prefix" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "pr_size:label_prefix"
+  value                  = var.pr_size_label_prefix
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "pr_size_add_comment" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "pr_size:add_comment"
+  value                  = var.pr_size_add_comment ? "true" : "false"
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "pr_size_excluded_file_patterns" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "pr_size:excluded_file_patterns"
+  value                  = jsonencode(var.pr_size_excluded_file_patterns)
+  type                   = "kv"
+  content_type           = "application/json"
+}
+
+# Size thresholds (only create if values are provided)
+resource "azurerm_app_configuration_key" "pr_size_small_threshold" {
+  count                  = var.pr_size_small_threshold != null ? 1 : 0
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "pr_size:thresholds:small"
+  value                  = tostring(var.pr_size_small_threshold)
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "pr_size_medium_threshold" {
+  count                  = var.pr_size_medium_threshold != null ? 1 : 0
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "pr_size:thresholds:medium"
+  value                  = tostring(var.pr_size_medium_threshold)
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "pr_size_large_threshold" {
+  count                  = var.pr_size_large_threshold != null ? 1 : 0
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "pr_size:thresholds:large"
+  value                  = tostring(var.pr_size_large_threshold)
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "pr_size_extra_large_threshold" {
+  count                  = var.pr_size_extra_large_threshold != null ? 1 : 0
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "pr_size:thresholds:extra_large"
+  value                  = tostring(var.pr_size_extra_large_threshold)
+  type                   = "kv"
+}
+
 ## Grant Function App access to App Configuration
 resource "azurerm_role_assignment" "function_app_appconfig_reader" {
   scope                = azurerm_app_configuration.app_config.id

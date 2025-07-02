@@ -5,6 +5,7 @@ use crate::config::{
 use async_trait::async_trait;
 use merge_warden_developer_platforms::errors::Error;
 use proptest::prelude::*;
+use regex::Regex;
 
 use super::*;
 

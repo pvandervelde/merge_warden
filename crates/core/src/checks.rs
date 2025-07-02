@@ -92,7 +92,7 @@ pub fn check_pr_title(
     }
 
     // Otherwise, perform normal validation
-    let regex = match Regex::new(&current_configuration.title_pattern.as_str()) {
+    let regex = match Regex::new(current_configuration.title_pattern.as_str()) {
         Ok(r) => r,
         Err(_) => return ValidationResult::invalid(),
     };
