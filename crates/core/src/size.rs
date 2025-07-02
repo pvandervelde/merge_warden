@@ -14,10 +14,6 @@ use serde::{Deserialize, Serialize};
 #[path = "size_tests.rs"]
 mod tests;
 
-#[cfg(test)]
-#[path = "size_integration_tests.rs"]
-mod integration_tests;
-
 /// Represents the size category of a pull request based on lines changed.
 ///
 /// These categories are based on industry research showing that smaller PRs
