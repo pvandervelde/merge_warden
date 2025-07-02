@@ -432,6 +432,12 @@ pub struct DiscoveredSizeLabels {
     pub xxl: Option<String>,
 }
 
+impl Default for DiscoveredSizeLabels {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl DiscoveredSizeLabels {
     /// Create a new empty discovery result
     pub fn new() -> Self {
@@ -551,13 +557,13 @@ impl LabelDiscovery {
                 );
             }
 
-            match category {
-                &"XS" => discovered.xs = best_label,
-                &"S" => discovered.s = best_label,
-                &"M" => discovered.m = best_label,
-                &"L" => discovered.l = best_label,
-                &"XL" => discovered.xl = best_label,
-                &"XXL" => discovered.xxl = best_label,
+            match *category {
+                "XS" => discovered.xs = best_label,
+                "S" => discovered.s = best_label,
+                "M" => discovered.m = best_label,
+                "L" => discovered.l = best_label,
+                "XL" => discovered.xl = best_label,
+                "XXL" => discovered.xxl = best_label,
                 _ => {}
             }
         }
