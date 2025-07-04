@@ -4,6 +4,7 @@
 //! the crate, making it easier to modify behavior in one place.
 use merge_warden_developer_platforms::{models::User, ConfigFetcher};
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 use tracing::{error, info, warn};
 
 use crate::errors::ConfigLoadError;
@@ -278,6 +279,10 @@ pub struct ApplicationDefaults {
     /// Configuration for PR size checking
     #[serde(rename = "prSize", default)]
     pub pr_size_check: PrSizeCheckConfig,
+
+    /// Configuration for change type label detection
+    #[serde(default)]
+    pub change_type_labels: ChangeTypeLabelConfig,
 }
 
 impl ApplicationDefaults {
@@ -317,6 +322,7 @@ impl Default for ApplicationDefaults {
             default_missing_work_item_label: ApplicationDefaults::default_work_item_missing_label(),
             bypass_rules: BypassRules::default(),
             pr_size_check: PrSizeCheckConfig::default(),
+            change_type_labels: ChangeTypeLabelConfig::default(),
         }
     }
 }
@@ -653,6 +659,10 @@ pub struct RepositoryProvidedConfig {
 
     #[serde(default)]
     pub policies: PoliciesConfig,
+
+    /// Repository-specific change type label configuration overrides
+    #[serde(default)]
+    pub change_type_labels: Option<ChangeTypeLabelConfig>,
 }
 
 /// Convert a RepositoryConfig (TOML) to a ValidationConfig (runtime enforcement)
@@ -692,6 +702,7 @@ impl Default for RepositoryProvidedConfig {
         Self {
             schema_version: 1,
             policies: PoliciesConfig::default(),
+            change_type_labels: None,
         }
     }
 }
@@ -870,6 +881,7 @@ pub async fn load_merge_warden_config(
     };
 
     let mut config: RepositoryProvidedConfig = RepositoryProvidedConfig::default();
+    let mut is_valid_config = true;
     if potential_content.is_some() {
         let content = potential_content.unwrap();
 
@@ -885,17 +897,20 @@ pub async fn load_merge_warden_config(
 
             // If we can't load the configuration we just pretend it's not there
             config = RepositoryProvidedConfig::default();
+            is_valid_config = false;
         }
     }
 
-    // Enforce application-level enables for validations
-    if app_defaults.enable_title_validation {
-        config.policies.pull_requests.title_policies.required = true;
-    }
+    // Only apply application defaults if we have a valid configuration
+    if is_valid_config {
+        // Enforce application-level enables for validations
+        if app_defaults.enable_title_validation {
+            config.policies.pull_requests.title_policies.required = true;
+        }
 
-    if app_defaults.enable_work_item_validation {
-        config.policies.pull_requests.work_item_policies.required = true;
-    }
+        if app_defaults.enable_work_item_validation {
+            config.policies.pull_requests.work_item_policies.required = true;
+        }
 
     // Use repository config labels and patterns if present, else fallback to defaults
     if config
@@ -958,9 +973,157 @@ pub async fn load_merge_warden_config(
         config.policies.pull_requests.size_policies = app_defaults.pr_size_check.clone();
     }
 
+    // Merge change type labels configuration with application defaults
+    if config.change_type_labels.is_none() {
+        config.change_type_labels = Some(app_defaults.change_type_labels.clone());
+    } else {
+        // Merge repository change type labels config with application defaults
+        let repo_change_type_labels = config.change_type_labels.as_ref().unwrap();
+        let mut merged_change_type_labels = app_defaults.change_type_labels.clone();
+
+        // Override with repository-specific settings where provided
+        merged_change_type_labels.enabled = repo_change_type_labels.enabled;
+
+        // Only override mappings if repository provides them
+        if !repo_change_type_labels
+            .conventional_commit_mappings
+            .feat
+            .is_empty()
+        {
+            merged_change_type_labels.conventional_commit_mappings.feat =
+                repo_change_type_labels.conventional_commit_mappings.feat.clone();
+        }
+        if !repo_change_type_labels
+            .conventional_commit_mappings
+            .fix
+            .is_empty()
+        {
+            merged_change_type_labels.conventional_commit_mappings.fix =
+                repo_change_type_labels.conventional_commit_mappings.fix.clone();
+        }
+        if !repo_change_type_labels
+            .conventional_commit_mappings
+            .docs
+            .is_empty()
+        {
+            merged_change_type_labels.conventional_commit_mappings.docs =
+                repo_change_type_labels.conventional_commit_mappings.docs.clone();
+        }
+        if !repo_change_type_labels
+            .conventional_commit_mappings
+            .style
+            .is_empty()
+        {
+            merged_change_type_labels.conventional_commit_mappings.style =
+                repo_change_type_labels.conventional_commit_mappings.style.clone();
+        }
+        if !repo_change_type_labels
+            .conventional_commit_mappings
+            .refactor
+            .is_empty()
+        {
+            merged_change_type_labels.conventional_commit_mappings.refactor = repo_change_type_labels
+                .conventional_commit_mappings
+                .refactor
+                .clone();
+        }
+        if !repo_change_type_labels
+            .conventional_commit_mappings
+            .perf
+            .is_empty()
+        {
+            merged_change_type_labels.conventional_commit_mappings.perf =
+                repo_change_type_labels.conventional_commit_mappings.perf.clone();
+        }
+        if !repo_change_type_labels
+            .conventional_commit_mappings
+            .test
+            .is_empty()
+        {
+            merged_change_type_labels.conventional_commit_mappings.test =
+                repo_change_type_labels.conventional_commit_mappings.test.clone();
+        }
+        if !repo_change_type_labels
+            .conventional_commit_mappings
+            .chore
+            .is_empty()
+        {
+            merged_change_type_labels.conventional_commit_mappings.chore =
+                repo_change_type_labels.conventional_commit_mappings.chore.clone();
+        }
+        if !repo_change_type_labels.conventional_commit_mappings.ci.is_empty() {
+            merged_change_type_labels.conventional_commit_mappings.ci =
+                repo_change_type_labels.conventional_commit_mappings.ci.clone();
+        }
+        if !repo_change_type_labels
+            .conventional_commit_mappings
+            .build
+            .is_empty()
+        {
+            merged_change_type_labels.conventional_commit_mappings.build =
+                repo_change_type_labels.conventional_commit_mappings.build.clone();
+        }
+        if !repo_change_type_labels
+            .conventional_commit_mappings
+            .revert
+            .is_empty()
+        {
+            merged_change_type_labels.conventional_commit_mappings.revert = repo_change_type_labels
+                .conventional_commit_mappings
+                .revert
+                .clone();
+        }
+
+        // Override fallback settings if repository provides them
+        if !repo_change_type_labels
+            .fallback_label_settings
+            .name_format
+            .is_empty()
+        {
+            merged_change_type_labels.fallback_label_settings.name_format = repo_change_type_labels
+                .fallback_label_settings
+                .name_format
+                .clone();
+        }
+        if !repo_change_type_labels
+            .fallback_label_settings
+            .color_scheme
+            .is_empty()
+        {
+            merged_change_type_labels.fallback_label_settings.color_scheme = repo_change_type_labels
+                .fallback_label_settings
+                .color_scheme
+                .clone();
+        }
+        merged_change_type_labels
+            .fallback_label_settings
+            .create_if_missing = repo_change_type_labels.fallback_label_settings.create_if_missing;
+
+        // Override detection strategy settings
+        merged_change_type_labels.detection_strategy.exact_match =
+            repo_change_type_labels.detection_strategy.exact_match;
+        merged_change_type_labels.detection_strategy.prefix_match =
+            repo_change_type_labels.detection_strategy.prefix_match;
+        merged_change_type_labels.detection_strategy.description_match =
+            repo_change_type_labels.detection_strategy.description_match;
+        if !repo_change_type_labels
+            .detection_strategy
+            .common_prefixes
+            .is_empty()
+        {
+            merged_change_type_labels.detection_strategy.common_prefixes =
+                repo_change_type_labels.detection_strategy.common_prefixes.clone();
+        }
+
+        config.change_type_labels = Some(merged_change_type_labels);
+    }
+
+    // End of valid config processing
+    }
+
     info!(
         enable_title_validation = config.policies.pull_requests.title_policies.required,
-        title_validation_pattern = config.policies.pull_requests.title_policies.pattern.clone(),
+        title_validation_pattern = config.policies.pull_requests.title_policies.pattern,
         label_if_title_validation_fails = config
             .policies
             .pull_requests
@@ -993,4 +1156,157 @@ pub async fn load_merge_warden_config(
     );
 
     Ok(config)
+}
+
+/// Configuration for change type label detection and management
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct ChangeTypeLabelConfig {
+    /// Whether change type label detection is enabled
+    pub enabled: bool,
+    /// Mappings from conventional commit types to repository label names
+    pub conventional_commit_mappings: ConventionalCommitMappings,
+    /// Settings for creating fallback labels when none exist
+    pub fallback_label_settings: FallbackLabelSettings,
+    /// Configuration for the label detection strategy
+    pub detection_strategy: LabelDetectionStrategy,
+}
+
+/// Mappings from conventional commit types to possible repository label names
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct ConventionalCommitMappings {
+    /// Feature-related mappings
+    pub feat: Vec<String>,
+    /// Bug fix-related mappings
+    pub fix: Vec<String>,
+    /// Documentation-related mappings
+    pub docs: Vec<String>,
+    /// Style-related mappings
+    pub style: Vec<String>,
+    /// Refactoring-related mappings
+    pub refactor: Vec<String>,
+    /// Performance-related mappings
+    pub perf: Vec<String>,
+    /// Test-related mappings
+    pub test: Vec<String>,
+    /// Chore-related mappings
+    pub chore: Vec<String>,
+    /// CI-related mappings
+    pub ci: Vec<String>,
+    /// Build-related mappings
+    pub build: Vec<String>,
+    /// Revert-related mappings
+    pub revert: Vec<String>,
+}
+
+/// Settings for creating fallback labels when repository labels are not found
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct FallbackLabelSettings {
+    /// Format for creating new label names (e.g., "type: {change_type}")
+    pub name_format: String,
+    /// Color scheme for different conventional commit types
+    pub color_scheme: HashMap<String, String>,
+    /// Whether to create fallback labels if none are found
+    pub create_if_missing: bool,
+}
+
+/// Configuration for the label detection strategy
+#[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct LabelDetectionStrategy {
+    /// Enable exact name matching (e.g., "feat", "fix")
+    pub exact_match: bool,
+    /// Enable prefix matching (e.g., "type: feat", "kind: fix")
+    pub prefix_match: bool,
+    /// Enable description matching (e.g., labels with "(type: feat)" in description)
+    pub description_match: bool,
+    /// Common prefixes to check for prefix matching
+    pub common_prefixes: Vec<String>,
+}
+
+impl Default for ChangeTypeLabelConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            conventional_commit_mappings: ConventionalCommitMappings::default(),
+            fallback_label_settings: FallbackLabelSettings::default(),
+            detection_strategy: LabelDetectionStrategy::default(),
+        }
+    }
+}
+
+impl Default for ConventionalCommitMappings {
+    fn default() -> Self {
+        Self {
+            feat: vec![
+                "enhancement".to_string(),
+                "feature".to_string(),
+                "new feature".to_string(),
+            ],
+            fix: vec!["bug".to_string(), "bugfix".to_string(), "fix".to_string()],
+            docs: vec!["documentation".to_string(), "docs".to_string()],
+            style: vec!["style".to_string(), "formatting".to_string()],
+            refactor: vec![
+                "refactor".to_string(),
+                "refactoring".to_string(),
+                "code quality".to_string(),
+            ],
+            perf: vec!["performance".to_string(), "optimization".to_string()],
+            test: vec![
+                "test".to_string(),
+                "tests".to_string(),
+                "testing".to_string(),
+            ],
+            chore: vec![
+                "chore".to_string(),
+                "maintenance".to_string(),
+                "housekeeping".to_string(),
+            ],
+            ci: vec![
+                "ci".to_string(),
+                "continuous integration".to_string(),
+                "build".to_string(),
+            ],
+            build: vec!["build".to_string(), "dependencies".to_string()],
+            revert: vec!["revert".to_string()],
+        }
+    }
+}
+
+impl Default for FallbackLabelSettings {
+    fn default() -> Self {
+        let mut color_scheme = HashMap::new();
+
+        // Color scheme as specified in issue #107
+        color_scheme.insert("feat".to_string(), "#0075ca".to_string());
+        color_scheme.insert("fix".to_string(), "#d73a4a".to_string());
+        color_scheme.insert("docs".to_string(), "#0052cc".to_string());
+        color_scheme.insert("style".to_string(), "#f9d0c4".to_string());
+        color_scheme.insert("refactor".to_string(), "#fef2c0".to_string());
+        color_scheme.insert("perf".to_string(), "#a2eeef".to_string());
+        color_scheme.insert("test".to_string(), "#d4edda".to_string());
+        color_scheme.insert("chore".to_string(), "#e1e4e8".to_string());
+        color_scheme.insert("ci".to_string(), "#fbca04".to_string());
+        color_scheme.insert("build".to_string(), "#c5def5".to_string());
+        color_scheme.insert("revert".to_string(), "#b60205".to_string());
+
+        Self {
+            name_format: "type: {change_type}".to_string(),
+            color_scheme,
+            create_if_missing: true,
+        }
+    }
+}
+
+impl Default for LabelDetectionStrategy {
+    fn default() -> Self {
+        Self {
+            exact_match: true,
+            prefix_match: true,
+            description_match: true,
+            common_prefixes: vec![
+                "type:".to_string(),
+                "kind:".to_string(),
+                "category:".to_string(),
+            ],
+        }
+    }
 }

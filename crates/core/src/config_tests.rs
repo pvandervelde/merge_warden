@@ -1,6 +1,6 @@
 use crate::config::{
-    BypassRule, BypassRules, CurrentPullRequestValidationConfiguration, PrSizeCheckConfig,
-    CONVENTIONAL_COMMIT_REGEX, WORK_ITEM_REGEX,
+    BypassRule, BypassRules, ChangeTypeLabelConfig, CurrentPullRequestValidationConfiguration,
+    PrSizeCheckConfig, CONVENTIONAL_COMMIT_REGEX, WORK_ITEM_REGEX,
 };
 use crate::size::SizeThresholds;
 use async_trait::async_trait;
@@ -180,6 +180,7 @@ fn test_custom_regex_patterns_are_used() {
                 size_policies: PrSizeCheckConfig::default(),
             },
         },
+        change_type_labels: None,
     };
     let validation = config.to_validation_config(&BypassRules::default());
     let custom_title = "CUSTOM: test title";
@@ -434,6 +435,7 @@ fn test_merge_warden_config_to_validation_config_conventional_commits_and_work_i
                 size_policies: PrSizeCheckConfig::default(),
             },
         },
+        change_type_labels: None,
     };
     let validation = config.to_validation_config(&BypassRules::default());
     assert!(validation.enforce_title_convention);
@@ -467,6 +469,7 @@ fn test_merge_warden_config_to_validation_config_non_conventional_commits() {
                 size_policies: PrSizeCheckConfig::default(),
             },
         },
+        change_type_labels: None,
     };
     let validation = config.to_validation_config(&BypassRules::default());
     assert!(!validation.enforce_title_convention);
@@ -712,6 +715,7 @@ fn test_application_defaults_bypass_rules_serialization() {
             work_items: BypassRule::default(),
             size: BypassRule::default(),
         },
+        change_type_labels: ChangeTypeLabelConfig::default(),
     };
 
     let serialized =
@@ -908,6 +912,7 @@ fn test_validation_config_includes_pr_size() {
                 },
             },
         },
+        change_type_labels: None,
     };
 
     let validation = repo_config.to_validation_config(&BypassRules::default());

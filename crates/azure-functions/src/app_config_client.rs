@@ -286,6 +286,7 @@ impl AppConfigClient {
             default_missing_work_item_label: defaults.default_missing_work_item_label,
             bypass_rules,
             pr_size_check: pr_size_check.clone(),
+            change_type_labels: defaults.change_type_labels,
         };
 
         info!(
