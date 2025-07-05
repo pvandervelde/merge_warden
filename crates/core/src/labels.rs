@@ -223,7 +223,8 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
         "Step 1: Discovering existing size labels in repository {}/{}",
         owner, repo
     );
-    let discovered_labels = LabelDiscovery::discover_size_labels(provider, owner, repo).await?;
+    let detector = SmartLabelDetector::new_for_size_labels();
+    let discovered_labels = detector.discover_size_labels(provider, owner, repo).await?;
     info!(
         "Label discovery completed. Found {} discovered labels",
         discovered_labels.count_discovered()
@@ -477,10 +478,37 @@ impl DiscoveredSizeLabels {
     }
 }
 
-/// Label discovery system that implements smart label detection
-pub struct LabelDiscovery;
+/// Unified smart label detector for both size and change type labels
+///
+/// This struct provides intelligent label detection using repository-specific patterns
+/// and supports both size labels (XS, S, M, L, XL, XXL) and change type labels
+/// (feat, fix, docs, etc.) with configurable search strategies.
+pub struct SmartLabelDetector {
+    /// Configuration for change type label detection
+    change_type_config: Option<ChangeTypeLabelConfig>,
+}
 
-impl LabelDiscovery {
+impl SmartLabelDetector {
+    /// Create a new smart label detector for size labels only
+    pub fn new_for_size_labels() -> Self {
+        Self {
+            change_type_config: None,
+        }
+    }
+
+    /// Create a new smart label detector with change type configuration
+    pub fn new_for_change_type_labels(config: ChangeTypeLabelConfig) -> Self {
+        Self {
+            change_type_config: Some(config),
+        }
+    }
+
+    /// Create a new smart label detector that handles both size and change type labels
+    pub fn new(config: Option<ChangeTypeLabelConfig>) -> Self {
+        Self {
+            change_type_config: config,
+        }
+    }
     /// Discover existing size labels in the repository using smart detection algorithms
     ///
     /// This implements the label detection algorithm from the spec:
@@ -488,6 +516,7 @@ impl LabelDiscovery {
     /// 2. Description-based detection for metadata
     /// 3. Priority-based selection
     pub async fn discover_size_labels<P: PullRequestProvider>(
+        &self,
         provider: &P,
         owner: &str,
         repo: &str,
@@ -538,7 +567,8 @@ impl LabelDiscovery {
                 "Searching for size labels matching category"
             );
 
-            let best_label = Self::find_best_label_for_category(&all_labels, category, owner, repo);
+            let best_label =
+                self.find_best_label_for_size_category(&all_labels, category, owner, repo);
 
             if let Some(ref label_name) = best_label {
                 info!(
@@ -586,7 +616,8 @@ impl LabelDiscovery {
     }
 
     /// Find the best matching label for a size category using priority-based selection
-    fn find_best_label_for_category(
+    fn find_best_label_for_size_category(
+        &self,
         labels: &[Label],
         category: &str,
         owner: &str,
@@ -600,7 +631,7 @@ impl LabelDiscovery {
         );
 
         // Priority 1: Exact size match - size/XS, size/S, etc.
-        if let Some(label) = Self::find_exact_size_match(labels, category) {
+        if let Some(label) = self.find_exact_size_match(labels, category) {
             info!(
                 repository_owner = owner,
                 repository = repo,
@@ -614,7 +645,7 @@ impl LabelDiscovery {
         }
 
         // Priority 2: Size with separator - size-M, size_L, size: M, etc.
-        if let Some(label) = Self::find_size_with_separator(labels, category) {
+        if let Some(label) = self.find_size_with_separator(labels, category) {
             info!(
                 repository_owner = owner,
                 repository = repo,
@@ -628,7 +659,7 @@ impl LabelDiscovery {
         }
 
         // Priority 3: Standalone size - XS, M, XXL, etc.
-        if let Some(label) = Self::find_standalone_size(labels, category) {
+        if let Some(label) = self.find_standalone_size(labels, category) {
             info!(
                 repository_owner = owner,
                 repository = repo,
@@ -642,7 +673,7 @@ impl LabelDiscovery {
         }
 
         // Priority 4: Description-based - any label with (size: M) in description
-        if let Some(label) = Self::find_description_based(labels, category) {
+        if let Some(label) = self.find_description_based(labels, category) {
             info!(
                 repository_owner = owner,
                 repository = repo,
@@ -668,7 +699,7 @@ impl LabelDiscovery {
     }
 
     /// Find exact size match: size/XS, size/S, etc.
-    fn find_exact_size_match<'a>(labels: &'a [Label], category: &str) -> Option<&'a Label> {
+    fn find_exact_size_match<'a>(&self, labels: &'a [Label], category: &str) -> Option<&'a Label> {
         let pattern = format!(r"^size/{}$", regex::escape(category));
         let regex = Regex::new(&pattern).ok()?;
 
@@ -695,7 +726,11 @@ impl LabelDiscovery {
     }
 
     /// Find size with separator: size-M, size_L, size: M, etc.
-    fn find_size_with_separator<'a>(labels: &'a [Label], category: &str) -> Option<&'a Label> {
+    fn find_size_with_separator<'a>(
+        &self,
+        labels: &'a [Label],
+        category: &str,
+    ) -> Option<&'a Label> {
         let pattern = format!(r"^size[_\-:\s]+{}$", regex::escape(category));
         let regex = Regex::new(&pattern).ok()?;
 
@@ -725,7 +760,7 @@ impl LabelDiscovery {
     }
 
     /// Find standalone size: XS, M, XXL, etc.
-    fn find_standalone_size<'a>(labels: &'a [Label], category: &str) -> Option<&'a Label> {
+    fn find_standalone_size<'a>(&self, labels: &'a [Label], category: &str) -> Option<&'a Label> {
         let pattern = format!(r"^{}$", regex::escape(category));
         let regex = Regex::new(&pattern).ok()?;
 
@@ -752,7 +787,7 @@ impl LabelDiscovery {
     }
 
     /// Find description-based: any label with (size: M) in description
-    fn find_description_based<'a>(labels: &'a [Label], category: &str) -> Option<&'a Label> {
+    fn find_description_based<'a>(&self, labels: &'a [Label], category: &str) -> Option<&'a Label> {
         let pattern = format!(r"(?i)\(size:\s*{}\)", regex::escape(category));
         let regex = Regex::new(&pattern).ok()?;
 
@@ -787,30 +822,6 @@ impl LabelDiscovery {
         debug!("No description-based match found for pattern: {}", pattern);
         None
     }
-}
-
-/// Result of change type label detection
-#[derive(Debug, Clone)]
-pub struct ChangeTypeLabelDetectionResult {
-    /// The detected label name, if any
-    pub label_name: Option<String>,
-    /// The conventional commit type that was searched for
-    pub commit_type: String,
-    /// Whether fallback label creation should be used
-    pub should_create_fallback: bool,
-}
-
-/// Label detector that implements the three-tier search strategy for change type labels
-pub struct LabelDetector {
-    /// Configuration for change type label detection
-    config: ChangeTypeLabelConfig,
-}
-
-impl LabelDetector {
-    /// Create a new label detector with the specified configuration
-    pub fn new(config: ChangeTypeLabelConfig) -> Self {
-        Self { config }
-    }
 
     /// Detect the best matching label for a conventional commit type
     ///
@@ -835,7 +846,13 @@ impl LabelDetector {
         owner: &str,
         repo: &str,
         commit_type: &str,
-    ) -> Result<ChangeTypeLabelDetectionResult, MergeWardenError> {
+    ) -> Result<DiscoveredChangeTypeLabels, MergeWardenError> {
+        let config = self.change_type_config.as_ref().ok_or_else(|| {
+            MergeWardenError::ConfigError(
+                "Change type configuration not provided to SmartLabelDetector".to_string(),
+            )
+        })?;
+
         info!(
             repository_owner = owner,
             repository = repo,
@@ -862,7 +879,7 @@ impl LabelDetector {
         );
 
         // Get mapped label names for this commit type
-        let mapped_labels = self.get_mapped_label_names(commit_type);
+        let mapped_labels = self.get_mapped_label_names(commit_type, config);
 
         debug!(
             repository_owner = owner,
@@ -873,11 +890,11 @@ impl LabelDetector {
         );
 
         // Tier 1: Exact match detection
-        if self.config.detection_strategy.exact_match {
+        if config.detection_strategy.exact_match {
             if let Some(label) =
                 self.find_exact_match(&all_labels, &mapped_labels, owner, repo, commit_type)
             {
-                return Ok(ChangeTypeLabelDetectionResult {
+                return Ok(DiscoveredChangeTypeLabels {
                     label_name: Some(label),
                     commit_type: commit_type.to_string(),
                     should_create_fallback: false,
@@ -886,9 +903,9 @@ impl LabelDetector {
         }
 
         // Tier 2: Prefix match detection
-        if self.config.detection_strategy.prefix_match {
+        if config.detection_strategy.prefix_match {
             if let Some(label) = self.find_prefix_match(&all_labels, commit_type, owner, repo) {
-                return Ok(ChangeTypeLabelDetectionResult {
+                return Ok(DiscoveredChangeTypeLabels {
                     label_name: Some(label),
                     commit_type: commit_type.to_string(),
                     should_create_fallback: false,
@@ -897,10 +914,10 @@ impl LabelDetector {
         }
 
         // Tier 3: Description match detection
-        if self.config.detection_strategy.description_match {
+        if config.detection_strategy.description_match {
             if let Some(label) = self.find_description_match(&all_labels, commit_type, owner, repo)
             {
-                return Ok(ChangeTypeLabelDetectionResult {
+                return Ok(DiscoveredChangeTypeLabels {
                     label_name: Some(label),
                     commit_type: commit_type.to_string(),
                     should_create_fallback: false,
@@ -916,30 +933,34 @@ impl LabelDetector {
             "No existing label found for commit type"
         );
 
-        Ok(ChangeTypeLabelDetectionResult {
+        Ok(DiscoveredChangeTypeLabels {
             label_name: None,
             commit_type: commit_type.to_string(),
-            should_create_fallback: self.config.fallback_label_settings.create_if_missing,
+            should_create_fallback: config.fallback_label_settings.create_if_missing,
         })
     }
 
     /// Get mapped label names for a conventional commit type
-    fn get_mapped_label_names(&self, commit_type: &str) -> Vec<String> {
+    fn get_mapped_label_names(
+        &self,
+        commit_type: &str,
+        config: &ChangeTypeLabelConfig,
+    ) -> Vec<String> {
         let mut mapped_labels = Vec::new();
 
         // Add mappings from the configuration based on commit type
         let config_mappings = match commit_type {
-            "feat" => &self.config.conventional_commit_mappings.feat,
-            "fix" => &self.config.conventional_commit_mappings.fix,
-            "docs" => &self.config.conventional_commit_mappings.docs,
-            "style" => &self.config.conventional_commit_mappings.style,
-            "refactor" => &self.config.conventional_commit_mappings.refactor,
-            "perf" => &self.config.conventional_commit_mappings.perf,
-            "test" => &self.config.conventional_commit_mappings.test,
-            "chore" => &self.config.conventional_commit_mappings.chore,
-            "ci" => &self.config.conventional_commit_mappings.ci,
-            "build" => &self.config.conventional_commit_mappings.build,
-            "revert" => &self.config.conventional_commit_mappings.revert,
+            "feat" => &config.conventional_commit_mappings.feat,
+            "fix" => &config.conventional_commit_mappings.fix,
+            "docs" => &config.conventional_commit_mappings.docs,
+            "style" => &config.conventional_commit_mappings.style,
+            "refactor" => &config.conventional_commit_mappings.refactor,
+            "perf" => &config.conventional_commit_mappings.perf,
+            "test" => &config.conventional_commit_mappings.test,
+            "chore" => &config.conventional_commit_mappings.chore,
+            "ci" => &config.conventional_commit_mappings.ci,
+            "build" => &config.conventional_commit_mappings.build,
+            "revert" => &config.conventional_commit_mappings.revert,
             _ => &Vec::new(), // Return empty vector for unknown types
         };
 
@@ -1117,4 +1138,15 @@ impl LabelDetector {
         );
         None
     }
+}
+
+/// Result of change type label detection
+#[derive(Debug, Clone)]
+pub struct DiscoveredChangeTypeLabels {
+    /// The detected label name, if any
+    pub label_name: Option<String>,
+    /// The conventional commit type that was searched for
+    pub commit_type: String,
+    /// Whether fallback label creation should be used
+    pub should_create_fallback: bool,
 }
