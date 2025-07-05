@@ -49,6 +49,7 @@
 //!         missing_work_item_label: Some(MISSING_WORK_ITEM_LABEL.to_string()),
 //!         bypass_rules: BypassRules::default(),
 //!         pr_size_check: Default::default(),
+//!         change_type_labels: None,
 //!     };
 //!
 //!     // Create a MergeWarden instance with custom configuration
@@ -961,7 +962,14 @@ Please update the PR body to include a valid work item reference."#;
         repo_name: &str,
         pr: &PullRequest,
     ) -> Result<Vec<String>, MergeWardenError> {
-        labels::set_pull_request_labels(&self.provider, repo_owner, repo_name, pr).await
+        labels::set_pull_request_labels_with_config(
+            &self.provider,
+            repo_owner,
+            repo_name,
+            pr,
+            Some(&self.config),
+        )
+        .await
     }
 
     /// Creates a new `MergeWarden` instance with default configuration.
@@ -1432,6 +1440,7 @@ Please update the PR body to include a valid work item reference."#;
     ///         missing_work_item_label: Some(MISSING_WORK_ITEM_LABEL.to_string()),
     ///         bypass_rules: BypassRules::default(),
     ///         pr_size_check: Default::default(),
+    ///         change_type_labels: None,
     ///     };
     ///
     ///     let warden = MergeWarden::with_config(provider, config);

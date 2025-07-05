@@ -510,6 +510,9 @@ pub struct CurrentPullRequestValidationConfiguration {
     /// Configuration for PR size checking
     pub pr_size_check: PrSizeCheckConfig,
 
+    /// Configuration for intelligent change type label detection
+    pub change_type_labels: Option<ChangeTypeLabelConfig>,
+
     /// Rules for bypassing validation checks
     pub bypass_rules: BypassRules,
 }
@@ -543,6 +546,7 @@ impl CurrentPullRequestValidationConfiguration {
             },
             missing_work_item_label,
             pr_size_check: pr_size_check.unwrap_or_default(),
+            change_type_labels: None, // Use default behavior for tests
             bypass_rules: bypass_rules.unwrap_or_default(),
         }
     }
@@ -558,6 +562,7 @@ impl Default for CurrentPullRequestValidationConfiguration {
             work_item_reference_pattern: WORK_ITEM_REGEX.to_string(),
             missing_work_item_label: Some(MISSING_WORK_ITEM_LABEL.to_string()),
             pr_size_check: PrSizeCheckConfig::default(),
+            change_type_labels: None, // Default to None, will be populated from app defaults
             bypass_rules: BypassRules::default(),
         }
     }
@@ -692,6 +697,7 @@ impl RepositoryProvidedConfig {
             work_item_reference_pattern,
             missing_work_item_label,
             pr_size_check,
+            change_type_labels: self.change_type_labels.clone(),
             bypass_rules: bypass_rules.clone(),
         }
     }

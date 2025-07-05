@@ -9,7 +9,9 @@
 //! - Breaking change indicators
 //! - Special labels based on PR description keywords
 
-use crate::config::{ChangeTypeLabelConfig, CONVENTIONAL_COMMIT_REGEX};
+use crate::config::{
+    ChangeTypeLabelConfig, CurrentPullRequestValidationConfiguration, CONVENTIONAL_COMMIT_REGEX,
+};
 use crate::errors::MergeWardenError;
 use crate::size::{PrSizeCategory, PrSizeInfo};
 use merge_warden_developer_platforms::models::{Label, PullRequest};
@@ -76,6 +78,34 @@ pub async fn set_pull_request_labels<P: PullRequestProvider>(
     repo: &str,
     pr: &PullRequest,
 ) -> Result<Vec<String>, MergeWardenError> {
+    set_pull_request_labels_with_config(provider, owner, repo, pr, None).await
+}
+
+/// Sets pull request labels with smart detection configuration.
+///
+/// This is the main implementation that supports both legacy behavior (when config is None)
+/// and smart label detection (when config is provided with change_type_labels).
+///
+/// # Arguments
+///
+/// * `provider` - The Git provider implementation
+/// * `owner` - The owner of the repository
+/// * `repo` - The name of the repository
+/// * `pr` - The pull request to analyze
+/// * `config` - Optional configuration with smart label detection settings
+///
+/// # Returns
+///
+/// A `Result` containing a vector of labels that were applied to the PR
+pub async fn set_pull_request_labels_with_config<P: PullRequestProvider>(
+    provider: &P,
+    owner: &str,
+    repo: &str,
+    pr: &PullRequest,
+    config: Option<&CurrentPullRequestValidationConfiguration>,
+) -> Result<Vec<String>, MergeWardenError> {
+    // This is the implementation we created earlier - delegate to the main function
+    // but include the logic in a new internal function to avoid circular calls
     let mut labels = Vec::new();
 
     // Extract type from PR title using pre-compiled regex
@@ -91,20 +121,49 @@ pub async fn set_pull_request_labels<P: PullRequestProvider>(
     if let Some(captures) = regex.captures(&pr.title) {
         let pr_type = captures.get(1).unwrap().as_str();
 
-        // Add type-based label
-        match pr_type {
-            "feat" => labels.push("feature".to_string()),
-            "fix" => labels.push("bug".to_string()),
-            "docs" => labels.push("documentation".to_string()),
-            "style" => labels.push("style".to_string()),
-            "refactor" => labels.push("refactor".to_string()),
-            "perf" => labels.push("performance".to_string()),
-            "test" => labels.push("testing".to_string()),
-            "build" => labels.push("build".to_string()),
-            "ci" => labels.push("ci".to_string()),
-            "chore" => labels.push("chore".to_string()),
-            "revert" => labels.push("revert".to_string()),
-            _ => {}
+        // Use smart label detection if configured, otherwise fall back to hardcoded labels
+        if let Some(config) = config {
+            if let Some(ref change_type_config) = config.change_type_labels {
+                // Use smart label detection with LabelManager
+                let label_manager = LabelManager::new(Some(change_type_config.clone()));
+
+                match label_manager
+                    .apply_change_type_label(provider, owner, repo, pr.number, pr_type)
+                    .await
+                {
+                    Ok(result) => {
+                        labels.extend(result.all_applied_labels());
+
+                        info!(
+                            repository_owner = owner,
+                            repository = repo,
+                            pr_number = pr.number,
+                            commit_type = pr_type,
+                            applied_labels = ?result.all_applied_labels(),
+                            "Applied smart change type labels"
+                        );
+                    }
+                    Err(e) => {
+                        warn!(
+                            repository_owner = owner,
+                            repository = repo,
+                            pr_number = pr.number,
+                            commit_type = pr_type,
+                            error = %e,
+                            "Smart label detection failed, falling back to hardcoded labels"
+                        );
+
+                        // Fall back to hardcoded labels
+                        add_hardcoded_type_label(&mut labels, pr_type);
+                    }
+                }
+            } else {
+                // No smart label configuration, use hardcoded labels
+                add_hardcoded_type_label(&mut labels, pr_type);
+            }
+        } else {
+            // No configuration provided, use hardcoded labels
+            add_hardcoded_type_label(&mut labels, pr_type);
         }
     }
 
@@ -135,7 +194,7 @@ pub async fn set_pull_request_labels<P: PullRequestProvider>(
         }
     }
 
-    // Add the labels to the PR
+    // Add any remaining labels to the PR (smart detection handles its own label application)
     if !labels.is_empty() {
         provider
             .add_labels(owner, repo, pr.number, &labels)
@@ -146,6 +205,24 @@ pub async fn set_pull_request_labels<P: PullRequestProvider>(
     }
 
     Ok(labels)
+}
+
+/// Add hardcoded type-based label mapping (legacy behavior)
+fn add_hardcoded_type_label(labels: &mut Vec<String>, pr_type: &str) {
+    match pr_type {
+        "feat" => labels.push("feature".to_string()),
+        "fix" => labels.push("bug".to_string()),
+        "docs" => labels.push("documentation".to_string()),
+        "style" => labels.push("style".to_string()),
+        "refactor" => labels.push("refactor".to_string()),
+        "perf" => labels.push("performance".to_string()),
+        "test" => labels.push("testing".to_string()),
+        "build" => labels.push("build".to_string()),
+        "ci" => labels.push("ci".to_string()),
+        "chore" => labels.push("chore".to_string()),
+        "revert" => labels.push("revert".to_string()),
+        _ => {}
+    }
 }
 
 /// Manages size labels for a pull request based on file changes using smart label discovery.

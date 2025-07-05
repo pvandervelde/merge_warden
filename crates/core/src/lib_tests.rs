@@ -588,6 +588,7 @@ async fn test_constructor_with_config() {
         work_item_reference_pattern: "cd".to_string(),
         missing_work_item_label: None,
         pr_size_check: crate::config::PrSizeCheckConfig::default(),
+        change_type_labels: None, // Use default behavior for tests
         bypass_rules: BypassRules::default(),
     };
 
@@ -913,6 +914,7 @@ async fn test_process_pull_request_custom_config_disabled_checks() {
         work_item_reference_pattern: "cd".to_string(),
         missing_work_item_label: None,
         pr_size_check: crate::config::PrSizeCheckConfig::default(),
+        change_type_labels: None, // Use default behavior for tests
         bypass_rules: BypassRules::default(),
     };
 
