@@ -943,8 +943,14 @@ Please update the PR body to include a valid work item reference."#;
     /// Determines and adds labels to a PR based on its content.
     ///
     /// This method analyzes the PR title and body to determine appropriate labels
-    /// to add, such as feature, bug, documentation, etc. It delegates to the
-    /// `labels::determine_labels` function for the actual label determination.
+    /// to add, such as feature, bug, documentation, etc. It supports both legacy
+    /// hardcoded labeling and smart label detection based on repository configuration.
+    ///
+    /// Features:
+    /// - Smart label detection using repository-specific label mappings
+    /// - Fallback to hardcoded labels if smart detection fails
+    /// - Performance monitoring and audit logging
+    /// - Graceful error handling that doesn't block PR processing
     ///
     /// # Arguments
     ///
@@ -955,21 +961,106 @@ Please update the PR body to include a valid work item reference."#;
     /// # Returns
     ///
     /// A `Result` containing a vector of labels that were added to the PR
-    #[instrument]
+    #[instrument(
+        fields(
+            repository_owner = repo_owner,
+            repository = repo_name,
+            pr_number = pr.number,
+            pr_title = %pr.title,
+            smart_labeling_enabled = self.config.change_type_labels.is_some()
+        )
+    )]
     async fn determine_labels(
         &self,
         repo_owner: &str,
         repo_name: &str,
         pr: &PullRequest,
     ) -> Result<Vec<String>, MergeWardenError> {
-        labels::set_pull_request_labels_with_config(
+        let start_time = std::time::Instant::now();
+
+        info!(
+            repository_owner = repo_owner,
+            repository = repo_name,
+            pr_number = pr.number,
+            smart_labeling_enabled = self.config.change_type_labels.is_some(),
+            "Starting label determination for pull request"
+        );
+
+        // Attempt smart label detection with graceful error handling
+        let result = labels::set_pull_request_labels_with_config(
             &self.provider,
             repo_owner,
             repo_name,
             pr,
             Some(&self.config),
         )
-        .await
+        .await;
+
+        let elapsed = start_time.elapsed();
+
+        match &result {
+            Ok(applied_labels) => {
+                info!(
+                    repository_owner = repo_owner,
+                    repository = repo_name,
+                    pr_number = pr.number,
+                    applied_labels = ?applied_labels,
+                    labels_count = applied_labels.len(),
+                    processing_duration_ms = elapsed.as_millis(),
+                    "Successfully determined and applied labels"
+                );
+
+                // Log audit trail for applied labels
+                for label in applied_labels {
+                    debug!(
+                        repository_owner = repo_owner,
+                        repository = repo_name,
+                        pr_number = pr.number,
+                        label_name = label,
+                        detection_method = if self.config.change_type_labels.is_some() {
+                            "smart_detection"
+                        } else {
+                            "legacy_hardcoded"
+                        },
+                        "Applied label to pull request"
+                    );
+                }
+            }
+            Err(e) => {
+                // Check if this is a label application error (should be propagated)
+                // vs a label detection error (should be handled gracefully)
+                match e {
+                    // Label application errors should propagate
+                    MergeWardenError::GitProviderError(_) => {
+                        error!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pr_number = pr.number,
+                            error = %e,
+                            processing_duration_ms = elapsed.as_millis(),
+                            "Label application failed - propagating error"
+                        );
+                        return Err(e);
+                    }
+                    // Other errors (detection failures) should be handled gracefully
+                    _ => {
+                        warn!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pr_number = pr.number,
+                            error = %e,
+                            processing_duration_ms = elapsed.as_millis(),
+                            "Label determination failed, but PR processing will continue"
+                        );
+
+                        // Return empty labels vector instead of failing
+                        return Ok(Vec::new());
+                    }
+                }
+            }
+        }
+
+        result
     }
 
     /// Creates a new `MergeWarden` instance with default configuration.
@@ -1273,8 +1364,41 @@ Please update the PR body to include a valid work item reference."#;
             String::new()
         };
 
-        // Determine labels
-        let labels = self.determine_labels(repo_owner, repo_name, &pr).await?;
+        // Determine labels with enhanced error handling and monitoring
+        let labels = self
+            .determine_labels(repo_owner, repo_name, &pr)
+            .await
+            .unwrap_or_else(|e| {
+                warn!(
+                    repository_owner = repo_owner,
+                    repository = repo_name,
+                    pr_number = pr_number,
+                    error = %e,
+                    "Label determination failed, continuing with empty labels"
+                );
+                Vec::new()
+            });
+
+        // Generate smart label status message for check reporting
+        let smart_label_message = if self.config.change_type_labels.is_some() {
+            if labels.is_empty() {
+                "⚠️ **Smart Label Detection**: No labels applied (detection may have failed or no matching labels found)".to_string()
+            } else {
+                format!(
+                    "✅ **Smart Label Detection**: Applied {} label(s): {}",
+                    labels.len(),
+                    labels.join(", ")
+                )
+            }
+        } else if !labels.is_empty() {
+            format!(
+                "📋 **Legacy Labeling**: Applied {} label(s): {}",
+                labels.len(),
+                labels.join(", ")
+            )
+        } else {
+            String::new()
+        };
 
         // Determine check conclusion - fail if any validation fails or if size is oversized and fail_on_oversized is true
         let should_fail_on_size = if let Some(files) = &pr_files {
@@ -1339,6 +1463,9 @@ Please update the PR body to include a valid work item reference."#;
             }
             if !size_message.is_empty() {
                 messages.push(size_message);
+            }
+            if !smart_label_message.is_empty() {
+                messages.push(smart_label_message);
             }
             messages.join("\n\n---\n\n")
         };

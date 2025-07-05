@@ -124,6 +124,17 @@ pub async fn set_pull_request_labels_with_config<P: PullRequestProvider>(
         // Use smart label detection if configured, otherwise fall back to hardcoded labels
         if let Some(config) = config {
             if let Some(ref change_type_config) = config.change_type_labels {
+                let detection_start = std::time::Instant::now();
+
+                info!(
+                    repository_owner = owner,
+                    repository = repo,
+                    pr_number = pr.number,
+                    commit_type = pr_type,
+                    detection_enabled = change_type_config.enabled,
+                    "Starting smart label detection for change type"
+                );
+
                 // Use smart label detection with LabelManager
                 let label_manager = LabelManager::new(Some(change_type_config.clone()));
 
@@ -132,6 +143,7 @@ pub async fn set_pull_request_labels_with_config<P: PullRequestProvider>(
                     .await
                 {
                     Ok(result) => {
+                        let detection_duration = detection_start.elapsed();
                         labels.extend(result.all_applied_labels());
 
                         info!(
@@ -140,30 +152,86 @@ pub async fn set_pull_request_labels_with_config<P: PullRequestProvider>(
                             pr_number = pr.number,
                             commit_type = pr_type,
                             applied_labels = ?result.all_applied_labels(),
-                            "Applied smart change type labels"
+                            labels_count = result.all_applied_labels().len(),
+                            detection_duration_ms = detection_duration.as_millis(),
+                            detection_method = "smart_detection",
+                            used_fallback = result.used_fallback_creation(),
+                            "Successfully applied smart change type labels"
                         );
+
+                        // Audit log for each applied label
+                        for label in result.all_applied_labels() {
+                            debug!(
+                                repository_owner = owner,
+                                repository = repo,
+                                pr_number = pr.number,
+                                label_name = label,
+                                commit_type = pr_type,
+                                detection_method = "smart_detection",
+                                source = if result.used_fallback_creation() {
+                                    "fallback_creation"
+                                } else {
+                                    "repository_detection"
+                                },
+                                "Applied smart label to pull request"
+                            );
+                        }
                     }
                     Err(e) => {
+                        let detection_duration = detection_start.elapsed();
+
                         warn!(
                             repository_owner = owner,
                             repository = repo,
                             pr_number = pr.number,
                             commit_type = pr_type,
                             error = %e,
+                            detection_duration_ms = detection_duration.as_millis(),
                             "Smart label detection failed, falling back to hardcoded labels"
                         );
 
-                        // Fall back to hardcoded labels
+                        // Fall back to hardcoded labels and log the decision
                         add_hardcoded_type_label(&mut labels, pr_type);
+
+                        info!(
+                            repository_owner = owner,
+                            repository = repo,
+                            pr_number = pr.number,
+                            commit_type = pr_type,
+                            applied_labels = ?labels,
+                            detection_method = "hardcoded_fallback",
+                            fallback_reason = "smart_detection_failure",
+                            "Applied hardcoded fallback labels after smart detection failure"
+                        );
                     }
                 }
             } else {
                 // No smart label configuration, use hardcoded labels
                 add_hardcoded_type_label(&mut labels, pr_type);
+
+                debug!(
+                    repository_owner = owner,
+                    repository = repo,
+                    pr_number = pr.number,
+                    commit_type = pr_type,
+                    applied_labels = ?labels,
+                    detection_method = "hardcoded_no_config",
+                    "Applied hardcoded labels (no smart detection configured)"
+                );
             }
         } else {
             // No configuration provided, use hardcoded labels
             add_hardcoded_type_label(&mut labels, pr_type);
+
+            debug!(
+                repository_owner = owner,
+                repository = repo,
+                pr_number = pr.number,
+                commit_type = pr_type,
+                applied_labels = ?labels,
+                detection_method = "hardcoded_no_config",
+                "Applied hardcoded labels (no configuration provided)"
+            );
         }
     }
 
@@ -1276,6 +1344,11 @@ impl LabelManagementResult {
         let mut all_labels = self.applied_labels.clone();
         all_labels.extend(self.created_fallback_labels.clone());
         all_labels
+    }
+
+    /// Check if fallback labels were created during the operation
+    pub fn used_fallback_creation(&self) -> bool {
+        !self.created_fallback_labels.is_empty()
     }
 }
 
