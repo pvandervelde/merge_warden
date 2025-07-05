@@ -223,7 +223,7 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
         "Step 1: Discovering existing size labels in repository {}/{}",
         owner, repo
     );
-    let detector = SmartLabelDetector::new_for_size_labels();
+    let detector = LabelDetector::new_for_size_labels();
     let discovered_labels = detector.discover_size_labels(provider, owner, repo).await?;
     info!(
         "Label discovery completed. Found {} discovered labels",
@@ -478,32 +478,32 @@ impl DiscoveredSizeLabels {
     }
 }
 
-/// Unified smart label detector for both size and change type labels
+/// Unified label detector for both size and change type labels
 ///
 /// This struct provides intelligent label detection using repository-specific patterns
 /// and supports both size labels (XS, S, M, L, XL, XXL) and change type labels
 /// (feat, fix, docs, etc.) with configurable search strategies.
-pub struct SmartLabelDetector {
+pub struct LabelDetector {
     /// Configuration for change type label detection
     change_type_config: Option<ChangeTypeLabelConfig>,
 }
 
-impl SmartLabelDetector {
-    /// Create a new smart label detector for size labels only
+impl LabelDetector {
+    /// Create a new label detector for size labels only
     pub fn new_for_size_labels() -> Self {
         Self {
             change_type_config: None,
         }
     }
 
-    /// Create a new smart label detector with change type configuration
+    /// Create a new label detector with change type configuration
     pub fn new_for_change_type_labels(config: ChangeTypeLabelConfig) -> Self {
         Self {
             change_type_config: Some(config),
         }
     }
 
-    /// Create a new smart label detector that handles both size and change type labels
+    /// Create a new label detector that handles both size and change type labels
     pub fn new(config: Option<ChangeTypeLabelConfig>) -> Self {
         Self {
             change_type_config: config,
@@ -849,7 +849,7 @@ impl SmartLabelDetector {
     ) -> Result<DiscoveredChangeTypeLabels, MergeWardenError> {
         let config = self.change_type_config.as_ref().ok_or_else(|| {
             MergeWardenError::ConfigError(
-                "Change type configuration not provided to SmartLabelDetector".to_string(),
+                "Change type configuration not provided to LabelDetector".to_string(),
             )
         })?;
 
@@ -1149,4 +1149,649 @@ pub struct DiscoveredChangeTypeLabels {
     pub commit_type: String,
     /// Whether fallback label creation should be used
     pub should_create_fallback: bool,
+}
+
+/// Result of label management operation
+#[derive(Debug, Clone)]
+pub struct LabelManagementResult {
+    /// Labels that were successfully applied
+    pub applied_labels: Vec<String>,
+    /// Labels that were removed
+    pub removed_labels: Vec<String>,
+    /// Labels that were created as fallbacks
+    pub created_fallback_labels: Vec<String>,
+    /// Any labels that failed to be applied
+    pub failed_labels: Vec<String>,
+    /// Error messages for any failures (non-blocking)
+    pub error_messages: Vec<String>,
+}
+
+impl Default for LabelManagementResult {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LabelManagementResult {
+    /// Create a new empty result
+    pub fn new() -> Self {
+        Self {
+            applied_labels: Vec::new(),
+            removed_labels: Vec::new(),
+            created_fallback_labels: Vec::new(),
+            failed_labels: Vec::new(),
+            error_messages: Vec::new(),
+        }
+    }
+
+    /// Check if the operation was completely successful
+    pub fn is_success(&self) -> bool {
+        self.failed_labels.is_empty() && self.error_messages.is_empty()
+    }
+
+    /// Check if any labels were applied (including fallbacks)
+    pub fn has_applied_labels(&self) -> bool {
+        !self.applied_labels.is_empty() || !self.created_fallback_labels.is_empty()
+    }
+
+    /// Get all labels that were successfully applied (including fallbacks)
+    pub fn all_applied_labels(&self) -> Vec<String> {
+        let mut all_labels = self.applied_labels.clone();
+        all_labels.extend(self.created_fallback_labels.clone());
+        all_labels
+    }
+}
+
+/// Label manager that coordinates intelligent label detection and application
+///
+/// This manager orchestrates the complete labeling workflow:
+/// - Uses LabelDetector to find existing repository labels
+/// - Applies intelligent label selection based on detection results
+/// - Creates fallback labels with consistent formatting when needed
+/// - Handles label application, removal, and updates intelligently
+/// - Provides graceful error handling and comprehensive logging
+pub struct LabelManager {
+    /// Configuration for change type label detection and management
+    config: Option<ChangeTypeLabelConfig>,
+}
+
+impl LabelManager {
+    /// Create a new label manager with the specified configuration
+    pub fn new(config: Option<ChangeTypeLabelConfig>) -> Self {
+        Self { config }
+    }
+
+    /// Apply labeling to a pull request based on conventional commit type
+    ///
+    /// This method implements the complete labeling workflow:
+    /// 1. Detects existing labels in the repository
+    /// 2. Applies intelligent label selection based on commit type
+    /// 3. Creates fallback labels if no existing labels are found
+    /// 4. Handles label application with proper error handling
+    ///
+    /// # Arguments
+    ///
+    /// * `provider` - The Git provider implementation
+    /// * `owner` - The owner of the repository
+    /// * `repo` - The name of the repository
+    /// * `pr_number` - The pull request number
+    /// * `commit_type` - The conventional commit type (feat, fix, docs, etc.)
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the label result with details about applied labels
+    pub async fn apply_change_type_label<P: PullRequestProvider>(
+        &self,
+        provider: &P,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        commit_type: &str,
+    ) -> Result<LabelManagementResult, MergeWardenError> {
+        let mut result = LabelManagementResult::new();
+
+        info!(
+            repository_owner = owner,
+            repository = repo,
+            pr_number = pr_number,
+            commit_type = commit_type,
+            "Starting smart label management for change type"
+        );
+
+        // Step 1: Detect existing labels using LabelDetector
+        if let Some(ref config) = self.config {
+            let detector = LabelDetector::new_for_change_type_labels(config.clone());
+
+            match detector
+                .detect_change_type_label(provider, owner, repo, commit_type)
+                .await
+            {
+                Ok(detection_result) => {
+                    if let Some(label_name) = detection_result.label_name {
+                        // Step 2: Apply the detected label
+                        info!(
+                            repository_owner = owner,
+                            repository = repo,
+                            pr_number = pr_number,
+                            commit_type = commit_type,
+                            detected_label = %label_name,
+                            "Found existing label for commit type, applying"
+                        );
+
+                        match self
+                            .apply_label(provider, owner, repo, pr_number, &label_name)
+                            .await
+                        {
+                            Ok(()) => {
+                                result.applied_labels.push(label_name);
+                                info!(
+                                    repository_owner = owner,
+                                    repository = repo,
+                                    pr_number = pr_number,
+                                    commit_type = commit_type,
+                                    applied_label = %result.applied_labels[0],
+                                    "Successfully applied detected label"
+                                );
+                            }
+                            Err(e) => {
+                                let error_msg = format!(
+                                    "Failed to apply detected label '{}': {}",
+                                    label_name, e
+                                );
+                                warn!(
+                                    repository_owner = owner,
+                                    repository = repo,
+                                    pr_number = pr_number,
+                                    commit_type = commit_type,
+                                    failed_label = %label_name,
+                                    error = %e,
+                                    "Failed to apply detected label"
+                                );
+                                result.failed_labels.push(label_name);
+                                result.error_messages.push(error_msg);
+                            }
+                        }
+                    } else if detection_result.should_create_fallback {
+                        // Step 3: Create and apply fallback label
+                        info!(
+                            repository_owner = owner,
+                            repository = repo,
+                            pr_number = pr_number,
+                            commit_type = commit_type,
+                            "No existing label found, creating fallback label"
+                        );
+
+                        match self
+                            .create_and_apply_fallback_label(
+                                provider,
+                                owner,
+                                repo,
+                                pr_number,
+                                commit_type,
+                                config,
+                            )
+                            .await
+                        {
+                            Ok(fallback_label) => {
+                                result.created_fallback_labels.push(fallback_label.clone());
+                                info!(
+                                    repository_owner = owner,
+                                    repository = repo,
+                                    pr_number = pr_number,
+                                    commit_type = commit_type,
+                                    fallback_label = %fallback_label,
+                                    "Successfully created and applied fallback label"
+                                );
+                            }
+                            Err(e) => {
+                                let error_msg = format!(
+                                    "Failed to create fallback label for '{}': {}",
+                                    commit_type, e
+                                );
+                                warn!(
+                                    repository_owner = owner,
+                                    repository = repo,
+                                    pr_number = pr_number,
+                                    commit_type = commit_type,
+                                    error = %e,
+                                    "Failed to create fallback label"
+                                );
+                                result.error_messages.push(error_msg);
+                            }
+                        }
+                    } else {
+                        debug!(
+                            repository_owner = owner,
+                            repository = repo,
+                            pr_number = pr_number,
+                            commit_type = commit_type,
+                            "No existing label found and fallback creation disabled"
+                        );
+                    }
+                }
+                Err(e) => {
+                    let error_msg = format!("Label detection failed for '{}': {}", commit_type, e);
+                    warn!(
+                        repository_owner = owner,
+                        repository = repo,
+                        pr_number = pr_number,
+                        commit_type = commit_type,
+                        error = %e,
+                        "Label detection failed, attempting fallback"
+                    );
+                    result.error_messages.push(error_msg);
+
+                    // Fallback to default behavior if detection fails
+                    if let Some(default_label) = self.get_default_label_for_commit_type(commit_type)
+                    {
+                        match self
+                            .apply_label(provider, owner, repo, pr_number, &default_label)
+                            .await
+                        {
+                            Ok(()) => {
+                                result.applied_labels.push(default_label);
+                                info!(
+                                    repository_owner = owner,
+                                    repository = repo,
+                                    pr_number = pr_number,
+                                    commit_type = commit_type,
+                                    fallback_label = %result.applied_labels[0],
+                                    "Applied default fallback label after detection failure"
+                                );
+                            }
+                            Err(e) => {
+                                let error_msg = format!(
+                                    "Failed to apply default fallback label '{}': {}",
+                                    default_label, e
+                                );
+                                result.failed_labels.push(default_label);
+                                result.error_messages.push(error_msg);
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            // No configuration provided, use hardcoded defaults
+            debug!(
+                repository_owner = owner,
+                repository = repo,
+                pr_number = pr_number,
+                commit_type = commit_type,
+                "No smart label configuration provided, using hardcoded defaults"
+            );
+
+            if let Some(default_label) = self.get_default_label_for_commit_type(commit_type) {
+                match self
+                    .apply_label(provider, owner, repo, pr_number, &default_label)
+                    .await
+                {
+                    Ok(()) => {
+                        result.applied_labels.push(default_label);
+                    }
+                    Err(e) => {
+                        let error_msg =
+                            format!("Failed to apply default label '{}': {}", default_label, e);
+                        result.failed_labels.push(default_label);
+                        result.error_messages.push(error_msg);
+                    }
+                }
+            }
+        }
+
+        let final_success = result.is_success();
+        let applied_count = result.all_applied_labels().len();
+
+        info!(
+            repository_owner = owner,
+            repository = repo,
+            pr_number = pr_number,
+            commit_type = commit_type,
+            success = final_success,
+            applied_labels_count = applied_count,
+            removed_labels_count = result.removed_labels.len(),
+            failed_labels_count = result.failed_labels.len(),
+            "Completed smart label management for change type"
+        );
+
+        Ok(result)
+    }
+
+    /// Apply a single label to a pull request
+    async fn apply_label<P: PullRequestProvider>(
+        &self,
+        provider: &P,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        label_name: &str,
+    ) -> Result<(), MergeWardenError> {
+        provider
+            .add_labels(owner, repo, pr_number, &[label_name.to_string()])
+            .await
+            .map_err(|_| {
+                MergeWardenError::FailedToUpdatePullRequest(format!(
+                    "Failed to add label '{}'",
+                    label_name
+                ))
+            })
+    }
+
+    /// Create and apply a fallback label when no existing label is found
+    async fn create_and_apply_fallback_label<P: PullRequestProvider>(
+        &self,
+        provider: &P,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        commit_type: &str,
+        config: &ChangeTypeLabelConfig,
+    ) -> Result<String, MergeWardenError> {
+        // Generate fallback label name based on configuration
+        let fallback_label = self.generate_fallback_label_name(commit_type, config);
+
+        debug!(
+            repository_owner = owner,
+            repository = repo,
+            pr_number = pr_number,
+            commit_type = commit_type,
+            fallback_label = %fallback_label,
+            "Generated fallback label name"
+        );
+
+        // Apply the fallback label (this will create it if it doesn't exist)
+        self.apply_label(provider, owner, repo, pr_number, &fallback_label)
+            .await?;
+
+        Ok(fallback_label)
+    }
+
+    /// Generate a fallback label name based on configuration and commit type
+    fn generate_fallback_label_name(
+        &self,
+        commit_type: &str,
+        config: &ChangeTypeLabelConfig,
+    ) -> String {
+        // Use the configured fallback format, defaulting to a standard pattern
+        let format = &config.fallback_label_settings.name_format;
+
+        // Replace {type} placeholder with the actual commit type
+        let fallback_label = format.replace("{type}", commit_type);
+
+        debug!(
+            commit_type = commit_type,
+            format_template = %format,
+            generated_label = %fallback_label,
+            "Generated fallback label using configured format"
+        );
+
+        fallback_label
+    }
+
+    /// Get default hardcoded label for a commit type (fallback when no configuration)
+    fn get_default_label_for_commit_type(&self, commit_type: &str) -> Option<String> {
+        let default_label = match commit_type {
+            "feat" => Some("feature".to_string()),
+            "fix" => Some("bug".to_string()),
+            "docs" => Some("documentation".to_string()),
+            "style" => Some("style".to_string()),
+            "refactor" => Some("refactor".to_string()),
+            "perf" => Some("performance".to_string()),
+            "test" => Some("testing".to_string()),
+            "build" => Some("build".to_string()),
+            "ci" => Some("ci".to_string()),
+            "chore" => Some("chore".to_string()),
+            "revert" => Some("revert".to_string()),
+            _ => None,
+        };
+
+        if let Some(ref label) = default_label {
+            debug!(
+                commit_type = commit_type,
+                default_label = %label,
+                "Using hardcoded default label for commit type"
+            );
+        } else {
+            debug!(
+                commit_type = commit_type,
+                "No hardcoded default label available for commit type"
+            );
+        }
+
+        default_label
+    }
+
+    /// Apply smart labeling for breaking changes detection
+    ///
+    /// This method handles the special case of breaking change detection,
+    /// which can be determined from PR title or body content.
+    ///
+    /// # Arguments
+    ///
+    /// * `provider` - The Git provider implementation
+    /// * `owner` - The owner of the repository
+    /// * `repo` - The name of the repository
+    /// * `pr_number` - The pull request number
+    /// * `pr_title` - The pull request title
+    /// * `pr_body` - The pull request body (optional)
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the smart label result for breaking change labels
+    pub async fn apply_breaking_change_label<P: PullRequestProvider>(
+        &self,
+        provider: &P,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        pr_title: &str,
+        pr_body: Option<&str>,
+    ) -> Result<LabelManagementResult, MergeWardenError> {
+        let mut result = LabelManagementResult::new();
+
+        // Check if this PR indicates a breaking change
+        let is_breaking_change = pr_title.contains("!:")
+            || pr_title.to_lowercase().contains("breaking change")
+            || pr_body.map_or(false, |body| {
+                body.to_lowercase().contains("breaking change")
+            });
+
+        if !is_breaking_change {
+            debug!(
+                repository_owner = owner,
+                repository = repo,
+                pr_number = pr_number,
+                "No breaking change indicators found in PR title or body"
+            );
+            return Ok(result);
+        }
+
+        info!(
+            repository_owner = owner,
+            repository = repo,
+            pr_number = pr_number,
+            "Breaking change detected, applying smart labeling"
+        );
+
+        // Try to find an existing breaking change label
+        let breaking_change_label = if let Some(ref config) = self.config {
+            // Use detection to find existing breaking change labels
+            let detector = LabelDetector::new_for_change_type_labels(config.clone());
+
+            // For breaking changes, we look for common patterns
+            let breaking_change_candidates =
+                vec!["breaking-change", "breaking", "major", "bc", "BREAKING"];
+
+            // Try to detect any existing breaking change label
+            let mut found_label = None;
+            for candidate in &breaking_change_candidates {
+                match detector
+                    .detect_change_type_label(provider, owner, repo, candidate)
+                    .await
+                {
+                    Ok(detection_result) => {
+                        if detection_result.label_name.is_some() {
+                            found_label = detection_result.label_name;
+                            break;
+                        }
+                    }
+                    Err(_) => continue, // Try next candidate
+                }
+            }
+
+            found_label.unwrap_or_else(|| {
+                // Fallback to configured format
+                self.generate_fallback_label_name("breaking", config)
+            })
+        } else {
+            // No configuration, use hardcoded default
+            "breaking-change".to_string()
+        };
+
+        // Apply the breaking change label
+        match self
+            .apply_label(provider, owner, repo, pr_number, &breaking_change_label)
+            .await
+        {
+            Ok(()) => {
+                result.applied_labels.push(breaking_change_label.clone());
+                info!(
+                    repository_owner = owner,
+                    repository = repo,
+                    pr_number = pr_number,
+                    breaking_change_label = %breaking_change_label,
+                    "Successfully applied breaking change label"
+                );
+            }
+            Err(e) => {
+                let error_msg = format!(
+                    "Failed to apply breaking change label '{}': {}",
+                    breaking_change_label, e
+                );
+                warn!(
+                    repository_owner = owner,
+                    repository = repo,
+                    pr_number = pr_number,
+                    breaking_change_label = %breaking_change_label,
+                    error = %e,
+                    "Failed to apply breaking change label"
+                );
+                result.failed_labels.push(breaking_change_label);
+                result.error_messages.push(error_msg);
+            }
+        }
+
+        Ok(result)
+    }
+
+    /// Apply smart labeling for keyword-based labels (security, hotfix, tech-debt)
+    ///
+    /// This method handles keyword detection in PR body for special labels.
+    ///
+    /// # Arguments
+    ///
+    /// * `provider` - The Git provider implementation
+    /// * `owner` - The owner of the repository
+    /// * `repo` - The name of the repository
+    /// * `pr_number` - The pull request number
+    /// * `pr_body` - The pull request body (optional)
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the smart label result for keyword-based labels
+    pub async fn apply_keyword_labels<P: PullRequestProvider>(
+        &self,
+        provider: &P,
+        owner: &str,
+        repo: &str,
+        pr_number: u64,
+        pr_body: Option<&str>,
+    ) -> Result<LabelManagementResult, MergeWardenError> {
+        let mut result = LabelManagementResult::new();
+
+        let Some(body) = pr_body else {
+            debug!(
+                repository_owner = owner,
+                repository = repo,
+                pr_number = pr_number,
+                "No PR body provided for keyword label detection"
+            );
+            return Ok(result);
+        };
+
+        let body_lower = body.to_lowercase();
+
+        // Define keyword mappings
+        let keyword_mappings = vec![
+            (vec!["security", "vulnerability"], "security"),
+            (vec!["hotfix"], "hotfix"),
+            (vec!["technical debt", "tech debt"], "tech-debt"),
+        ];
+
+        for (keywords, default_label) in keyword_mappings {
+            let has_keyword = keywords.iter().any(|keyword| body_lower.contains(keyword));
+
+            if has_keyword {
+                info!(
+                    repository_owner = owner,
+                    repository = repo,
+                    pr_number = pr_number,
+                    keywords = ?keywords,
+                    default_label = default_label,
+                    "Found keyword match, applying smart labeling"
+                );
+
+                let label_to_apply = if let Some(ref config) = self.config {
+                    // Try to detect existing label using detection
+                    let detector = LabelDetector::new_for_change_type_labels(config.clone());
+
+                    match detector
+                        .detect_change_type_label(provider, owner, repo, default_label)
+                        .await
+                    {
+                        Ok(detection_result) => detection_result.label_name.unwrap_or_else(|| {
+                            self.generate_fallback_label_name(default_label, config)
+                        }),
+                        Err(_) => default_label.to_string(),
+                    }
+                } else {
+                    default_label.to_string()
+                };
+
+                // Apply the keyword-based label
+                match self
+                    .apply_label(provider, owner, repo, pr_number, &label_to_apply)
+                    .await
+                {
+                    Ok(()) => {
+                        result.applied_labels.push(label_to_apply.clone());
+                        info!(
+                            repository_owner = owner,
+                            repository = repo,
+                            pr_number = pr_number,
+                            applied_label = %label_to_apply,
+                            matched_keywords = ?keywords,
+                            "Successfully applied keyword-based label"
+                        );
+                    }
+                    Err(e) => {
+                        let error_msg =
+                            format!("Failed to apply keyword label '{}': {}", label_to_apply, e);
+                        warn!(
+                            repository_owner = owner,
+                            repository = repo,
+                            pr_number = pr_number,
+                            failed_label = %label_to_apply,
+                            error = %e,
+                            "Failed to apply keyword-based label"
+                        );
+                        result.failed_labels.push(label_to_apply);
+                        result.error_messages.push(error_msg);
+                    }
+                }
+            }
+        }
+
+        Ok(result)
+    }
 }
