@@ -9,7 +9,7 @@
 //! - Breaking change indicators
 //! - Special labels based on PR description keywords
 
-use crate::config::CONVENTIONAL_COMMIT_REGEX;
+use crate::config::{ChangeTypeLabelConfig, CONVENTIONAL_COMMIT_REGEX};
 use crate::errors::MergeWardenError;
 use crate::size::{PrSizeCategory, PrSizeInfo};
 use merge_warden_developer_platforms::models::{Label, PullRequest};
@@ -785,6 +785,336 @@ impl LabelDiscovery {
         }
 
         debug!("No description-based match found for pattern: {}", pattern);
+        None
+    }
+}
+
+/// Result of change type label detection
+#[derive(Debug, Clone)]
+pub struct ChangeTypeLabelDetectionResult {
+    /// The detected label name, if any
+    pub label_name: Option<String>,
+    /// The conventional commit type that was searched for
+    pub commit_type: String,
+    /// Whether fallback label creation should be used
+    pub should_create_fallback: bool,
+}
+
+/// Label detector that implements the three-tier search strategy for change type labels
+pub struct LabelDetector {
+    /// Configuration for change type label detection
+    config: ChangeTypeLabelConfig,
+}
+
+impl LabelDetector {
+    /// Create a new label detector with the specified configuration
+    pub fn new(config: ChangeTypeLabelConfig) -> Self {
+        Self { config }
+    }
+
+    /// Detect the best matching label for a conventional commit type
+    ///
+    /// This implements the three-tier search strategy:
+    /// 1. Exact match detection - looks for exact matches of mapped label names
+    /// 2. Prefix match detection - looks for labels with type prefixes (e.g., "feat:", "fix:")
+    /// 3. Description match detection - looks for commit types in label descriptions
+    ///
+    /// # Arguments
+    ///
+    /// * `provider` - The Git provider implementation
+    /// * `owner` - The owner of the repository
+    /// * `repo` - The name of the repository
+    /// * `commit_type` - The conventional commit type to search for
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the detection result
+    pub async fn detect_change_type_label<P: PullRequestProvider>(
+        &self,
+        provider: &P,
+        owner: &str,
+        repo: &str,
+        commit_type: &str,
+    ) -> Result<ChangeTypeLabelDetectionResult, MergeWardenError> {
+        info!(
+            repository_owner = owner,
+            repository = repo,
+            commit_type = commit_type,
+            "Starting change type label detection"
+        );
+
+        // Get repository labels
+        let all_labels = provider
+            .list_repository_labels(owner, repo)
+            .await
+            .map_err(|_| {
+                MergeWardenError::FailedToUpdatePullRequest(
+                    "Failed to fetch repository labels".to_string(),
+                )
+            })?;
+
+        debug!(
+            repository_owner = owner,
+            repository = repo,
+            commit_type = commit_type,
+            total_labels = all_labels.len(),
+            "Retrieved repository labels for change type detection"
+        );
+
+        // Get mapped label names for this commit type
+        let mapped_labels = self.get_mapped_label_names(commit_type);
+
+        debug!(
+            repository_owner = owner,
+            repository = repo,
+            commit_type = commit_type,
+            mapped_labels = ?mapped_labels,
+            "Retrieved mapped label names for commit type"
+        );
+
+        // Tier 1: Exact match detection
+        if self.config.detection_strategy.exact_match {
+            if let Some(label) =
+                self.find_exact_match(&all_labels, &mapped_labels, owner, repo, commit_type)
+            {
+                return Ok(ChangeTypeLabelDetectionResult {
+                    label_name: Some(label),
+                    commit_type: commit_type.to_string(),
+                    should_create_fallback: false,
+                });
+            }
+        }
+
+        // Tier 2: Prefix match detection
+        if self.config.detection_strategy.prefix_match {
+            if let Some(label) = self.find_prefix_match(&all_labels, commit_type, owner, repo) {
+                return Ok(ChangeTypeLabelDetectionResult {
+                    label_name: Some(label),
+                    commit_type: commit_type.to_string(),
+                    should_create_fallback: false,
+                });
+            }
+        }
+
+        // Tier 3: Description match detection
+        if self.config.detection_strategy.description_match {
+            if let Some(label) = self.find_description_match(&all_labels, commit_type, owner, repo)
+            {
+                return Ok(ChangeTypeLabelDetectionResult {
+                    label_name: Some(label),
+                    commit_type: commit_type.to_string(),
+                    should_create_fallback: false,
+                });
+            }
+        }
+
+        // No match found - should create fallback if enabled
+        warn!(
+            repository_owner = owner,
+            repository = repo,
+            commit_type = commit_type,
+            "No existing label found for commit type"
+        );
+
+        Ok(ChangeTypeLabelDetectionResult {
+            label_name: None,
+            commit_type: commit_type.to_string(),
+            should_create_fallback: self.config.fallback_label_settings.create_if_missing,
+        })
+    }
+
+    /// Get mapped label names for a conventional commit type
+    fn get_mapped_label_names(&self, commit_type: &str) -> Vec<String> {
+        let mut mapped_labels = Vec::new();
+
+        // Add mappings from the configuration based on commit type
+        let config_mappings = match commit_type {
+            "feat" => &self.config.conventional_commit_mappings.feat,
+            "fix" => &self.config.conventional_commit_mappings.fix,
+            "docs" => &self.config.conventional_commit_mappings.docs,
+            "style" => &self.config.conventional_commit_mappings.style,
+            "refactor" => &self.config.conventional_commit_mappings.refactor,
+            "perf" => &self.config.conventional_commit_mappings.perf,
+            "test" => &self.config.conventional_commit_mappings.test,
+            "chore" => &self.config.conventional_commit_mappings.chore,
+            "ci" => &self.config.conventional_commit_mappings.ci,
+            "build" => &self.config.conventional_commit_mappings.build,
+            "revert" => &self.config.conventional_commit_mappings.revert,
+            _ => &Vec::new(), // Return empty vector for unknown types
+        };
+
+        // Add configured mappings
+        mapped_labels.extend(config_mappings.clone());
+
+        // Add default mappings if no configuration mappings exist
+        if mapped_labels.is_empty() {
+            mapped_labels.extend(self.get_default_mappings(commit_type));
+        }
+
+        mapped_labels
+    }
+
+    /// Get default mappings for common conventional commit types
+    fn get_default_mappings(&self, commit_type: &str) -> Vec<String> {
+        match commit_type {
+            "feat" => vec!["feature".to_string(), "enhancement".to_string()],
+            "fix" => vec!["bug".to_string(), "bugfix".to_string()],
+            "docs" => vec!["documentation".to_string()],
+            "style" => vec!["style".to_string()],
+            "refactor" => vec!["refactor".to_string()],
+            "perf" => vec!["performance".to_string()],
+            "test" => vec!["testing".to_string(), "tests".to_string()],
+            "build" => vec!["build".to_string()],
+            "ci" => vec!["ci".to_string()],
+            "chore" => vec!["chore".to_string()],
+            "revert" => vec!["revert".to_string()],
+            _ => vec![],
+        }
+    }
+
+    /// Find exact match for mapped label names
+    fn find_exact_match(
+        &self,
+        labels: &[Label],
+        mapped_labels: &[String],
+        owner: &str,
+        repo: &str,
+        commit_type: &str,
+    ) -> Option<String> {
+        debug!(
+            repository_owner = owner,
+            repository = repo,
+            commit_type = commit_type,
+            "Starting exact match detection"
+        );
+
+        for mapped_label in mapped_labels {
+            for label in labels {
+                if label.name.eq_ignore_ascii_case(mapped_label) {
+                    info!(
+                        repository_owner = owner,
+                        repository = repo,
+                        commit_type = commit_type,
+                        found_label = %label.name,
+                        mapped_label = %mapped_label,
+                        detection_method = "exact_match",
+                        "Found exact match for commit type"
+                    );
+                    return Some(label.name.clone());
+                }
+            }
+        }
+
+        debug!(
+            repository_owner = owner,
+            repository = repo,
+            commit_type = commit_type,
+            "No exact match found"
+        );
+        None
+    }
+
+    /// Find prefix match for commit type
+    fn find_prefix_match(
+        &self,
+        labels: &[Label],
+        commit_type: &str,
+        owner: &str,
+        repo: &str,
+    ) -> Option<String> {
+        debug!(
+            repository_owner = owner,
+            repository = repo,
+            commit_type = commit_type,
+            "Starting prefix match detection"
+        );
+
+        // Define possible prefix patterns
+        let prefix_patterns = vec![
+            format!("{}:", commit_type),
+            format!("{}-", commit_type),
+            format!("{}_{}", commit_type, ""),
+            format!("type: {}", commit_type),
+            format!("type-{}", commit_type),
+            format!("type_{}", commit_type),
+            format!("kind: {}", commit_type),
+            format!("kind-{}", commit_type),
+            format!("kind_{}", commit_type),
+        ];
+
+        for pattern in &prefix_patterns {
+            for label in labels {
+                if label
+                    .name
+                    .to_lowercase()
+                    .starts_with(&pattern.to_lowercase())
+                {
+                    info!(
+                        repository_owner = owner,
+                        repository = repo,
+                        commit_type = commit_type,
+                        found_label = %label.name,
+                        prefix_pattern = %pattern,
+                        detection_method = "prefix_match",
+                        "Found prefix match for commit type"
+                    );
+                    return Some(label.name.clone());
+                }
+            }
+        }
+
+        debug!(
+            repository_owner = owner,
+            repository = repo,
+            commit_type = commit_type,
+            "No prefix match found"
+        );
+        None
+    }
+
+    /// Find description match for commit type
+    fn find_description_match(
+        &self,
+        labels: &[Label],
+        commit_type: &str,
+        owner: &str,
+        repo: &str,
+    ) -> Option<String> {
+        debug!(
+            repository_owner = owner,
+            repository = repo,
+            commit_type = commit_type,
+            "Starting description match detection"
+        );
+
+        let commit_type_lower = commit_type.to_lowercase();
+
+        for label in labels {
+            if let Some(ref description) = label.description {
+                let description_lower = description.to_lowercase();
+
+                // Look for the commit type in the description
+                if description_lower.contains(&commit_type_lower) {
+                    info!(
+                        repository_owner = owner,
+                        repository = repo,
+                        commit_type = commit_type,
+                        found_label = %label.name,
+                        label_description = %description,
+                        detection_method = "description_match",
+                        "Found description match for commit type"
+                    );
+                    return Some(label.name.clone());
+                }
+            }
+        }
+
+        debug!(
+            repository_owner = owner,
+            repository = repo,
+            commit_type = commit_type,
+            "No description match found"
+        );
         None
     }
 }
