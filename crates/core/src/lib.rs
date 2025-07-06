@@ -998,7 +998,7 @@ Please update the PR body to include a valid work item reference."#;
 
         let elapsed = start_time.elapsed();
 
-        match &result {
+        match result {
             Ok(applied_labels) => {
                 info!(
                     repository_owner = repo_owner,
@@ -1011,12 +1011,12 @@ Please update the PR body to include a valid work item reference."#;
                 );
 
                 // Log audit trail for applied labels
-                for label in applied_labels {
+                for label in applied_labels.iter() {
                     debug!(
                         repository_owner = repo_owner,
                         repository = repo_name,
                         pr_number = pr.number,
-                        label_name = label,
+                        label_name = label.clone(),
                         detection_method = if self.config.change_type_labels.is_some() {
                             "smart_detection"
                         } else {
@@ -1025,42 +1025,25 @@ Please update the PR body to include a valid work item reference."#;
                         "Applied label to pull request"
                     );
                 }
+
+                return Ok(applied_labels);
             }
             Err(e) => {
-                // Check if this is a label application error (should be propagated)
-                // vs a label detection error (should be handled gracefully)
-                match e {
-                    // Label application errors should propagate
-                    MergeWardenError::GitProviderError(_) => {
-                        error!(
-                            repository_owner = repo_owner,
-                            repository = repo_name,
-                            pr_number = pr.number,
-                            error = %e,
-                            processing_duration_ms = elapsed.as_millis(),
-                            "Label application failed - propagating error"
-                        );
-                        return Err(e);
-                    }
-                    // Other errors (detection failures) should be handled gracefully
-                    _ => {
-                        warn!(
-                            repository_owner = repo_owner,
-                            repository = repo_name,
-                            pr_number = pr.number,
-                            error = %e,
-                            processing_duration_ms = elapsed.as_millis(),
-                            "Label determination failed, but PR processing will continue"
-                        );
+                // Label failures should be logged but not propagate
+                // The core validation and status reporting should continue to work
+                warn!(
+                    repository_owner = repo_owner,
+                    repository = repo_name,
+                    pr_number = pr.number,
+                    error = %e,
+                    processing_duration_ms = elapsed.as_millis(),
+                    "Label determination failed, but PR processing will continue"
+                );
 
-                        // Return empty labels vector instead of failing
-                        return Ok(Vec::new());
-                    }
-                }
+                // Return empty labels vector instead of failing
+                return Ok(Vec::new());
             }
         }
-
-        result
     }
 
     /// Creates a new `MergeWarden` instance with default configuration.

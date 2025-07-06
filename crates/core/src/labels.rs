@@ -107,6 +107,7 @@ pub async fn set_pull_request_labels_with_config<P: PullRequestProvider>(
     // This is the implementation we created earlier - delegate to the main function
     // but include the logic in a new internal function to avoid circular calls
     let mut labels = Vec::new();
+    let mut smart_detection_applied = false;
 
     // Extract type from PR title using pre-compiled regex
     let regex = match Regex::new(CONVENTIONAL_COMMIT_REGEX) {
@@ -124,86 +125,102 @@ pub async fn set_pull_request_labels_with_config<P: PullRequestProvider>(
         // Use smart label detection if configured, otherwise fall back to hardcoded labels
         if let Some(config) = config {
             if let Some(ref change_type_config) = config.change_type_labels {
-                let detection_start = std::time::Instant::now();
+                if change_type_config.enabled {
+                    let detection_start = std::time::Instant::now();
 
-                info!(
-                    repository_owner = owner,
-                    repository = repo,
-                    pr_number = pr.number,
-                    commit_type = pr_type,
-                    detection_enabled = change_type_config.enabled,
-                    "Starting smart label detection for change type"
-                );
+                    info!(
+                        repository_owner = owner,
+                        repository = repo,
+                        pr_number = pr.number,
+                        commit_type = pr_type,
+                        detection_enabled = change_type_config.enabled,
+                        "Starting smart label detection for change type"
+                    );
 
-                // Use smart label detection with LabelManager
-                let label_manager = LabelManager::new(Some(change_type_config.clone()));
+                    // Use smart label detection with LabelManager
+                    let label_manager = LabelManager::new(Some(change_type_config.clone()));
 
-                match label_manager
-                    .apply_change_type_label(provider, owner, repo, pr.number, pr_type)
-                    .await
-                {
-                    Ok(result) => {
-                        let detection_duration = detection_start.elapsed();
-                        labels.extend(result.all_applied_labels());
+                    match label_manager
+                        .apply_change_type_label(provider, owner, repo, pr.number, pr_type)
+                        .await
+                    {
+                        Ok(result) => {
+                            let detection_duration = detection_start.elapsed();
+                            labels.extend(result.all_applied_labels());
+                            smart_detection_applied = true;
 
-                        info!(
-                            repository_owner = owner,
-                            repository = repo,
-                            pr_number = pr.number,
-                            commit_type = pr_type,
-                            applied_labels = ?result.all_applied_labels(),
-                            labels_count = result.all_applied_labels().len(),
-                            detection_duration_ms = detection_duration.as_millis(),
-                            detection_method = "smart_detection",
-                            used_fallback = result.used_fallback_creation(),
-                            "Successfully applied smart change type labels"
-                        );
-
-                        // Audit log for each applied label
-                        for label in result.all_applied_labels() {
-                            debug!(
+                            info!(
                                 repository_owner = owner,
                                 repository = repo,
                                 pr_number = pr.number,
-                                label_name = label,
                                 commit_type = pr_type,
+                                applied_labels = ?result.all_applied_labels(),
+                                labels_count = result.all_applied_labels().len(),
+                                detection_duration_ms = detection_duration.as_millis(),
                                 detection_method = "smart_detection",
-                                source = if result.used_fallback_creation() {
-                                    "fallback_creation"
-                                } else {
-                                    "repository_detection"
-                                },
-                                "Applied smart label to pull request"
+                                used_fallback = result.used_fallback_creation(),
+                                "Successfully applied smart change type labels"
+                            );
+
+                            // Audit log for each applied label
+                            for label in result.all_applied_labels() {
+                                debug!(
+                                    repository_owner = owner,
+                                    repository = repo,
+                                    pr_number = pr.number,
+                                    label_name = label,
+                                    commit_type = pr_type,
+                                    detection_method = "smart_detection",
+                                    source = if result.used_fallback_creation() {
+                                        "fallback_creation"
+                                    } else {
+                                        "repository_detection"
+                                    },
+                                    "Applied smart label to pull request"
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            let detection_duration = detection_start.elapsed();
+
+                            warn!(
+                                repository_owner = owner,
+                                repository = repo,
+                                pr_number = pr.number,
+                                commit_type = pr_type,
+                                error = %e,
+                                detection_duration_ms = detection_duration.as_millis(),
+                                "Smart label detection failed, falling back to hardcoded labels"
+                            );
+
+                            // Fall back to hardcoded labels and log the decision
+                            add_hardcoded_type_label(&mut labels, pr_type);
+
+                            info!(
+                                repository_owner = owner,
+                                repository = repo,
+                                pr_number = pr.number,
+                                commit_type = pr_type,
+                                applied_labels = ?labels,
+                                detection_method = "hardcoded_fallback",
+                                fallback_reason = "smart_detection_failure",
+                                "Applied hardcoded fallback labels after smart detection failure"
                             );
                         }
                     }
-                    Err(e) => {
-                        let detection_duration = detection_start.elapsed();
+                } else {
+                    // Smart label configuration exists but is disabled, use hardcoded labels
+                    add_hardcoded_type_label(&mut labels, pr_type);
 
-                        warn!(
-                            repository_owner = owner,
-                            repository = repo,
-                            pr_number = pr.number,
-                            commit_type = pr_type,
-                            error = %e,
-                            detection_duration_ms = detection_duration.as_millis(),
-                            "Smart label detection failed, falling back to hardcoded labels"
-                        );
-
-                        // Fall back to hardcoded labels and log the decision
-                        add_hardcoded_type_label(&mut labels, pr_type);
-
-                        info!(
-                            repository_owner = owner,
-                            repository = repo,
-                            pr_number = pr.number,
-                            commit_type = pr_type,
-                            applied_labels = ?labels,
-                            detection_method = "hardcoded_fallback",
-                            fallback_reason = "smart_detection_failure",
-                            "Applied hardcoded fallback labels after smart detection failure"
-                        );
-                    }
+                    debug!(
+                        repository_owner = owner,
+                        repository = repo,
+                        pr_number = pr.number,
+                        commit_type = pr_type,
+                        applied_labels = ?labels,
+                        detection_method = "hardcoded_disabled",
+                        "Applied hardcoded labels (smart detection disabled)"
+                    );
                 }
             } else {
                 // No smart label configuration, use hardcoded labels
@@ -235,9 +252,13 @@ pub async fn set_pull_request_labels_with_config<P: PullRequestProvider>(
         }
     }
 
+    // Collect additional labels that need to be applied
+    let mut additional_labels = Vec::new();
+
     // Check if PR is a breaking change
     let breaking_change_label = "breaking-change".to_string();
     if pr.title.contains("!:") || pr.title.to_lowercase().contains("breaking change") {
+        additional_labels.push(breaking_change_label.clone());
         labels.push(breaking_change_label.clone());
     }
 
@@ -246,30 +267,62 @@ pub async fn set_pull_request_labels_with_config<P: PullRequestProvider>(
         let body_lower = body.to_lowercase();
 
         if body_lower.contains("breaking change") && !labels.contains(&breaking_change_label) {
+            additional_labels.push(breaking_change_label.clone());
             labels.push(breaking_change_label.clone());
         }
 
         if body_lower.contains("security") || body_lower.contains("vulnerability") {
+            additional_labels.push("security".to_string());
             labels.push("security".to_string());
         }
 
         if body_lower.contains("hotfix") {
+            additional_labels.push("hotfix".to_string());
             labels.push("hotfix".to_string());
         }
 
         if body_lower.contains("technical debt") || body_lower.contains("tech debt") {
+            additional_labels.push("tech-debt".to_string());
             labels.push("tech-debt".to_string());
         }
     }
 
-    // Add any remaining labels to the PR (smart detection handles its own label application)
-    if !labels.is_empty() {
-        provider
-            .add_labels(owner, repo, pr.number, &labels)
-            .await
-            .map_err(|_| {
-                MergeWardenError::FailedToUpdatePullRequest("Failed to add label".to_string())
-            })?;
+    // Apply labels to the PR
+    if smart_detection_applied {
+        // Smart detection already applied its labels, only apply additional labels
+        if !additional_labels.is_empty() {
+            if let Err(e) = provider
+                .add_labels(owner, repo, pr.number, &additional_labels)
+                .await
+            {
+                warn!(
+                    repository_owner = owner,
+                    repository = repo,
+                    pr_number = pr.number,
+                    labels = ?additional_labels,
+                    error = %e,
+                    "Failed to add additional labels to pull request, continuing with validation"
+                );
+                // Don't propagate the error, just log it and continue
+            }
+        }
+    } else {
+        // Apply all labels (hardcoded + additional)
+        if !labels.is_empty() {
+            if let Err(e) = provider.add_labels(owner, repo, pr.number, &labels).await {
+                warn!(
+                    repository_owner = owner,
+                    repository = repo,
+                    pr_number = pr.number,
+                    labels = ?labels,
+                    error = %e,
+                    "Failed to add labels to pull request, continuing with validation"
+                );
+                // Don't propagate the error, just log it and continue
+                // Return empty labels vector since none were successfully applied
+                return Ok(vec![]);
+            }
+        }
     }
 
     Ok(labels)
@@ -444,7 +497,15 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
         provider
             .add_labels(owner, repo, pr_number, &[label_name.clone()])
             .await
-            .map_err(|_| {
+            .map_err(|e| {
+                warn!(
+                    repository_owner = owner,
+                    repository = repo,
+                    pr_number = pr_number,
+                    label_name = label_name,
+                    error = %e,
+                    "Failed to add size label to pull request"
+                );
                 MergeWardenError::FailedToUpdatePullRequest("Failed to add size label".to_string())
             })?;
 
@@ -468,7 +529,15 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
         provider
             .add_labels(owner, repo, pr_number, &[fallback_label.clone()])
             .await
-            .map_err(|_| {
+            .map_err(|e| {
+                warn!(
+                    repository_owner = owner,
+                    repository = repo,
+                    pr_number = pr_number,
+                    fallback_label = fallback_label,
+                    error = %e,
+                    "Failed to add fallback size label to pull request"
+                );
                 MergeWardenError::FailedToUpdatePullRequest(
                     "Failed to add fallback size label".to_string(),
                 )
@@ -855,7 +924,7 @@ impl LabelDetector {
         );
 
         for label in labels {
-            let matches = regex.is_match(&label.name.to_uppercase());
+            let matches = regex.is_match(&label.name);
             debug!(
                 "Exact size match check: label '{}' against pattern '{}' = {}",
                 label.name, pattern, matches
@@ -886,7 +955,7 @@ impl LabelDetector {
         );
 
         for label in labels {
-            let matches = regex.is_match(&label.name.to_uppercase());
+            let matches = regex.is_match(&label.name);
             debug!(
                 "Size with separator check: label '{}' against pattern '{}' = {}",
                 label.name, pattern, matches
@@ -1665,8 +1734,8 @@ impl LabelManager {
         // Use the configured fallback format, defaulting to a standard pattern
         let format = &config.fallback_label_settings.name_format;
 
-        // Replace {type} placeholder with the actual commit type
-        let fallback_label = format.replace("{type}", commit_type);
+        // Replace {change_type} placeholder with the actual commit type
+        let fallback_label = format.replace("{change_type}", commit_type);
 
         debug!(
             commit_type = commit_type,

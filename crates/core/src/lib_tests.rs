@@ -142,7 +142,7 @@ impl PullRequestProvider for ErrorMockGitProvider {
     ) -> Result<(), Error> {
         if self.error_on_add_labels {
             Err(Error::FailedToUpdatePullRequest(
-                "Failed to add labels".to_string(),
+                "Failed to add label".to_string(),
             ))
         } else {
             Ok(())
@@ -1173,18 +1173,29 @@ async fn test_process_pull_request_error_add_labels() {
     // Create a MergeWarden instance
     let warden = MergeWarden::new(provider);
 
-    // Process the PR - should return an error
+    // Process the PR - should succeed even if labels fail
     let result = warden.process_pull_request("owner", "repo", 1).await;
 
-    // Verify the error
+    // Should succeed - labeling is non-critical, core validation should still work
     assert!(
-        result.is_err(),
-        "Should return an error when adding labels fails"
+        result.is_ok(),
+        "Should succeed even when adding labels fails"
     );
-    assert_eq!(
-        result.unwrap_err().to_string(),
-        "Failed to update pull request. Issue was: 'Failed to add label'.",
-        "Should return the specific error message"
+
+    let check_result = result.unwrap();
+
+    // Verify that core validation functionality still works
+    assert!(check_result.title_valid, "Title validation should work");
+    assert!(
+        check_result.work_item_referenced,
+        "Work item validation should work"
+    );
+    assert!(check_result.size_valid, "Size validation should work");
+
+    // Labels should be empty since label application failed
+    assert!(
+        check_result.labels.is_empty(),
+        "Labels should be empty when label application fails"
     );
 }
 
