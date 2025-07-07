@@ -190,3 +190,185 @@ variable "rust_log" {
   type        = string
   default     = "info"
 }
+
+#
+# CHANGE TYPE LABELS CONFIGURATION
+#
+
+variable "change_type_labels_enabled" {
+  description = "Whether smart change type label detection is enabled."
+  type        = bool
+  default     = true
+}
+
+# Conventional commit mappings
+variable "change_type_labels_feat_mappings" {
+  description = "Repository labels to search for 'feat' commits."
+  type        = list(string)
+  default     = ["enhancement", "feature", "new feature"]
+}
+
+variable "change_type_labels_fix_mappings" {
+  description = "Repository labels to search for 'fix' commits."
+  type        = list(string)
+  default     = ["bug", "bugfix", "fix"]
+}
+
+variable "change_type_labels_docs_mappings" {
+  description = "Repository labels to search for 'docs' commits."
+  type        = list(string)
+  default     = ["documentation", "docs"]
+}
+
+variable "change_type_labels_style_mappings" {
+  description = "Repository labels to search for 'style' commits."
+  type        = list(string)
+  default     = ["style", "formatting"]
+}
+
+variable "change_type_labels_refactor_mappings" {
+  description = "Repository labels to search for 'refactor' commits."
+  type        = list(string)
+  default     = ["refactor", "refactoring", "code quality"]
+}
+
+variable "change_type_labels_perf_mappings" {
+  description = "Repository labels to search for 'perf' commits."
+  type        = list(string)
+  default     = ["performance", "optimization"]
+}
+
+variable "change_type_labels_test_mappings" {
+  description = "Repository labels to search for 'test' commits."
+  type        = list(string)
+  default     = ["test", "tests", "testing"]
+}
+
+variable "change_type_labels_chore_mappings" {
+  description = "Repository labels to search for 'chore' commits."
+  type        = list(string)
+  default     = ["chore", "maintenance", "housekeeping"]
+}
+
+variable "change_type_labels_ci_mappings" {
+  description = "Repository labels to search for 'ci' commits."
+  type        = list(string)
+  default     = ["ci", "continuous integration", "build"]
+}
+
+variable "change_type_labels_build_mappings" {
+  description = "Repository labels to search for 'build' commits."
+  type        = list(string)
+  default     = ["build", "dependencies"]
+}
+
+variable "change_type_labels_revert_mappings" {
+  description = "Repository labels to search for 'revert' commits."
+  type        = list(string)
+  default     = ["revert"]
+}
+
+# Fallback label settings
+variable "change_type_labels_fallback_name_format" {
+  description = "Format for creating fallback labels (uses {change_type} placeholder)."
+  type        = string
+  default     = "type: {change_type}"
+}
+
+variable "change_type_labels_fallback_create_if_missing" {
+  description = "Whether to create labels when none exist in the repository."
+  type        = bool
+  default     = true
+}
+
+# Color scheme for fallback labels
+variable "change_type_labels_color_feat" {
+  description = "Hex color for 'feat' fallback labels."
+  type        = string
+  default     = "#0075ca"
+}
+
+variable "change_type_labels_color_fix" {
+  description = "Hex color for 'fix' fallback labels."
+  type        = string
+  default     = "#d73a4a"
+}
+
+variable "change_type_labels_color_docs" {
+  description = "Hex color for 'docs' fallback labels."
+  type        = string
+  default     = "#0052cc"
+}
+
+variable "change_type_labels_color_style" {
+  description = "Hex color for 'style' fallback labels."
+  type        = string
+  default     = "#f9d0c4"
+}
+
+variable "change_type_labels_color_refactor" {
+  description = "Hex color for 'refactor' fallback labels."
+  type        = string
+  default     = "#fef2c0"
+}
+
+variable "change_type_labels_color_perf" {
+  description = "Hex color for 'perf' fallback labels."
+  type        = string
+  default     = "#a2eeef"
+}
+
+variable "change_type_labels_color_test" {
+  description = "Hex color for 'test' fallback labels."
+  type        = string
+  default     = "#d4edda"
+}
+
+variable "change_type_labels_color_chore" {
+  description = "Hex color for 'chore' fallback labels."
+  type        = string
+  default     = "#e1e4e8"
+}
+
+variable "change_type_labels_color_ci" {
+  description = "Hex color for 'ci' fallback labels."
+  type        = string
+  default     = "#fbca04"
+}
+
+variable "change_type_labels_color_build" {
+  description = "Hex color for 'build' fallback labels."
+  type        = string
+  default     = "#c5def5"
+}
+
+variable "change_type_labels_color_revert" {
+  description = "Hex color for 'revert' fallback labels."
+  type        = string
+  default     = "#b60205"
+}
+
+# Detection strategy
+variable "change_type_labels_detection_exact_match" {
+  description = "Enable exact name matching against repository labels."
+  type        = bool
+  default     = true
+}
+
+variable "change_type_labels_detection_prefix_match" {
+  description = "Enable prefix matching (e.g., 'type:feat' matches 'feat')."
+  type        = bool
+  default     = true
+}
+
+variable "change_type_labels_detection_description_match" {
+  description = "Enable description matching (e.g., label description ending with '(type: feat)')."
+  type        = bool
+  default     = true
+}
+
+variable "change_type_labels_detection_common_prefixes" {
+  description = "Prefixes to check during prefix matching."
+  type        = list(string)
+  default     = ["type:", "kind:", "category:"]
+}

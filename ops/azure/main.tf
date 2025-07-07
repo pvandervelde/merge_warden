@@ -470,6 +470,226 @@ resource "azurerm_app_configuration_key" "pr_size_extra_large_threshold" {
   type                   = "kv"
 }
 
+## Change Type Labels configuration keys
+resource "azurerm_app_configuration_key" "change_type_labels_enabled" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:enabled"
+  value                  = var.change_type_labels_enabled ? "true" : "false"
+  type                   = "kv"
+}
+
+# Conventional commit mappings
+resource "azurerm_app_configuration_key" "change_type_labels_mappings_feat" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:mappings:feat"
+  value                  = jsonencode(var.change_type_labels_feat_mappings)
+  type                   = "kv"
+  content_type           = "application/json"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_mappings_fix" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:mappings:fix"
+  value                  = jsonencode(var.change_type_labels_fix_mappings)
+  type                   = "kv"
+  content_type           = "application/json"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_mappings_docs" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:mappings:docs"
+  value                  = jsonencode(var.change_type_labels_docs_mappings)
+  type                   = "kv"
+  content_type           = "application/json"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_mappings_style" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:mappings:style"
+  value                  = jsonencode(var.change_type_labels_style_mappings)
+  type                   = "kv"
+  content_type           = "application/json"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_mappings_refactor" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:mappings:refactor"
+  value                  = jsonencode(var.change_type_labels_refactor_mappings)
+  type                   = "kv"
+  content_type           = "application/json"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_mappings_perf" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:mappings:perf"
+  value                  = jsonencode(var.change_type_labels_perf_mappings)
+  type                   = "kv"
+  content_type           = "application/json"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_mappings_test" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:mappings:test"
+  value                  = jsonencode(var.change_type_labels_test_mappings)
+  type                   = "kv"
+  content_type           = "application/json"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_mappings_chore" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:mappings:chore"
+  value                  = jsonencode(var.change_type_labels_chore_mappings)
+  type                   = "kv"
+  content_type           = "application/json"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_mappings_ci" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:mappings:ci"
+  value                  = jsonencode(var.change_type_labels_ci_mappings)
+  type                   = "kv"
+  content_type           = "application/json"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_mappings_build" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:mappings:build"
+  value                  = jsonencode(var.change_type_labels_build_mappings)
+  type                   = "kv"
+  content_type           = "application/json"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_mappings_revert" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:mappings:revert"
+  value                  = jsonencode(var.change_type_labels_revert_mappings)
+  type                   = "kv"
+  content_type           = "application/json"
+}
+
+# Fallback label settings
+resource "azurerm_app_configuration_key" "change_type_labels_fallback_name_format" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:fallback:name_format"
+  value                  = var.change_type_labels_fallback_name_format
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_fallback_create_if_missing" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:fallback:create_if_missing"
+  value                  = var.change_type_labels_fallback_create_if_missing ? "true" : "false"
+  type                   = "kv"
+}
+
+# Color scheme for fallback labels
+resource "azurerm_app_configuration_key" "change_type_labels_colors_feat" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:colors:feat"
+  value                  = var.change_type_labels_color_feat
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_colors_fix" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:colors:fix"
+  value                  = var.change_type_labels_color_fix
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_colors_docs" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:colors:docs"
+  value                  = var.change_type_labels_color_docs
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_colors_style" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:colors:style"
+  value                  = var.change_type_labels_color_style
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_colors_refactor" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:colors:refactor"
+  value                  = var.change_type_labels_color_refactor
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_colors_perf" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:colors:perf"
+  value                  = var.change_type_labels_color_perf
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_colors_test" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:colors:test"
+  value                  = var.change_type_labels_color_test
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_colors_chore" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:colors:chore"
+  value                  = var.change_type_labels_color_chore
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_colors_ci" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:colors:ci"
+  value                  = var.change_type_labels_color_ci
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_colors_build" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:colors:build"
+  value                  = var.change_type_labels_color_build
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_colors_revert" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:colors:revert"
+  value                  = var.change_type_labels_color_revert
+  type                   = "kv"
+}
+
+# Detection strategy
+resource "azurerm_app_configuration_key" "change_type_labels_detection_exact_match" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:detection:exact_match"
+  value                  = var.change_type_labels_detection_exact_match ? "true" : "false"
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_detection_prefix_match" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:detection:prefix_match"
+  value                  = var.change_type_labels_detection_prefix_match ? "true" : "false"
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_detection_description_match" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:detection:description_match"
+  value                  = var.change_type_labels_detection_description_match ? "true" : "false"
+  type                   = "kv"
+}
+
+resource "azurerm_app_configuration_key" "change_type_labels_detection_common_prefixes" {
+  configuration_store_id = azurerm_app_configuration.app_config.id
+  key                    = "change_type_labels:detection:common_prefixes"
+  value                  = jsonencode(var.change_type_labels_detection_common_prefixes)
+  type                   = "kv"
+  content_type           = "application/json"
+}
+
 ## Grant Function App access to App Configuration
 resource "azurerm_role_assignment" "function_app_appconfig_reader" {
   scope                = azurerm_app_configuration.app_config.id
