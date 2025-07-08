@@ -389,7 +389,9 @@ async fn handle_webhook(
                     .default_missing_work_item_label
                     .clone(),
                 pr_size_check: merge_warden_core::config::PrSizeCheckConfig::default(),
-                change_type_labels: None, // Use default behavior for CLI
+                change_type_labels: Some(
+                    merge_warden_core::config::ChangeTypeLabelConfig::default(),
+                ),
                 bypass_rules: state.config.policies.bypass_rules.clone(),
             }
         }
