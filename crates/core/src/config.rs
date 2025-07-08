@@ -918,213 +918,257 @@ pub async fn load_merge_warden_config(
             config.policies.pull_requests.work_item_policies.required = true;
         }
 
-    // Use repository config labels and patterns if present, else fallback to defaults
-    if config
-        .policies
-        .pull_requests
-        .title_policies
-        .pattern
-        .is_empty()
-    {
-        config.policies.pull_requests.title_policies.pattern =
-            app_defaults.default_title_pattern.clone();
-    }
-
-    if config
-        .policies
-        .pull_requests
-        .title_policies
-        .label_if_missing
-        .is_none()
-    {
-        config
+        // Use repository config labels and patterns if present, else fallback to defaults
+        if config
             .policies
             .pull_requests
             .title_policies
-            .label_if_missing = app_defaults.default_invalid_title_label.clone();
-    }
+            .pattern
+            .is_empty()
+        {
+            config.policies.pull_requests.title_policies.pattern =
+                app_defaults.default_title_pattern.clone();
+        }
 
-    if config
-        .policies
-        .pull_requests
-        .work_item_policies
-        .pattern
-        .is_empty()
-    {
-        config.policies.pull_requests.work_item_policies.pattern =
-            app_defaults.default_work_item_pattern.clone();
-    }
+        if config
+            .policies
+            .pull_requests
+            .title_policies
+            .label_if_missing
+            .is_none()
+        {
+            config
+                .policies
+                .pull_requests
+                .title_policies
+                .label_if_missing = app_defaults.default_invalid_title_label.clone();
+        }
 
-    if config
-        .policies
-        .pull_requests
-        .work_item_policies
-        .label_if_missing
-        .is_none()
-    {
-        config
+        if config
             .policies
             .pull_requests
             .work_item_policies
-            .label_if_missing = app_defaults.default_missing_work_item_label.clone();
-    }
-
-    // Merge PR size configuration from app defaults
-    if app_defaults.pr_size_check.enabled {
-        config.policies.pull_requests.size_policies.enabled = true;
-    }
-
-    // Use app defaults for any unspecified PR size config values
-    if !config.policies.pull_requests.size_policies.enabled {
-        config.policies.pull_requests.size_policies = app_defaults.pr_size_check.clone();
-    }
-
-    // Merge change type labels configuration with application defaults
-    if config.change_type_labels.is_none() {
-        config.change_type_labels = Some(app_defaults.change_type_labels.clone());
-    } else {
-        // Merge repository change type labels config with application defaults
-        let repo_change_type_labels = config.change_type_labels.as_ref().unwrap();
-        let mut merged_change_type_labels = app_defaults.change_type_labels.clone();
-
-        // Override with repository-specific settings where provided
-        merged_change_type_labels.enabled = repo_change_type_labels.enabled;
-
-        // Only override mappings if repository provides them
-        if !repo_change_type_labels
-            .conventional_commit_mappings
-            .feat
+            .pattern
             .is_empty()
         {
-            merged_change_type_labels.conventional_commit_mappings.feat =
-                repo_change_type_labels.conventional_commit_mappings.feat.clone();
+            config.policies.pull_requests.work_item_policies.pattern =
+                app_defaults.default_work_item_pattern.clone();
         }
-        if !repo_change_type_labels
-            .conventional_commit_mappings
-            .fix
-            .is_empty()
+
+        if config
+            .policies
+            .pull_requests
+            .work_item_policies
+            .label_if_missing
+            .is_none()
         {
-            merged_change_type_labels.conventional_commit_mappings.fix =
-                repo_change_type_labels.conventional_commit_mappings.fix.clone();
+            config
+                .policies
+                .pull_requests
+                .work_item_policies
+                .label_if_missing = app_defaults.default_missing_work_item_label.clone();
         }
-        if !repo_change_type_labels
-            .conventional_commit_mappings
-            .docs
-            .is_empty()
-        {
-            merged_change_type_labels.conventional_commit_mappings.docs =
-                repo_change_type_labels.conventional_commit_mappings.docs.clone();
+
+        // Merge PR size configuration from app defaults
+        if app_defaults.pr_size_check.enabled {
+            config.policies.pull_requests.size_policies.enabled = true;
         }
-        if !repo_change_type_labels
-            .conventional_commit_mappings
-            .style
-            .is_empty()
-        {
-            merged_change_type_labels.conventional_commit_mappings.style =
-                repo_change_type_labels.conventional_commit_mappings.style.clone();
+
+        // Use app defaults for any unspecified PR size config values
+        if !config.policies.pull_requests.size_policies.enabled {
+            config.policies.pull_requests.size_policies = app_defaults.pr_size_check.clone();
         }
-        if !repo_change_type_labels
-            .conventional_commit_mappings
-            .refactor
-            .is_empty()
-        {
-            merged_change_type_labels.conventional_commit_mappings.refactor = repo_change_type_labels
+
+        // Merge change type labels configuration with application defaults
+        if config.change_type_labels.is_none() {
+            config.change_type_labels = Some(app_defaults.change_type_labels.clone());
+        } else {
+            // Merge repository change type labels config with application defaults
+            let repo_change_type_labels = config.change_type_labels.as_ref().unwrap();
+            let mut merged_change_type_labels = app_defaults.change_type_labels.clone();
+
+            // Override with repository-specific settings where provided
+            merged_change_type_labels.enabled = repo_change_type_labels.enabled;
+
+            // Only override mappings if repository provides them
+            if !repo_change_type_labels
+                .conventional_commit_mappings
+                .feat
+                .is_empty()
+            {
+                merged_change_type_labels.conventional_commit_mappings.feat =
+                    repo_change_type_labels
+                        .conventional_commit_mappings
+                        .feat
+                        .clone();
+            }
+            if !repo_change_type_labels
+                .conventional_commit_mappings
+                .fix
+                .is_empty()
+            {
+                merged_change_type_labels.conventional_commit_mappings.fix =
+                    repo_change_type_labels
+                        .conventional_commit_mappings
+                        .fix
+                        .clone();
+            }
+            if !repo_change_type_labels
+                .conventional_commit_mappings
+                .docs
+                .is_empty()
+            {
+                merged_change_type_labels.conventional_commit_mappings.docs =
+                    repo_change_type_labels
+                        .conventional_commit_mappings
+                        .docs
+                        .clone();
+            }
+            if !repo_change_type_labels
+                .conventional_commit_mappings
+                .style
+                .is_empty()
+            {
+                merged_change_type_labels.conventional_commit_mappings.style =
+                    repo_change_type_labels
+                        .conventional_commit_mappings
+                        .style
+                        .clone();
+            }
+            if !repo_change_type_labels
                 .conventional_commit_mappings
                 .refactor
-                .clone();
-        }
-        if !repo_change_type_labels
-            .conventional_commit_mappings
-            .perf
-            .is_empty()
-        {
-            merged_change_type_labels.conventional_commit_mappings.perf =
-                repo_change_type_labels.conventional_commit_mappings.perf.clone();
-        }
-        if !repo_change_type_labels
-            .conventional_commit_mappings
-            .test
-            .is_empty()
-        {
-            merged_change_type_labels.conventional_commit_mappings.test =
-                repo_change_type_labels.conventional_commit_mappings.test.clone();
-        }
-        if !repo_change_type_labels
-            .conventional_commit_mappings
-            .chore
-            .is_empty()
-        {
-            merged_change_type_labels.conventional_commit_mappings.chore =
-                repo_change_type_labels.conventional_commit_mappings.chore.clone();
-        }
-        if !repo_change_type_labels.conventional_commit_mappings.ci.is_empty() {
-            merged_change_type_labels.conventional_commit_mappings.ci =
-                repo_change_type_labels.conventional_commit_mappings.ci.clone();
-        }
-        if !repo_change_type_labels
-            .conventional_commit_mappings
-            .build
-            .is_empty()
-        {
-            merged_change_type_labels.conventional_commit_mappings.build =
-                repo_change_type_labels.conventional_commit_mappings.build.clone();
-        }
-        if !repo_change_type_labels
-            .conventional_commit_mappings
-            .revert
-            .is_empty()
-        {
-            merged_change_type_labels.conventional_commit_mappings.revert = repo_change_type_labels
+                .is_empty()
+            {
+                merged_change_type_labels
+                    .conventional_commit_mappings
+                    .refactor = repo_change_type_labels
+                    .conventional_commit_mappings
+                    .refactor
+                    .clone();
+            }
+            if !repo_change_type_labels
+                .conventional_commit_mappings
+                .perf
+                .is_empty()
+            {
+                merged_change_type_labels.conventional_commit_mappings.perf =
+                    repo_change_type_labels
+                        .conventional_commit_mappings
+                        .perf
+                        .clone();
+            }
+            if !repo_change_type_labels
+                .conventional_commit_mappings
+                .test
+                .is_empty()
+            {
+                merged_change_type_labels.conventional_commit_mappings.test =
+                    repo_change_type_labels
+                        .conventional_commit_mappings
+                        .test
+                        .clone();
+            }
+            if !repo_change_type_labels
+                .conventional_commit_mappings
+                .chore
+                .is_empty()
+            {
+                merged_change_type_labels.conventional_commit_mappings.chore =
+                    repo_change_type_labels
+                        .conventional_commit_mappings
+                        .chore
+                        .clone();
+            }
+            if !repo_change_type_labels
+                .conventional_commit_mappings
+                .ci
+                .is_empty()
+            {
+                merged_change_type_labels.conventional_commit_mappings.ci = repo_change_type_labels
+                    .conventional_commit_mappings
+                    .ci
+                    .clone();
+            }
+            if !repo_change_type_labels
+                .conventional_commit_mappings
+                .build
+                .is_empty()
+            {
+                merged_change_type_labels.conventional_commit_mappings.build =
+                    repo_change_type_labels
+                        .conventional_commit_mappings
+                        .build
+                        .clone();
+            }
+            if !repo_change_type_labels
                 .conventional_commit_mappings
                 .revert
-                .clone();
-        }
+                .is_empty()
+            {
+                merged_change_type_labels
+                    .conventional_commit_mappings
+                    .revert = repo_change_type_labels
+                    .conventional_commit_mappings
+                    .revert
+                    .clone();
+            }
 
-        // Override fallback settings if repository provides them
-        if !repo_change_type_labels
-            .fallback_label_settings
-            .name_format
-            .is_empty()
-        {
-            merged_change_type_labels.fallback_label_settings.name_format = repo_change_type_labels
+            // Override fallback settings if repository provides them
+            if !repo_change_type_labels
                 .fallback_label_settings
                 .name_format
-                .clone();
-        }
-        if !repo_change_type_labels
-            .fallback_label_settings
-            .color_scheme
-            .is_empty()
-        {
-            merged_change_type_labels.fallback_label_settings.color_scheme = repo_change_type_labels
+                .is_empty()
+            {
+                merged_change_type_labels
+                    .fallback_label_settings
+                    .name_format = repo_change_type_labels
+                    .fallback_label_settings
+                    .name_format
+                    .clone();
+            }
+            if !repo_change_type_labels
                 .fallback_label_settings
                 .color_scheme
-                .clone();
+                .is_empty()
+            {
+                merged_change_type_labels
+                    .fallback_label_settings
+                    .color_scheme = repo_change_type_labels
+                    .fallback_label_settings
+                    .color_scheme
+                    .clone();
+            }
+            merged_change_type_labels
+                .fallback_label_settings
+                .create_if_missing = repo_change_type_labels
+                .fallback_label_settings
+                .create_if_missing;
+
+            // Override detection strategy settings
+            merged_change_type_labels.detection_strategy.exact_match =
+                repo_change_type_labels.detection_strategy.exact_match;
+            merged_change_type_labels.detection_strategy.prefix_match =
+                repo_change_type_labels.detection_strategy.prefix_match;
+            merged_change_type_labels
+                .detection_strategy
+                .description_match = repo_change_type_labels.detection_strategy.description_match;
+            if !repo_change_type_labels
+                .detection_strategy
+                .common_prefixes
+                .is_empty()
+            {
+                merged_change_type_labels.detection_strategy.common_prefixes =
+                    repo_change_type_labels
+                        .detection_strategy
+                        .common_prefixes
+                        .clone();
+            }
+
+            config.change_type_labels = Some(merged_change_type_labels);
         }
-        merged_change_type_labels
-            .fallback_label_settings
-            .create_if_missing = repo_change_type_labels.fallback_label_settings.create_if_missing;
 
-        // Override detection strategy settings
-        merged_change_type_labels.detection_strategy.exact_match =
-            repo_change_type_labels.detection_strategy.exact_match;
-        merged_change_type_labels.detection_strategy.prefix_match =
-            repo_change_type_labels.detection_strategy.prefix_match;
-        merged_change_type_labels.detection_strategy.description_match =
-            repo_change_type_labels.detection_strategy.description_match;
-        if !repo_change_type_labels
-            .detection_strategy
-            .common_prefixes
-            .is_empty()
-        {
-            merged_change_type_labels.detection_strategy.common_prefixes =
-                repo_change_type_labels.detection_strategy.common_prefixes.clone();
-        }
-
-        config.change_type_labels = Some(merged_change_type_labels);
-    }
-
-    // End of valid config processing
+        // End of valid config processing
     }
 
     info!(
