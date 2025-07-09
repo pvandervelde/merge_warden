@@ -55,6 +55,7 @@ fn create_default_config() -> CurrentPullRequestValidationConfiguration {
         work_item_reference_pattern: WORK_ITEM_REGEX.to_string(),
         missing_work_item_label: Some("missing-work-item".to_string()),
         pr_size_check: crate::config::PrSizeCheckConfig::default(),
+        change_type_labels: None, // Use default behavior for tests
         bypass_rules: Default::default(),
     }
 }

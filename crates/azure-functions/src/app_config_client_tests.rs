@@ -189,3 +189,146 @@ fn test_bypass_rules_parsing() {
     assert!(!result.work_item_convention().enabled());
     assert!(result.work_item_convention().users().is_empty());
 }
+
+#[test]
+fn test_change_type_labels_parsing() {
+    let client = AppConfigClient::new("https://test.azconfig.io", Duration::from_secs(300))
+        .expect("Failed to create client");
+
+    let mut config_map = HashMap::new();
+
+    // Add change type labels configuration
+    config_map.insert(
+        "change_type_labels:enabled".to_string(),
+        ConfigValue {
+            key: "change_type_labels:enabled".to_string(),
+            value: "true".to_string(),
+            content_type: None,
+            etag: None,
+            label: None,
+        },
+    );
+
+    config_map.insert(
+        "change_type_labels:mappings:feat".to_string(),
+        ConfigValue {
+            key: "change_type_labels:mappings:feat".to_string(),
+            value: r#"["enhancement", "feature"]"#.to_string(),
+            content_type: Some("application/json".to_string()),
+            etag: None,
+            label: None,
+        },
+    );
+
+    config_map.insert(
+        "change_type_labels:mappings:fix".to_string(),
+        ConfigValue {
+            key: "change_type_labels:mappings:fix".to_string(),
+            value: r#"["bug", "bugfix"]"#.to_string(),
+            content_type: Some("application/json".to_string()),
+            etag: None,
+            label: None,
+        },
+    );
+
+    config_map.insert(
+        "change_type_labels:fallback:name_format".to_string(),
+        ConfigValue {
+            key: "change_type_labels:fallback:name_format".to_string(),
+            value: "type: {change_type}".to_string(),
+            content_type: None,
+            etag: None,
+            label: None,
+        },
+    );
+
+    config_map.insert(
+        "change_type_labels:fallback:create_if_missing".to_string(),
+        ConfigValue {
+            key: "change_type_labels:fallback:create_if_missing".to_string(),
+            value: "true".to_string(),
+            content_type: None,
+            etag: None,
+            label: None,
+        },
+    );
+
+    config_map.insert(
+        "change_type_labels:colors:feat".to_string(),
+        ConfigValue {
+            key: "change_type_labels:colors:feat".to_string(),
+            value: "#0075ca".to_string(),
+            content_type: None,
+            etag: None,
+            label: None,
+        },
+    );
+
+    config_map.insert(
+        "change_type_labels:detection:exact_match".to_string(),
+        ConfigValue {
+            key: "change_type_labels:detection:exact_match".to_string(),
+            value: "true".to_string(),
+            content_type: None,
+            etag: None,
+            label: None,
+        },
+    );
+
+    config_map.insert(
+        "change_type_labels:detection:common_prefixes".to_string(),
+        ConfigValue {
+            key: "change_type_labels:detection:common_prefixes".to_string(),
+            value: r#"["type:", "kind:"]"#.to_string(),
+            content_type: Some("application/json".to_string()),
+            etag: None,
+            label: None,
+        },
+    );
+
+    // Test parsing
+    let result = client.parse_change_type_labels_config(&config_map).unwrap();
+
+    // Verify main settings
+    assert!(result.enabled);
+    assert_eq!(
+        result.fallback_label_settings.name_format,
+        "type: {change_type}"
+    );
+    assert!(result.fallback_label_settings.create_if_missing);
+
+    // Verify mappings
+    assert_eq!(
+        result.conventional_commit_mappings.feat,
+        vec!["enhancement", "feature"]
+    );
+    assert_eq!(
+        result.conventional_commit_mappings.fix,
+        vec!["bug", "bugfix"]
+    );
+    // Default mappings should be used for types not specified
+    assert_eq!(
+        result.conventional_commit_mappings.docs,
+        vec!["documentation", "docs"]
+    );
+
+    // Verify colors
+    assert_eq!(
+        result.fallback_label_settings.color_scheme.get("feat"),
+        Some(&"#0075ca".to_string())
+    );
+    // Default color should be used for types not specified
+    assert_eq!(
+        result.fallback_label_settings.color_scheme.get("fix"),
+        Some(&"#d73a4a".to_string())
+    );
+
+    // Verify detection strategy
+    assert!(result.detection_strategy.exact_match);
+    assert!(result.detection_strategy.prefix_match); // Should default to true
+    assert!(result.detection_strategy.description_match); // Should default to true
+    assert_eq!(
+        result.detection_strategy.common_prefixes,
+        vec!["type:", "kind:"]
+    );
+}

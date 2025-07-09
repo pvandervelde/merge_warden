@@ -49,3 +49,64 @@ add_comment = true
 # l = 250    # 101-250 lines
 # xl = 500   # 251-500 lines
 # xxl = 501+ lines (anything above xl)
+
+# Configuration for smart change type label detection
+[change_type_labels]
+# Enable intelligent change type label detection
+enabled = true
+
+# Mappings from conventional commit types to repository-specific labels
+[change_type_labels.conventional_commit_mappings]
+# Feature-related label mappings (will look for these labels in the repository)
+feat = ["enhancement", "feature", "new feature"]
+# Bug fix-related label mappings
+fix = ["bug", "bugfix", "fix"]
+# Documentation-related label mappings
+docs = ["documentation", "docs"]
+# Style-related label mappings
+style = ["style", "formatting"]
+# Refactoring-related label mappings
+refactor = ["refactor", "refactoring", "code quality"]
+# Performance-related label mappings
+perf = ["performance", "optimization"]
+# Test-related label mappings
+test = ["test", "tests", "testing"]
+# Chore-related label mappings
+chore = ["chore", "maintenance", "housekeeping"]
+# CI-related label mappings
+ci = ["ci", "continuous integration", "build"]
+# Build-related label mappings
+build = ["build", "dependencies"]
+# Revert-related label mappings
+revert = ["revert"]
+
+# Settings for creating fallback labels when repository labels are not found
+[change_type_labels.fallback_label_settings]
+# Format for creating new label names (use {change_type} placeholder)
+name_format = "type: {change_type}"
+# Whether to create fallback labels if none are found
+create_if_missing = true
+# Colors for fallback labels (hex format)
+[change_type_labels.fallback_label_settings.color_scheme]
+feat = "#0075ca"     # Blue - features
+fix = "#d73a4a"      # Red - bug fixes
+docs = "#0052cc"     # Dark blue - documentation
+style = "#f9d0c4"    # Light pink - formatting
+refactor = "#fef2c0" # Light yellow - refactoring
+perf = "#a2eeef"     # Light blue - performance
+test = "#d4edda"     # Light green - testing
+chore = "#e1e4e8"    # Light gray - maintenance
+ci = "#fbca04"       # Yellow - CI/CD
+build = "#c5def5"    # Light blue - build system
+revert = "#b60205"   # Dark red - reverts
+
+# Configuration for the label detection strategy
+[change_type_labels.detection_strategy]
+# Enable exact name matching (e.g., "feat", "fix")
+exact_match = true
+# Enable prefix matching (e.g., "type: feat", "kind: fix")
+prefix_match = true
+# Enable description matching (e.g., labels with "(type: feat)" in description)
+description_match = true
+# Common prefixes to check for prefix matching
+common_prefixes = ["type:", "kind:", "category:"]

@@ -8,7 +8,10 @@
 
 use azure_core::credentials::TokenCredential;
 use azure_identity::{ManagedIdentityCredential, ManagedIdentityCredentialOptions};
-use merge_warden_core::config::{ApplicationDefaults, BypassRule, BypassRules, PrSizeCheckConfig};
+use merge_warden_core::config::{
+    ApplicationDefaults, BypassRule, BypassRules, ChangeTypeLabelConfig,
+    ConventionalCommitMappings, FallbackLabelSettings, LabelDetectionStrategy, PrSizeCheckConfig,
+};
 use merge_warden_core::size::SizeThresholds;
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
@@ -247,6 +250,10 @@ impl AppConfigClient {
             .get_values_by_prefix("pr_size:", None)
             .await
             .unwrap_or_default();
+        let change_type_values = self
+            .get_values_by_prefix("change_type_labels:", None)
+            .await
+            .unwrap_or_default();
 
         // Convert to map for easier lookup
         let mut config_map = HashMap::new();
@@ -254,6 +261,7 @@ impl AppConfigClient {
             .into_iter()
             .chain(app_values.into_iter())
             .chain(pr_size_values.into_iter())
+            .chain(change_type_values.into_iter())
         {
             config_map.insert(value.key.clone(), value);
         }
@@ -273,9 +281,20 @@ impl AppConfigClient {
         // Parse PR size configuration
         let pr_size_check = self.parse_pr_size_config(&config_map)?;
 
+        // Parse change type labels configuration
+        let change_type_labels = self.parse_change_type_labels_config(&config_map)?;
+
         // For patterns and labels, we fall back to the ApplicationDefaults::default() values
         // if they're not present in App Configuration yet
         let defaults = ApplicationDefaults::default();
+
+        info!(
+            enable_title_validation = enable_title_validation,
+            enable_work_item_validation = enable_work_item_validation,
+            enable_pr_size_checking = pr_size_check.enabled,
+            enable_change_type_labels = change_type_labels.enabled,
+            "Application configuration loaded successfully"
+        );
 
         let result = ApplicationDefaults {
             enable_title_validation,
@@ -286,14 +305,8 @@ impl AppConfigClient {
             default_missing_work_item_label: defaults.default_missing_work_item_label,
             bypass_rules,
             pr_size_check: pr_size_check.clone(),
+            change_type_labels,
         };
-
-        info!(
-            enable_title_validation = enable_title_validation,
-            enable_work_item_validation = enable_work_item_validation,
-            enable_pr_size_checking = pr_size_check.enabled,
-            "Application configuration loaded successfully"
-        );
 
         Ok(result)
     }
@@ -506,6 +519,162 @@ impl AppConfigClient {
         key: &str,
     ) -> Option<bool> {
         config_map.get(key)?.value.parse().ok()
+    }
+
+    /// Parses change type labels configuration from the configuration map
+    fn parse_change_type_labels_config(
+        &self,
+        config_map: &HashMap<String, ConfigValue>,
+    ) -> Result<ChangeTypeLabelConfig, AppConfigError> {
+        let enabled = self
+            .parse_bool_value(config_map, "change_type_labels:enabled")
+            .unwrap_or(true);
+
+        // Parse conventional commit mappings
+        let conventional_commit_mappings = ConventionalCommitMappings {
+            feat: self
+                .parse_json_array_value(config_map, "change_type_labels:mappings:feat")
+                .unwrap_or_else(|| {
+                    vec![
+                        "enhancement".to_string(),
+                        "feature".to_string(),
+                        "new feature".to_string(),
+                    ]
+                }),
+            fix: self
+                .parse_json_array_value(config_map, "change_type_labels:mappings:fix")
+                .unwrap_or_else(|| {
+                    vec!["bug".to_string(), "bugfix".to_string(), "fix".to_string()]
+                }),
+            docs: self
+                .parse_json_array_value(config_map, "change_type_labels:mappings:docs")
+                .unwrap_or_else(|| vec!["documentation".to_string(), "docs".to_string()]),
+            style: self
+                .parse_json_array_value(config_map, "change_type_labels:mappings:style")
+                .unwrap_or_else(|| vec!["style".to_string(), "formatting".to_string()]),
+            refactor: self
+                .parse_json_array_value(config_map, "change_type_labels:mappings:refactor")
+                .unwrap_or_else(|| {
+                    vec![
+                        "refactor".to_string(),
+                        "refactoring".to_string(),
+                        "code quality".to_string(),
+                    ]
+                }),
+            perf: self
+                .parse_json_array_value(config_map, "change_type_labels:mappings:perf")
+                .unwrap_or_else(|| vec!["performance".to_string(), "optimization".to_string()]),
+            test: self
+                .parse_json_array_value(config_map, "change_type_labels:mappings:test")
+                .unwrap_or_else(|| {
+                    vec![
+                        "test".to_string(),
+                        "tests".to_string(),
+                        "testing".to_string(),
+                    ]
+                }),
+            chore: self
+                .parse_json_array_value(config_map, "change_type_labels:mappings:chore")
+                .unwrap_or_else(|| {
+                    vec![
+                        "chore".to_string(),
+                        "maintenance".to_string(),
+                        "housekeeping".to_string(),
+                    ]
+                }),
+            ci: self
+                .parse_json_array_value(config_map, "change_type_labels:mappings:ci")
+                .unwrap_or_else(|| {
+                    vec![
+                        "ci".to_string(),
+                        "continuous integration".to_string(),
+                        "build".to_string(),
+                    ]
+                }),
+            build: self
+                .parse_json_array_value(config_map, "change_type_labels:mappings:build")
+                .unwrap_or_else(|| vec!["build".to_string(), "dependencies".to_string()]),
+            revert: self
+                .parse_json_array_value(config_map, "change_type_labels:mappings:revert")
+                .unwrap_or_else(|| vec!["revert".to_string()]),
+        };
+
+        // Parse fallback label settings
+        let name_format = config_map
+            .get("change_type_labels:fallback:name_format")
+            .map(|v| v.value.clone())
+            .unwrap_or_else(|| "type: {change_type}".to_string());
+
+        let create_if_missing = self
+            .parse_bool_value(config_map, "change_type_labels:fallback:create_if_missing")
+            .unwrap_or(true);
+
+        // Parse color scheme with defaults
+        let mut color_scheme = HashMap::new();
+        let default_colors = [
+            ("feat", "#0075ca"),
+            ("fix", "#d73a4a"),
+            ("docs", "#0052cc"),
+            ("style", "#f9d0c4"),
+            ("refactor", "#fef2c0"),
+            ("perf", "#a2eeef"),
+            ("test", "#d4edda"),
+            ("chore", "#e1e4e8"),
+            ("ci", "#fbca04"),
+            ("build", "#c5def5"),
+            ("revert", "#b60205"),
+        ];
+
+        for (commit_type, default_color) in default_colors {
+            let color = config_map
+                .get(&format!("change_type_labels:colors:{}", commit_type))
+                .map(|v| v.value.clone())
+                .unwrap_or_else(|| default_color.to_string());
+            color_scheme.insert(commit_type.to_string(), color);
+        }
+
+        let fallback_label_settings = FallbackLabelSettings {
+            name_format,
+            color_scheme,
+            create_if_missing,
+        };
+
+        // Parse detection strategy
+        let exact_match = self
+            .parse_bool_value(config_map, "change_type_labels:detection:exact_match")
+            .unwrap_or(true);
+
+        let prefix_match = self
+            .parse_bool_value(config_map, "change_type_labels:detection:prefix_match")
+            .unwrap_or(true);
+
+        let description_match = self
+            .parse_bool_value(config_map, "change_type_labels:detection:description_match")
+            .unwrap_or(true);
+
+        let common_prefixes = self
+            .parse_json_array_value(config_map, "change_type_labels:detection:common_prefixes")
+            .unwrap_or_else(|| {
+                vec![
+                    "type:".to_string(),
+                    "kind:".to_string(),
+                    "category:".to_string(),
+                ]
+            });
+
+        let detection_strategy = LabelDetectionStrategy {
+            exact_match,
+            prefix_match,
+            description_match,
+            common_prefixes,
+        };
+
+        Ok(ChangeTypeLabelConfig {
+            enabled,
+            conventional_commit_mappings,
+            fallback_label_settings,
+            detection_strategy,
+        })
     }
 
     /// Parses a JSON array value from the configuration map
