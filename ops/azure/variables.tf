@@ -8,7 +8,7 @@ variable "category" {
 }
 
 variable "environment" {
-  default     = "production"
+  default     = "test"
   description = "The name of the environment that all the resources are running in."
 }
 
