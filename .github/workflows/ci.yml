@@ -50,9 +50,9 @@ jobs:
           # Debug logging
           echo "Debug: LAST_TAG = '${LAST_TAG}'"
           echo "Debug: LAST_COMMIT = '${LAST_COMMIT}'"
-          echo "Debug: About to run: conventional_commits_next_version --from-version ${LAST_TAG} --from-commit-hash ${LAST_COMMIT} --calculation-mode Batch"
+          echo "Debug: About to run: conventional_commits_next_version --calculation-mode Batch --from-version ${LAST_TAG} --from-commit-hash ${LAST_COMMIT}"
 
-          NEXT_VERSION=$(conventional_commits_next_version --from-version ${LAST_TAG} --from-commit-hash ${LAST_COMMIT} --calculation-mode "Batch")
+          NEXT_VERSION=$(conventional_commits_next_version --calculation-mode Batch --from-version ${LAST_TAG} --from-commit-hash ${LAST_COMMIT})
           echo "NEXT_VERSION=${NEXT_VERSION}" >> $GITHUB_OUTPUT
           echo "The next version is: ${NEXT_VERSION}"
 
