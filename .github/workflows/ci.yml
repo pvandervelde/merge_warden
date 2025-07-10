@@ -44,7 +44,15 @@ jobs:
         id: calc_version
         run: |
           # Use Conventional Commits Next Version to calculate the next version
-          NEXT_VERSION=$(conventional_commits_next_version --from-commit-hash $(git rev-parse $(git describe --tags --abbrev=0)) --from-version $(git describe --tags --abbrev=0) --calculation-mode "Batch")
+          LAST_TAG=$(git describe --tags --abbrev=0)
+          LAST_COMMIT=$(git rev-parse ${LAST_TAG})
+
+          # Debug logging
+          echo "Debug: LAST_TAG = '${LAST_TAG}'"
+          echo "Debug: LAST_COMMIT = '${LAST_COMMIT}'"
+          echo "Debug: About to run: conventional_commits_next_version --from-version ${LAST_TAG} --calculation-mode Batch ${LAST_COMMIT}"
+
+          NEXT_VERSION=$(conventional_commits_next_version --from-version ${LAST_TAG} --calculation-mode Batch ${LAST_COMMIT})
           echo "NEXT_VERSION=${NEXT_VERSION}" >> $GITHUB_OUTPUT
           echo "The next version is: ${NEXT_VERSION}"
 

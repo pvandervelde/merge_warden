@@ -7,10 +7,10 @@ terraform {
   }
 
   backend "azurerm" {
-    resource_group_name  = "p-aue-tf-tfstate-rg"
-    storage_account_name = "paueterraformstate"
-    container_name       = "p-aue-tf-tfstate-sc"
-    key                  = "prod.mergew.tfstate"
+    resource_group_name  = "t-aue-tf-tfstate-rg"
+    storage_account_name = "taueterraformstate"
+    container_name       = "t-aue-tf-tfstate-sc"
+    key                  = "test.mergew.tfstate"
   }
 }
 

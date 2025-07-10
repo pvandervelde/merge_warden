@@ -8,7 +8,7 @@ variable "category" {
 }
 
 variable "environment" {
-  default     = "production"
+  default     = "test"
   description = "The name of the environment that all the resources are running in."
 }
 
@@ -90,7 +90,7 @@ variable "bypass_rules_work_item_enabled" {
 variable "bypass_rules_work_item_users" {
   description = "List of users who can bypass work item validation by default."
   type        = list(string)
-  default     = []
+  default     = ["renovate[bot]", "dependabot[bot]"]
 }
 
 #
@@ -116,7 +116,7 @@ variable "require_work_items" {
 variable "pr_size_enabled" {
   description = "Whether PR size checking is enabled."
   type        = bool
-  default     = false
+  default     = true
 }
 
 variable "pr_size_fail_on_oversized" {
@@ -128,7 +128,7 @@ variable "pr_size_fail_on_oversized" {
 variable "pr_size_label_prefix" {
   description = "Label prefix for size labels (defaults to 'size/')."
   type        = string
-  default     = "size/"
+  default     = "size: "
 }
 
 variable "pr_size_add_comment" {
@@ -205,7 +205,7 @@ variable "change_type_labels_enabled" {
 variable "change_type_labels_feat_mappings" {
   description = "Repository labels to search for 'feat' commits."
   type        = list(string)
-  default     = ["enhancement", "feature", "new feature"]
+  default     = ["enhancement", "feature"]
 }
 
 variable "change_type_labels_fix_mappings" {
@@ -253,7 +253,7 @@ variable "change_type_labels_chore_mappings" {
 variable "change_type_labels_ci_mappings" {
   description = "Repository labels to search for 'ci' commits."
   type        = list(string)
-  default     = ["ci", "continuous integration", "build"]
+  default     = ["ci", "continuous integration"]
 }
 
 variable "change_type_labels_build_mappings" {
@@ -285,67 +285,67 @@ variable "change_type_labels_fallback_create_if_missing" {
 variable "change_type_labels_color_feat" {
   description = "Hex color for 'feat' fallback labels."
   type        = string
-  default     = "#0075ca"
+  default     = "#fcc37b"
 }
 
 variable "change_type_labels_color_fix" {
   description = "Hex color for 'fix' fallback labels."
   type        = string
-  default     = "#d73a4a"
+  default     = "#fcc37b"
 }
 
 variable "change_type_labels_color_docs" {
   description = "Hex color for 'docs' fallback labels."
   type        = string
-  default     = "#0052cc"
+  default     = "#fcc37b"
 }
 
 variable "change_type_labels_color_style" {
   description = "Hex color for 'style' fallback labels."
   type        = string
-  default     = "#f9d0c4"
+  default     = "#fcc37b"
 }
 
 variable "change_type_labels_color_refactor" {
   description = "Hex color for 'refactor' fallback labels."
   type        = string
-  default     = "#fef2c0"
+  default     = "#fcc37b"
 }
 
 variable "change_type_labels_color_perf" {
   description = "Hex color for 'perf' fallback labels."
   type        = string
-  default     = "#a2eeef"
+  default     = "#fcc37b"
 }
 
 variable "change_type_labels_color_test" {
   description = "Hex color for 'test' fallback labels."
   type        = string
-  default     = "#d4edda"
+  default     = "#fcc37b"
 }
 
 variable "change_type_labels_color_chore" {
   description = "Hex color for 'chore' fallback labels."
   type        = string
-  default     = "#e1e4e8"
+  default     = "#fcc37b"
 }
 
 variable "change_type_labels_color_ci" {
   description = "Hex color for 'ci' fallback labels."
   type        = string
-  default     = "#fbca04"
+  default     = "#fcc37b"
 }
 
 variable "change_type_labels_color_build" {
   description = "Hex color for 'build' fallback labels."
   type        = string
-  default     = "#c5def5"
+  default     = "#fcc37b"
 }
 
 variable "change_type_labels_color_revert" {
   description = "Hex color for 'revert' fallback labels."
   type        = string
-  default     = "#b60205"
+  default     = "#fcc37b"
 }
 
 # Detection strategy
