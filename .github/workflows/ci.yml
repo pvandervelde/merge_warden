@@ -46,7 +46,7 @@ jobs:
           # Use Conventional Commits Next Version to calculate the next version
           LAST_TAG=$(git describe --tags --abbrev=0)
           LAST_COMMIT=$(git rev-parse ${LAST_TAG})
-          NEXT_VERSION=$(conventional_commits_next_version --from-commit-hash ${LAST_COMMIT} --from-version ${LAST_TAG} --calculation-mode "Batch")
+          NEXT_VERSION=$(conventional_commits_next_version --from-version ${LAST_TAG} --from-commit-hash ${LAST_COMMIT} --calculation-mode "Batch")
           echo "NEXT_VERSION=${NEXT_VERSION}" >> $GITHUB_OUTPUT
           echo "The next version is: ${NEXT_VERSION}"
 
