@@ -104,34 +104,6 @@ add_comment = true
   uses defaults.
 * The schema is designed to be extensible for future rules. Always specify `schemaVersion`.
 
-## Release Process
-
-This project uses a custom workflow leveraging [knope](https://knope.tech/) and
-[git-cliff](https://git-cliff.org/) to automate releases based on
-[Conventional Commits](https://www.conventionalcommits.org/).
-
-1. **Development:** Changes are made on feature branches and merged into the `master` branch.
-    Commit messages should follow the Conventional Commits specification.
-2. **Prepare Release PR:** When commits that warrant a release (e.g., `feat:`, `fix:`) are pushed
-    to `master`, the `prepare-release.yml` workflow runs. It automatically:
-    * Calculates the next semantic version using `knope`.
-    * Cleans up any stale release branches/PRs.
-    * Creates or updates a `release/X.Y.Z` branch.
-    * Updates the root `Cargo.toml` version using `knope`.
-    * Updates `CHANGELOG.md` using `git-cliff`.
-    * Creates or updates a "Release PR" targeting `master`.
-3. **Merging:** Review and merge the Release PR.
-4. **Tagging & Release:** Merging the Release PR triggers the `publish-release.yml` workflow. It:
-    * Creates an annotated Git tag (e.g., `0.2.0`) based on the version in `Cargo.toml`.
-    * Pushes the tag.
-    * Creates a corresponding GitHub release using notes extracted by `git-cliff`.
-5. **Artifact Creation & Upload:** The creation of the Git tag triggers the `deploy.yml`
-    workflow. This workflow:
-    * Builds the `az_handler` Azure Function package.
-    * Builds the `merge-warden` CLI binaries for multiple platforms.
-    * Creates deployment artifacts with checksums.
-    * Uploads all artifacts to the GitHub release for distribution.
-
 ## Deployment
 
 Merge Warden is distributed as pre-built artifacts that can be deployed to various cloud platforms. The source repository provides the code and build artifacts, while deployment infrastructure is maintained separately.
@@ -228,9 +200,11 @@ Or run the Azure Function host if testing the Azure deployment.
 * Check firewall or network settings if webhooks are not received
 * Use `RUST_LOG=debug` for more verbose output
 
-### Smart Change Type Label Detection
+### Change Type Label Detection
 
-merge-warden includes intelligent change type label detection that automatically applies appropriate labels based on conventional commit types in PR titles. This feature uses a sophisticated detection strategy to find and use existing repository labels instead of creating duplicate labels.
+merge-warden includes change type label detection that automatically applies appropriate
+labels based on conventional commit types in PR titles. This feature uses a strategy
+to find and use existing repository labels instead of creating duplicate labels.
 
 #### Detection Strategy
 
