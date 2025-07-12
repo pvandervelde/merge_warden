@@ -1,4 +1,4 @@
-name: Deploy binaries
+name: Package and Release Artifacts
 
 on:
   workflow_dispatch:
@@ -11,15 +11,13 @@ on:
     types:
       - published
 
-# Sets permissions of the GITHUB_TOKEN to allow deployment to Azure
+# Sets permissions of the GITHUB_TOKEN to allow uploading release artifacts
 permissions:
-  contents: read
-  id-token: write
+  contents: write
 
 jobs:
-  deploy_to_azure:
+  package-azure-function:
     runs-on: ubuntu-latest
-    environment: on-release-publish
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
       with:
@@ -66,79 +64,52 @@ jobs:
     #     [F] function.json     --> <target>/<function_name>/function.json
     # [F] host.json             --> <target>/host.json
     # [F] az_handler               --> <target>/az_handler
-    - name: Copy Azure functions configs
+    - name: Package Azure Function
       run: |
         mkdir -p target/func/merge_warden
         cp -r ./target/temp/x86_64-unknown-linux-musl/release/az_handler target/func
         cp -r ./configs/az_func/merge_warden/* target/func/merge_warden
         cp -r ./configs/az_func/host.json target/func
 
-    - name: show directories after assemble
+    - name: Show packaged function structure
       run: |
-        ls -la
-        ls -la target
         ls -la target/func
         ls -la target/func/merge_warden
 
-    - name: Set up Terraform
-      uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
-
-    - name: Azure Login
-      uses: azure/login@a457da9ea143d694b1b9c7c869ebb04ebe844ef5 # v2
-      with:
-        client-id: ${{ secrets.ARM_CLIENT_ID }}
-        tenant-id: ${{ secrets.ARM_TENANT_ID }}
-        subscription-id: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-
-    - name: Terraform Init
-      run: terraform init
-      working-directory: ops/azure
-      env:
-        ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
-        ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-        ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
-        ARM_USE_OIDC: true
-
-    - name: Create GitHub App Key File
-      shell: bash # Explicitly use bash for redirection
+    - name: Create Azure Function deployment package
       run: |
-        printf '%s\n' "${{ secrets.GH_APP_PRIVATE_KEY }}" > ${{ github.workspace }}/ops/azure/gh_app_key.pem
-        if [ -f ${{ github.workspace }}/ops/azure/gh_app_key.pem ]; then
-          echo "GitHub App Key File created successfully."
-        else
-          echo "Failed to create GitHub App Key File."
-          exit 1
-        fi
+        cd target/func
+        zip -r ../azure-function-package.zip .
+        cd ../..
+        ls -la target/azure-function-package.zip
 
-    - name: Terraform Apply
-      working-directory: ops/azure
+    - name: Generate checksum for Azure Function package
       run: |
-        terraform apply -auto-approve
+        cd target
+        sha256sum azure-function-package.zip > azure-function-package.zip.sha256
+        cat azure-function-package.zip.sha256
+
+    - name: Upload Azure Function package to release
+      uses: actions/upload-release-asset@v1
       env:
-        ARM_CLIENT_ID: ${{ secrets.ARM_CLIENT_ID }}
-        ARM_SUBSCRIPTION_ID: ${{ secrets.ARM_SUBSCRIPTION_ID }}
-        ARM_TENANT_ID: ${{ secrets.ARM_TENANT_ID }}
-        ARM_USE_OIDC: true
-        TF_VAR_github_app_id: ${{ secrets.GH_APP_ID }}
-        TF_VAR_github_app_private_key_path: "${{ github.workspace }}/ops/azure/gh_app_key.pem"
-        TF_VAR_github_webhook_secret: ${{ secrets.GH_WEBHOOK_SECRET }}
-        TF_VAR_meta_git_sha: ${{ github.sha }}
-        TF_VAR_meta_version: ${{ github.event.release.tag_name }} # Use the release tag name
-
-    - name: Remove GitHub App Key File
-      if: always()
-      run: rm ${{ github.workspace }}/ops/azure/gh_app_key.pem
-      shell: bash
-
-    # Don't use the publish profile for custom handlers
-    - name: Deploy to Azure Functions
-      uses: Azure/functions-action@0bd707f87c0b6385742bab336c74e1afc61f6369 # v1
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        app-name: p-aue-tf-mergew-function
-        package: ${{ github.workspace }}/target/func
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: target/azure-function-package.zip
+        asset_name: azure-function-package.zip
+        asset_content_type: application/zip
+
+    - name: Upload Azure Function package checksum to release
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: target/azure-function-package.zip.sha256
+        asset_name: azure-function-package.zip.sha256
+        asset_content_type: text/plain
 
   publish-cli:
-    if: ${{ github.event_name }} != 'workflow_dispatch'
     name: ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
     permissions:

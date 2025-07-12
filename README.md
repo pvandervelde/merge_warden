@@ -104,33 +104,30 @@ add_comment = true
   uses defaults.
 * The schema is designed to be extensible for future rules. Always specify `schemaVersion`.
 
-## Release Process
+## Deployment
 
-This project uses a custom workflow leveraging [knope](https://knope.tech/) and
-[git-cliff](https://git-cliff.org/) to automate releases based on
-[Conventional Commits](https://www.conventionalcommits.org/).
+Merge Warden is distributed as pre-built artifacts that can be deployed to various cloud platforms. The source repository provides the code and build artifacts, while deployment infrastructure is maintained separately.
 
-1. **Development:** Changes are made on feature branches and merged into the `master` branch.
-    Commit messages should follow the Conventional Commits specification.
-2. **Prepare Release PR:** When commits that warrant a release (e.g., `feat:`, `fix:`) are pushed
-    to `master`, the `prepare-release.yml` workflow runs. It automatically:
-    * Calculates the next semantic version using `knope`.
-    * Cleans up any stale release branches/PRs.
-    * Creates or updates a `release/X.Y.Z` branch.
-    * Updates the root `Cargo.toml` version using `knope`.
-    * Updates `CHANGELOG.md` using `git-cliff`.
-    * Creates or updates a "Release PR" targeting `master`.
-3. **Merging:** Review and merge the Release PR.
-4. **Tagging & Release:** Merging the Release PR triggers the `publish-release.yml` workflow. It:
-    * Creates an annotated Git tag (e.g., `0.2.0`) based on the version in `Cargo.toml`.
-    * Pushes the tag.
-    * Creates a corresponding GitHub release using notes extracted by `git-cliff`.
-5. **Deployment & Binary Upload:** The creation of the Git tag triggers the `deploy.yml`
-    workflow. This workflow:
-    * Builds the `az_handler` Azure Function package.
-    * Builds the `merge-warden` CLI binaries for multiple platforms.
-    * Uploads the CLI binaries to the GitHub release.
-    * Deploys the `az_handler` package to Azure Functions.
+### Available Deployment Options
+
+* **Azure Functions**: Deploy using the `azure-function-package.zip` artifact from GitHub releases
+* **CLI Tool**: Download platform-specific binaries from GitHub releases for local or server use
+
+### Getting Started with Deployment
+
+1. **Download artifacts** from the [latest GitHub release](https://github.com/pvandervelde/merge_warden/releases/latest)
+2. **Review the deployment documentation** in the [`docs/deployment/`](docs/deployment/) directory
+3. **Use the provided samples** in [`samples/terraform/`](samples/terraform/) for infrastructure setup
+4. **Leverage CI/CD templates** from [`samples/ci-cd/`](samples/ci-cd/) for automated deployment
+
+### Deployment Resources
+
+* 📚 **[Azure Deployment Guide](docs/deployment/azure/)** - Complete guide for Azure Functions deployment
+* 🏗️ **[Terraform Samples](samples/terraform/azure/)** - Infrastructure-as-code templates
+* ⚡ **[CI/CD Workflows](samples/ci-cd/)** - GitHub Actions templates for automated deployment
+* 🛠️ **[Helper Scripts](samples/scripts/)** - Deployment automation scripts
+
+For detailed deployment instructions, see the [deployment documentation](docs/deployment/).
 
 ## Development Environment Setup for GitHub Action Testing
 
@@ -203,9 +200,11 @@ Or run the Azure Function host if testing the Azure deployment.
 * Check firewall or network settings if webhooks are not received
 * Use `RUST_LOG=debug` for more verbose output
 
-### Smart Change Type Label Detection
+### Change Type Label Detection
 
-merge-warden includes intelligent change type label detection that automatically applies appropriate labels based on conventional commit types in PR titles. This feature uses a sophisticated detection strategy to find and use existing repository labels instead of creating duplicate labels.
+merge-warden includes change type label detection that automatically applies appropriate
+labels based on conventional commit types in PR titles. This feature uses a strategy
+to find and use existing repository labels instead of creating duplicate labels.
 
 #### Detection Strategy
 
