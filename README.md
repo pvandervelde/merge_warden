@@ -125,12 +125,37 @@ This project uses a custom workflow leveraging [knope](https://knope.tech/) and
     * Creates an annotated Git tag (e.g., `0.2.0`) based on the version in `Cargo.toml`.
     * Pushes the tag.
     * Creates a corresponding GitHub release using notes extracted by `git-cliff`.
-5. **Deployment & Binary Upload:** The creation of the Git tag triggers the `deploy.yml`
+5. **Artifact Creation & Upload:** The creation of the Git tag triggers the `deploy.yml`
     workflow. This workflow:
     * Builds the `az_handler` Azure Function package.
     * Builds the `merge-warden` CLI binaries for multiple platforms.
-    * Uploads the CLI binaries to the GitHub release.
-    * Deploys the `az_handler` package to Azure Functions.
+    * Creates deployment artifacts with checksums.
+    * Uploads all artifacts to the GitHub release for distribution.
+
+## Deployment
+
+Merge Warden is distributed as pre-built artifacts that can be deployed to various cloud platforms. The source repository provides the code and build artifacts, while deployment infrastructure is maintained separately.
+
+### Available Deployment Options
+
+* **Azure Functions**: Deploy using the `azure-function-package.zip` artifact from GitHub releases
+* **CLI Tool**: Download platform-specific binaries from GitHub releases for local or server use
+
+### Getting Started with Deployment
+
+1. **Download artifacts** from the [latest GitHub release](https://github.com/pvandervelde/merge_warden/releases/latest)
+2. **Review the deployment documentation** in the [`docs/deployment/`](docs/deployment/) directory
+3. **Use the provided samples** in [`samples/terraform/`](samples/terraform/) for infrastructure setup
+4. **Leverage CI/CD templates** from [`samples/ci-cd/`](samples/ci-cd/) for automated deployment
+
+### Deployment Resources
+
+* 📚 **[Azure Deployment Guide](docs/deployment/azure/)** - Complete guide for Azure Functions deployment
+* 🏗️ **[Terraform Samples](samples/terraform/azure/)** - Infrastructure-as-code templates
+* ⚡ **[CI/CD Workflows](samples/ci-cd/)** - GitHub Actions templates for automated deployment
+* 🛠️ **[Helper Scripts](samples/scripts/)** - Deployment automation scripts
+
+For detailed deployment instructions, see the [deployment documentation](docs/deployment/).
 
 ## Development Environment Setup for GitHub Action Testing
 

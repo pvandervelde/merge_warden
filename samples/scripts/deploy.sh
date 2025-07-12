@@ -108,176 +108,176 @@ fi
 # Check prerequisites
 check_prerequisites() {
     log_info "Checking prerequisites..."
-    
+
     local missing_tools=()
-    
+
     if ! command -v az &> /dev/null; then
         missing_tools+=("azure-cli")
     fi
-    
+
     if ! command -v terraform &> /dev/null; then
         missing_tools+=("terraform")
     fi
-    
+
     if ! command -v jq &> /dev/null; then
         missing_tools+=("jq")
     fi
-    
+
     if ! command -v curl &> /dev/null; then
         missing_tools+=("curl")
     fi
-    
+
     if [[ ${#missing_tools[@]} -gt 0 ]]; then
         log_error "Missing required tools: ${missing_tools[*]}"
         exit 1
     fi
-    
+
     # Check Azure login
     if ! az account show &> /dev/null; then
         log_error "Not logged into Azure. Run 'az login' first."
         exit 1
     fi
-    
+
     log_success "All prerequisites met"
 }
 
 # Download release artifacts
 download_artifacts() {
     log_info "Downloading release artifacts..."
-    
+
     local download_url
     if [[ "$RELEASE_TAG" == "latest" ]]; then
         download_url="https://github.com/pvandervelde/merge_warden/releases/latest/download"
     else
         download_url="https://github.com/pvandervelde/merge_warden/releases/download/$RELEASE_TAG"
     fi
-    
+
     if [[ "$DRY_RUN" == "true" ]]; then
         log_info "DRY RUN: Would download from $download_url"
         return
     fi
-    
+
     # Create temp directory
     local temp_dir
     temp_dir=$(mktemp -d)
     cd "$temp_dir"
-    
+
     # Download function package
     if ! curl -L -o azure-function-package.zip "$download_url/azure-function-package.zip"; then
         log_error "Failed to download azure-function-package.zip"
         exit 1
     fi
-    
+
     # Download and verify checksum
     if ! curl -L -o azure-function-package.zip.sha256 "$download_url/azure-function-package.zip.sha256"; then
         log_error "Failed to download checksum file"
         exit 1
     fi
-    
+
     # Verify integrity
     if ! sha256sum -c azure-function-package.zip.sha256; then
         log_error "Checksum verification failed"
         exit 1
     fi
-    
+
     # Move to working directory
     mv azure-function-package.zip "$OLDPWD/"
     cd "$OLDPWD"
     rm -rf "$temp_dir"
-    
+
     log_success "Downloaded and verified release artifacts"
 }
 
 # Deploy infrastructure
 deploy_infrastructure() {
     log_info "Deploying infrastructure..."
-    
+
     if [[ ! -d "$TERRAFORM_DIR" ]]; then
         log_error "Terraform directory not found: $TERRAFORM_DIR"
         exit 1
     fi
-    
+
     cd "$TERRAFORM_DIR"
-    
+
     # Initialize terraform
     if [[ "$DRY_RUN" == "true" ]]; then
         log_info "DRY RUN: Would run terraform init"
     else
         terraform init
     fi
-    
+
     # Prepare terraform variables
     local tf_vars=()
     tf_vars+=("-var=environment=$ENVIRONMENT")
     tf_vars+=("-var=location=$LOCATION")
-    
+
     if [[ -n "$RESOURCE_PREFIX" ]]; then
         tf_vars+=("-var=resource_prefix=$RESOURCE_PREFIX")
     fi
-    
+
     # Add environment-specific vars file if it exists
     if [[ -f "environments/$ENVIRONMENT.tfvars" ]]; then
         tf_vars+=("-var-file=environments/$ENVIRONMENT.tfvars")
     fi
-    
+
     # Plan
     if [[ "$DRY_RUN" == "true" ]]; then
         log_info "DRY RUN: Would run terraform plan with: ${tf_vars[*]}"
     else
         terraform plan "${tf_vars[@]}" -out=deployment.tfplan
     fi
-    
+
     # Apply
     if [[ "$DRY_RUN" == "true" ]]; then
         log_info "DRY RUN: Would run terraform apply"
     else
         terraform apply -auto-approve deployment.tfplan
-        
+
         # Get outputs
         RESOURCE_GROUP_NAME=$(terraform output -raw resource_group_name)
         FUNCTION_APP_NAME=$(terraform output -raw function_app_name)
         FUNCTION_URL=$(terraform output -raw function_url)
-        
+
         log_success "Infrastructure deployed successfully"
         log_info "Resource Group: $RESOURCE_GROUP_NAME"
         log_info "Function App: $FUNCTION_APP_NAME"
         log_info "Function URL: $FUNCTION_URL"
     fi
-    
+
     cd "$OLDPWD"
 }
 
 # Deploy function code
 deploy_function() {
     log_info "Deploying function code..."
-    
+
     if [[ "$DRY_RUN" == "true" ]]; then
         log_info "DRY RUN: Would deploy azure-function-package.zip to $FUNCTION_APP_NAME"
         return
     fi
-    
+
     if [[ ! -f "azure-function-package.zip" ]]; then
         log_error "Function package not found: azure-function-package.zip"
         exit 1
     fi
-    
+
     # Deploy the package
     az functionapp deployment source config-zip \
         --resource-group "$RESOURCE_GROUP_NAME" \
         --name "$FUNCTION_APP_NAME" \
         --src azure-function-package.zip
-    
+
     # Wait for deployment
     log_info "Waiting for deployment to complete..."
     sleep 30
-    
+
     # Verify deployment
     local state
     state=$(az functionapp show \
         --resource-group "$RESOURCE_GROUP_NAME" \
         --name "$FUNCTION_APP_NAME" \
         --query "state" -o tsv)
-    
+
     if [[ "$state" == "Running" ]]; then
         log_success "Function deployed and running"
     else
@@ -291,18 +291,18 @@ main() {
     log_info "Environment: $ENVIRONMENT"
     log_info "Location: $LOCATION"
     log_info "Release: $RELEASE_TAG"
-    
+
     if [[ "$DRY_RUN" == "true" ]]; then
         log_warning "DRY RUN MODE - No changes will be made"
     fi
-    
+
     check_prerequisites
     download_artifacts
     deploy_infrastructure
-    
+
     if [[ "$DRY_RUN" != "true" ]]; then
         deploy_function
-        
+
         echo
         log_success "Deployment completed successfully!"
         echo
