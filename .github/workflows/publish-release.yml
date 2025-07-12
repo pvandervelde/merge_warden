@@ -62,7 +62,7 @@ jobs:
         run: |
           LAST_TAG=$(git describe --tags --abbrev=0)
           LAST_COMMIT=$(git rev-parse ${LAST_TAG})
-          RELEASE_VERSION=$(conventional_commits_next_version --from-commit-hash ${LAST_COMMIT} --from-version ${LAST_TAG} --calculation-mode "Batch")
+          RELEASE_VERSION=$(conventional_commits_next_version --from-version ${LAST_TAG} --calculation-mode Batch ${LAST_COMMIT})
           echo "RELEASE_VERSION=${RELEASE_VERSION}" >> $GITHUB_OUTPUT
           echo "The release version is: ${RELEASE_VERSION}"
 
