@@ -10,6 +10,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### <!-- 0 -->⛰️  Features
 
 - Complete terraform migration to separate repository infrastructure from source code ([#161](https://github.com/pvandervelde/merge_warden/issues/161))
+- Remove tf-test job from CI workflow
+- Complete Phase 4 - Remove terraform code and update documentation
+- Complete phases 1-3 of terraform migration
+- Implement smart label detection for conventional commit types ([#157](https://github.com/pvandervelde/merge_warden/issues/157))
+- Add Azure App Configuration support for smart label detection
+- Implement robust non-blocking smart label detection
+- Integrate smart label detection with MergeWarden core processing
+- Integrate smart label detection with core processing pipeline
+- Implement label detection algorithm with three-tier search strategy
+- Extend configuration system for change type label detection
+- Add labeling for PR size ([#150](https://github.com/pvandervelde/merge_warden/issues/150))
+- Implement PR size check bypasses and fix compilation errors
+- Add PR size configuration support to Terraform and Azure Function
+- Implement smart label discovery for PR size labeling
+- Extend configuration schema for PR size checking
+- Implement PR size analysis foundation
+- Implement comprehensive bypass capabilities with audit trails ([#146](https://github.com/pvandervelde/merge_warden/issues/146))
+- Integrate Azure App Configuration for centralized config management
+- Add Azure App Configuration for centralized configuration
+- Add bypass indication in check status text
+- Add enhanced validation result types for bypass logging
+- Add bypass rule management commands
+- Implement bypass rules for validation checks
+- Implement data models for PR author bypass rules
+- Support repository-specific PR rule configuration via .github/merge-warden.toml ([#141](https://github.com/pvandervelde/merge_warden/issues/141))
+- Updating the CLI with the new config approach
+- Updating the azure function with the new config approach
+- Updating the core library to match the new config approach
+- Updating the way we read and combine the configurations
+- Integrate TOML config loading for merge-warden validation rules
+- Add TOML-based config schema, loader, and docs for merge-warden pull request rules
+- GitHub checks for merge blocking ([#137](https://github.com/pvandervelde/merge_warden/issues/137))
+- Switch to status checks for merge blocking
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- Correct conventional_commits_next_version command arguments ([#164](https://github.com/pvandervelde/merge_warden/issues/164))
+- Correct conventional_commits_next_version command arguments
+- Enable smart label detection in CLI mode
+- Broken refactor ([#155](https://github.com/pvandervelde/merge_warden/issues/155))
+- Add synchronize event to webhook processing ([#154](https://github.com/pvandervelde/merge_warden/issues/154))
+- Add synchronize event to webhook processing
+- Complete clippy warning fixes to achieve zero warnings
+- Make PR size label discovery case-insensitive
+- Fix description-based size label discovery
+- Add PR size configuration to ApplicationDefaults
+- Add tempfile dev dependency for bypass tests
+- Configuration unit tests
+- Azure function unable to start and connect to Key Vault ([#130](https://github.com/pvandervelde/merge_warden/issues/130))
+- Remove the reference to the local function config file
+- Write debug logs in Azure
+- Don't initialize the logs twice
+
+### <!-- 2 -->🚜 Refactor
+
+- Improve naming conventions by removing 'Smart' prefix
+- Unify label detection structs and improve naming
+- Move size integration tests to separate file
+- Report failures in the PR processing in the logs but continue working
+- Add more logging to the config read
+- If the PR is a draft we want to report as 'skipped'
+- Improve the github webhook signature verification
+
+### <!-- 3 -->📚 Documentation
+
+- Complete smart label detection documentation
+- Create the spec for PR size labeling
+- Updating the config file example in the readme
+- Adding the configuration schema rfc
+- Minor changes to the readme
+- Adding a section about the configuration to the README
+- Improving the README.md
+
+### <!-- 5 -->🎨 Styling
+
+- Fix rustfmt formatting issues
+
+### <!-- 6 -->🧪 Testing
+
+- Adding tests for the config changes
+- Updating the configuration tests
+- Add #[cfg(test)] test module imports and basic test scaffolding
+
+### <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- 0.2.0 ([#138](https://github.com/pvandervelde/merge_warden/issues/138))
+- Update the terraform check
+- Cleaning up compiler warnings
+- Remove copying files that no longer exist
+- Trying to get better error messages
+- Ignore the terraform state files
+- Allow manual deploys for testing
+
+
+
+## [0.2.0] - 2025-07-12
+
+### <!-- 0 -->⛰️  Features
+
+- Complete terraform migration to separate repository infrastructure from source code ([#161](https://github.com/pvandervelde/merge_warden/issues/161))
 - Implement smart label detection for conventional commit types ([#157](https://github.com/pvandervelde/merge_warden/issues/157))
 - Add Azure App Configuration support for smart label detection
 - Implement robust non-blocking smart label detection
