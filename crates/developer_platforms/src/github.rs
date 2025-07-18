@@ -508,7 +508,7 @@ impl PullRequestProvider for GitHubProvider {
     }
 
     #[instrument]
-    async fn list_labels(
+    async fn list_applied_labels(
         &self,
         repo_owner: &str,
         repo_name: &str,
@@ -547,7 +547,7 @@ impl PullRequestProvider for GitHubProvider {
     }
 
     #[instrument]
-    async fn list_repository_labels(
+    async fn list_available_labels(
         &self,
         repo_owner: &str,
         repo_name: &str,

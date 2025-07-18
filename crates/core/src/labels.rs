@@ -434,7 +434,7 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
         owner, repo, pr_number
     );
     let current_pr_labels = provider
-        .list_labels(owner, repo, pr_number)
+        .list_applied_labels(owner, repo, pr_number)
         .await
         .map_err(|_| {
             MergeWardenError::FailedToUpdatePullRequest(
@@ -742,7 +742,7 @@ impl LabelDetector {
         );
 
         let all_labels = provider
-            .list_repository_labels(owner, repo)
+            .list_available_labels(owner, repo)
             .await
             .map_err(|_| {
                 MergeWardenError::FailedToUpdatePullRequest(
@@ -1076,7 +1076,7 @@ impl LabelDetector {
 
         // Get repository labels
         let all_labels = provider
-            .list_repository_labels(owner, repo)
+            .list_available_labels(owner, repo)
             .await
             .map_err(|_| {
                 MergeWardenError::FailedToUpdatePullRequest(
