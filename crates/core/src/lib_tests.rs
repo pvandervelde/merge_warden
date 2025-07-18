@@ -159,7 +159,7 @@ impl PullRequestProvider for ErrorMockGitProvider {
         Ok(())
     }
 
-    async fn list_labels(
+    async fn list_applied_labels(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
@@ -168,7 +168,7 @@ impl PullRequestProvider for ErrorMockGitProvider {
         Ok(Vec::new())
     }
 
-    async fn list_repository_labels(
+    async fn list_available_labels(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
@@ -335,7 +335,7 @@ impl PullRequestProvider for DynamicMockGitProvider {
         Ok(())
     }
 
-    async fn list_labels(
+    async fn list_applied_labels(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
@@ -345,7 +345,7 @@ impl PullRequestProvider for DynamicMockGitProvider {
         Ok(labels.clone())
     }
 
-    async fn list_repository_labels(
+    async fn list_available_labels(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
@@ -511,7 +511,7 @@ impl PullRequestProvider for MockGitProvider {
         Ok(())
     }
 
-    async fn list_labels(
+    async fn list_applied_labels(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
@@ -521,7 +521,7 @@ impl PullRequestProvider for MockGitProvider {
         Ok(labels.clone())
     }
 
-    async fn list_repository_labels(
+    async fn list_available_labels(
         &self,
         _repo_owner: &str,
         _repo_name: &str,

@@ -5,6 +5,10 @@ pub mod errors;
 pub mod github;
 
 pub mod models;
+
+#[cfg(test)]
+mod lib_tests;
+
 use errors::Error;
 use models::{Comment, Label, PullRequest, PullRequestFile};
 
@@ -56,16 +60,169 @@ pub trait ConfigFetcher: Sync + Send {
 ///     # async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
 ///     # async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
 ///     # async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<Comment>, Error> { unimplemented!() }
-///     # async fn list_repository_labels(&self, _: &str, _: &str) -> Result<Vec<Label>, Error> { unimplemented!() }
+///     # async fn list_available_labels(&self, _: &str, _: &str) -> Result<Vec<Label>, Error> { unimplemented!() }
 ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
 ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
-///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
+///     # async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
 ///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
 ///     # async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
 /// }
 /// ```
 #[async_trait]
 pub trait PullRequestProvider {
+    /// Adds a comment to a pull request.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner` - The owner of the repository
+    /// * `repo_name` - The name of the repository
+    /// * `pr_number` - The pull request number
+    /// * `comment` - The comment text to add
+    ///
+    /// # Returns
+    ///
+    /// A `Result` indicating success or failure
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use merge_warden_developer_platforms::PullRequestProvider;
+    /// # use merge_warden_developer_platforms::errors::Error;
+    /// # use async_trait::async_trait;
+    /// # struct MyProvider;
+    /// # #[async_trait]
+    /// # impl PullRequestProvider for MyProvider {
+    /// #     async fn get_pull_request(&self, _: &str, _: &str, _: u64) -> Result<merge_warden_developer_platforms::models::PullRequest, Error> { unimplemented!() }
+    /// #     async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
+    /// #     async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Comment>, Error> { unimplemented!() }
+    /// #     async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
+    /// #     async fn list_available_labels(&self, _: &str, _: &str) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
+    /// #     async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
+    ///
+    /// async fn add_comment(
+    ///     &self,
+    ///     repo_owner: &str,
+    ///     repo_name: &str,
+    ///     pr_number: u64,
+    ///     comment: &str,
+    /// ) -> Result<(), Error> {
+    ///     // Implementation to add comment to pull request
+    ///     # unimplemented!()
+    /// }
+    /// # }
+    /// ```
+    async fn add_comment(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr_number: u64,
+        comment: &str,
+    ) -> Result<(), Error>;
+
+    /// Adds labels to a pull request.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner` - The owner of the repository
+    /// * `repo_name` - The name of the repository
+    /// * `pr_number` - The pull request number
+    /// * `labels` - The labels to add
+    ///
+    /// # Returns
+    ///
+    /// A `Result` indicating success or failure
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use merge_warden_developer_platforms::PullRequestProvider;
+    /// # use merge_warden_developer_platforms::errors::Error;
+    /// # use async_trait::async_trait;
+    /// # struct MyProvider;
+    /// # #[async_trait]
+    /// # impl PullRequestProvider for MyProvider {
+    /// #     async fn get_pull_request(&self, _: &str, _: &str, _: u64) -> Result<merge_warden_developer_platforms::models::PullRequest, Error> { unimplemented!() }
+    /// #     async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
+    /// #     async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Comment>, Error> { unimplemented!() }
+    /// #     async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
+    /// #     async fn list_available_labels(&self, _: &str, _: &str) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
+    /// #     async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
+    ///
+    /// async fn add_labels(
+    ///     &self,
+    ///     repo_owner: &str,
+    ///     repo_name: &str,
+    ///     pr_number: u64,
+    ///     labels: &[String],
+    /// ) -> Result<(), Error> {
+    ///     // Implementation to add labels to pull request
+    ///     # unimplemented!()
+    /// }
+    /// # }
+    /// ```
+    async fn add_labels(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr_number: u64,
+        labels: &[String],
+    ) -> Result<(), Error>;
+
+    /// Deletes a comment from a pull request.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner` - The owner of the repository
+    /// * `repo_name` - The name of the repository
+    /// * `comment_id` - The ID of the comment to delete
+    ///
+    /// # Returns
+    ///
+    /// A `Result` indicating success or failure
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use merge_warden_developer_platforms::PullRequestProvider;
+    /// # use merge_warden_developer_platforms::errors::Error;
+    /// # use async_trait::async_trait;
+    /// # struct MyProvider;
+    /// # #[async_trait]
+    /// # impl PullRequestProvider for MyProvider {
+    /// #     async fn get_pull_request(&self, _: &str, _: &str, _: u64) -> Result<merge_warden_developer_platforms::models::PullRequest, Error> { unimplemented!() }
+    /// #     async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
+    /// #     async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Comment>, Error> { unimplemented!() }
+    /// #     async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
+    /// #     async fn list_available_labels(&self, _: &str, _: &str) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
+    /// #     async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
+    ///
+    /// async fn delete_comment(
+    ///     &self,
+    ///     repo_owner: &str,
+    ///     repo_name: &str,
+    ///     comment_id: u64,
+    /// ) -> Result<(), Error> {
+    ///     // Implementation to delete comment from pull request
+    ///     # unimplemented!()
+    /// }
+    /// # }
+    /// ```
+    async fn delete_comment(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        comment_id: u64,
+    ) -> Result<(), Error>;
+
     /// Retrieves a pull request from the Git provider.
     ///
     /// # Arguments
@@ -113,10 +270,10 @@ pub trait PullRequestProvider {
     /// #     async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
     /// #     async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
     /// #     async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Comment>, Error> { unimplemented!() }
-    /// #     async fn list_repository_labels(&self, _: &str, _: &str) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
+    /// #     async fn list_available_labels(&self, _: &str, _: &str) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
     /// #     async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
     /// #     async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
-    /// #     async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
+    /// #     async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
     /// #     async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
     ///
     /// async fn get_pull_request_files(
@@ -137,43 +294,108 @@ pub trait PullRequestProvider {
         pr_number: u64,
     ) -> Result<Vec<PullRequestFile>, Error>;
 
-    /// Adds a comment to a pull request.
+    /// Lists all labels currently applied to a pull request.
+    ///
+    /// This method fetches the labels that are currently attached to a specific
+    /// pull request, which is useful for determining what labels are already present
+    /// before adding or removing labels.
     ///
     /// # Arguments
     ///
     /// * `repo_owner` - The owner of the repository
     /// * `repo_name` - The name of the repository
     /// * `pr_number` - The pull request number
-    /// * `comment` - The comment text to add
     ///
     /// # Returns
     ///
-    /// A `Result` indicating success or failure
-    async fn add_comment(
+    /// A `Result` containing a vector of labels currently applied to the pull request
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use merge_warden_developer_platforms::PullRequestProvider;
+    /// # use merge_warden_developer_platforms::errors::Error;
+    /// # use async_trait::async_trait;
+    /// # struct MyProvider;
+    /// # #[async_trait]
+    /// # impl PullRequestProvider for MyProvider {
+    /// #     async fn get_pull_request(&self, _: &str, _: &str, _: u64) -> Result<merge_warden_developer_platforms::models::PullRequest, Error> { unimplemented!() }
+    /// #     async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
+    /// #     async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Comment>, Error> { unimplemented!() }
+    /// #     async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn list_available_labels(&self, _: &str, _: &str) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
+    /// #     async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
+    ///
+    /// async fn list_applied_labels(
+    ///     &self,
+    ///     repo_owner: &str,
+    ///     repo_name: &str,
+    ///     pr_number: u64,
+    /// ) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> {
+    ///     // Implementation to list labels currently applied to pull request
+    ///     # unimplemented!()
+    /// }
+    /// # }
+    /// ```
+    async fn list_applied_labels(
         &self,
         repo_owner: &str,
         repo_name: &str,
         pr_number: u64,
-        comment: &str,
-    ) -> Result<(), Error>;
+    ) -> Result<Vec<Label>, Error>;
 
-    /// Deletes a comment from a pull request.
+    /// Lists all labels available in the repository.
+    ///
+    /// This method fetches all labels that are defined in the repository,
+    /// which is essential for smart label discovery and validation. It provides
+    /// the complete set of labels that can be applied to pull requests.
     ///
     /// # Arguments
     ///
     /// * `repo_owner` - The owner of the repository
     /// * `repo_name` - The name of the repository
-    /// * `comment_id` - The ID of the comment to delete
     ///
     /// # Returns
     ///
-    /// A `Result` indicating success or failure
-    async fn delete_comment(
+    /// A `Result` containing a vector of all available repository labels
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use merge_warden_developer_platforms::PullRequestProvider;
+    /// # use merge_warden_developer_platforms::errors::Error;
+    /// # use async_trait::async_trait;
+    /// # struct MyProvider;
+    /// # #[async_trait]
+    /// # impl PullRequestProvider for MyProvider {
+    /// #     async fn get_pull_request(&self, _: &str, _: &str, _: u64) -> Result<merge_warden_developer_platforms::models::PullRequest, Error> { unimplemented!() }
+    /// #     async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
+    /// #     async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Comment>, Error> { unimplemented!() }
+    /// #     async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
+    /// #     async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
+    ///
+    /// async fn list_available_labels(
+    ///     &self,
+    ///     repo_owner: &str,
+    ///     repo_name: &str,
+    /// ) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> {
+    ///     // Implementation to list all available repository labels
+    ///     # unimplemented!()
+    /// }
+    /// # }
+    /// ```
+    async fn list_available_labels(
         &self,
         repo_owner: &str,
         repo_name: &str,
-        comment_id: u64,
-    ) -> Result<(), Error>;
+    ) -> Result<Vec<Label>, Error>;
 
     /// Lists all comments on a pull request.
     ///
@@ -186,32 +408,43 @@ pub trait PullRequestProvider {
     /// # Returns
     ///
     /// A `Result` containing a vector of comments
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use merge_warden_developer_platforms::PullRequestProvider;
+    /// # use merge_warden_developer_platforms::errors::Error;
+    /// # use async_trait::async_trait;
+    /// # struct MyProvider;
+    /// # #[async_trait]
+    /// # impl PullRequestProvider for MyProvider {
+    /// #     async fn get_pull_request(&self, _: &str, _: &str, _: u64) -> Result<merge_warden_developer_platforms::models::PullRequest, Error> { unimplemented!() }
+    /// #     async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
+    /// #     async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
+    /// #     async fn list_available_labels(&self, _: &str, _: &str) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
+    /// #     async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
+    ///
+    /// async fn list_comments(
+    ///     &self,
+    ///     repo_owner: &str,
+    ///     repo_name: &str,
+    ///     pr_number: u64,
+    /// ) -> Result<Vec<merge_warden_developer_platforms::models::Comment>, Error> {
+    ///     // Implementation to list comments on pull request
+    ///     # unimplemented!()
+    /// }
+    /// # }
+    /// ```
     async fn list_comments(
         &self,
         repo_owner: &str,
         repo_name: &str,
         pr_number: u64,
     ) -> Result<Vec<Comment>, Error>;
-
-    /// Adds labels to a pull request.
-    ///
-    /// # Arguments
-    ///
-    /// * `repo_owner` - The owner of the repository
-    /// * `repo_name` - The name of the repository
-    /// * `pr_number` - The pull request number
-    /// * `labels` - The labels to add
-    ///
-    /// # Returns
-    ///
-    /// A `Result` indicating success or failure
-    async fn add_labels(
-        &self,
-        repo_owner: &str,
-        repo_name: &str,
-        pr_number: u64,
-        labels: &[String],
-    ) -> Result<(), Error>;
 
     /// Removes a label from a pull request.
     ///
@@ -225,6 +458,38 @@ pub trait PullRequestProvider {
     /// # Returns
     ///
     /// A `Result` indicating success or failure
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use merge_warden_developer_platforms::PullRequestProvider;
+    /// # use merge_warden_developer_platforms::errors::Error;
+    /// # use async_trait::async_trait;
+    /// # struct MyProvider;
+    /// # #[async_trait]
+    /// # impl PullRequestProvider for MyProvider {
+    /// #     async fn get_pull_request(&self, _: &str, _: &str, _: u64) -> Result<merge_warden_developer_platforms::models::PullRequest, Error> { unimplemented!() }
+    /// #     async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
+    /// #     async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Comment>, Error> { unimplemented!() }
+    /// #     async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
+    /// #     async fn list_available_labels(&self, _: &str, _: &str) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
+    /// #     async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
+    ///
+    /// async fn remove_label(
+    ///     &self,
+    ///     repo_owner: &str,
+    ///     repo_name: &str,
+    ///     pr_number: u64,
+    ///     label: &str,
+    /// ) -> Result<(), Error> {
+    ///     // Implementation to remove label from pull request
+    ///     # unimplemented!()
+    /// }
+    /// # }
+    /// ```
     async fn remove_label(
         &self,
         repo_owner: &str,
@@ -232,43 +497,6 @@ pub trait PullRequestProvider {
         pr_number: u64,
         label: &str,
     ) -> Result<(), Error>;
-
-    /// Lists all labels on a pull request.
-    ///
-    /// # Arguments
-    ///
-    /// * `repo_owner` - The owner of the repository
-    /// * `repo_name` - The name of the repository
-    /// * `pr_number` - The pull request number
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing a vector of labels
-    async fn list_labels(
-        &self,
-        repo_owner: &str,
-        repo_name: &str,
-        pr_number: u64,
-    ) -> Result<Vec<Label>, Error>;
-
-    /// Lists all available labels in the repository.
-    ///
-    /// This method fetches all labels that are available in the repository,
-    /// which is needed for smart label discovery in size labeling.
-    ///
-    /// # Arguments
-    ///
-    /// * `repo_owner` - The owner of the repository
-    /// * `repo_name` - The name of the repository
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing a vector of all repository labels
-    async fn list_repository_labels(
-        &self,
-        repo_owner: &str,
-        repo_name: &str,
-    ) -> Result<Vec<Label>, Error>;
 
     /// Updates the GitHub check run status for the pull request. This should be used to report
     /// the result of MergeWarden's validation as a GitHub check (success/failure, with details).
@@ -286,6 +514,41 @@ pub trait PullRequestProvider {
     /// # Returns
     ///
     /// A `Result` indicating success or failure
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use merge_warden_developer_platforms::PullRequestProvider;
+    /// # use merge_warden_developer_platforms::errors::Error;
+    /// # use async_trait::async_trait;
+    /// # struct MyProvider;
+    /// # #[async_trait]
+    /// # impl PullRequestProvider for MyProvider {
+    /// #     async fn get_pull_request(&self, _: &str, _: &str, _: u64) -> Result<merge_warden_developer_platforms::models::PullRequest, Error> { unimplemented!() }
+    /// #     async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
+    /// #     async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
+    /// #     async fn list_available_labels(&self, _: &str, _: &str) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
+    /// #     async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Comment>, Error> { unimplemented!() }
+    /// #     async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+    ///
+    /// async fn update_pr_check_status(
+    ///     &self,
+    ///     repo_owner: &str,
+    ///     repo_name: &str,
+    ///     pr_number: u64,
+    ///     conclusion: &str,
+    ///     output_title: &str,
+    ///     output_summary: &str,
+    ///     output_text: &str,
+    /// ) -> Result<(), Error> {
+    ///     // Implementation to update pull request check status
+    ///     # unimplemented!()
+    /// }
+    /// # }
+    /// ```
     #[allow(clippy::too_many_arguments)]
     async fn update_pr_check_status(
         &self,

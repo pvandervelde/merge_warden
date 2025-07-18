@@ -286,7 +286,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
             // Check if PR already has the invalid title label
             let labels = (self
                 .provider
-                .list_labels(repo_owner, repo_name, pr.number)
+                .list_applied_labels(repo_owner, repo_name, pr.number)
                 .await)
                 .unwrap_or_default();
             debug!(
@@ -392,7 +392,7 @@ Please update the PR title to match the conventional commit message guidelines."
             // Check if PR has the invalid title label to remove it
             let labels = (self
                 .provider
-                .list_labels(repo_owner, repo_name, pr.number)
+                .list_applied_labels(repo_owner, repo_name, pr.number)
                 .await)
                 .unwrap_or_default();
 
@@ -589,7 +589,7 @@ Please update the PR title to match the conventional commit message guidelines."
             // Check if PR already has the missing work item label
             let labels = (self
                 .provider
-                .list_labels(repo_owner, repo_name, pr.number)
+                .list_applied_labels(repo_owner, repo_name, pr.number)
                 .await)
                 .unwrap_or_default();
             debug!(
@@ -704,7 +704,7 @@ Please update the PR body to include a valid work item reference."#;
             if let Some(work_item_label) = &self.config.missing_work_item_label {
                 let labels = (self
                     .provider
-                    .list_labels(repo_owner, repo_name, pr.number)
+                    .list_applied_labels(repo_owner, repo_name, pr.number)
                     .await)
                     .unwrap_or_default();
 
@@ -1086,10 +1086,10 @@ Please update the PR body to include a valid work item reference."#;
     ///     # async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
     ///     # async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<Comment>, Error> { unimplemented!() }
-    ///     # async fn list_repository_labels(&self, _: &str, _: &str) -> Result<Vec<Label>, Error> { unimplemented!() }
+    ///     # async fn list_available_labels(&self, _: &str, _: &str) -> Result<Vec<Label>, Error> { unimplemented!() }
     ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
     ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
-    ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
+    ///     # async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
     ///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
     /// }
@@ -1157,10 +1157,10 @@ Please update the PR body to include a valid work item reference."#;
     ///     # async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
     ///     # async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<Comment>, Error> { unimplemented!() }
-    ///     # async fn list_repository_labels(&self, _: &str, _: &str) -> Result<Vec<Label>, Error> { unimplemented!() }
+    ///     # async fn list_available_labels(&self, _: &str, _: &str) -> Result<Vec<Label>, Error> { unimplemented!() }
     ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
     ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
-    ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
+    ///     # async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
     ///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
     /// }
@@ -1531,10 +1531,10 @@ Please update the PR body to include a valid work item reference."#;
     ///     # async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> { unimplemented!() }
     ///     # async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<Comment>, Error> { unimplemented!() }
-    ///     # async fn list_repository_labels(&self, _: &str, _: &str) -> Result<Vec<Label>, Error> { unimplemented!() }
+    ///     # async fn list_available_labels(&self, _: &str, _: &str) -> Result<Vec<Label>, Error> { unimplemented!() }
     ///     # async fn add_labels(&self, _: &str, _: &str, _: u64, _: &[String]) -> Result<(), Error> { unimplemented!() }
     ///     # async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
-    ///     # async fn list_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
+    ///     # async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
     ///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
     /// }

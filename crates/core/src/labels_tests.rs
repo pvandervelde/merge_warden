@@ -73,7 +73,7 @@ impl PullRequestProvider for MockGitProvider {
         unimplemented!("Not needed for this test")
     }
 
-    async fn list_repository_labels(
+    async fn list_available_labels(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
@@ -109,7 +109,7 @@ impl PullRequestProvider for MockGitProvider {
         unimplemented!("Not needed for this test")
     }
 
-    async fn list_labels(
+    async fn list_applied_labels(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
@@ -201,7 +201,7 @@ impl PullRequestProvider for ErrorMockGitProvider {
         unimplemented!("Not needed for this test")
     }
 
-    async fn list_labels(
+    async fn list_applied_labels(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
@@ -232,7 +232,7 @@ impl PullRequestProvider for ErrorMockGitProvider {
         unimplemented!("Not needed for this test")
     }
 
-    async fn list_repository_labels(
+    async fn list_available_labels(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
@@ -755,7 +755,7 @@ impl PullRequestProvider for SmartMockGitProvider {
         unimplemented!("Not needed for this test")
     }
 
-    async fn list_repository_labels(
+    async fn list_available_labels(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
@@ -791,7 +791,7 @@ impl PullRequestProvider for SmartMockGitProvider {
         unimplemented!("Not needed for this test")
     }
 
-    async fn list_labels(
+    async fn list_applied_labels(
         &self,
         _repo_owner: &str,
         _repo_name: &str,
