@@ -1,3 +1,6 @@
+#![deny(missing_docs)]
+#![deny(clippy::missing_docs_in_private_items)]
+
 use axum::{extract::State, routing::get, routing::post, Router};
 use axum_macros::debug_handler;
 use azure_core::credentials::TokenCredential;

@@ -1,3 +1,6 @@
+#![deny(missing_docs)]
+#![deny(clippy::missing_docs_in_private_items)]
+
 //! # Merge Warden Core
 //!
 //! Core business logic for validating and managing pull requests according to
