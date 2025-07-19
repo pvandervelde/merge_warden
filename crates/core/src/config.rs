@@ -291,26 +291,32 @@ pub struct ApplicationDefaults {
 }
 
 impl ApplicationDefaults {
+    /// Default value for invalid title label (None)
     fn default_title_invalid_label() -> Option<String> {
         None
     }
 
+    /// Default regex pattern for title validation (conventional commits)
     fn default_title_pattern() -> String {
         CONVENTIONAL_COMMIT_REGEX.to_string()
     }
 
+    /// Default value for title validation requirement (false)
     fn default_title_required() -> bool {
         false
     }
 
+    /// Default value for missing work item label (None)
     fn default_work_item_missing_label() -> Option<String> {
         None
     }
 
+    /// Default regex pattern for work item validation
     fn default_work_item_pattern() -> String {
         WORK_ITEM_REGEX.to_string()
     }
 
+    /// Default value for work item validation requirement (false)
     fn default_work_item_required() -> bool {
         false
     }
@@ -510,7 +516,7 @@ impl BypassRules {
     /// # Arguments
     ///
     /// * `title_convention` - Bypass rule for title validation
-    /// * `work_items` - Bypass rule for work item validation  
+    /// * `work_items` - Bypass rule for work item validation
     /// * `size` - Bypass rule for PR size validation
     pub fn new_with_size(
         title_convention: BypassRule,
@@ -662,14 +668,17 @@ pub struct PullRequestsTitlePolicyConfig {
 }
 
 impl PullRequestsTitlePolicyConfig {
+    /// Default value for label when validation fails (None)
     fn default_label() -> Option<String> {
         None
     }
 
+    /// Default regex pattern for title validation (conventional commits)
     fn default_pattern() -> String {
         CONVENTIONAL_COMMIT_REGEX.to_string()
     }
 
+    /// Default value for title validation requirement (false)
     fn default_required() -> bool {
         false
     }
@@ -801,14 +810,17 @@ pub struct WorkItemPolicyConfig {
 }
 
 impl WorkItemPolicyConfig {
+    /// Default value for label when work item is missing (None)
     fn default_label() -> Option<String> {
         None
     }
 
+    /// Default regex pattern for work item validation
     fn default_pattern() -> String {
         WORK_ITEM_REGEX.to_string()
     }
 
+    /// Default value for work item validation requirement (false)
     fn default_required() -> bool {
         false
     }
@@ -853,18 +865,22 @@ pub struct PrSizeCheckConfig {
 }
 
 impl PrSizeCheckConfig {
+    /// Default value for size check enablement (false)
     fn default_enabled() -> bool {
         false
     }
 
+    /// Default value for failing on oversized PRs (false)
     fn default_fail_on_oversized() -> bool {
         false
     }
 
+    /// Default prefix for size labels ("size/")
     fn default_label_prefix() -> String {
         "size/".to_string()
     }
 
+    /// Default value for adding educational comments (true)
     fn default_add_comment() -> bool {
         true
     }

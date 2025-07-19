@@ -147,13 +147,13 @@ pub struct CheckResult {
 pub struct WebhookPayload {
     /// The action that triggered the webhook event
     pub action: String,
-    
+
     /// The pull request data, if available in the webhook payload
     pub pull_request: Option<PullRequest>,
-    
+
     /// The repository information from the webhook
     pub repository: Option<Repository>,
-    
+
     /// The GitHub App installation information, if applicable
     pub installation: Option<Installation>,
 }
@@ -185,7 +185,7 @@ pub struct WebhookPayload {
 pub struct MergeWarden<P: PullRequestProvider + std::fmt::Debug> {
     /// The pull request provider implementation (GitHub, GitLab, etc.)
     provider: P,
-    
+
     /// The validation configuration settings for this instance
     config: CurrentPullRequestValidationConfiguration,
 }

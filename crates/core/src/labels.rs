@@ -1817,9 +1817,7 @@ impl LabelManager {
         // Check if this PR indicates a breaking change
         let is_breaking_change = pr_title.contains("!:")
             || pr_title.to_lowercase().contains("breaking change")
-            || pr_body.map_or(false, |body| {
-                body.to_lowercase().contains("breaking change")
-            });
+            || pr_body.is_some_and(|body| body.to_lowercase().contains("breaking change"));
 
         if !is_breaking_change {
             debug!(
