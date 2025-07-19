@@ -75,6 +75,10 @@ use config::CurrentPullRequestValidationConfiguration;
 use config::TITLE_COMMENT_MARKER;
 use config::WORK_ITEM_COMMENT_MARKER;
 
+/// Error types and utilities for Merge Warden operations.
+///
+/// This module contains error types that can occur during pull request
+/// validation, configuration parsing, and Git provider interactions.
 pub mod errors;
 use errors::MergeWardenError;
 use serde::Deserialize;
@@ -110,11 +114,47 @@ pub struct CheckResult {
     pub bypasses_used: Vec<validation_result::BypassInfo>,
 }
 
+/// Webhook payload structure for GitHub webhook events.
+///
+/// This struct represents the JSON payload received from GitHub webhooks
+/// when pull request events occur. It contains the essential information
+/// needed to process pull request events.
+///
+/// # Fields
+///
+/// * `action` - The type of action that triggered the webhook (e.g., "opened", "synchronize")
+/// * `pull_request` - The pull request data, if available
+/// * `repository` - The repository information
+/// * `installation` - The GitHub App installation information, if applicable
+///
+/// # Examples
+///
+/// ```rust
+/// use merge_warden_core::WebhookPayload;
+/// use serde_json::from_str;
+///
+/// let json = r#"{
+///     "action": "opened",
+///     "pull_request": null,
+///     "repository": null,
+///     "installation": null
+/// }"#;
+///
+/// let payload: WebhookPayload = from_str(json).expect("Failed to parse webhook payload");
+/// assert_eq!(payload.action, "opened");
+/// ```
 #[derive(Deserialize)]
 pub struct WebhookPayload {
+    /// The action that triggered the webhook event
     pub action: String,
+    
+    /// The pull request data, if available in the webhook payload
     pub pull_request: Option<PullRequest>,
+    
+    /// The repository information from the webhook
     pub repository: Option<Repository>,
+    
+    /// The GitHub App installation information, if applicable
     pub installation: Option<Installation>,
 }
 
@@ -143,7 +183,10 @@ pub struct WebhookPayload {
 /// ```
 #[derive(Debug)]
 pub struct MergeWarden<P: PullRequestProvider + std::fmt::Debug> {
+    /// The pull request provider implementation (GitHub, GitLab, etc.)
     provider: P,
+    
+    /// The validation configuration settings for this instance
     config: CurrentPullRequestValidationConfiguration,
 }
 
