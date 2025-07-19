@@ -7,10 +7,15 @@ use tracing::{debug, error, info, instrument};
 use crate::config::{get_config_path, AppConfig};
 use crate::errors::CliError;
 
+/// Service name for storing credentials in the system keyring
 pub const KEY_RING_SERVICE_NAME: &str = "merge_warden_cli";
+/// Key name for storing GitHub App ID in the keyring
 pub const KEY_RING_APP_ID: &str = "github_app_id";
+/// Key name for storing GitHub App private key path in the keyring
 pub const KEY_RING_APP_PRIVATE_KEY_PATH: &str = "github_private_key_path";
+/// Key name for storing GitHub user token in the keyring
 pub const KEY_RING_USER_TOKEN: &str = "github_token";
+/// Key name for storing webhook secret in the keyring
 pub const KEY_RING_WEB_HOOK_SECRET: &str = "webhook_secret";
 
 #[cfg(test)]
@@ -34,9 +39,6 @@ pub enum AuthCommands {
 pub async fn execute(cmd: AuthCommands) -> Result<(), CliError> {
     match cmd {
         AuthCommands::GitHub { method } => auth_github(&method).await,
-        _ => Err(CliError::InvalidArguments(
-            "Unknown authentication type.".to_string(),
-        )),
     }
 }
 

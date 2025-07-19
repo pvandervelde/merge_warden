@@ -44,16 +44,56 @@ pub struct Comment {
     /// The text content of the comment
     pub body: String,
 
-    // The user who made the comment
+    /// The user who made the comment
     pub user: User,
 }
 
-#[derive(Deserialize)]
+/// Represents a GitHub App installation.
+///
+/// This struct contains information about a GitHub App installation
+/// on a repository or organization. Used for authentication and
+/// identifying the scope of the app's permissions.
+///
+/// # Fields
+///
+/// * `id` - The unique identifier of the installation
+/// * `slug` - Optional slug identifier for the installation
+/// * `client_id` - Optional client ID associated with the installation
+/// * `node_id` - GitHub's global node identifier for GraphQL API
+/// * `name` - Optional name of the installation
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_developer_platforms::models::Installation;
+/// use serde_json::from_str;
+///
+/// let json = r#"{
+///     "id": 12345,
+///     "slug": "my-app-installation",
+///     "client_id": "Iv1.1234567890abcdef",
+///     "node_id": "MDIzOkluc3RhbGxhdGlvbjEyMzQ1",
+///     "name": "My App Installation"
+/// }"#;
+///
+/// let installation: Installation = from_str(json).expect("Failed to parse installation");
+/// assert_eq!(installation.id, 12345);
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Installation {
+    /// The unique identifier of the installation
     pub id: u64,
+
+    /// Optional slug identifier for the installation
     pub slug: Option<String>,
+
+    /// Optional client ID associated with the installation
     pub client_id: Option<String>,
+
+    /// GitHub's global node identifier for GraphQL API
     pub node_id: String,
+
+    /// Optional name of the installation
     pub name: Option<String>,
 }
 
@@ -85,9 +125,28 @@ pub struct Label {
     pub description: Option<String>,
 }
 
+/// Represents an organization on a Git provider platform.
+///
+/// This struct contains essential information about an organization
+/// that owns repositories and manages team access.
+///
+/// # Fields
+///
+/// * `name` - The name/login of the organization
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_developer_platforms::models::Organization;
+///
+/// let org = Organization {
+///     name: "my-company".to_string(),
+/// };
+/// assert_eq!(org.name, "my-company");
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Organization {
-    /// The name of the organization
+    /// The name/login of the organization
     pub name: String,
 }
 
@@ -183,23 +242,115 @@ pub struct PullRequestFile {
     pub status: String,
 }
 
-#[derive(Deserialize)]
+/// Represents a repository on a Git provider platform.
+///
+/// This struct contains essential information about a repository
+/// that is used for identifying and accessing the repository.
+///
+/// # Fields
+///
+/// * `full_name` - The full name including owner (e.g., "owner/repo")
+/// * `name` - The repository name only
+/// * `node_id` - GitHub's global node identifier for GraphQL API
+/// * `private` - Whether the repository is private or public
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_developer_platforms::models::Repository;
+/// use serde_json::from_str;
+///
+/// let json = r#"{
+///     "full_name": "octocat/Hello-World",
+///     "name": "Hello-World",
+///     "node_id": "MDEwOlJlcG9zaXRvcnkxMjk2MjY5",
+///     "private": false
+/// }"#;
+///
+/// let repo: Repository = from_str(json).expect("Failed to parse repository");
+/// assert_eq!(repo.full_name, "octocat/Hello-World");
+/// assert_eq!(repo.name, "Hello-World");
+/// assert!(!repo.private);
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Repository {
+    /// The full name including owner (e.g., "owner/repo")
     pub full_name: String,
+
+    /// The repository name only
     pub name: String,
+
+    /// GitHub's global node identifier for GraphQL API
     pub node_id: String,
+
+    /// Whether the repository is private or public
     pub private: bool,
 }
 
+/// Represents a review on a pull request.
+///
+/// This struct contains information about a code review submitted
+/// by a user on a pull request, including the review state and reviewer.
+///
+/// # Fields
+///
+/// * `id` - The unique identifier of the review
+/// * `state` - The state of the review (e.g., "approved", "changes_requested", "commented")
+/// * `user` - The user who submitted the review
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_developer_platforms::models::{Review, User};
+///
+/// let review = Review {
+///     id: 789,
+///     state: "approved".to_string(),
+///     user: User {
+///         id: 123,
+///         login: "reviewer123".to_string(),
+///     },
+/// };
+/// assert_eq!(review.state, "approved");
+/// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Review {
+    /// The unique identifier of the review
     pub id: u64,
+
+    /// The state of the review (e.g., "approved", "changes_requested", "commented")
     pub state: String,
+
+    /// The user who submitted the review
     pub user: User,
 }
 
+/// Represents a user on a Git provider platform.
+///
+/// This struct contains the essential user information needed
+/// for identification and attribution of actions.
+///
+/// # Fields
+///
+/// * `id` - The unique identifier of the user
+/// * `login` - The username/login of the user
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_developer_platforms::models::User;
+///
+/// let user = User {
+///     id: 456,
+///     login: "octocat".to_string(),
+/// };
+/// assert_eq!(user.login, "octocat");
+/// ```
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct User {
+    /// The unique identifier of the user
     pub id: u64,
+
+    /// The username/login of the user
     pub login: String,
 }

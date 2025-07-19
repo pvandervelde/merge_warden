@@ -26,9 +26,11 @@ pub struct AppConfig {
     pub policies: ApplicationDefaults,
 
     #[serde(default)]
+    /// Authentication configuration settings
     pub authentication: AuthenticationConfig,
 
     #[serde(default)]
+    /// Webhook server configuration settings
     pub webhooks: WebHookConfig,
 }
 
@@ -90,17 +92,21 @@ impl Default for AppConfig {
     }
 }
 
+/// Configuration for authentication settings
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AuthenticationConfig {
     #[serde(default = "AuthenticationConfig::default_auth_method")]
+    /// The authentication method to use (e.g., "token", "app")
     pub auth_method: String,
 }
 
 impl AuthenticationConfig {
+    /// Returns the default authentication method
     fn default_auth_method() -> String {
         "token".to_string()
     }
 
+    /// Creates a new AuthenticationConfig with default values
     pub fn new() -> Self {
         AuthenticationConfig {
             auth_method: Self::default_auth_method(),
@@ -125,10 +131,12 @@ pub struct DefaultConfig {
 }
 
 impl DefaultConfig {
+    /// Returns the default Git provider name
     fn default_provider() -> String {
         "github".to_string()
     }
 
+    /// Creates a new DefaultConfig with default values
     pub fn new() -> Self {
         DefaultConfig {
             provider: Self::default_provider(),
@@ -153,6 +161,7 @@ pub struct WebHookConfig {
 }
 
 impl WebHookConfig {
+    /// Creates a new WebHookConfig with default values
     pub fn new() -> Self {
         WebHookConfig {
             port: default_port(),
@@ -179,6 +188,7 @@ pub fn get_config_path(config_path: Option<&str>) -> PathBuf {
     }
 }
 
+/// Returns the default port number for webhook listening
 fn default_port() -> u32 {
     3100
 }

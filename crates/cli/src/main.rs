@@ -1,16 +1,54 @@
+//! # Merge Warden CLI
+//!
+//! Command-line interface for validating pull requests against configured rules.
+//!
+//! This binary provides a CLI interface to the Merge Warden functionality,
+//! allowing users to validate pull requests, manage configuration, and
+//! authenticate with Git providers from the command line.
+//!
+//! # Commands
+//!
+//! - `checkpr` - Validate a pull request against configured rules
+//! - `config` - Manage configuration files and settings
+//! - `auth` - Authenticate with Git providers (GitHub, GitLab, etc.)
+//!
+//! # Examples
+//!
+//! ```bash
+//! # Check a pull request
+//! merge-warden checkpr --repo owner/repo --pr-number 123
+//!
+//! # Initialize configuration
+//! merge-warden config init
+//!
+//! # Authenticate with GitHub
+//! merge-warden auth github --token <token>
+//! ```
+
+#![deny(missing_docs)]
+#![deny(clippy::missing_docs_in_private_items)]
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use tracing::{error, info, instrument};
 
+/// Command implementations for the CLI.
 mod commands;
+
+/// Configuration management for the CLI.
 mod config;
+
+/// Error types specific to the CLI.
 mod errors;
 
 use commands::{auth::AuthCommands, check_pr::CheckPrArgs, config_cmd::ConfigCommands};
 use errors::CliError;
 use tracing_subscriber::{fmt, prelude::*, EnvFilter};
 
-/// Merge Warden CLI - Validate pull requests against configured rules
+/// Command-line interface structure for Merge Warden.
+///
+/// This struct defines the top-level CLI interface using clap's derive API.
+/// It includes global options like verbose logging and the main command structure.
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
@@ -18,10 +56,16 @@ struct Cli {
     #[arg(short, long)]
     verbose: bool,
 
+    /// The subcommand to execute
     #[command(subcommand)]
     command: Commands,
 }
 
+/// Available commands for the Merge Warden CLI.
+///
+/// This enum defines all the subcommands that can be executed through
+/// the CLI interface. Each variant corresponds to a different area of
+/// functionality within Merge Warden.
 #[derive(Subcommand)]
 enum Commands {
     /// Validate a pull request against configured rules
@@ -37,6 +81,33 @@ enum Commands {
     Auth(AuthCommands),
 }
 
+/// Main entry point for the Merge Warden CLI.
+///
+/// This function initializes logging, parses command-line arguments,
+/// and dispatches to the appropriate command handler based on the
+/// user's input.
+///
+/// # Returns
+///
+/// Returns `Ok(())` on successful execution, or a `CliError` if any
+/// operation fails.
+///
+/// # Errors
+///
+/// This function can return errors in the following cases:
+/// - Command parsing failures
+/// - Command execution failures
+/// - Configuration errors
+/// - Authentication errors
+/// - Network or API errors during PR validation
+///
+/// # Examples
+///
+/// The function is called automatically when the binary is executed:
+///
+/// ```bash
+/// merge-warden checkpr --repo owner/repo --pr-number 123
+/// ```
 #[tokio::main]
 #[instrument]
 async fn main() -> Result<(), CliError> {

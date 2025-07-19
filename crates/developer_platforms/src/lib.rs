@@ -1,9 +1,47 @@
+//! # Developer Platforms Crate
+//!
+//! This crate provides abstractions and implementations for interacting with
+//! various developer platforms (like GitHub, GitLab) that host pull requests.
+//!
+//! The crate defines traits for platform-agnostic operations on pull requests,
+//! comments, labels, and other Git provider features. It includes a GitHub
+//! implementation and models for representing platform data.
+//!
+//! # Key Components
+//!
+//! - [`PullRequestProvider`] - Core trait for pull request operations
+//! - [`ConfigFetcher`] - Trait for fetching configuration files
+//! - [`models`] - Data models for pull requests, comments, labels, etc.
+//! - [`github`] - GitHub implementation of the provider traits
+//! - [`errors`] - Error types for the crate
+//!
+//! # Examples
+//!
+//! ```rust,no_run
+//! use merge_warden_developer_platforms::{PullRequestProvider, github::GitHubProvider};
+//! # use merge_warden_developer_platforms::errors::Error;
+//! # use octocrab::Octocrab;
+//!
+//! async fn example() -> Result<(), Error> {
+//!     let github = GitHubProvider::new(Octocrab::builder().build()?);
+//!     let pr = github.get_pull_request("owner", "repo", 123).await?;
+//!     println!("PR title: {}", pr.title);
+//!     Ok(())
+//! }
+//! ```
+
+#![deny(missing_docs)]
+#![deny(clippy::missing_docs_in_private_items)]
+
 use async_trait::async_trait;
 
+/// Error types for developer platform operations.
 pub mod errors;
 
+/// GitHub implementation of developer platform traits.
 pub mod github;
 
+/// Data models for pull requests, comments, labels, and other platform entities.
 pub mod models;
 
 #[cfg(test)]

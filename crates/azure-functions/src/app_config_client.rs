@@ -29,21 +29,37 @@ mod tests;
 /// Errors that can occur when interacting with Azure App Configuration
 #[derive(Error, Debug)]
 pub enum AppConfigError {
+    /// Authentication with Azure App Configuration failed
     #[error("Authentication failed: {0}")]
     Authentication(String),
 
+    /// HTTP request to Azure App Configuration failed
     #[error("HTTP request failed: {0}")]
     Http(#[from] reqwest::Error),
 
+    /// Azure App Configuration API returned an error response
     #[error("Azure App Configuration API error: {status} - {message}")]
-    ApiError { status: StatusCode, message: String },
+    ApiError {
+        /// HTTP status code returned by the API
+        status: StatusCode,
+        /// Error message from the API response
+        message: String,
+    },
 
+    /// Failed to parse a configuration value
     #[error("Failed to parse configuration value: {key} - {error}")]
-    ParseError { key: String, error: String },
+    ParseError {
+        /// The configuration key that failed to parse
+        key: String,
+        /// The parsing error details
+        error: String,
+    },
 
+    /// Invalid Azure App Configuration endpoint URL
     #[error("Invalid endpoint URL: {0}")]
     InvalidEndpoint(String),
 
+    /// Configuration key was not found
     #[error("Configuration key not found: {0}")]
     KeyNotFound(String),
 }
@@ -51,43 +67,61 @@ pub enum AppConfigError {
 /// Represents a key-value pair from Azure App Configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ConfigValue {
+    /// The configuration key name
     pub key: String,
+    /// The configuration value as a string
     pub value: String,
+    /// Optional content type for the value
     pub content_type: Option<String>,
+    /// Optional ETag for version control
     pub etag: Option<String>,
+    /// Optional label for environment-specific configuration
     pub label: Option<String>,
 }
 
 /// Response from Azure App Configuration REST API for multiple key-value pairs
 #[derive(Debug, Deserialize)]
 struct ConfigListResponse {
+    /// Array of configuration key-value pairs
     items: Vec<ConfigValue>,
 }
 
 /// Cache entry with TTL
 #[derive(Debug, Clone)]
 struct CacheEntry {
+    /// The cached configuration value
     value: ConfigValue,
+    /// Expiration timestamp for cache invalidation
     expires_at: Instant,
 }
 
 /// Cache status information for monitoring and debugging
 #[derive(Debug, Clone)]
 pub struct CacheStatus {
+    /// Total number of cached entries
     pub total_entries: usize,
+    /// Number of expired cache entries
     pub expired_entries: usize,
+    /// Number of cache hits
     pub hit_count: u64,
+    /// Number of cache misses
     pub miss_count: u64,
 }
 
 /// Azure App Configuration REST client with caching support
 pub struct AppConfigClient {
+    /// Azure App Configuration endpoint URL
     endpoint: String,
+    /// Managed identity credential for authentication
     credential: Arc<ManagedIdentityCredential>,
+    /// HTTP client for making REST API calls
     http_client: Client,
+    /// In-memory cache for configuration values
     cache: Arc<RwLock<HashMap<String, CacheEntry>>>,
+    /// Time-to-live for cached entries
     cache_ttl: Duration,
-    cache_stats: Arc<RwLock<(u64, u64)>>, // (hits, misses)
+    /// Cache hit/miss statistics (hits, misses)
+    cache_stats: Arc<RwLock<(u64, u64)>>,
 }
 
 impl AppConfigClient {

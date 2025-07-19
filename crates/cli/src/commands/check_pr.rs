@@ -31,9 +31,13 @@ use crate::errors::CliError;
 
 use super::auth::KEY_RING_WEB_HOOK_SECRET;
 
+/// Application state for the PR checking functionality
 pub struct AppState {
+    /// Authenticated GitHub API client
     pub octocrab: Octocrab,
+    /// Application configuration
     pub config: AppConfig,
+    /// Webhook secret for payload verification
     pub webhook_secret: String,
 }
 
@@ -226,7 +230,7 @@ pub async fn execute(args: CheckPrArgs) -> Result<(), CliError> {
     let config = AppConfig::load(&config_path)
         .map_err(|e| CliError::ConfigError(format!("Failed to load configuration: {}", e)))?;
 
-    let (octocrab, user) = create_github_app(&config).await?;
+    let (octocrab, _user) = create_github_app(&config).await?;
     let webhook_secret = retrieve_webhook_secret()?;
 
     let addr = format!("0.0.0.0:{}", config.webhooks.port);
@@ -422,6 +426,22 @@ async fn handle_webhook(
     Ok(StatusCode::OK)
 }
 
+/// Retrieves the webhook secret from the system keyring.
+///
+/// This function accesses the stored webhook secret that was previously saved during
+/// authentication. The secret is used to verify the authenticity of incoming webhook payloads.
+///
+/// # Returns
+///
+/// Returns `Ok(String)` containing the webhook secret, or an error if the secret
+/// cannot be retrieved from the keyring.
+///
+/// # Errors
+///
+/// Returns `CliError::AuthError` if:
+/// - The keyring entry cannot be created
+/// - The webhook secret is not found in the keyring
+/// - The keyring access fails
 fn retrieve_webhook_secret() -> Result<String, CliError> {
     debug!(message = "Retrieving webhook secret");
     let webhook_secret = Entry::new(KEY_RING_SERVICE_NAME, KEY_RING_WEB_HOOK_SECRET)
@@ -473,7 +493,7 @@ fn verify_github_signature(secret: &str, headers: &HeaderMap, payload: &[u8]) ->
     //debug!("Expected signature: {}", hex::encode(expected_bytes));
     //debug!("Received signature: {}", received_sig);
 
-    let result = expected_bytes.as_slice() == received_bytes;
+    let _result = expected_bytes.as_slice() == received_bytes;
     //debug!("Match result: {}", result);
 
     // For now just return true. If you're running this as a CLI it is likely that
