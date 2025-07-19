@@ -17,9 +17,36 @@ use crate::{
 mod tests;
 
 #[derive(Debug, Serialize, Deserialize)]
+/// JWT claims structure for GitHub App authentication.
+///
+/// This struct represents the claims that are included in a JSON Web Token (JWT)
+/// when authenticating as a GitHub App. The JWT is used to obtain installation
+/// access tokens from GitHub's API.
+///
+/// # JWT Authentication Flow
+///
+/// 1. Create a JWT with these claims signed by the app's private key
+/// 2. Use the JWT to authenticate with GitHub's API
+/// 3. Exchange the JWT for an installation access token
+/// 4. Use the installation token for API operations
 struct JWTClaims {
+    /// Issued at timestamp (Unix timestamp in seconds).
+    ///
+    /// This field indicates when the JWT was created. GitHub requires
+    /// this to be no more than 60 seconds in the past.
     iat: u64,
+
+    /// Expiration timestamp (Unix timestamp in seconds).
+    ///
+    /// This field indicates when the JWT expires. GitHub requires
+    /// JWTs to expire within 10 minutes of the issued at time.
     exp: u64,
+
+    /// Issuer - the GitHub App ID.
+    ///
+    /// This field contains the numeric ID of the GitHub App that
+    /// is making the authentication request. This can be found
+    /// in the app's settings page on GitHub.
     iss: u64,
 }
 
@@ -192,6 +219,19 @@ pub async fn create_app_client(app_id: u64, private_key: &str) -> Result<(Octocr
     Ok((octocrab, user))
 }
 
+/// Creates a GitHub client authenticated with a personal access token.
+///
+/// # Arguments
+///
+/// * `token` - The personal access token for authentication
+///
+/// # Returns
+///
+/// A `Result` containing the authenticated GitHub client
+///
+/// # Errors
+///
+/// Returns `Error::ApiError` if the client cannot be created
 #[instrument(skip(token))]
 pub fn create_token_client(token: &str) -> Result<Octocrab, Error> {
     Octocrab::builder()
@@ -200,6 +240,26 @@ pub fn create_token_client(token: &str) -> Result<Octocrab, Error> {
         .map_err(|_| Error::ApiError())
 }
 
+/// Logs detailed error information from Octocrab GitHub API errors.
+///
+/// This private function takes an Octocrab error and logs it with appropriate
+/// detail based on the error type. It extracts specific information like
+/// error messages, backtraces, and error context to provide comprehensive
+/// debugging information.
+///
+/// # Arguments
+///
+/// * `message` - A contextual message describing what operation failed
+/// * `e` - The Octocrab error to log
+///
+/// # Error Types Handled
+///
+/// - `GitHub` - GitHub API errors with detailed error messages
+/// - `UriParse` - URI parsing failures
+/// - `Uri` - URI construction failures
+/// - `InvalidHeaderValue` - HTTP header validation errors
+/// - `InvalidUtf8` - UTF-8 encoding errors
+/// - Other - Generic error logging for unmatched types
 fn log_octocrab_error(message: &str, e: octocrab::Error) {
     match e {
         octocrab::Error::GitHub { source, backtrace } => {
@@ -240,12 +300,31 @@ fn log_octocrab_error(message: &str, e: octocrab::Error) {
     };
 }
 
+/// GitHub implementation of the developer platform traits.
+///
+/// This struct provides GitHub-specific implementations for interacting with
+/// pull requests, comments, labels, and other GitHub features.
 #[derive(Debug, Default)]
 pub struct GitHubProvider {
+    /// The authenticated GitHub client
     client: Octocrab,
 }
 
 impl GitHubProvider {
+    /// Fetches the default branch name for a repository.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner` - The owner of the repository
+    /// * `repo_name` - The name of the repository
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the default branch name
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the repository cannot be found or accessed
     pub async fn fetch_default_branch(
         &self,
         repo_owner: &str,
@@ -310,6 +389,25 @@ impl GitHubProvider {
         }
     }
 
+    /// Creates a new GitHubProvider with the given authenticated client.
+    ///
+    /// # Arguments
+    ///
+    /// * `client` - An authenticated Octocrab client for GitHub API access
+    ///
+    /// # Returns
+    ///
+    /// A new GitHubProvider instance
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// use merge_warden_developer_platforms::github::GitHubProvider;
+    /// use octocrab::Octocrab;
+    ///
+    /// let client = Octocrab::builder().personal_token("token".to_string()).build().unwrap();
+    /// let provider = GitHubProvider::new(client);
+    /// ```
     pub fn new(client: Octocrab) -> Self {
         Self { client }
     }
