@@ -1,3 +1,8 @@
+//! Azure Functions implementation for the Merge Warden service.
+//!
+//! This crate provides the Azure Functions implementation of the Merge Warden webhook handler,
+//! including configuration management, secret handling, and telemetry integration.
+
 #![deny(missing_docs)]
 #![deny(clippy::missing_docs_in_private_items)]
 
@@ -23,10 +28,13 @@ use sha2::Sha256;
 use std::{env, sync::Arc};
 use tracing::{debug, error, info, instrument, warn};
 
+/// Error handling for Azure Functions specific operations
 mod errors;
 use errors::AzureFunctionsError;
 
+/// Azure App Configuration client for retrieving application settings
 mod app_config_client;
+/// Telemetry and observability configuration
 mod telemetry;
 
 use app_config_client::AppConfigClient;
@@ -35,16 +43,25 @@ use app_config_client::AppConfigClient;
 #[path = "main_tests.rs"]
 mod tests;
 
+/// Application secrets retrieved from Azure Key Vault
 struct AppSecrets {
+    /// GitHub App ID for authentication
     app_id: u64,
+    /// GitHub App private key for JWT token generation
     app_private_key: String,
+    /// Webhook secret for payload verification
     webhook_secret: String,
 }
 
+/// Application state shared across Azure Function handlers
 pub struct AppState {
+    /// Authenticated GitHub API client
     pub octocrab: Octocrab,
+    /// GitHub user information for the authenticated app
     pub user: User,
+    /// Application-wide policy configurations
     pub policies: ApplicationDefaults,
+    /// Secret key for webhook payload verification
     pub webhook_secret: String,
 }
 
@@ -111,6 +128,22 @@ async fn create_github_app(secrets: &AppSecrets) -> Result<(Octocrab, User), Azu
     Ok(provider)
 }
 
+/// Retrieves application secrets from Azure Key Vault.
+///
+/// This function connects to Azure Key Vault using managed identity and retrieves
+/// the necessary GitHub App credentials and webhook secret.
+///
+/// # Returns
+///
+/// Returns `Ok(AppSecrets)` containing the GitHub App ID, private key, and webhook secret,
+/// or an error if any secrets cannot be retrieved or parsed.
+///
+/// # Errors
+///
+/// Returns `AzureFunctionsError::ConfigError` if:
+/// - The KEY_VAULT_NAME environment variable is not set
+/// - Any required secret cannot be retrieved from Key Vault
+/// - The GitHub App ID cannot be parsed as a number
 async fn get_azure_secrets() -> Result<AppSecrets, AzureFunctionsError> {
     let key_vault_name = env::var("KEY_VAULT_NAME").map_err(|e| {
         error!(
@@ -160,6 +193,22 @@ async fn get_azure_secrets() -> Result<AppSecrets, AzureFunctionsError> {
     Ok(secrets)
 }
 
+/// Retrieves application configuration from Azure App Configuration.
+///
+/// This function connects to Azure App Configuration using managed identity and retrieves
+/// the application defaults and policies for the Merge Warden service.
+///
+/// # Returns
+///
+/// Returns `Ok(ApplicationDefaults)` containing the loaded configuration,
+/// or an error if the configuration cannot be retrieved or parsed.
+///
+/// # Errors
+///
+/// Returns `AzureFunctionsError::ConfigError` if:
+/// - The APP_CONFIG_ENDPOINT environment variable is not set
+/// - The App Configuration client cannot be created
+/// - Configuration values cannot be retrieved or parsed
 async fn get_application_config() -> Result<ApplicationDefaults, AzureFunctionsError> {
     let app_config_endpoint = env::var("APP_CONFIG_ENDPOINT").map_err(|e| {
         error!(
@@ -207,6 +256,28 @@ async fn get_application_config() -> Result<ApplicationDefaults, AzureFunctionsE
     Ok(application_defaults)
 }
 
+/// Retrieves a secret from Azure Key Vault using managed identity.
+///
+/// This function authenticates with Azure Key Vault using managed identity credentials
+/// and retrieves the specified secret value.
+///
+/// # Arguments
+///
+/// * `key_vault_url` - The URL of the Azure Key Vault (e.g., "https://vault-name.vault.azure.net")
+/// * `secret_name` - The name of the secret to retrieve
+///
+/// # Returns
+///
+/// Returns `Ok(String)` containing the secret value, or an error if the secret
+/// cannot be retrieved.
+///
+/// # Errors
+///
+/// Returns `AzureFunctionsError` if:
+/// - Managed identity credentials cannot be created
+/// - Authentication with Key Vault fails
+/// - The secret does not exist or cannot be accessed
+/// - The Key Vault client cannot be created
 async fn get_secret_from_keyvault(
     key_vault_url: &str,
     secret_name: &str,
