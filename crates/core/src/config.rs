@@ -242,30 +242,35 @@ pub struct ApplicationDefaults {
     )]
     pub enable_title_validation: bool,
 
+    /// Default regex pattern for validating pull request titles
     #[serde(
         rename = "titlePattern",
         default = "ApplicationDefaults::default_title_pattern"
     )]
     pub default_title_pattern: String,
 
+    /// Default label to apply when title validation fails
     #[serde(
         rename = "labelIfTitleInvalid",
         default = "ApplicationDefaults::default_title_invalid_label"
     )]
     pub default_invalid_title_label: Option<String>,
 
+    /// Whether work item reference validation is enabled by default
     #[serde(
         rename = "enforceWorkItemValidation",
         default = "ApplicationDefaults::default_work_item_required"
     )]
     pub enable_work_item_validation: bool,
 
+    /// Default regex pattern for validating work item references
     #[serde(
         rename = "workItemPattern",
         default = "ApplicationDefaults::default_work_item_pattern"
     )]
     pub default_work_item_pattern: String,
 
+    /// Default label to apply when work item reference is missing
     #[serde(
         rename = "labelIfWorkItemMissing",
         default = "ApplicationDefaults::default_work_item_missing_label"
@@ -404,14 +409,36 @@ impl BypassRule {
             .any(|bypass_user| bypass_user == &user.login)
     }
 
+    /// Returns whether this bypass rule is enabled
     pub fn enabled(&self) -> bool {
         self.enabled
     }
 
+    /// Creates a new bypass rule with the specified settings
+    ///
+    /// # Arguments
+    ///
+    /// * `enabled` - Whether the bypass rule should be active
+    /// * `users` - List of GitHub usernames allowed to bypass validation
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use merge_warden_core::config::BypassRule;
+    ///
+    /// let rule = BypassRule::new(true, vec!["admin".to_string(), "bot".to_string()]);
+    /// assert!(rule.enabled());
+    /// assert_eq!(rule.users(), vec!["admin", "bot"]);
+    /// ```
     pub fn new(enabled: bool, users: Vec<String>) -> Self {
         Self { enabled, users }
     }
 
+    /// Returns the list of usernames allowed to bypass this rule
+    ///
+    /// # Returns
+    ///
+    /// A vector of string references containing the allowed usernames
     pub fn users(&self) -> Vec<&str> {
         self.users.iter().map(|f| f.as_ref()).collect()
     }
@@ -454,6 +481,22 @@ pub struct BypassRules {
 }
 
 impl BypassRules {
+    /// Creates a new BypassRules configuration with title and work item rules
+    ///
+    /// # Arguments
+    ///
+    /// * `title_convention` - Bypass rule for title validation
+    /// * `work_items` - Bypass rule for work item validation
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use merge_warden_core::config::{BypassRules, BypassRule};
+    ///
+    /// let title_rule = BypassRule::new(true, vec!["admin".to_string()]);
+    /// let work_rule = BypassRule::new(false, vec![]);
+    /// let rules = BypassRules::new(title_rule, work_rule);
+    /// ```
     pub fn new(title_convention: BypassRule, work_items: BypassRule) -> Self {
         Self {
             title_convention,
@@ -462,6 +505,13 @@ impl BypassRules {
         }
     }
 
+    /// Creates a new BypassRules configuration with all three rule types
+    ///
+    /// # Arguments
+    ///
+    /// * `title_convention` - Bypass rule for title validation
+    /// * `work_items` - Bypass rule for work item validation  
+    /// * `size` - Bypass rule for PR size validation
     pub fn new_with_size(
         title_convention: BypassRule,
         work_items: BypassRule,
@@ -474,14 +524,17 @@ impl BypassRules {
         }
     }
 
+    /// Returns the bypass rule for title convention validation
     pub fn title_convention(&self) -> &BypassRule {
         &self.title_convention
     }
 
+    /// Returns the bypass rule for work item validation
     pub fn work_item_convention(&self) -> &BypassRule {
         &self.work_items
     }
 
+    /// Returns the bypass rule for PR size validation
     pub fn size(&self) -> &BypassRule {
         &self.size
     }
@@ -571,6 +624,7 @@ impl Default for CurrentPullRequestValidationConfiguration {
 /// Policies configuration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct PoliciesConfig {
+    /// Configuration for pull request validation policies
     #[serde(default, rename = "pullRequests")]
     pub pull_requests: PullRequestsPoliciesConfig,
 }
@@ -578,12 +632,15 @@ pub struct PoliciesConfig {
 /// Pull request policies configuration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct PullRequestsPoliciesConfig {
+    /// Configuration for pull request title validation policies
     #[serde(default, rename = "prTitle")]
     pub title_policies: PullRequestsTitlePolicyConfig,
 
+    /// Configuration for work item reference validation policies
     #[serde(default, rename = "workItem")]
     pub work_item_policies: WorkItemPolicyConfig,
 
+    /// Configuration for pull request size validation policies
     #[serde(default, rename = "prSize")]
     pub size_policies: PrSizeCheckConfig,
 }
@@ -599,7 +656,7 @@ pub struct PullRequestsTitlePolicyConfig {
     #[serde(default = "PullRequestsTitlePolicyConfig::default_pattern")]
     pub pattern: String,
 
-    // Indicates the label that should be applied if the title doesn't match the pattern
+    /// Label to apply when the title doesn't match the required pattern
     #[serde(default = "PullRequestsTitlePolicyConfig::default_label")]
     pub label_if_missing: Option<String>,
 }
@@ -659,9 +716,11 @@ impl Default for PullRequestsTitlePolicyConfig {
 /// ---- ----------- ----
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RepositoryProvidedConfig {
+    /// Schema version for configuration compatibility
     #[serde(rename = "schemaVersion")]
     pub schema_version: u32,
 
+    /// Validation policies for pull requests
     #[serde(default)]
     pub policies: PoliciesConfig,
 
@@ -672,6 +731,18 @@ pub struct RepositoryProvidedConfig {
 
 /// Convert a RepositoryConfig (TOML) to a ValidationConfig (runtime enforcement)
 impl RepositoryProvidedConfig {
+    /// Converts repository configuration to validation configuration
+    ///
+    /// This method transforms the repository-level configuration (loaded from TOML)
+    /// into the runtime validation configuration used by the merge warden engine.
+    ///
+    /// # Arguments
+    ///
+    /// * `bypass_rules` - Bypass rules to apply for validation exceptions
+    ///
+    /// # Returns
+    ///
+    /// A `CurrentPullRequestValidationConfiguration` ready for runtime use
     pub fn to_validation_config(
         &self,
         bypass_rules: &BypassRules,
@@ -724,7 +795,7 @@ pub struct WorkItemPolicyConfig {
     #[serde(default = "WorkItemPolicyConfig::default_pattern")]
     pub pattern: String,
 
-    // Indicates the label that should be applied if the work item is missing
+    /// Label to apply when work item reference is missing
     #[serde(default = "WorkItemPolicyConfig::default_label")]
     pub label_if_missing: Option<String>,
 }

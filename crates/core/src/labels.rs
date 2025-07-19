@@ -639,11 +639,17 @@ fn get_category_description(category: &PrSizeCategory) -> &'static str {
 /// Discovered size labels in the repository using smart discovery
 #[derive(Debug, Clone)]
 pub struct DiscoveredSizeLabels {
+    /// Label name for extra small PRs (typically < 10 lines changed)
     pub xs: Option<String>,
+    /// Label name for small PRs (typically 10-100 lines changed)
     pub s: Option<String>,
+    /// Label name for medium PRs (typically 100-300 lines changed)
     pub m: Option<String>,
+    /// Label name for large PRs (typically 300-500 lines changed)
     pub l: Option<String>,
+    /// Label name for extra large PRs (typically 500-800 lines changed)
     pub xl: Option<String>,
+    /// Label name for extra extra large PRs (typically > 800 lines changed)
     pub xxl: Option<String>,
 }
 
