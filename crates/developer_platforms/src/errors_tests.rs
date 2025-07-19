@@ -42,7 +42,7 @@ fn test_failed_to_update_pull_request_error() {
     let error = Error::FailedToUpdatePullRequest("Network error".to_string());
 
     // Test error message
-    assert_eq!(error.to_string(), "Failed to update the PR.");
+    assert_eq!(error.to_string(), "Failed to update the PR: Network error");
 
     // Test error source
     assert!(error.source().is_none());
