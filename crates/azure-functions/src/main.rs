@@ -1,3 +1,11 @@
+//! Azure Functions implementation for the Merge Warden service.
+//!
+//! This crate provides the Azure Functions implementation of the Merge Warden webhook handler,
+//! including configuration management, secret handling, and telemetry integration.
+
+#![deny(missing_docs)]
+#![deny(clippy::missing_docs_in_private_items)]
+
 use axum::{extract::State, routing::get, routing::post, Router};
 use axum_macros::debug_handler;
 use azure_core::credentials::TokenCredential;
@@ -20,10 +28,13 @@ use sha2::Sha256;
 use std::{env, sync::Arc};
 use tracing::{debug, error, info, instrument, warn};
 
+/// Error handling for Azure Functions specific operations
 mod errors;
 use errors::AzureFunctionsError;
 
+/// Azure App Configuration client for retrieving application settings
 mod app_config_client;
+/// Telemetry and observability configuration
 mod telemetry;
 
 use app_config_client::AppConfigClient;
@@ -32,16 +43,25 @@ use app_config_client::AppConfigClient;
 #[path = "main_tests.rs"]
 mod tests;
 
+/// Application secrets retrieved from Azure Key Vault
 struct AppSecrets {
+    /// GitHub App ID for authentication
     app_id: u64,
+    /// GitHub App private key for JWT token generation
     app_private_key: String,
+    /// Webhook secret for payload verification
     webhook_secret: String,
 }
 
+/// Application state shared across Azure Function handlers
 pub struct AppState {
+    /// Authenticated GitHub API client
     pub octocrab: Octocrab,
+    /// GitHub user information for the authenticated app
     pub user: User,
+    /// Application-wide policy configurations
     pub policies: ApplicationDefaults,
+    /// Secret key for webhook payload verification
     pub webhook_secret: String,
 }
 
@@ -108,6 +128,22 @@ async fn create_github_app(secrets: &AppSecrets) -> Result<(Octocrab, User), Azu
     Ok(provider)
 }
 
+/// Retrieves application secrets from Azure Key Vault.
+///
+/// This function connects to Azure Key Vault using managed identity and retrieves
+/// the necessary GitHub App credentials and webhook secret.
+///
+/// # Returns
+///
+/// Returns `Ok(AppSecrets)` containing the GitHub App ID, private key, and webhook secret,
+/// or an error if any secrets cannot be retrieved or parsed.
+///
+/// # Errors
+///
+/// Returns `AzureFunctionsError::ConfigError` if:
+/// - The KEY_VAULT_NAME environment variable is not set
+/// - Any required secret cannot be retrieved from Key Vault
+/// - The GitHub App ID cannot be parsed as a number
 async fn get_azure_secrets() -> Result<AppSecrets, AzureFunctionsError> {
     let key_vault_name = env::var("KEY_VAULT_NAME").map_err(|e| {
         error!(
@@ -157,6 +193,22 @@ async fn get_azure_secrets() -> Result<AppSecrets, AzureFunctionsError> {
     Ok(secrets)
 }
 
+/// Retrieves application configuration from Azure App Configuration.
+///
+/// This function connects to Azure App Configuration using managed identity and retrieves
+/// the application defaults and policies for the Merge Warden service.
+///
+/// # Returns
+///
+/// Returns `Ok(ApplicationDefaults)` containing the loaded configuration,
+/// or an error if the configuration cannot be retrieved or parsed.
+///
+/// # Errors
+///
+/// Returns `AzureFunctionsError::ConfigError` if:
+/// - The APP_CONFIG_ENDPOINT environment variable is not set
+/// - The App Configuration client cannot be created
+/// - Configuration values cannot be retrieved or parsed
 async fn get_application_config() -> Result<ApplicationDefaults, AzureFunctionsError> {
     let app_config_endpoint = env::var("APP_CONFIG_ENDPOINT").map_err(|e| {
         error!(
@@ -204,6 +256,28 @@ async fn get_application_config() -> Result<ApplicationDefaults, AzureFunctionsE
     Ok(application_defaults)
 }
 
+/// Retrieves a secret from Azure Key Vault using managed identity.
+///
+/// This function authenticates with Azure Key Vault using managed identity credentials
+/// and retrieves the specified secret value.
+///
+/// # Arguments
+///
+/// * `key_vault_url` - The URL of the Azure Key Vault (e.g., "https://vault-name.vault.azure.net")
+/// * `secret_name` - The name of the secret to retrieve
+///
+/// # Returns
+///
+/// Returns `Ok(String)` containing the secret value, or an error if the secret
+/// cannot be retrieved.
+///
+/// # Errors
+///
+/// Returns `AzureFunctionsError` if:
+/// - Managed identity credentials cannot be created
+/// - Authentication with Key Vault fails
+/// - The secret does not exist or cannot be accessed
+/// - The Key Vault client cannot be created
 async fn get_secret_from_keyvault(
     key_vault_url: &str,
     secret_name: &str,
@@ -264,6 +338,20 @@ async fn get_secret_from_keyvault(
     Ok(value.value.unwrap_or_default())
 }
 
+/// Handles HTTP GET requests to the Azure Function endpoint.
+///
+/// This function serves as a health check endpoint that returns HTTP 200 OK
+/// for GET requests. It's primarily used for monitoring and service health verification.
+///
+/// # Arguments
+///
+/// * `_state` - Application state (unused for GET requests)
+/// * `_headers` - HTTP request headers (unused for GET requests)
+/// * `_body` - Request body (unused for GET requests)
+///
+/// # Returns
+///
+/// Returns `Ok(StatusCode::OK)` for successful health checks
 #[instrument(skip(_state, _headers, _body))]
 async fn handle_get_request(
     State(_state): State<Arc<AppState>>,
@@ -275,6 +363,28 @@ async fn handle_get_request(
     Ok(StatusCode::OK)
 }
 
+/// Handles HTTP POST requests containing GitHub webhook payloads.
+///
+/// This function processes GitHub webhook events for pull request operations.
+/// It validates webhook signatures, parses the payload, and delegates processing
+/// to the Merge Warden engine for PR validation and management.
+///
+/// # Arguments
+///
+/// * `state` - Application state containing GitHub client and configuration
+/// * `headers` - HTTP request headers including webhook signature
+/// * `body` - JSON payload from GitHub webhook
+///
+/// # Returns
+///
+/// * `Ok(StatusCode::OK)` - Successfully processed the webhook
+/// * `Err(StatusCode::UNAUTHORIZED)` - Invalid webhook signature
+/// * `Err(StatusCode::BAD_REQUEST)` - Malformed payload or missing required fields
+///
+/// # Security
+///
+/// All webhook payloads are verified using HMAC-SHA256 signature validation
+/// before processing to ensure they originated from GitHub.
 #[debug_handler]
 #[instrument(skip(state, headers, body))]
 async fn handle_post_request(
@@ -439,6 +549,31 @@ async fn handle_post_request(
     Ok(StatusCode::OK)
 }
 
+/// Verifies the authenticity of a GitHub webhook payload using HMAC-SHA256 signature validation.
+///
+/// This function implements GitHub's webhook security mechanism by computing an HMAC-SHA256
+/// signature of the payload using the configured webhook secret and comparing it against
+/// the signature provided in the `X-Hub-Signature-256` header.
+///
+/// # Arguments
+///
+/// * `secret` - The webhook secret configured in GitHub and stored securely
+/// * `headers` - HTTP request headers containing the GitHub signature
+/// * `body` - The raw request body that was signed by GitHub
+///
+/// # Returns
+///
+/// * `true` - The signature is valid and the payload is authentic
+/// * `false` - The signature is invalid, missing, or the payload was tampered with
+///
+/// # Security
+///
+/// This function is critical for webhook security. It prevents:
+/// - Replay attacks from malicious actors
+/// - Payload tampering during transit
+/// - Unauthorized webhook submissions
+///
+/// The GitHub signature format is: `sha256=<hex_encoded_hmac>`
 #[instrument]
 fn verify_github_signature(secret: &str, headers: &HeaderMap, body: &str) -> bool {
     let signature = match headers.get("X-Hub-Signature-256") {

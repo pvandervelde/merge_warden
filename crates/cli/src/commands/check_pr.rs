@@ -31,9 +31,13 @@ use crate::errors::CliError;
 
 use super::auth::KEY_RING_WEB_HOOK_SECRET;
 
+/// Application state for the PR checking functionality
 pub struct AppState {
+    /// Authenticated GitHub API client
     pub octocrab: Octocrab,
+    /// Application configuration
     pub config: AppConfig,
+    /// Webhook secret for payload verification
     pub webhook_secret: String,
 }
 
@@ -226,7 +230,7 @@ pub async fn execute(args: CheckPrArgs) -> Result<(), CliError> {
     let config = AppConfig::load(&config_path)
         .map_err(|e| CliError::ConfigError(format!("Failed to load configuration: {}", e)))?;
 
-    let (octocrab, user) = create_github_app(&config).await?;
+    let (octocrab, _user) = create_github_app(&config).await?;
     let webhook_secret = retrieve_webhook_secret()?;
 
     let addr = format!("0.0.0.0:{}", config.webhooks.port);
@@ -248,6 +252,28 @@ pub async fn execute(args: CheckPrArgs) -> Result<(), CliError> {
     Ok(())
 }
 
+/// Handles incoming GitHub webhook requests in CLI webhook server mode.
+///
+/// This function processes GitHub webhook events for pull request operations when
+/// running the CLI in webhook server mode. It validates webhook signatures, parses
+/// the payload, and delegates processing to the Merge Warden engine.
+///
+/// # Arguments
+///
+/// * `state` - Application state containing GitHub client and configuration
+/// * `headers` - HTTP request headers including webhook signature
+/// * `body` - Raw bytes of the JSON payload from GitHub webhook
+///
+/// # Returns
+///
+/// * `Ok(StatusCode::OK)` - Successfully processed the webhook
+/// * `Err(StatusCode::UNAUTHORIZED)` - Invalid webhook signature
+/// * `Err(StatusCode::BAD_REQUEST)` - Malformed payload or missing required fields
+///
+/// # Security
+///
+/// All webhook payloads are verified using HMAC-SHA256 signature validation
+/// before processing to ensure they originated from GitHub.
 #[debug_handler]
 #[instrument(skip(state, headers, body))]
 async fn handle_webhook(
@@ -422,6 +448,22 @@ async fn handle_webhook(
     Ok(StatusCode::OK)
 }
 
+/// Retrieves the webhook secret from the system keyring.
+///
+/// This function accesses the stored webhook secret that was previously saved during
+/// authentication. The secret is used to verify the authenticity of incoming webhook payloads.
+///
+/// # Returns
+///
+/// Returns `Ok(String)` containing the webhook secret, or an error if the secret
+/// cannot be retrieved from the keyring.
+///
+/// # Errors
+///
+/// Returns `CliError::AuthError` if:
+/// - The keyring entry cannot be created
+/// - The webhook secret is not found in the keyring
+/// - The keyring access fails
 fn retrieve_webhook_secret() -> Result<String, CliError> {
     debug!(message = "Retrieving webhook secret");
     let webhook_secret = Entry::new(KEY_RING_SERVICE_NAME, KEY_RING_WEB_HOOK_SECRET)
@@ -440,6 +482,28 @@ fn retrieve_webhook_secret() -> Result<String, CliError> {
     Ok(webhook_secret)
 }
 
+/// Verifies the authenticity of a GitHub webhook payload using HMAC-SHA256 signature validation.
+///
+/// This CLI version of signature verification is designed for development and testing scenarios.
+/// Unlike the production Azure Functions version, this implementation includes additional debugging
+/// and currently returns `true` for compatibility with proxy scenarios during development.
+///
+/// # Arguments
+///
+/// * `secret` - The webhook secret configured in GitHub and stored in the keyring
+/// * `headers` - HTTP request headers containing the GitHub signature
+/// * `payload` - The raw request payload bytes that were signed by GitHub
+///
+/// # Returns
+///
+/// * `true` - Always returns true in CLI mode to accommodate development proxies
+/// * The actual signature validation logic is implemented but currently bypassed
+///
+/// # Development Note
+///
+/// This function currently returns `true` to support development workflows where
+/// webhooks may pass through proxies that modify the payload, invalidating signatures.
+/// In production, proper signature validation should be enabled.
 #[instrument]
 fn verify_github_signature(secret: &str, headers: &HeaderMap, payload: &[u8]) -> bool {
     let prefix = "sha256=";
@@ -473,7 +537,7 @@ fn verify_github_signature(secret: &str, headers: &HeaderMap, payload: &[u8]) ->
     //debug!("Expected signature: {}", hex::encode(expected_bytes));
     //debug!("Received signature: {}", received_sig);
 
-    let result = expected_bytes.as_slice() == received_bytes;
+    let _result = expected_bytes.as_slice() == received_bytes;
     //debug!("Match result: {}", result);
 
     // For now just return true. If you're running this as a CLI it is likely that
