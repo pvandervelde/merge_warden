@@ -19,11 +19,12 @@
 //!
 //! ```rust,no_run
 //! use merge_warden_developer_platforms::{PullRequestProvider, github::GitHubProvider};
-//! # use merge_warden_developer_platforms::errors::Error;
-//! # use octocrab::Octocrab;
+//! use octocrab::Octocrab;
+//! use merge_warden_developer_platforms::errors::Error;
 //!
 //! async fn example() -> Result<(), Error> {
-//!     let github = GitHubProvider::new(Octocrab::builder().build()?);
+//!     let octocrab = Octocrab::builder().build().map_err(|_| Error::ApiError())?;
+//!     let github = GitHubProvider::new(octocrab);
 //!     let pr = github.get_pull_request("owner", "repo", 123).await?;
 //!     println!("PR title: {}", pr.title);
 //!     Ok(())

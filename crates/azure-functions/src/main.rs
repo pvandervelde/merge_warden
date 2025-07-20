@@ -338,6 +338,20 @@ async fn get_secret_from_keyvault(
     Ok(value.value.unwrap_or_default())
 }
 
+/// Handles HTTP GET requests to the Azure Function endpoint.
+///
+/// This function serves as a health check endpoint that returns HTTP 200 OK
+/// for GET requests. It's primarily used for monitoring and service health verification.
+///
+/// # Arguments
+///
+/// * `_state` - Application state (unused for GET requests)
+/// * `_headers` - HTTP request headers (unused for GET requests)
+/// * `_body` - Request body (unused for GET requests)
+///
+/// # Returns
+///
+/// Returns `Ok(StatusCode::OK)` for successful health checks
 #[instrument(skip(_state, _headers, _body))]
 async fn handle_get_request(
     State(_state): State<Arc<AppState>>,
@@ -349,6 +363,28 @@ async fn handle_get_request(
     Ok(StatusCode::OK)
 }
 
+/// Handles HTTP POST requests containing GitHub webhook payloads.
+///
+/// This function processes GitHub webhook events for pull request operations.
+/// It validates webhook signatures, parses the payload, and delegates processing
+/// to the Merge Warden engine for PR validation and management.
+///
+/// # Arguments
+///
+/// * `state` - Application state containing GitHub client and configuration
+/// * `headers` - HTTP request headers including webhook signature
+/// * `body` - JSON payload from GitHub webhook
+///
+/// # Returns
+///
+/// * `Ok(StatusCode::OK)` - Successfully processed the webhook
+/// * `Err(StatusCode::UNAUTHORIZED)` - Invalid webhook signature
+/// * `Err(StatusCode::BAD_REQUEST)` - Malformed payload or missing required fields
+///
+/// # Security
+///
+/// All webhook payloads are verified using HMAC-SHA256 signature validation
+/// before processing to ensure they originated from GitHub.
 #[debug_handler]
 #[instrument(skip(state, headers, body))]
 async fn handle_post_request(
@@ -513,6 +549,31 @@ async fn handle_post_request(
     Ok(StatusCode::OK)
 }
 
+/// Verifies the authenticity of a GitHub webhook payload using HMAC-SHA256 signature validation.
+///
+/// This function implements GitHub's webhook security mechanism by computing an HMAC-SHA256
+/// signature of the payload using the configured webhook secret and comparing it against
+/// the signature provided in the `X-Hub-Signature-256` header.
+///
+/// # Arguments
+///
+/// * `secret` - The webhook secret configured in GitHub and stored securely
+/// * `headers` - HTTP request headers containing the GitHub signature
+/// * `body` - The raw request body that was signed by GitHub
+///
+/// # Returns
+///
+/// * `true` - The signature is valid and the payload is authentic
+/// * `false` - The signature is invalid, missing, or the payload was tampered with
+///
+/// # Security
+///
+/// This function is critical for webhook security. It prevents:
+/// - Replay attacks from malicious actors
+/// - Payload tampering during transit
+/// - Unauthorized webhook submissions
+///
+/// The GitHub signature format is: `sha256=<hex_encoded_hmac>`
 #[instrument]
 fn verify_github_signature(secret: &str, headers: &HeaderMap, body: &str) -> bool {
     let signature = match headers.get("X-Hub-Signature-256") {

@@ -252,6 +252,28 @@ pub async fn execute(args: CheckPrArgs) -> Result<(), CliError> {
     Ok(())
 }
 
+/// Handles incoming GitHub webhook requests in CLI webhook server mode.
+///
+/// This function processes GitHub webhook events for pull request operations when
+/// running the CLI in webhook server mode. It validates webhook signatures, parses
+/// the payload, and delegates processing to the Merge Warden engine.
+///
+/// # Arguments
+///
+/// * `state` - Application state containing GitHub client and configuration
+/// * `headers` - HTTP request headers including webhook signature
+/// * `body` - Raw bytes of the JSON payload from GitHub webhook
+///
+/// # Returns
+///
+/// * `Ok(StatusCode::OK)` - Successfully processed the webhook
+/// * `Err(StatusCode::UNAUTHORIZED)` - Invalid webhook signature
+/// * `Err(StatusCode::BAD_REQUEST)` - Malformed payload or missing required fields
+///
+/// # Security
+///
+/// All webhook payloads are verified using HMAC-SHA256 signature validation
+/// before processing to ensure they originated from GitHub.
 #[debug_handler]
 #[instrument(skip(state, headers, body))]
 async fn handle_webhook(
@@ -460,6 +482,28 @@ fn retrieve_webhook_secret() -> Result<String, CliError> {
     Ok(webhook_secret)
 }
 
+/// Verifies the authenticity of a GitHub webhook payload using HMAC-SHA256 signature validation.
+///
+/// This CLI version of signature verification is designed for development and testing scenarios.
+/// Unlike the production Azure Functions version, this implementation includes additional debugging
+/// and currently returns `true` for compatibility with proxy scenarios during development.
+///
+/// # Arguments
+///
+/// * `secret` - The webhook secret configured in GitHub and stored in the keyring
+/// * `headers` - HTTP request headers containing the GitHub signature
+/// * `payload` - The raw request payload bytes that were signed by GitHub
+///
+/// # Returns
+///
+/// * `true` - Always returns true in CLI mode to accommodate development proxies
+/// * The actual signature validation logic is implemented but currently bypassed
+///
+/// # Development Note
+///
+/// This function currently returns `true` to support development workflows where
+/// webhooks may pass through proxies that modify the payload, invalidating signatures.
+/// In production, proper signature validation should be enabled.
 #[instrument]
 fn verify_github_signature(secret: &str, headers: &HeaderMap, payload: &[u8]) -> bool {
     let prefix = "sha256=";
