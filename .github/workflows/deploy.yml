@@ -19,7 +19,7 @@ jobs:
   build-azure-function:
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+    - uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
       with:
         ref: ${{ github.event.release.tag_name }} # Use tag from release event
         fetch-tags: true
@@ -109,7 +109,7 @@ jobs:
     timeout-minutes: 60
     steps:
       - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5
         # No need to specify ref here, it checks out the commit associated with the release tag by default
 
       - name: Install Rust toolchain
