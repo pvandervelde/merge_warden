@@ -16,7 +16,7 @@ permissions:
   contents: write
 
 jobs:
-  package-azure-function:
+  build-azure-function:
     runs-on: ubuntu-latest
     steps:
     - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
@@ -55,58 +55,41 @@ jobs:
         ls -la target/temp/x86_64-unknown-linux-musl
         ls -la target/temp/x86_64-unknown-linux-musl/release
 
-    # Copy the files for the azure function into a single directory
+    # Prepare the Azure Function binary for release
     #
-    # For the azure function we need the following directories and files in the following layout.
-    # Where [D] means directory and [F] means file
-    #
-    # [D] <function_name>       --> <target>/<function_name>
-    #     [F] function.json     --> <target>/<function_name>/function.json
-    # [F] host.json             --> <target>/host.json
-    # [F] az_handler               --> <target>/az_handler
-    - name: Package Azure Function
+    # Note: Only the az_handler binary is included in the release.
+    # Users must provide their own configuration files (host.json and function.json)
+    # based on the samples in the samples/ directory. This allows users to customize
+    # their Azure Function settings according to their specific requirements.
+    - name: Prepare Azure Function binary
       run: |
-        mkdir -p target/func/merge_warden
-        cp -r ./target/temp/x86_64-unknown-linux-musl/release/az_handler target/func
-        cp -r ./configs/az_func/merge_warden/* target/func/merge_warden
-        cp -r ./configs/az_func/host.json target/func
+        cp ./target/temp/x86_64-unknown-linux-musl/release/az_handler target/az_handler
+        ls -la target/az_handler
 
-    - name: Show packaged function structure
-      run: |
-        ls -la target/func
-        ls -la target/func/merge_warden
-
-    - name: Create Azure Function deployment package
-      run: |
-        cd target/func
-        zip -r ../azure-function-package.zip .
-        cd ../..
-        ls -la target/azure-function-package.zip
-
-    - name: Generate checksum for Azure Function package
+    - name: Generate checksum for Azure Function binary
       run: |
         cd target
-        sha256sum azure-function-package.zip > azure-function-package.zip.sha256
-        cat azure-function-package.zip.sha256
+        sha256sum az_handler > az_handler.sha256
+        cat az_handler.sha256
 
-    - name: Upload Azure Function package to release
+    - name: Upload Azure Function binary to release
       uses: actions/upload-release-asset@e8f9f06c4b078e705bd2ea027f0926603fc9b4d5 # v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ github.event.release.upload_url }}
-        asset_path: target/azure-function-package.zip
-        asset_name: azure-function-package.zip
-        asset_content_type: application/zip
+        asset_path: target/az_handler
+        asset_name: az_handler
+        asset_content_type: application/octet-stream
 
-    - name: Upload Azure Function package checksum to release
+    - name: Upload Azure Function binary checksum to release
       uses: actions/upload-release-asset@e8f9f06c4b078e705bd2ea027f0926603fc9b4d5 # v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         upload_url: ${{ github.event.release.upload_url }}
-        asset_path: target/azure-function-package.zip.sha256
-        asset_name: azure-function-package.zip.sha256
+        asset_path: target/az_handler.sha256
+        asset_name: az_handler.sha256
         asset_content_type: text/plain
 
   publish-cli:

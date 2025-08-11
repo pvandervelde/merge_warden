@@ -55,14 +55,16 @@ Your service principal or user account needs the following permissions:
 
 Download the latest release artifacts from the [GitHub releases page](https://github.com/pvandervelde/merge_warden/releases):
 
-- `azure-function-package.zip` - The complete Azure Function deployment package
-- `azure-function-package.zip.sha256` - Checksum for integrity verification
+- `az_handler` - The Azure Function binary executable
+- `az_handler.sha256` - Checksum for integrity verification
 
-Verify the package integrity:
+Verify the binary integrity:
 
 ```bash
-sha256sum -c azure-function-package.zip.sha256
+sha256sum -c az_handler.sha256
 ```
+
+**Important**: The release contains only the compiled binary. You must provide your own configuration files (`host.json` and `function.json`) based on the samples provided in the repository.
 
 ### Step 2: Set Up Infrastructure
 
@@ -113,20 +115,61 @@ terraform plan -var-file="environments/prod.tfvars"
 terraform apply -var-file="environments/prod.tfvars"
 ```
 
-### Step 4: Deploy Function Code
+### Step 4: Prepare Configuration Files
 
-After infrastructure is provisioned, deploy the function package:
+Before deploying the function code, you need to create the required configuration files based on the samples provided in the repository:
+
+```bash
+# Download configuration samples from the repository
+curl -O https://raw.githubusercontent.com/pvandervelde/merge_warden/master/samples/host.json
+curl -O https://raw.githubusercontent.com/pvandervelde/merge_warden/master/samples/function.json
+
+# Customize the configuration files according to your requirements
+# - Edit logging levels in host.json
+# - Configure Application Insights if desired
+# - Set authentication level in function.json
+```
+
+**Required files:**
+
+- `host.json` - Azure Functions runtime configuration (place in root directory)
+- `merge_warden/function.json` - HTTP trigger configuration (place in subdirectory)
+
+See the [Azure Functions configuration guide](../../../samples/azure-functions-README.md) for detailed customization instructions.
+
+### Step 5: Deploy Function Code
+
+After infrastructure is provisioned and configuration files are prepared, deploy the function:
 
 ```bash
 # Extract the resource names from terraform output
 RESOURCE_GROUP=$(terraform output -raw resource_group_name)
 FUNCTION_APP=$(terraform output -raw function_app_name)
 
-# Deploy the function package
+# Create a temporary directory for deployment
+mkdir -p temp-deploy/merge_warden
+
+# Copy the function binary (make it executable)
+cp az_handler temp-deploy/
+chmod +x temp-deploy/az_handler
+
+# Copy your customized configuration files
+cp host.json temp-deploy/
+cp azure-function-function.json temp-deploy/merge_warden/function.json
+
+# Create deployment package with your configuration
+cd temp-deploy
+zip -r ../final-deployment.zip .
+cd ..
+
+# Deploy the complete package
 az functionapp deployment source config-zip \
   --resource-group $RESOURCE_GROUP \
   --name $FUNCTION_APP \
-  --src azure-function-package.zip
+  --src final-deployment.zip
+
+# Clean up
+rm -rf temp-deploy final-deployment.zip
 ```
 
 ### Step 5: Configure GitHub Webhook
