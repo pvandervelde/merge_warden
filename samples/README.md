@@ -61,7 +61,7 @@ The `function.json` file defines the HTTP trigger configuration. Place this file
 
    ```bash
    # Copy and customize the host.json
-   cp samples/azure-function-host.json ./host.json
+   cp samples/host.json ./host.json
 
    # Create the function directory and copy function.json
    mkdir merge_warden
