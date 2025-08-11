@@ -55,7 +55,7 @@ The `function.json` file defines the HTTP trigger configuration. Place this file
 
 ## Deployment Instructions
 
-1. **Download the deployment binary** from the [GitHub releases](https://github.com/pvandervelde/merge_warden/releases)
+1. **Download the deployment binary** from the [GitHub releases](https://github.com/pvandervelde/merge_warden/releases) (example: replace with your repository's releases page if using a fork or alternate deployment)
 
 2. **Create your configuration files** based on the samples in this directory:
 
