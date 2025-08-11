@@ -135,7 +135,7 @@ curl -O https://raw.githubusercontent.com/pvandervelde/merge_warden/master/sampl
 - `host.json` - Azure Functions runtime configuration (place in root directory)
 - `merge_warden/function.json` - HTTP trigger configuration (place in subdirectory)
 
-See the [Azure Functions configuration guide](../../../samples/azure-functions-README.md) for detailed customization instructions.
+See the [Azure Functions configuration guide](../../../samples/README.md) for detailed customization instructions.
 
 ### Step 5: Deploy Function Code
 
