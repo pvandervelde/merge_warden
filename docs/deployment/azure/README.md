@@ -155,8 +155,7 @@ chmod +x temp-deploy/az_handler
 
 # Copy your customized configuration files
 cp host.json temp-deploy/
-cp azure-function-function.json temp-deploy/merge_warden/function.json
-
+cp function.json temp-deploy/merge_warden/function.json
 # Create deployment package with your configuration
 cd temp-deploy
 zip -r ../final-deployment.zip .
