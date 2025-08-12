@@ -596,9 +596,7 @@ fn verify_github_signature(secret: &str, headers: &HeaderMap, body: &str) -> boo
 
 #[tokio::main]
 async fn main() -> Result<(), AzureFunctionsError> {
-    let instrumentation_connection_string = env::var("APPLICATIONINSIGHTS_CONNECTION_STRING")
-        .expect("APPLICATIONINSIGHTS_CONNECTION_STRING not set");
-    telemetry::init_telemetry(&instrumentation_connection_string).await?;
+    telemetry::init_console_logging()?;
 
     info!("Starting application");
 

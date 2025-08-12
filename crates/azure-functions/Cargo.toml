@@ -17,13 +17,6 @@ azure_security_keyvault_secrets = "0.2.0"
 hex.workspace = true
 hmac.workspace = true
 octocrab = { workspace = true }
-opentelemetry = { workspace = true }
-opentelemetry_sdk = { workspace = true }
-opentelemetry-application-insights = { version = "0.40.0", features = [
-    "reqwest",
-    "tracing",
-] }
-opentelemetry-otlp = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
@@ -31,11 +24,7 @@ sha2.workspace = true
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true, features = ["log"] }
-tracing-opentelemetry = { workspace = true, features = ["thiserror"] }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
-tracing-log = "0.2"
-log = "0.4.27"
-opentelemetry-appender-log = "0.29.0"
 azure_core = "0.23"
 
 # See https://github.com/sfackler/rust-openssl/issues/1627
