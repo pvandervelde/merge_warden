@@ -46,6 +46,9 @@ pub mod github;
 pub mod mocks;
 pub mod utils;
 
+#[cfg(test)]
+mod environment_tests;
+
 // Re-export main types for convenient access
 pub use environment::{
     BotConfiguration, IntegrationTestEnvironment, OutageConfig, TestConfig, TestRepository,

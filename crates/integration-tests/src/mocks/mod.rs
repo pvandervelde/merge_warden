@@ -52,6 +52,7 @@ use crate::errors::{TestError, TestResult};
 ///     Ok(())
 /// }
 /// ```
+#[derive(Debug)]
 pub struct MockServiceProvider {
     /// Mock Azure App Configuration service
     pub app_config: MockAppConfigService,

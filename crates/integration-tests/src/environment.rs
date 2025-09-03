@@ -47,6 +47,7 @@ use crate::mocks::MockServiceProvider;
 ///     Ok(())
 /// }
 /// ```
+#[derive(Debug)]
 pub struct IntegrationTestEnvironment {
     /// Configuration for the test environment
     pub config: TestConfig,
@@ -66,8 +67,41 @@ impl IntegrationTestEnvironment {
     /// This method performs the complete setup process:
     /// 1. Loads and validates test configuration from environment variables
     /// 2. Initializes GitHub API clients and authentication
-    /// 3. Sets up mock Azure services
+    /// 3. Sets up mock Azure services with default configurations
     /// 4. Prepares the test environment for operation
+    /// 5. Validates connectivity and permissions
+    ///
+    /// # Setup Process Details
+    ///
+    /// ## Configuration Loading (Step 1)
+    /// - Reads all required and optional environment variables
+    /// - Validates configuration values according to security and format requirements
+    /// - Sets up default values for optional configuration parameters
+    /// - Performs comprehensive validation of all loaded values
+    ///
+    /// ## GitHub Client Initialization (Step 2)
+    /// - Creates authenticated GitHub API client using personal access token
+    /// - Validates token permissions and organization access
+    /// - Sets up GitHub App authentication for webhook testing
+    /// - Verifies connectivity to GitHub APIs
+    ///
+    /// ## Mock Service Setup (Step 3)
+    /// - Initializes MockAppConfigService with default test configuration
+    /// - Sets up MockKeyVaultService with test secrets
+    /// - Configures service integration traits for mock/real service swapping
+    /// - Establishes mock service provider coordination
+    ///
+    /// ## Environment Preparation (Step 4)
+    /// - Initializes resource tracking for cleanup management
+    /// - Sets up test data directories and temporary file management
+    /// - Configures logging and observability for test execution
+    /// - Prepares webhook endpoint validation
+    ///
+    /// ## Connectivity Validation (Step 5)
+    /// - Tests GitHub API connectivity and authentication
+    /// - Validates organization access permissions
+    /// - Checks local webhook endpoint accessibility (if configured)
+    /// - Verifies mock service initialization and health
     ///
     /// # Environment Variables Required
     ///
@@ -82,37 +116,93 @@ impl IntegrationTestEnvironment {
     /// - `TEST_TIMEOUT_SECONDS`: Operation timeout (default: 30)
     /// - `TEST_CLEANUP_ENABLED`: Enable automatic cleanup (default: true)
     /// - `LOCAL_WEBHOOK_ENDPOINT`: Local webhook endpoint (default: "http://localhost:7071/api/webhook")
+    /// - `USE_MOCK_SERVICES`: Use mock Azure services (default: true)
+    /// - `TEST_REPOSITORY_PREFIX`: Repository name prefix (default: "merge-warden-test")
     ///
     /// # Returns
     ///
-    /// A fully configured `IntegrationTestEnvironment` ready for test execution.
+    /// A fully configured `IntegrationTestEnvironment` ready for test execution
+    /// with all components initialized and validated.
     ///
     /// # Errors
     ///
     /// Returns `TestError::InvalidConfiguration` if:
     /// - Required environment variables are missing or invalid
-    /// - GitHub authentication fails
-    /// - Mock services cannot be initialized
+    /// - GitHub token format is incorrect or lacks required permissions
+    /// - GitHub App credentials are invalid or malformed
+    /// - Configuration validation fails for any parameter
+    /// - Environment variable values are outside acceptable ranges
+    ///
+    /// Returns `TestError::AuthenticationError` if:
+    /// - GitHub authentication fails with provided token
+    /// - GitHub App authentication cannot be established
+    /// - Organization access is denied or not available
+    /// - Token permissions are insufficient for test operations
     ///
     /// Returns `TestError::EnvironmentError` if:
-    /// - Network connectivity to GitHub fails
-    /// - Local webhook endpoint setup fails
+    /// - Network connectivity to GitHub fails during setup
+    /// - Local webhook endpoint setup fails or is not accessible
+    /// - Mock service initialization fails
+    /// - Temporary directory creation fails
+    /// - Resource tracking initialization fails
+    ///
+    /// Returns `TestError::NetworkError` if:
+    /// - GitHub API endpoints are unreachable
+    /// - DNS resolution fails for GitHub domains
+    /// - Network timeouts occur during connectivity validation
+    /// - Proxy or firewall issues prevent GitHub access
     ///
     /// # Examples
     ///
     /// ```rust
     /// use merge_warden_integration_tests::{IntegrationTestEnvironment, TestError};
+    /// use std::env;
     ///
     /// #[tokio::test]
-    /// async fn test_environment_setup() -> Result<(), TestError> {
+    /// async fn test_environment_setup_success() -> Result<(), TestError> {
+    ///     // Ensure required environment variables are set
+    ///     env::set_var("GITHUB_TEST_TOKEN", "ghp_test_token_123456789");
+    ///     env::set_var("GITHUB_TEST_APP_ID", "123456");
+    ///     env::set_var("GITHUB_TEST_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----");
+    ///     env::set_var("GITHUB_TEST_WEBHOOK_SECRET", "test_webhook_secret");
+    ///
     ///     let test_env = IntegrationTestEnvironment::setup().await?;
+    ///
+    ///     // Verify environment is ready
     ///     assert!(test_env.is_ready());
+    ///     assert_eq!(test_env.config.github_organization, "glitchgrove");
+    ///     assert!(test_env.mock_services.is_healthy().await?);
+    ///
     ///     Ok(())
+    /// }
+    ///
+    /// #[tokio::test]
+    /// async fn test_environment_setup_with_custom_config() -> Result<(), TestError> {
+    ///     env::set_var("GITHUB_TEST_ORGANIZATION", "custom-test-org");
+    ///     env::set_var("TEST_TIMEOUT_SECONDS", "60");
+    ///     env::set_var("USE_MOCK_SERVICES", "false");
+    ///
+    ///     let test_env = IntegrationTestEnvironment::setup().await?;
+    ///
+    ///     assert_eq!(test_env.config.github_organization, "custom-test-org");
+    ///     assert_eq!(test_env.config.default_timeout.as_secs(), 60);
+    ///     assert!(!test_env.config.use_mock_services);
+    ///
+    ///     Ok(())
+    /// }
+    ///
+    /// #[tokio::test]
+    /// async fn test_environment_setup_missing_token() {
+    ///     env::remove_var("GITHUB_TEST_TOKEN");
+    ///
+    ///     let result = IntegrationTestEnvironment::setup().await;
+    ///     assert!(result.is_err());
+    ///     assert!(matches!(result.unwrap_err(), TestError::InvalidConfiguration(_)));
     /// }
     /// ```
     pub async fn setup() -> TestResult<Self> {
-        // TODO: implement - Load configuration from environment
-        todo!("Load and validate test configuration")
+        // TODO: implement - Load configuration, initialize components, validate connectivity
+        todo!("Load configuration, initialize all components, and validate environment")
     }
 
     /// Creates a new test repository in the configured GitHub organization.
@@ -415,31 +505,102 @@ impl TestConfig {
     /// This method reads all necessary configuration from environment variables
     /// and validates that required values are present and correctly formatted.
     ///
+    /// # Environment Variables Required
+    ///
+    /// - `GITHUB_TEST_TOKEN`: GitHub personal access token with repo permissions in `glitchgrove` org
+    ///   - Must be a valid GitHub personal access token (starts with `ghp_` or `github_pat_`)
+    ///   - Must have `repo` scope for repository operations
+    ///   - Must have access to the `glitchgrove` organization
+    /// - `GITHUB_TEST_APP_ID`: GitHub App ID for webhook testing
+    ///   - Must be a numeric string representing a valid GitHub App ID
+    ///   - App must be installed on the `glitchgrove` organization
+    /// - `GITHUB_TEST_PRIVATE_KEY`: GitHub App private key content
+    ///   - Must be valid PEM-formatted RSA private key
+    ///   - Must correspond to the GitHub App specified by `GITHUB_TEST_APP_ID`
+    /// - `GITHUB_TEST_WEBHOOK_SECRET`: Webhook secret for signature validation
+    ///   - Must be a non-empty string used for HMAC-SHA256 signature validation
+    ///   - Should be cryptographically secure (minimum 16 characters recommended)
+    ///
+    /// # Environment Variables Optional (with defaults)
+    ///
+    /// - `GITHUB_TEST_ORGANIZATION`: Target organization (default: "glitchgrove")
+    ///   - Must be a valid GitHub organization name
+    ///   - GitHub App must be installed on this organization
+    /// - `TEST_TIMEOUT_SECONDS`: Operation timeout in seconds (default: 30)
+    ///   - Must be a positive integer between 1 and 300 seconds
+    /// - `TEST_CLEANUP_ENABLED`: Enable automatic cleanup (default: "true")
+    ///   - Must be "true" or "false" (case insensitive)
+    /// - `LOCAL_WEBHOOK_ENDPOINT`: Local webhook endpoint (default: "http://localhost:7071/api/webhook")
+    ///   - Must be a valid HTTP or HTTPS URL
+    ///   - Should be accessible from the test environment
+    /// - `USE_MOCK_SERVICES`: Use mock Azure services (default: "true")
+    ///   - Must be "true" or "false" (case insensitive)
+    /// - `TEST_REPOSITORY_PREFIX`: Repository name prefix (default: "merge-warden-test")
+    ///   - Must be a valid GitHub repository name prefix (alphanumeric and hyphens only)
+    ///   - Will be combined with test name and UUID for uniqueness
+    ///
     /// # Returns
     ///
-    /// A validated `TestConfig` instance ready for use.
+    /// A validated `TestConfig` instance ready for use with all configuration
+    /// parameters loaded and validated.
     ///
     /// # Errors
     ///
-    /// Returns `TestError::InvalidConfiguration` if any required environment
-    /// variables are missing or have invalid values.
+    /// Returns `TestError::InvalidConfiguration` if:
+    /// - Any required environment variable is missing or empty
+    /// - GitHub token format is invalid or doesn't start with expected prefix
+    /// - GitHub App ID is not a valid positive integer
+    /// - Private key is not valid PEM format or cannot be parsed
+    /// - Webhook secret is empty or too short (less than 8 characters)
+    /// - Organization name contains invalid characters
+    /// - Timeout value is not a positive integer or exceeds maximum
+    /// - Boolean values are not "true" or "false"
+    /// - Webhook endpoint is not a valid URL format
+    /// - Repository prefix contains invalid characters
+    ///
+    /// Returns `TestError::EnvironmentError` if:
+    /// - Environment variable reading fails due to system issues
+    /// - Memory allocation fails during configuration creation
     ///
     /// # Examples
     ///
     /// ```rust
     /// use merge_warden_integration_tests::{TestConfig, TestError};
+    /// use std::env;
     ///
     /// #[tokio::test]
-    /// async fn test_config_loading() -> Result<(), TestError> {
+    /// async fn test_config_loading_with_required_vars() -> Result<(), TestError> {
+    ///     // Set required environment variables
+    ///     env::set_var("GITHUB_TEST_TOKEN", "ghp_test_token_123456789");
+    ///     env::set_var("GITHUB_TEST_APP_ID", "123456");
+    ///     env::set_var("GITHUB_TEST_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----");
+    ///     env::set_var("GITHUB_TEST_WEBHOOK_SECRET", "test_webhook_secret");
+    ///
     ///     let config = TestConfig::from_environment()?;
     ///     assert!(!config.github_token.is_empty());
     ///     assert_eq!(config.github_organization, "glitchgrove");
+    ///     assert_eq!(config.default_timeout.as_secs(), 30);
+    ///
+    ///     Ok(())
+    /// }
+    ///
+    /// #[tokio::test]
+    /// async fn test_config_loading_with_custom_values() -> Result<(), TestError> {
+    ///     env::set_var("GITHUB_TEST_ORGANIZATION", "custom-org");
+    ///     env::set_var("TEST_TIMEOUT_SECONDS", "60");
+    ///     env::set_var("TEST_CLEANUP_ENABLED", "false");
+    ///
+    ///     let config = TestConfig::from_environment()?;
+    ///     assert_eq!(config.github_organization, "custom-org");
+    ///     assert_eq!(config.default_timeout.as_secs(), 60);
+    ///     assert!(!config.cleanup_enabled);
+    ///
     ///     Ok(())
     /// }
     /// ```
     pub fn from_environment() -> TestResult<Self> {
-        // TODO: implement - Load configuration from environment variables
-        todo!("Load configuration from environment variables")
+        // TODO: implement - Load and validate configuration from environment variables
+        todo!("Load and validate configuration from environment variables")
     }
 
     /// Validates the configuration values.
@@ -447,25 +608,124 @@ impl TestConfig {
     /// This method performs comprehensive validation of all configuration
     /// parameters to ensure they are valid and usable for testing.
     ///
+    /// # Validation Rules
+    ///
+    /// ## GitHub Configuration Validation
+    /// - **Token Format**: Must start with `ghp_`, `github_pat_`, or be a classic token format
+    /// - **App ID**: Must be a positive integer, typically 6-8 digits
+    /// - **Private Key**: Must be valid PEM format with RSA private key structure
+    /// - **Webhook Secret**: Must be at least 8 characters for security
+    /// - **Organization**: Must contain only alphanumeric characters, hyphens, and underscores
+    ///
+    /// ## Timeout and Duration Validation
+    /// - **Default Timeout**: Must be between 1 and 300 seconds (5 minutes maximum)
+    /// - **Values must be reasonable**: No negative or zero timeouts allowed
+    ///
+    /// ## URL and Endpoint Validation
+    /// - **Webhook Endpoint**: Must be valid HTTP or HTTPS URL with proper format
+    /// - **Localhost URLs**: Allowed for development testing
+    /// - **Port Numbers**: Must be valid (1-65535) if specified
+    ///
+    /// ## Repository and Naming Validation
+    /// - **Repository Prefix**: Must follow GitHub naming conventions (alphanumeric and hyphens)
+    /// - **Length Limits**: Repository prefix must be 1-50 characters
+    /// - **No Special Characters**: Only letters, numbers, and hyphens allowed
+    ///
     /// # Returns
     ///
-    /// `Ok(())` if configuration is valid, or `TestError::InvalidConfiguration`
-    /// with details about validation failures.
+    /// `Ok(())` if all configuration parameters are valid and usable for testing.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TestError::InvalidConfiguration` with specific details if:
+    /// - **GitHub Token Invalid**: Token format doesn't match expected patterns or is empty
+    /// - **App ID Invalid**: Not a positive integer or outside reasonable range (1-99999999)
+    /// - **Private Key Invalid**: Not valid PEM format, missing headers/footers, or corrupted content
+    /// - **Webhook Secret Weak**: Less than 8 characters or contains only whitespace
+    /// - **Organization Invalid**: Contains forbidden characters or is empty
+    /// - **Timeout Invalid**: Zero, negative, or exceeds 300 seconds
+    /// - **URL Malformed**: Webhook endpoint is not a valid URL or uses unsupported scheme
+    /// - **Repository Prefix Invalid**: Contains forbidden characters, too long, or empty
+    ///
+    /// # Validation Details
+    ///
+    /// The validation performs these specific checks:
+    /// 1. **Format Validation**: Ensures all values match expected patterns
+    /// 2. **Security Validation**: Checks that secrets meet minimum security requirements
+    /// 3. **Functional Validation**: Verifies values are usable for their intended purpose
+    /// 4. **Range Validation**: Ensures numeric values are within acceptable ranges
     ///
     /// # Examples
     ///
     /// ```rust
     /// use merge_warden_integration_tests::{TestConfig, TestError};
+    /// use std::time::Duration;
+    /// use std::collections::HashMap;
     ///
     /// #[tokio::test]
-    /// async fn test_config_validation() -> Result<(), TestError> {
-    ///     let config = TestConfig::from_environment()?;
-    ///     config.validate()?;
+    /// async fn test_valid_configuration() -> Result<(), TestError> {
+    ///     let config = TestConfig {
+    ///         github_token: "ghp_valid_token_1234567890abcdef".to_string(),
+    ///         github_app_id: "123456".to_string(),
+    ///         github_private_key: "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA...\n-----END RSA PRIVATE KEY-----".to_string(),
+    ///         github_webhook_secret: "secure_webhook_secret_123".to_string(),
+    ///         github_organization: "glitchgrove".to_string(),
+    ///         repository_prefix: "merge-warden-test".to_string(),
+    ///         default_timeout: Duration::from_secs(30),
+    ///         cleanup_enabled: true,
+    ///         local_webhook_endpoint: "http://localhost:7071/api/webhook".to_string(),
+    ///         use_mock_services: true,
+    ///         additional_config: HashMap::new(),
+    ///     };
+    ///
+    ///     config.validate()?; // Should succeed
     ///     Ok(())
+    /// }
+    ///
+    /// #[tokio::test]
+    /// async fn test_invalid_token_format() {
+    ///     let config = TestConfig {
+    ///         github_token: "invalid_token_format".to_string(),
+    ///         // ... other valid fields
+    ///         github_app_id: "123456".to_string(),
+    ///         github_private_key: "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----".to_string(),
+    ///         github_webhook_secret: "valid_secret".to_string(),
+    ///         github_organization: "glitchgrove".to_string(),
+    ///         repository_prefix: "test".to_string(),
+    ///         default_timeout: Duration::from_secs(30),
+    ///         cleanup_enabled: true,
+    ///         local_webhook_endpoint: "http://localhost:7071/api/webhook".to_string(),
+    ///         use_mock_services: true,
+    ///         additional_config: HashMap::new(),
+    ///     };
+    ///
+    ///     let result = config.validate();
+    ///     assert!(result.is_err());
+    ///     assert!(matches!(result.unwrap_err(), TestError::InvalidConfiguration(_)));
+    /// }
+    ///
+    /// #[tokio::test]
+    /// async fn test_timeout_out_of_range() {
+    ///     let config = TestConfig {
+    ///         github_token: "ghp_valid_token".to_string(),
+    ///         github_app_id: "123456".to_string(),
+    ///         github_private_key: "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----".to_string(),
+    ///         github_webhook_secret: "valid_secret".to_string(),
+    ///         github_organization: "glitchgrove".to_string(),
+    ///         repository_prefix: "test".to_string(),
+    ///         default_timeout: Duration::from_secs(500), // Too large
+    ///         cleanup_enabled: true,
+    ///         local_webhook_endpoint: "http://localhost:7071/api/webhook".to_string(),
+    ///         use_mock_services: true,
+    ///         additional_config: HashMap::new(),
+    ///     };
+    ///
+    ///     let result = config.validate();
+    ///     assert!(result.is_err());
     /// }
     /// ```
     pub fn validate(&self) -> TestResult<()> {
-        // TODO: implement - Validate configuration parameters
+        // TODO: implement - Validate configuration parameters with comprehensive checks
         todo!("Validate configuration parameters")
     }
 }

@@ -39,6 +39,7 @@ use crate::errors::{TestError, TestResult};
 ///     Ok(())
 /// }
 /// ```
+#[derive(Debug)]
 pub struct TestBotInstance {
     /// GitHub App ID for authentication
     app_id: String,

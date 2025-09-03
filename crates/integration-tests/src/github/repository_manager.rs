@@ -38,6 +38,7 @@ use crate::errors::{TestError, TestResult};
 ///     Ok(())
 /// }
 /// ```
+#[derive(Debug)]
 pub struct TestRepositoryManager {
     /// GitHub API client for repository operations
     github_client: octocrab::Octocrab,

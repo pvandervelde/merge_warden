@@ -27,6 +27,7 @@ use crate::errors::{TestError, TestResult};
 ///     Ok(())
 /// }
 /// ```
+#[derive(Debug)]
 pub struct MockAppConfigService {
     /// Configuration store
     config_store: HashMap<String, String>,
@@ -122,128 +123,8 @@ impl MockAppConfigService {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn get_configuration(&self, key: &str) -> TestResult<String> {
+    pub async fn get_configuration(&self, _key: &str) -> TestResult<String> {
         // TODO: implement - Get configuration value with failure simulation
         todo!("Get configuration value from mock store")
-    }
-
-    /// Sets a configuration value.
-    ///
-    /// # Parameters
-    ///
-    /// - `key`: Configuration key
-    /// - `value`: Configuration value
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use merge_warden_integration_tests::MockAppConfigService;
-    ///
-    /// let mut service = MockAppConfigService::new();
-    /// service.set_configuration("test-key", "test-value");
-    /// ```
-    pub fn set_configuration(&mut self, key: &str, value: &str) {
-        // TODO: implement - Set configuration value
-        todo!("Set configuration value in mock store")
-    }
-
-    /// Sets the failure rate for the mock service.
-    ///
-    /// # Parameters
-    ///
-    /// - `rate`: Failure rate between 0.0 (no failures) and 1.0 (all requests fail)
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use merge_warden_integration_tests::MockAppConfigService;
-    ///
-    /// let mut service = MockAppConfigService::new();
-    /// service.set_failure_rate(0.5); // 50% of requests will fail
-    /// ```
-    pub fn set_failure_rate(&mut self, rate: f32) {
-        // TODO: implement - Set failure rate for testing
-        todo!("Set failure rate for mock service")
-    }
-
-    /// Simulates a complete service outage.
-    ///
-    /// This method configures the service to fail all requests, simulating
-    /// a complete Azure App Configuration outage.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use merge_warden_integration_tests::MockAppConfigService;
-    ///
-    /// let mut service = MockAppConfigService::new();
-    /// service.simulate_outage();
-    /// // All subsequent requests will fail
-    /// ```
-    pub fn simulate_outage(&mut self) {
-        // TODO: implement - Simulate complete service outage
-        self.is_healthy = false;
-        self.failure_rate = 1.0;
-    }
-
-    /// Restores the service to healthy operation.
-    ///
-    /// This method resets the failure rate to zero and restores normal
-    /// service operation.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use merge_warden_integration_tests::MockAppConfigService;
-    ///
-    /// let mut service = MockAppConfigService::new();
-    /// service.simulate_outage();
-    /// service.restore_service();
-    /// // Service is now healthy again
-    /// ```
-    pub fn restore_service(&mut self) {
-        // TODO: implement - Restore service to healthy operation
-        self.is_healthy = true;
-        self.failure_rate = 0.0;
-    }
-
-    /// Checks if the service is currently healthy.
-    ///
-    /// # Returns
-    ///
-    /// `true` if the service is healthy, `false` if it's failing.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use merge_warden_integration_tests::MockAppConfigService;
-    ///
-    /// let service = MockAppConfigService::new();
-    /// assert!(service.is_healthy());
-    /// ```
-    pub fn is_healthy(&self) -> bool {
-        // TODO: implement - Check service health status
-        self.is_healthy
-    }
-
-    /// Resets the service to its initial state.
-    ///
-    /// This method clears all configuration and restores default test data.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use merge_warden_integration_tests::MockAppConfigService;
-    ///
-    /// let mut service = MockAppConfigService::new();
-    /// service.set_configuration("temp-key", "temp-value");
-    /// service.reset();
-    /// // Service is back to default state
-    /// ```
-    pub fn reset(&mut self) {
-        // TODO: implement - Reset service to initial state
-        self.config_store.clear();
-        self.is_healthy = true;
-        self.failure_rate = 0.0;
     }
 }

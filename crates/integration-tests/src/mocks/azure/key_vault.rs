@@ -27,6 +27,7 @@ use crate::errors::{TestError, TestResult};
 ///     Ok(())
 /// }
 /// ```
+#[derive(Debug)]
 pub struct MockKeyVaultService {
     /// Secret store
     secret_store: HashMap<String, String>,
@@ -125,128 +126,8 @@ impl MockKeyVaultService {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn get_secret(&self, name: &str) -> TestResult<String> {
+    pub async fn get_secret(&self, _name: &str) -> TestResult<String> {
         // TODO: implement - Get secret value with failure simulation
         todo!("Get secret value from mock store")
-    }
-
-    /// Sets a secret value.
-    ///
-    /// # Parameters
-    ///
-    /// - `name`: Secret name
-    /// - `value`: Secret value
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use merge_warden_integration_tests::MockKeyVaultService;
-    ///
-    /// let mut service = MockKeyVaultService::new();
-    /// service.set_secret("test-secret", "secret-value");
-    /// ```
-    pub fn set_secret(&mut self, name: &str, value: &str) {
-        // TODO: implement - Set secret value
-        todo!("Set secret value in mock store")
-    }
-
-    /// Sets the failure rate for the mock service.
-    ///
-    /// # Parameters
-    ///
-    /// - `rate`: Failure rate between 0.0 (no failures) and 1.0 (all requests fail)
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use merge_warden_integration_tests::MockKeyVaultService;
-    ///
-    /// let mut service = MockKeyVaultService::new();
-    /// service.set_failure_rate(0.3); // 30% of requests will fail
-    /// ```
-    pub fn set_failure_rate(&mut self, rate: f32) {
-        // TODO: implement - Set failure rate for testing
-        todo!("Set failure rate for mock service")
-    }
-
-    /// Simulates a complete service outage.
-    ///
-    /// This method configures the service to fail all requests, simulating
-    /// a complete Azure Key Vault outage.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use merge_warden_integration_tests::MockKeyVaultService;
-    ///
-    /// let mut service = MockKeyVaultService::new();
-    /// service.simulate_outage();
-    /// // All subsequent requests will fail
-    /// ```
-    pub fn simulate_outage(&mut self) {
-        // TODO: implement - Simulate complete service outage
-        self.is_healthy = false;
-        self.failure_rate = 1.0;
-    }
-
-    /// Restores the service to healthy operation.
-    ///
-    /// This method resets the failure rate to zero and restores normal
-    /// service operation.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use merge_warden_integration_tests::MockKeyVaultService;
-    ///
-    /// let mut service = MockKeyVaultService::new();
-    /// service.simulate_outage();
-    /// service.restore_service();
-    /// // Service is now healthy again
-    /// ```
-    pub fn restore_service(&mut self) {
-        // TODO: implement - Restore service to healthy operation
-        self.is_healthy = true;
-        self.failure_rate = 0.0;
-    }
-
-    /// Checks if the service is currently healthy.
-    ///
-    /// # Returns
-    ///
-    /// `true` if the service is healthy, `false` if it's failing.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use merge_warden_integration_tests::MockKeyVaultService;
-    ///
-    /// let service = MockKeyVaultService::new();
-    /// assert!(service.is_healthy());
-    /// ```
-    pub fn is_healthy(&self) -> bool {
-        // TODO: implement - Check service health status
-        self.is_healthy
-    }
-
-    /// Resets the service to its initial state.
-    ///
-    /// This method clears all secrets and restores default test data.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use merge_warden_integration_tests::MockKeyVaultService;
-    ///
-    /// let mut service = MockKeyVaultService::new();
-    /// service.set_secret("temp-secret", "temp-value");
-    /// service.reset();
-    /// // Service is back to default state
-    /// ```
-    pub fn reset(&mut self) {
-        // TODO: implement - Reset service to initial state
-        self.secret_store.clear();
-        self.is_healthy = true;
-        self.failure_rate = 0.0;
     }
 }
