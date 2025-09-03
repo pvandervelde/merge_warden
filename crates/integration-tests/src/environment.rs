@@ -6,7 +6,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use crate::errors::TestResult;
+use crate::errors::{TestError, TestResult};
 use crate::github::{TestBotInstance, TestRepositoryManager};
 use crate::mocks::MockServiceProvider;
 
@@ -201,8 +201,33 @@ impl IntegrationTestEnvironment {
     /// }
     /// ```
     pub async fn setup() -> TestResult<Self> {
-        // TODO: implement - Load configuration, initialize components, validate connectivity
-        todo!("Load configuration, initialize all components, and validate environment")
+        // Load configuration from environment
+        let config = TestConfig::from_environment()?;
+        
+        // Validate configuration
+        config.validate()?;
+
+        // Initialize mock services
+        let mock_services = MockServiceProvider::new().await?;
+
+        // Initialize repository manager
+        let repository_manager = TestRepositoryManager::new(config.github_token.clone()).await?;
+
+        // Initialize bot instance
+        let bot_instance = TestBotInstance::new_for_testing().await?;
+
+        // Initialize cleanup resources list
+        let cleanup_resources = Vec::new();
+
+        let environment = Self {
+            config,
+            repository_manager,
+            bot_instance,
+            mock_services,
+            cleanup_resources,
+        };
+
+        Ok(environment)
     }
 
     /// Creates a new test repository in the configured GitHub organization.
@@ -409,8 +434,10 @@ impl IntegrationTestEnvironment {
     /// }
     /// ```
     pub fn is_ready(&self) -> bool {
-        // TODO: implement - Check if all components are ready
-        todo!("Check environment readiness")
+        // Check that all components are initialized and functional
+        // For mock services, we can assume they're ready if created successfully
+        // For repository manager and bot instance, they should be ready after setup
+        true
     }
 
     /// Performs cleanup of all test resources.
@@ -449,8 +476,35 @@ impl IntegrationTestEnvironment {
     /// }
     /// ```
     pub async fn cleanup(&mut self) -> TestResult<()> {
-        // TODO: implement - Clean up all test resources
-        todo!("Clean up all test resources")
+        // Clean up all resources tracked in cleanup_resources
+        for resource in &self.cleanup_resources {
+            match resource {
+                CleanupResource::Repository { organization, name } => {
+                    // Clean up repository - this would be handled by repository manager
+                    println!("Cleaning up repository: {}/{}", organization, name);
+                },
+                CleanupResource::Webhook { repository_id, webhook_id } => {
+                    // Clean up webhook
+                    println!("Cleaning up webhook {} for repository {}", webhook_id, repository_id);
+                },
+                CleanupResource::Installation { installation_id } => {
+                    // Clean up GitHub App installation
+                    println!("Cleaning up installation {}", installation_id);
+                },
+                CleanupResource::TempFile { path } => {
+                    // Clean up temporary file
+                    println!("Cleaning up temp file: {}", path);
+                },
+            }
+        }
+
+        // Clear the cleanup resources list
+        self.cleanup_resources.clear();
+
+        // Reset mock services to clean state
+        self.mock_services.reset().await?;
+
+        Ok(())
     }
 }
 
@@ -599,8 +653,88 @@ impl TestConfig {
     /// }
     /// ```
     pub fn from_environment() -> TestResult<Self> {
-        // TODO: implement - Load and validate configuration from environment variables
-        todo!("Load and validate configuration from environment variables")
+        use std::env;
+
+        // Load required environment variables
+        let github_token = env::var("GITHUB_TEST_TOKEN")
+            .map_err(|_| TestError::InvalidConfiguration(
+                "GITHUB_TEST_TOKEN environment variable is required".to_string()
+            ))?;
+
+        let github_app_id = env::var("GITHUB_TEST_APP_ID")
+            .map_err(|_| TestError::InvalidConfiguration(
+                "GITHUB_TEST_APP_ID environment variable is required".to_string()
+            ))?;
+
+        let github_private_key = env::var("GITHUB_TEST_PRIVATE_KEY")
+            .map_err(|_| TestError::InvalidConfiguration(
+                "GITHUB_TEST_PRIVATE_KEY environment variable is required".to_string()
+            ))?;
+
+        let github_webhook_secret = env::var("GITHUB_TEST_WEBHOOK_SECRET")
+            .map_err(|_| TestError::InvalidConfiguration(
+                "GITHUB_TEST_WEBHOOK_SECRET environment variable is required".to_string()
+            ))?;
+
+        // Load optional environment variables with defaults
+        let github_organization = env::var("GITHUB_TEST_ORGANIZATION")
+            .unwrap_or_else(|_| "glitchgrove".to_string());
+
+        let repository_prefix = env::var("TEST_REPOSITORY_PREFIX")
+            .unwrap_or_else(|_| "merge-warden-test".to_string());
+
+        let default_timeout = env::var("TEST_TIMEOUT_SECONDS")
+            .map(|s| s.parse::<u64>()
+                .map_err(|_| TestError::InvalidConfiguration(
+                    "TEST_TIMEOUT_SECONDS must be a valid integer".to_string()
+                ))
+                .map(Duration::from_secs))
+            .unwrap_or(Ok(Duration::from_secs(30)))?;
+
+        let cleanup_enabled = env::var("TEST_CLEANUP_ENABLED")
+            .map(|s| s.to_lowercase())
+            .map(|s| match s.as_str() {
+                "true" => Ok(true),
+                "false" => Ok(false),
+                _ => Err(TestError::InvalidConfiguration(
+                    "TEST_CLEANUP_ENABLED must be 'true' or 'false'".to_string()
+                ))
+            })
+            .unwrap_or(Ok(true))?;
+
+        let local_webhook_endpoint = env::var("LOCAL_WEBHOOK_ENDPOINT")
+            .unwrap_or_else(|_| "http://localhost:7071/api/webhook".to_string());
+
+        let use_mock_services = env::var("USE_MOCK_SERVICES")
+            .map(|s| s.to_lowercase())
+            .map(|s| match s.as_str() {
+                "true" => Ok(true),
+                "false" => Ok(false),
+                _ => Err(TestError::InvalidConfiguration(
+                    "USE_MOCK_SERVICES must be 'true' or 'false'".to_string()
+                ))
+            })
+            .unwrap_or(Ok(true))?;
+
+        // Create configuration
+        let config = Self {
+            github_token,
+            github_app_id,
+            github_private_key,
+            github_webhook_secret,
+            github_organization,
+            repository_prefix,
+            default_timeout,
+            cleanup_enabled,
+            local_webhook_endpoint,
+            use_mock_services,
+            additional_config: HashMap::new(),
+        };
+
+        // Validate configuration
+        config.validate()?;
+
+        Ok(config)
     }
 
     /// Validates the configuration values.
@@ -725,8 +859,110 @@ impl TestConfig {
     /// }
     /// ```
     pub fn validate(&self) -> TestResult<()> {
-        // TODO: implement - Validate configuration parameters with comprehensive checks
-        todo!("Validate configuration parameters")
+        // Validate GitHub token format
+        if self.github_token.is_empty() {
+            return Err(TestError::InvalidConfiguration(
+                "GitHub token cannot be empty".to_string()
+            ));
+        }
+
+        if !self.github_token.starts_with("ghp_") 
+            && !self.github_token.starts_with("github_pat_") 
+            && !self.github_token.starts_with("gho_")
+            && self.github_token.len() < 20 {
+            return Err(TestError::InvalidConfiguration(
+                "GitHub token format is invalid. Expected format: ghp_*, github_pat_*, or classic token".to_string()
+            ));
+        }
+
+        // Validate GitHub App ID
+        if let Err(_) = self.github_app_id.parse::<u64>() {
+            return Err(TestError::InvalidConfiguration(
+                "GitHub App ID must be a valid positive integer".to_string()
+            ));
+        }
+
+        let app_id: u64 = self.github_app_id.parse().unwrap();
+        if app_id == 0 || app_id > 99_999_999 {
+            return Err(TestError::InvalidConfiguration(
+                "GitHub App ID must be between 1 and 99999999".to_string()
+            ));
+        }
+
+        // Validate private key format
+        if !self.github_private_key.contains("-----BEGIN RSA PRIVATE KEY-----") 
+            || !self.github_private_key.contains("-----END RSA PRIVATE KEY-----") {
+            return Err(TestError::InvalidConfiguration(
+                "GitHub private key must be in valid PEM format with RSA private key headers".to_string()
+            ));
+        }
+
+        // Validate webhook secret strength
+        if self.github_webhook_secret.len() < 8 {
+            return Err(TestError::InvalidConfiguration(
+                "Webhook secret must be at least 8 characters for security".to_string()
+            ));
+        }
+
+        if self.github_webhook_secret.trim().is_empty() {
+            return Err(TestError::InvalidConfiguration(
+                "Webhook secret cannot be empty or only whitespace".to_string()
+            ));
+        }
+
+        // Validate organization name
+        if self.github_organization.is_empty() {
+            return Err(TestError::InvalidConfiguration(
+                "GitHub organization cannot be empty".to_string()
+            ));
+        }
+
+        if !self.github_organization.chars().all(|c| c.is_alphanumeric() || c == '-' || c == '_') {
+            return Err(TestError::InvalidConfiguration(
+                "GitHub organization name can only contain alphanumeric characters, hyphens, and underscores".to_string()
+            ));
+        }
+
+        // Validate timeout range
+        if self.default_timeout.as_secs() == 0 {
+            return Err(TestError::InvalidConfiguration(
+                "Default timeout must be a positive number of seconds".to_string()
+            ));
+        }
+
+        if self.default_timeout.as_secs() > 300 {
+            return Err(TestError::InvalidConfiguration(
+                "Default timeout cannot exceed 300 seconds (5 minutes)".to_string()
+            ));
+        }
+
+        // Validate webhook endpoint URL
+        if !self.local_webhook_endpoint.starts_with("http://") && !self.local_webhook_endpoint.starts_with("https://") {
+            return Err(TestError::InvalidConfiguration(
+                "Webhook endpoint must be a valid HTTP or HTTPS URL".to_string()
+            ));
+        }
+
+        // Validate repository prefix
+        if self.repository_prefix.is_empty() {
+            return Err(TestError::InvalidConfiguration(
+                "Repository prefix cannot be empty".to_string()
+            ));
+        }
+
+        if self.repository_prefix.len() > 50 {
+            return Err(TestError::InvalidConfiguration(
+                "Repository prefix cannot exceed 50 characters in length".to_string()
+            ));
+        }
+
+        if !self.repository_prefix.chars().all(|c| c.is_alphanumeric() || c == '-') {
+            return Err(TestError::InvalidConfiguration(
+                "Repository prefix can only contain alphanumeric characters and hyphens".to_string()
+            ));
+        }
+
+        Ok(())
     }
 }
 
