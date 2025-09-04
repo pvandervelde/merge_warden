@@ -40,6 +40,7 @@
 //! - `GITHUB_TEST_WEBHOOK_SECRET`: Webhook secret for signature validation
 //! - `GITHUB_TEST_ORGANIZATION`: Target organization for test repositories (default: "glitchgrove")
 
+pub mod ci_config;
 pub mod environment;
 pub mod errors;
 pub mod github;
@@ -47,9 +48,15 @@ pub mod mocks;
 pub mod utils;
 
 #[cfg(test)]
+mod ci_config_tests;
+#[cfg(test)]
 mod environment_tests;
 
 // Re-export main types for convenient access
+pub use ci_config::{
+    CiTestConfig, CiTestExecutor, CleanupConfig, EnvironmentIsolation, GitHubRateLimit,
+    RetryConfig, TestExecutionResults, TestStatus, TestTimeouts,
+};
 pub use environment::{
     BotConfiguration, IntegrationTestEnvironment, OutageConfig, TestConfig, TestRepository,
 };

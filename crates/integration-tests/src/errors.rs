@@ -53,6 +53,19 @@ pub enum TestError {
     #[error("Test configuration error: {0}")]
     InvalidConfiguration(String),
 
+    /// CI/CD configuration or execution error.
+    ///
+    /// This error occurs during CI/CD pipeline execution or configuration:
+    /// - Invalid CI environment setup
+    /// - Missing CI environment variables or secrets
+    /// - CI execution environment validation failures
+    /// - Test execution coordination issues
+    ///
+    /// # Parameters
+    /// - `message`: Detailed description of the CI configuration issue
+    #[error("CI configuration error: {0}")]
+    CiConfigurationError(String),
+
     /// GitHub API operation failed.
     ///
     /// This error indicates failures in GitHub API operations such as:
