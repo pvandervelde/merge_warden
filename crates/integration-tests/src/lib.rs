@@ -55,7 +55,7 @@ mod environment_tests;
 // Re-export main types for convenient access
 pub use ci_config::{
     CiTestConfig, CiTestExecutor, CleanupConfig, EnvironmentIsolation, GitHubRateLimit,
-    RetryConfig, TestExecutionResults, TestStatus, TestTimeouts,
+    IndividualTestResult, RetryConfig, TestExecutionResults, TestStatus, TestTimeouts,
 };
 pub use environment::{
     BotConfiguration, IntegrationTestEnvironment, OutageConfig, TestConfig, TestRepository,

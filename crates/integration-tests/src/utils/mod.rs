@@ -189,16 +189,15 @@ pub fn validate_webhook_signature(payload: &str, signature: &str, secret: &str) 
 /// use merge_warden_integration_tests::{create_webhook_payload, TestRepository};
 /// use serde_json::Value;
 ///
-/// let repo = TestRepository { /* ... */ };
 /// let repo = TestRepository {
 ///     name: "test-repo".to_string(),
 ///     organization: "glitchgrove".to_string(),
+///     id: 12345,
+///     full_name: "glitchgrove/test-repo".to_string(),
 ///     clone_url: "https://github.com/glitchgrove/test-repo.git".to_string(),
 ///     default_branch: "main".to_string(),
 ///     private: false,
 ///     created_at: chrono::Utc::now(),
-///     full_name: "glitchgrove/test-repo".to_string(),
-///     id: 1,
 /// };
 /// let payload = create_webhook_payload("pull_request", "opened", &repo);
 ///
@@ -210,8 +209,26 @@ pub fn create_webhook_payload(
     action: &str,
     repository_data: &crate::environment::TestRepository,
 ) -> String {
-    // TODO: implement - Create realistic webhook payload
-    todo!("Create webhook payload for testing")
+    format!(
+        r#"{{
+    "action": "{}",
+    "repository": {{
+        "id": {},
+        "name": "{}",
+        "full_name": "{}",
+        "private": {},
+        "clone_url": "{}",
+        "default_branch": "{}"
+    }}
+}}"#,
+        action,
+        repository_data.id,
+        repository_data.name,
+        repository_data.full_name,
+        repository_data.private,
+        repository_data.clone_url,
+        repository_data.default_branch
+    )
 }
 
 /// Retry utility for flaky operations in integration tests.
