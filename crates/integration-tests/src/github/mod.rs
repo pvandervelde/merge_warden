@@ -100,8 +100,18 @@ impl TestBotInstance {
     /// }
     /// ```
     pub async fn new_for_testing() -> TestResult<Self> {
-        // TODO: implement - Initialize bot instance from environment
-        todo!("Initialize bot instance from test configuration")
+        // For now, create a basic bot instance with placeholder values
+        // TODO: Load actual values from environment in future iterations
+        let github_client = octocrab::Octocrab::builder().build()?;
+
+        Ok(TestBotInstance {
+            app_id: "123456".to_string(), // Placeholder
+            private_key: "test-private-key".to_string(),
+            webhook_secret: "test-webhook-secret".to_string(),
+            base_webhook_url: "https://example.com/webhook".to_string(),
+            ngrok_tunnel: None,
+            github_client,
+        })
     }
 
     /// Configures the bot for testing with a specific repository.

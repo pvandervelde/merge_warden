@@ -80,9 +80,16 @@ impl TestRepositoryManager {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn new(github_token: String) -> TestResult<Self> {
-        // TODO: implement - Initialize repository manager
-        todo!("Initialize repository manager with GitHub client")
+    pub async fn new(_github_token: String) -> TestResult<Self> {
+        // TODO: Initialize actual GitHub client when needed
+        let github_client = octocrab::Octocrab::builder().build()?;
+
+        Ok(TestRepositoryManager {
+            github_client,
+            organization: "glitchgrove".to_string(),
+            repository_prefix: "merge-warden-test".to_string(),
+            created_repositories: Vec::new(),
+        })
     }
 
     /// Creates a new test repository with unique naming.

@@ -15,9 +15,6 @@ pub use azure::{MockAppConfigService, MockKeyVaultService};
 // Future: GCP services will be added here
 // pub mod gcp;
 
-use std::collections::HashMap;
-use std::time::Duration;
-
 use crate::errors::{TestError, TestResult};
 
 /// Provider for all mock Azure services used in integration testing.
@@ -89,8 +86,14 @@ impl MockServiceProvider {
     /// }
     /// ```
     pub async fn new() -> TestResult<Self> {
-        // TODO: implement - Initialize mock service provider
-        todo!("Initialize mock service provider with default configuration")
+        let app_config = MockAppConfigService::new();
+        let key_vault = MockKeyVaultService::new();
+
+        Ok(MockServiceProvider {
+            app_config,
+            key_vault,
+            is_healthy: true,
+        })
     }
 
     /// Sets a configuration value in the mock App Config service.
@@ -117,8 +120,8 @@ impl MockServiceProvider {
     /// }
     /// ```
     pub async fn set_app_config_value(&mut self, key: &str, value: &str) -> TestResult<()> {
-        // TODO: implement - Set app config value
-        todo!("Set app config value in mock service")
+        self.app_config.set_configuration(key, value);
+        Ok(())
     }
 
     /// Sets a secret in the mock Key Vault service.
@@ -145,8 +148,8 @@ impl MockServiceProvider {
     /// }
     /// ```
     pub async fn set_key_vault_secret(&mut self, name: &str, value: &str) -> TestResult<()> {
-        // TODO: implement - Set key vault secret
-        todo!("Set key vault secret in mock service")
+        self.key_vault.set_secret(name, value);
+        Ok(())
     }
 
     /// Simulates service outages across all mock services.
@@ -179,8 +182,18 @@ impl MockServiceProvider {
         app_config_failure_rate: f32,
         key_vault_failure_rate: f32,
     ) -> TestResult<()> {
-        // TODO: implement - Simulate service outages
-        todo!("Configure mock services for outage simulation")
+        self.app_config.set_failure_rate(app_config_failure_rate);
+        self.key_vault.set_failure_rate(key_vault_failure_rate);
+
+        if app_config_failure_rate >= 1.0 {
+            self.app_config.simulate_outage();
+        }
+
+        if key_vault_failure_rate >= 1.0 {
+            self.key_vault.simulate_outage();
+        }
+
+        Ok(())
     }
 
     /// Restores all mock services to healthy operation.
@@ -207,8 +220,10 @@ impl MockServiceProvider {
     /// }
     /// ```
     pub async fn restore_services(&mut self) -> TestResult<()> {
-        // TODO: implement - Restore all services to healthy state
-        todo!("Restore all mock services to healthy operation")
+        self.app_config.restore_service();
+        self.key_vault.restore_service();
+        self.is_healthy = true;
+        Ok(())
     }
 
     /// Checks if all mock services are healthy and responsive.
@@ -230,8 +245,7 @@ impl MockServiceProvider {
     /// }
     /// ```
     pub async fn is_healthy(&self) -> TestResult<bool> {
-        // TODO: implement - Check health of all mock services
-        todo!("Check health status of all mock services")
+        Ok(self.is_healthy && self.app_config.is_healthy() && self.key_vault.is_healthy())
     }
 
     /// Resets all mock services to their initial state.
@@ -259,7 +273,9 @@ impl MockServiceProvider {
     /// }
     /// ```
     pub async fn reset(&mut self) -> TestResult<()> {
-        // TODO: implement - Reset all mock services to initial state
-        todo!("Reset all mock services to initial state")
+        self.app_config.reset();
+        self.key_vault.reset();
+        self.is_healthy = true;
+        Ok(())
     }
 }

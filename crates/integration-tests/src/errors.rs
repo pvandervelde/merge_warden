@@ -468,3 +468,13 @@ impl From<toml::de::Error> for TestError {
         TestError::InvalidConfiguration(format!("TOML parsing error: {}", err))
     }
 }
+
+/// Converts from `octocrab::Error` to `TestError`.
+impl From<octocrab::Error> for TestError {
+    fn from(err: octocrab::Error) -> Self {
+        TestError::GitHubApiError {
+            operation: "github_client_operation".to_string(),
+            message: err.to_string(),
+        }
+    }
+}

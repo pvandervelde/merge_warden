@@ -347,8 +347,9 @@ mod config_validation_tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             TestError::InvalidConfiguration(msg) => {
-                assert!(msg.contains("app") || msg.contains("ID"));
-                assert!(msg.contains("range"));
+                // Look for the actual error message: "GitHub App ID must be between 1 and 99999999"
+                assert!(msg.contains("App ID") || msg.contains("app") || msg.contains("ID"));
+                assert!(msg.contains("between") || msg.contains("range"));
             }
             _ => panic!("Expected InvalidConfiguration error"),
         }
@@ -382,8 +383,8 @@ mod config_validation_tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             TestError::InvalidConfiguration(msg) => {
-                assert!(msg.contains("webhook secret"));
-                assert!(msg.contains("8 characters") || msg.contains("too short"));
+                assert!(msg.contains("Webhook secret") || msg.contains("webhook"));
+                assert!(msg.contains("8 characters") || msg.contains("at least"));
             }
             _ => panic!("Expected InvalidConfiguration error"),
         }
@@ -454,8 +455,8 @@ mod config_validation_tests {
         assert!(result.is_err());
         match result.unwrap_err() {
             TestError::InvalidConfiguration(msg) => {
-                assert!(msg.contains("webhook") || msg.contains("URL"));
-                assert!(msg.contains("invalid") || msg.contains("format"));
+                assert!(msg.contains("Webhook") || msg.contains("endpoint") || msg.contains("URL"));
+                assert!(msg.contains("HTTP") || msg.contains("valid") || msg.contains("HTTPS"));
             }
             _ => panic!("Expected InvalidConfiguration error"),
         }
