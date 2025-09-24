@@ -17,7 +17,8 @@ mod config_loading_tests {
 
     #[tokio::test]
     async fn test_load_config_with_all_required_variables() -> TestResult<()> {
-        // Arrange: Set all required environment variables
+        // Arrange: Clean environment and set all required environment variables
+        cleanup_environment_variables();
         env::set_var("GITHUB_TEST_TOKEN", "ghp_test_token_1234567890abcdef");
         env::set_var("GITHUB_TEST_APP_ID", "123456");
         env::set_var(
@@ -53,7 +54,8 @@ mod config_loading_tests {
 
     #[tokio::test]
     async fn test_load_config_with_custom_optional_values() -> TestResult<()> {
-        // Arrange: Set required variables and custom optional values
+        // Arrange: Clean environment, set required variables and custom optional values
+        cleanup_environment_variables();
         setup_required_environment_variables();
         env::set_var("GITHUB_TEST_ORGANIZATION", "custom-test-org");
         env::set_var("TEST_TIMEOUT_SECONDS", "60");
@@ -208,7 +210,8 @@ mod config_loading_tests {
 
     #[tokio::test]
     async fn test_load_config_case_insensitive_booleans() -> TestResult<()> {
-        // Arrange: Set boolean values in different cases
+        // Arrange: Clean environment and set boolean values in different cases
+        cleanup_environment_variables();
         setup_required_environment_variables();
         env::set_var("TEST_CLEANUP_ENABLED", "TRUE");
         env::set_var("USE_MOCK_SERVICES", "False");

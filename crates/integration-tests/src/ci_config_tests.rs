@@ -20,7 +20,8 @@ async fn test_github_actions_detection() -> TestResult<()> {
     // Assert: Should be detected as CI environment
     assert!(config.is_ci_environment());
     println!("Parallel test limit: {}", config.parallel_test_limit());
-    assert!(config.parallel_test_limit() <= 4); // Conservative in CI
+    // GitHub Actions should use conservative parallel limit (2 by default)
+    assert!(config.parallel_test_limit() == 2, "Expected parallel limit of 2 for GitHub Actions, got {}", config.parallel_test_limit());
     assert!(config.test_timeouts().default_timeout >= Duration::from_secs(60)); // Longer timeouts in CI
 
     // Cleanup
