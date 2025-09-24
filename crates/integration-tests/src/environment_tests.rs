@@ -120,11 +120,12 @@ mod config_loading_tests {
 
     #[tokio::test]
     async fn test_load_config_missing_private_key() {
-        // Arrange: Remove required private key
-        env::remove_var("GITHUB_TEST_PRIVATE_KEY");
-        setup_other_required_variables();
+        // Arrange: Clean environment and set up everything except private key
+        cleanup_environment_variables();
         env::set_var("GITHUB_TEST_TOKEN", "ghp_test_token");
         env::set_var("GITHUB_TEST_APP_ID", "123456");
+        env::set_var("GITHUB_TEST_WEBHOOK_SECRET", "test_webhook_secret");
+        // Intentionally not setting GITHUB_TEST_PRIVATE_KEY
 
         // Act & Assert: Should fail with InvalidConfiguration
         let result = TestConfig::from_environment();
@@ -186,7 +187,8 @@ mod config_loading_tests {
 
     #[tokio::test]
     async fn test_load_config_invalid_boolean_format() {
-        // Arrange: Set invalid boolean value
+        // Arrange: Clean environment, set all required variables, then set invalid boolean
+        cleanup_environment_variables();
         setup_required_environment_variables();
         env::set_var("TEST_CLEANUP_ENABLED", "maybe");
 
