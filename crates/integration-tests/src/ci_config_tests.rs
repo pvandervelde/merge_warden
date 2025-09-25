@@ -21,7 +21,11 @@ async fn test_github_actions_detection() -> TestResult<()> {
     assert!(config.is_ci_environment());
     println!("Parallel test limit: {}", config.parallel_test_limit());
     // GitHub Actions should use conservative parallel limit (2 by default)
-    assert!(config.parallel_test_limit() == 2, "Expected parallel limit of 2 for GitHub Actions, got {}", config.parallel_test_limit());
+    assert!(
+        config.parallel_test_limit() == 2,
+        "Expected parallel limit of 2 for GitHub Actions, got {}",
+        config.parallel_test_limit()
+    );
     assert!(config.test_timeouts().default_timeout >= Duration::from_secs(60)); // Longer timeouts in CI
 
     // Cleanup
@@ -31,7 +35,10 @@ async fn test_github_actions_detection() -> TestResult<()> {
 
 #[tokio::test]
 async fn test_local_development_configuration() -> TestResult<()> {
-    // Arrange: Ensure no CI environment variables
+    // Arrange: Clean up any environment variables from other tests first
+    cleanup_test_environment();
+
+    // Ensure no CI environment variables
     env::remove_var("GITHUB_ACTIONS");
     env::remove_var("CI");
 
@@ -118,7 +125,8 @@ async fn test_environment_isolation_configuration() -> TestResult<()> {
 
 #[tokio::test]
 async fn test_run_integration_tests_with_mock_execution() -> TestResult<()> {
-    // Arrange: Set up valid environment and create executor
+    // Arrange: Clean environment first, then set up valid environment and create executor
+    cleanup_test_environment();
     setup_valid_test_environment();
     let config = CiTestConfig::for_local_development().await?;
     let mut executor = CiTestExecutor::new(config).await?;
@@ -137,7 +145,8 @@ async fn test_run_integration_tests_with_mock_execution() -> TestResult<()> {
 
 #[tokio::test]
 async fn test_run_filtered_tests() -> TestResult<()> {
-    // Arrange: Set up valid environment and create executor
+    // Arrange: Clean environment first, then set up valid environment and create executor
+    cleanup_test_environment();
     setup_valid_test_environment();
     env::set_var("USE_MOCK_SERVICES", "true"); // Ensure mock services are enabled
     let config = CiTestConfig::for_local_development().await?;
