@@ -169,7 +169,10 @@ mod config_loading_tests {
 
     #[tokio::test]
     async fn test_load_config_invalid_timeout_format() {
-        // Arrange: Set invalid timeout value
+        // Arrange: Clean up any environment variables from other tests first
+        cleanup_environment_variables();
+
+        // Set invalid timeout value
         setup_required_environment_variables();
         env::set_var("TEST_TIMEOUT_SECONDS", "not_a_number");
 
