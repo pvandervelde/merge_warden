@@ -105,7 +105,10 @@ mod config_loading_tests {
 
     #[tokio::test]
     async fn test_load_config_missing_app_id() {
-        // Arrange: Remove required app ID
+        // Arrange: Clean up any environment variables from other tests first
+        cleanup_environment_variables();
+
+        // Remove required app ID
         env::remove_var("GITHUB_TEST_APP_ID");
         setup_other_required_variables();
         env::set_var("GITHUB_TEST_TOKEN", "ghp_test_token");
@@ -573,7 +576,10 @@ mod environment_setup_tests {
 
     #[tokio::test]
     async fn test_environment_setup_missing_required_variable() {
-        // Arrange: Remove required environment variable
+        // Arrange: Clean up any environment variables from other tests first
+        cleanup_test_environment();
+
+        // Remove required environment variable
         env::remove_var("GITHUB_TEST_TOKEN");
 
         // Act & Assert: Setup should fail
