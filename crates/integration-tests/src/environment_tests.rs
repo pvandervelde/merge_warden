@@ -82,7 +82,10 @@ mod config_loading_tests {
 
     #[tokio::test]
     async fn test_load_config_missing_github_token() {
-        // Arrange: Remove required token
+        // Arrange: Clean up any environment variables from other tests first
+        cleanup_environment_variables();
+
+        // Remove required token
         env::remove_var("GITHUB_TEST_TOKEN");
         setup_other_required_variables();
 
