@@ -3,10 +3,27 @@
 //! This module contains tests for all aspects of environment configuration loading,
 //! validation, and setup functionality. Tests cover both success and failure scenarios
 //! to ensure robust error handling and proper validation.
+//!
+//! ## Serial Test Execution
+//!
+//! All tests in this module are marked with `#[serial]` to ensure they run sequentially
+//! rather than in parallel. This is necessary because these tests manipulate global
+//! environment variables (e.g., `GITHUB_TEST_TOKEN`, `GITHUB_TEST_APP_ID`, etc.) to test
+//! configuration loading, validation, and error handling.
+//!
+//! When tests run in parallel, they create race conditions where:
+//! - Test A sets environment variables for its configuration
+//! - Test B's cleanup function removes all environment variables
+//! - Test A tries to load the configuration and fails unexpectedly
+//!
+//! Running these tests serially prevents such interference and ensures consistent,
+//! reproducible results across different execution environments (local vs CI).
 
 use std::collections::HashMap;
 use std::env;
 use std::time::Duration;
+
+use serial_test::serial;
 
 use crate::environment::{IntegrationTestEnvironment, OutageConfig, TestConfig};
 use crate::errors::{TestError, TestResult};
@@ -16,6 +33,7 @@ mod config_loading_tests {
     use super::*;
 
     #[tokio::test]
+    #[serial]
     async fn test_load_config_with_all_required_variables() -> TestResult<()> {
         // Arrange: Clean environment and set all required environment variables
         cleanup_environment_variables();
@@ -53,6 +71,7 @@ mod config_loading_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_load_config_with_custom_optional_values() -> TestResult<()> {
         // Arrange: Clean environment, set required variables and custom optional values
         cleanup_environment_variables();
@@ -81,6 +100,7 @@ mod config_loading_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_load_config_missing_github_token() {
         // Arrange: Clean up any environment variables from other tests first
         cleanup_environment_variables();
@@ -104,6 +124,7 @@ mod config_loading_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_load_config_missing_app_id() {
         // Arrange: Clean up any environment variables from other tests first
         cleanup_environment_variables();
@@ -127,6 +148,7 @@ mod config_loading_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_load_config_missing_private_key() {
         // Arrange: Clean environment and set up everything except private key
         cleanup_environment_variables();
@@ -149,6 +171,7 @@ mod config_loading_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_load_config_missing_webhook_secret() {
         // Arrange: Remove required webhook secret
         env::remove_var("GITHUB_TEST_WEBHOOK_SECRET");
@@ -174,6 +197,7 @@ mod config_loading_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_load_config_invalid_timeout_format() {
         // Arrange: Clean up any environment variables from other tests first
         cleanup_environment_variables();
@@ -197,6 +221,7 @@ mod config_loading_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_load_config_invalid_boolean_format() {
         // Arrange: Clean environment, set all required variables, then set invalid boolean
         cleanup_environment_variables();
@@ -218,6 +243,7 @@ mod config_loading_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_load_config_case_insensitive_booleans() -> TestResult<()> {
         // Arrange: Clean environment and set boolean values in different cases
         cleanup_environment_variables();
@@ -272,6 +298,7 @@ mod config_validation_tests {
     use super::*;
 
     #[tokio::test]
+    #[serial]
     async fn test_validate_valid_configuration() -> TestResult<()> {
         // Arrange: Create valid configuration
         let config = TestConfig {
@@ -296,6 +323,7 @@ mod config_validation_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_validate_invalid_github_token_format() {
         // Arrange: Create config with invalid token format
         let config = create_base_config();
@@ -315,6 +343,7 @@ mod config_validation_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_validate_empty_github_token() {
         // Arrange: Create config with empty token
         let mut config = create_base_config();
@@ -333,6 +362,7 @@ mod config_validation_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_validate_invalid_app_id_format() {
         // Arrange: Create config with invalid app ID
         let mut config = create_base_config();
@@ -351,6 +381,7 @@ mod config_validation_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_validate_app_id_out_of_range() {
         // Arrange: Create config with app ID out of reasonable range
         let mut config = create_base_config();
@@ -370,6 +401,7 @@ mod config_validation_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_validate_invalid_private_key_format() {
         // Arrange: Create config with invalid private key format
         let mut config = create_base_config();
@@ -387,6 +419,7 @@ mod config_validation_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_validate_weak_webhook_secret() {
         // Arrange: Create config with weak webhook secret
         let mut config = create_base_config();
@@ -405,6 +438,7 @@ mod config_validation_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_validate_invalid_organization_name() {
         // Arrange: Create config with invalid organization name
         let mut config = create_base_config();
@@ -423,6 +457,7 @@ mod config_validation_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_validate_timeout_too_large() {
         // Arrange: Create config with timeout exceeding maximum
         let mut config = create_base_config();
@@ -441,6 +476,7 @@ mod config_validation_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_validate_zero_timeout() {
         // Arrange: Create config with zero timeout
         let mut config = create_base_config();
@@ -459,6 +495,7 @@ mod config_validation_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_validate_invalid_webhook_url() {
         // Arrange: Create config with invalid webhook URL
         let mut config = create_base_config();
@@ -477,6 +514,7 @@ mod config_validation_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_validate_invalid_repository_prefix() {
         // Arrange: Create config with invalid repository prefix
         let mut config = create_base_config();
@@ -495,6 +533,7 @@ mod config_validation_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_validate_repository_prefix_too_long() {
         // Arrange: Create config with repository prefix that's too long
         let mut config = create_base_config();
@@ -537,6 +576,7 @@ mod environment_setup_tests {
     use super::*;
 
     #[tokio::test]
+    #[serial]
     async fn test_environment_setup_success() -> TestResult<()> {
         // Arrange: Set up valid environment variables
         setup_valid_test_environment();
@@ -555,6 +595,7 @@ mod environment_setup_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_environment_setup_with_custom_configuration() -> TestResult<()> {
         // Arrange: Set up environment with custom values
         setup_valid_test_environment();
@@ -575,6 +616,7 @@ mod environment_setup_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_environment_setup_missing_required_variable() {
         // Arrange: Clean up any environment variables from other tests first
         cleanup_test_environment();
@@ -596,6 +638,7 @@ mod environment_setup_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_environment_setup_invalid_github_credentials() {
         // Arrange: Set invalid GitHub credentials
         setup_valid_test_environment();
@@ -610,6 +653,7 @@ mod environment_setup_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_environment_setup_network_connectivity_failure() {
         // Arrange: Set up environment but simulate network failure
         setup_valid_test_environment();
@@ -627,6 +671,7 @@ mod environment_setup_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_environment_setup_mock_service_initialization_failure() {
         // Arrange: Set up environment but force mock service failure
         setup_valid_test_environment();
@@ -670,6 +715,7 @@ mod environment_readiness_tests {
     use super::*;
 
     #[tokio::test]
+    #[serial]
     async fn test_environment_readiness_when_fully_initialized() -> TestResult<()> {
         // Arrange: Set up and initialize environment
         setup_valid_test_environment();
@@ -683,6 +729,7 @@ mod environment_readiness_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_environment_readiness_when_partially_initialized() {
         // This test would check scenarios where environment is partially set up
         // Implementation would depend on how partial initialization is handled
@@ -727,6 +774,7 @@ mod outage_simulation_tests {
     use super::*;
 
     #[tokio::test]
+    #[serial]
     async fn test_complete_outage_configuration() {
         // Arrange & Act: Create complete outage configuration
         let outage = OutageConfig::complete_outage();
@@ -739,6 +787,7 @@ mod outage_simulation_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_partial_outage_configuration() {
         // Arrange & Act: Create partial outage configuration
         let outage = OutageConfig::partial_outage(0.3);
@@ -752,6 +801,7 @@ mod outage_simulation_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_simulate_azure_outage() -> TestResult<()> {
         // Arrange: Set up test environment
         setup_valid_test_environment();
@@ -770,6 +820,7 @@ mod outage_simulation_tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_restore_azure_services() -> TestResult<()> {
         // Arrange: Set up environment and simulate outage
         setup_valid_test_environment();

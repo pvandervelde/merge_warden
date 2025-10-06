@@ -1,12 +1,30 @@
 //! Tests for CI configuration and test execution coordination.
+//!
+//! ## Serial Test Execution
+//!
+//! All tests in this module are marked with `#[serial]` to ensure they run sequentially
+//! rather than in parallel. This is necessary because these tests manipulate global
+//! environment variables (e.g., `GITHUB_ACTIONS`, `CI`, `GITHUB_TEST_TOKEN`) to simulate
+//! different CI environments and configurations.
+//!
+//! When tests run in parallel, they create race conditions where:
+//! - Test A sets `GITHUB_ACTIONS=true`
+//! - Test B's cleanup removes all environment variables
+//! - Test A tries to read the variable and fails
+//!
+//! Running these tests serially prevents such interference and ensures consistent,
+//! reproducible results across different execution environments (local vs CI).
 
 use std::env;
 use std::time::Duration;
+
+use serial_test::serial;
 
 use crate::ci_config::*;
 use crate::errors::{TestError, TestResult};
 
 #[tokio::test]
+#[serial]
 async fn test_github_actions_detection() -> TestResult<()> {
     // Arrange: Set GitHub Actions environment variables
     cleanup_test_environment();
@@ -34,6 +52,7 @@ async fn test_github_actions_detection() -> TestResult<()> {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_local_development_configuration() -> TestResult<()> {
     // Arrange: Clean up any environment variables from other tests first
     cleanup_test_environment();
@@ -54,6 +73,7 @@ async fn test_local_development_configuration() -> TestResult<()> {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_custom_parallel_limit_override() -> TestResult<()> {
     // Arrange: Set custom parallel limit
     env::set_var("CI_PARALLEL_LIMIT", "8");
@@ -70,6 +90,7 @@ async fn test_custom_parallel_limit_override() -> TestResult<()> {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_github_rate_limit_without_authentication() -> TestResult<()> {
     // Arrange: Ensure no GitHub token
     env::remove_var("GITHUB_TOKEN");
@@ -86,6 +107,7 @@ async fn test_github_rate_limit_without_authentication() -> TestResult<()> {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_timeout_configuration_in_ci_environment() -> TestResult<()> {
     // Arrange: Set CI environment
     env::set_var("GITHUB_ACTIONS", "true");
@@ -105,6 +127,7 @@ async fn test_timeout_configuration_in_ci_environment() -> TestResult<()> {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_environment_isolation_configuration() -> TestResult<()> {
     // Act: Create configuration
     let config = CiTestConfig::for_local_development().await?;
@@ -124,6 +147,7 @@ async fn test_environment_isolation_configuration() -> TestResult<()> {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_run_integration_tests_with_mock_execution() -> TestResult<()> {
     // Arrange: Clean environment first, then set up valid environment and create executor
     cleanup_test_environment();
@@ -144,6 +168,7 @@ async fn test_run_integration_tests_with_mock_execution() -> TestResult<()> {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_run_filtered_tests() -> TestResult<()> {
     // Arrange: Clean environment first, then set up valid environment and create executor
     cleanup_test_environment();
@@ -193,6 +218,7 @@ fn cleanup_test_environment() {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_results_counting_all_passed() -> TestResult<()> {
     // Arrange: Create test results with all passed
     let results = create_test_results_with_status(&[
@@ -211,6 +237,7 @@ async fn test_results_counting_all_passed() -> TestResult<()> {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_results_counting_with_failures() -> TestResult<()> {
     // Arrange: Create test results with some failures
     let results = create_test_results_with_status(&[
@@ -230,6 +257,7 @@ async fn test_results_counting_with_failures() -> TestResult<()> {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_results_counting_with_skipped_tests() -> TestResult<()> {
     // Arrange: Create test results with skipped tests
     let results = create_test_results_with_status(&[
@@ -249,6 +277,7 @@ async fn test_results_counting_with_skipped_tests() -> TestResult<()> {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_empty_results() -> TestResult<()> {
     // Arrange: Create empty test results
     let results = create_test_results_with_status(&[]);
@@ -308,6 +337,7 @@ fn create_test_results_with_status(statuses: &[TestStatus]) -> TestExecutionResu
 }
 
 #[tokio::test]
+#[serial]
 async fn test_retryable_error_types() -> TestResult<()> {
     // Arrange: Create retry configuration
     let retry_config = RetryConfig::default();
@@ -327,6 +357,7 @@ async fn test_retryable_error_types() -> TestResult<()> {
 }
 
 #[tokio::test]
+#[serial]
 async fn test_exponential_backoff_configuration() -> TestResult<()> {
     // Arrange: Create configuration with exponential backoff
     let config = CiTestConfig::for_github_actions().await?;
