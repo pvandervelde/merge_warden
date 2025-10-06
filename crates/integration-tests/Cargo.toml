@@ -1,0 +1,56 @@
+[package]
+name = "merge-warden-integration-tests"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+license-file.workspace = true
+edition = "2021"
+
+[dependencies]
+# Workspace dependencies
+merge_warden_core = { path = "../core" }
+merge_warden_developer_platforms = { path = "../developer_platforms" }
+az_handler = { path = "../azure-functions" }
+
+# Async runtime and testing
+async-trait = { workspace = true }
+futures = "0.3"
+tokio = { workspace = true, features = ["full", "test-util"] }
+tokio-test = "0.4"
+
+# GitHub API and HTTP client
+octocrab = { workspace = true }
+reqwest = { workspace = true, features = ["json"] }
+
+# Serialization and configuration
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = "0.9"
+toml = { workspace = true }
+
+# Test utilities and mocking
+mockall = "0.13"
+serial_test = "3.2"
+tempfile = "3.8"
+uuid = { version = "1.10", features = ["v4"] }
+wiremock = "0.6"
+
+# Error handling and logging
+anyhow = { workspace = true }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+# Cryptography and encoding
+hex = { workspace = true }
+hmac = { workspace = true }
+jsonwebtoken = { workspace = true }
+sha2 = { workspace = true }
+
+# Time and random utilities
+chrono = { version = "0.4", features = ["serde"] }
+rand = "0.8"
+
+[dev-dependencies]
+# Additional test dependencies can be added here if needed
+pretty_assertions = "1.4"

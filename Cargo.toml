@@ -6,6 +6,7 @@ members = [
     #"crates/aws-lambda",
     "crates/azure-functions",
     "crates/cli",
+    "crates/integration-tests",
 ]
 
 [workspace.package]
