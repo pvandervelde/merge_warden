@@ -26,7 +26,7 @@ use merge_warden_integration_tests::{
 /// # Test Scenario Coverage
 ///
 /// 1. **Initial Configuration**: Sets up repository with strict validation rules
-/// 2. **Invalid PR Creation**: Creates PR that violates initial configuration  
+/// 2. **Invalid PR Creation**: Creates PR that violates initial configuration
 /// 3. **Validation Failure**: Verifies that validation fails as expected
 /// 4. **Configuration Update**: Updates configuration to allow previously invalid PR
 /// 5. **Re-evaluation**: Triggers re-evaluation of the same PR
@@ -41,7 +41,7 @@ use merge_warden_integration_tests::{
 async fn test_configuration_changes_are_applied() -> TestResult<()> {
     // Arrange: Set up test environment with strict initial configuration
     let mut test_env = IntegrationTestEnvironment::setup().await?;
-    
+
     let repo = test_env
         .create_test_repository("config-change-test")
         .await?;
@@ -55,14 +55,12 @@ async fn test_configuration_changes_are_applied() -> TestResult<()> {
         body: "Test PR for configuration testing".to_string(),
         source_branch: "test-config-changes".to_string(),
         target_branch: "main".to_string(),
-        files: vec![
-            FileSpec {
-                path: "test-file.txt".to_string(),
-                content: "Simple test content".to_string(),
-                action: FileAction::Add,
-                mime_type: Some("text/plain".to_string()),
-            },
-        ],
+        files: vec![FileSpec {
+            path: "test-file.txt".to_string(),
+            content: "Simple test content".to_string(),
+            action: FileAction::Add,
+            mime_type: Some("text/plain".to_string()),
+        }],
         labels: vec!["test".to_string()],
         draft: false,
         assignees: vec![],
@@ -76,12 +74,15 @@ async fn test_configuration_changes_are_applied() -> TestResult<()> {
     let processing_timeout = Duration::from_secs(10);
     let initial_result = timeout(
         processing_timeout,
-        wait_for_validation_completion(&test_env, &repo, pr.number)
-    ).await.map_err(|_| TestError::timeout("initial validation", processing_timeout))??;
+        wait_for_validation_completion(&test_env, &repo, pr.number),
+    )
+    .await
+    .map_err(|_| TestError::timeout("initial validation", processing_timeout.as_secs()))??;
 
     // Assert: Verify initial validation failed due to strict rules
     let initial_checks = test_env.get_pr_checks(&repo, pr.number).await?;
-    let merge_warden_check = initial_checks.iter()
+    let merge_warden_check = initial_checks
+        .iter()
         .find(|c| c.name == "merge-warden")
         .ok_or_else(|| TestError::validation("merge-warden check not found"))?;
 
@@ -93,7 +94,7 @@ async fn test_configuration_changes_are_applied() -> TestResult<()> {
 
     // Act: Update configuration to allow flexible title format
     let config_update_start = Instant::now();
-    
+
     update_repository_configuration(&test_env, &repo).await?;
 
     // Trigger re-evaluation by sending webhook event
@@ -103,8 +104,10 @@ async fn test_configuration_changes_are_applied() -> TestResult<()> {
     let reeval_timeout = Duration::from_secs(15);
     let reeval_result = timeout(
         reeval_timeout,
-        wait_for_configuration_update_completion(&test_env, &repo, pr.number)
-    ).await.map_err(|_| TestError::timeout("configuration update", reeval_timeout))??;
+        wait_for_configuration_update_completion(&test_env, &repo, pr.number),
+    )
+    .await
+    .map_err(|_| TestError::timeout("configuration update", reeval_timeout.as_secs()))??;
 
     let config_update_duration = config_update_start.elapsed();
 
@@ -117,7 +120,8 @@ async fn test_configuration_changes_are_applied() -> TestResult<()> {
 
     // Assert: Verify validation now passes with updated configuration
     let updated_checks = test_env.get_pr_checks(&repo, pr.number).await?;
-    let updated_merge_warden_check = updated_checks.iter()
+    let updated_merge_warden_check = updated_checks
+        .iter()
         .find(|c| c.name == "merge-warden")
         .ok_or_else(|| TestError::validation("merge-warden check not found after update"))?;
 
@@ -136,8 +140,10 @@ async fn test_configuration_changes_are_applied() -> TestResult<()> {
     // Assert: Verify new comment reflects configuration change
     let comments = test_env.get_pr_comments(&repo, pr.number).await?;
     assert!(
-        comments.iter().any(|c| c.body.contains("Configuration updated") || 
-                               c.body.contains("Re-evaluated with new configuration")),
+        comments
+            .iter()
+            .any(|c| c.body.contains("Configuration updated")
+                || c.body.contains("Re-evaluated with new configuration")),
         "Bot should indicate that configuration was updated"
     );
 
@@ -168,12 +174,14 @@ enabled = true
 maxLines = 500
 "#;
 
-    test_env.update_file_in_repository(
-        repo,
-        ".github/merge-warden.toml",
-        strict_config,
-        "Configure strict validation rules"
-    ).await?;
+    test_env
+        .update_file_in_repository(
+            repo,
+            ".github/merge-warden.toml",
+            strict_config,
+            "Configure strict validation rules",
+        )
+        .await?;
 
     Ok(())
 }
@@ -198,12 +206,14 @@ enabled = true
 maxLines = 2000
 "#;
 
-    test_env.update_file_in_repository(
-        repo,
-        ".github/merge-warden.toml",
-        permissive_config,
-        "Update to permissive validation rules"
-    ).await?;
+    test_env
+        .update_file_in_repository(
+            repo,
+            ".github/merge-warden.toml",
+            permissive_config,
+            "Update to permissive validation rules",
+        )
+        .await?;
 
     Ok(())
 }
@@ -215,17 +225,25 @@ async fn create_test_pull_request(
     pr_spec: &PullRequestSpec,
 ) -> TestResult<merge_warden_integration_tests::utils::TestPullRequest> {
     // Create source branch
-    test_env.create_branch(repo, &pr_spec.source_branch, "main").await?;
+    test_env
+        .create_branch(repo, &pr_spec.source_branch, "main")
+        .await?;
 
     // Add files to source branch
     for file_spec in &pr_spec.files {
-        test_env.add_file_to_branch(
-            repo,
-            &pr_spec.source_branch,
-            &file_spec.path,
-            &file_spec.content,
-            &format!("{}: {}", file_spec.action.as_commit_message(), file_spec.path)
-        ).await?;
+        test_env
+            .add_file_to_branch(
+                repo,
+                &pr_spec.source_branch,
+                &file_spec.path,
+                &file_spec.content,
+                &format!(
+                    "{}: {}",
+                    file_spec.action.as_commit_message(),
+                    file_spec.path
+                ),
+            )
+            .await?;
     }
 
     // Create pull request
@@ -258,7 +276,8 @@ async fn trigger_configuration_reload(
         }
     });
 
-    test_env.bot_instance
+    test_env
+        .bot_instance
         .simulate_webhook("pull_request", &webhook_payload)
         .await?;
 
@@ -276,7 +295,7 @@ async fn wait_for_validation_completion(
 
     while start_time.elapsed() < timeout_duration {
         let checks = test_env.get_pr_checks(repo, pr_number).await?;
-        
+
         if let Some(merge_warden_check) = checks.iter().find(|c| c.name == "merge-warden") {
             if merge_warden_check.conclusion.is_some() {
                 return Ok(());
@@ -286,7 +305,10 @@ async fn wait_for_validation_completion(
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 
-    Err(TestError::timeout("validation completion", timeout_duration))
+    Err(TestError::timeout(
+        "validation completion",
+        timeout_duration.as_secs(),
+    ))
 }
 
 /// Helper function to wait for configuration update completion
@@ -300,13 +322,14 @@ async fn wait_for_configuration_update_completion(
 
     // Store initial check state to detect changes
     let initial_checks = test_env.get_pr_checks(repo, pr_number).await?;
-    let initial_check_id = initial_checks.iter()
+    let initial_check_id = initial_checks
+        .iter()
         .find(|c| c.name == "merge-warden")
         .map(|c| c.id.clone());
 
     while start_time.elapsed() < timeout_duration {
         let checks = test_env.get_pr_checks(repo, pr_number).await?;
-        
+
         if let Some(current_check) = checks.iter().find(|c| c.name == "merge-warden") {
             // Check if this is a new check run (different ID) or conclusion changed
             if let Some(ref initial_id) = initial_check_id {
@@ -321,5 +344,8 @@ async fn wait_for_configuration_update_completion(
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
 
-    Err(TestError::timeout("configuration update completion", timeout_duration))
+    Err(TestError::timeout(
+        "configuration update completion",
+        timeout_duration.as_secs(),
+    ))
 }

@@ -40,10 +40,8 @@ use merge_warden_integration_tests::{
 async fn test_recovery_from_github_api_failures() -> TestResult<()> {
     // Arrange: Set up test environment
     let mut test_env = IntegrationTestEnvironment::setup().await?;
-    
-    let repo = test_env
-        .create_test_repository("api-recovery-test")
-        .await?;
+
+    let repo = test_env.create_test_repository("api-recovery-test").await?;
 
     test_env.setup_repository_configuration(&repo).await?;
 
@@ -56,14 +54,12 @@ async fn test_recovery_from_github_api_failures() -> TestResult<()> {
         body: "Testing system resilience to GitHub API failures.\n\nFixes #999".to_string(),
         source_branch: "feature/api-recovery-test".to_string(),
         target_branch: "main".to_string(),
-        files: vec![
-            FileSpec {
-                path: "recovery-test.rs".to_string(),
-                content: "// Test file for API recovery\npub fn test_recovery() {}\n".to_string(),
-                action: FileAction::Add,
-                mime_type: Some("text/x-rust".to_string()),
-            },
-        ],
+        files: vec![FileSpec {
+            path: "recovery-test.rs".to_string(),
+            content: "// Test file for API recovery\npub fn test_recovery() {}\n".to_string(),
+            action: FileAction::Add,
+            mime_type: Some("text/x-rust".to_string()),
+        }],
         labels: vec!["test".to_string(), "resilience".to_string()],
         draft: false,
         assignees: vec![],
@@ -78,13 +74,21 @@ async fn test_recovery_from_github_api_failures() -> TestResult<()> {
     tokio::time::sleep(failure_timeout).await;
 
     // Assert: Verify no successful processing occurred during API failure
-    let initial_checks = test_env.get_pr_checks(&repo, pr.number).await.unwrap_or_default();
-    let initial_comments = test_env.get_pr_comments(&repo, pr.number).await.unwrap_or_default();
-    
+    let initial_checks = test_env
+        .get_pr_checks(&repo, pr.number)
+        .await
+        .unwrap_or_default();
+    let initial_comments = test_env
+        .get_pr_comments(&repo, pr.number)
+        .await
+        .unwrap_or_default();
+
     // During API failure, we might not get any results or get error indicators
     assert!(
-        initial_checks.is_empty() || 
-        initial_checks.iter().any(|c| c.conclusion.as_ref().map_or(false, |s| s == "failure")),
+        initial_checks.is_empty()
+            || initial_checks
+                .iter()
+                .any(|c| c.conclusion.as_ref().map_or(false, |s| s == "failure")),
         "Processing should fail or be absent during API outage"
     );
 
@@ -99,8 +103,10 @@ async fn test_recovery_from_github_api_failures() -> TestResult<()> {
     let recovery_timeout = Duration::from_secs(30);
     let recovery_result = timeout(
         recovery_timeout,
-        wait_for_successful_processing(&test_env, &repo, pr.number)
-    ).await.map_err(|_| TestError::timeout("recovery processing", recovery_timeout))??;
+        wait_for_successful_processing(&test_env, &repo, pr.number),
+    )
+    .await
+    .map_err(|_| TestError::timeout("recovery processing", recovery_timeout.as_secs()))??;
 
     let recovery_duration = recovery_start.elapsed();
 
@@ -118,7 +124,8 @@ async fn test_recovery_from_github_api_failures() -> TestResult<()> {
         "Checks should be present after recovery"
     );
 
-    let merge_warden_check = final_checks.iter()
+    let merge_warden_check = final_checks
+        .iter()
         .find(|c| c.name == "merge-warden")
         .ok_or_else(|| TestError::validation("merge-warden check not found after recovery"))?;
 
@@ -161,7 +168,7 @@ async fn test_recovery_from_github_api_failures() -> TestResult<()> {
 async fn test_fallback_to_default_config_during_outage() -> TestResult<()> {
     // Arrange: Set up test environment
     let mut test_env = IntegrationTestEnvironment::setup().await?;
-    
+
     let repo = test_env
         .create_test_repository("config-outage-test")
         .await?;
@@ -177,14 +184,12 @@ async fn test_fallback_to_default_config_during_outage() -> TestResult<()> {
         body: "Test PR during Azure App Config outage.\n\nCloses #888".to_string(),
         source_branch: "feature/config-fallback".to_string(),
         target_branch: "main".to_string(),
-        files: vec![
-            FileSpec {
-                path: "fallback-test.rs".to_string(),
-                content: "// Test file for config fallback\npub fn test_fallback() {}\n".to_string(),
-                action: FileAction::Add,
-                mime_type: Some("text/x-rust".to_string()),
-            },
-        ],
+        files: vec![FileSpec {
+            path: "fallback-test.rs".to_string(),
+            content: "// Test file for config fallback\npub fn test_fallback() {}\n".to_string(),
+            action: FileAction::Add,
+            mime_type: Some("text/x-rust".to_string()),
+        }],
         labels: vec!["test".to_string()],
         draft: false,
         assignees: vec![],
@@ -198,8 +203,10 @@ async fn test_fallback_to_default_config_during_outage() -> TestResult<()> {
     let processing_timeout = Duration::from_secs(20);
     let processing_result = timeout(
         processing_timeout,
-        wait_for_processing_with_fallback(&test_env, &repo, pr.number)
-    ).await.map_err(|_| TestError::timeout("fallback processing", processing_timeout))??;
+        wait_for_processing_with_fallback(&test_env, &repo, pr.number),
+    )
+    .await
+    .map_err(|_| TestError::timeout("fallback processing", processing_timeout.as_secs()))??;
 
     // Assert: Verify bot still functions with default configuration
     let checks = test_env.get_pr_checks(&repo, pr.number).await?;
@@ -211,11 +218,11 @@ async fn test_fallback_to_default_config_during_outage() -> TestResult<()> {
     // Assert: Verify comments indicate fallback mode
     let comments = test_env.get_pr_comments(&repo, pr.number).await?;
     assert!(
-        comments.iter().any(|c| 
-            c.body.contains("default configuration") || 
-            c.body.contains("configuration service unavailable") ||
-            c.body.contains("fallback mode")
-        ),
+        comments
+            .iter()
+            .any(|c| c.body.contains("default configuration")
+                || c.body.contains("configuration service unavailable")
+                || c.body.contains("fallback mode")),
         "Bot should indicate fallback to default configuration"
     );
 
@@ -232,7 +239,7 @@ async fn test_fallback_to_default_config_during_outage() -> TestResult<()> {
     // Assert: Verify system recognizes service recovery
     let recovery_comments = test_env.get_pr_comments(&repo, pr.number).await?;
     let comment_count_after_recovery = recovery_comments.len();
-    
+
     // Should have additional comments after recovery or updated status
     assert!(
         comment_count_after_recovery >= comments.len(),
@@ -249,11 +256,11 @@ async fn test_fallback_to_default_config_during_outage() -> TestResult<()> {
 ///
 /// This test validates system behavior when multiple services fail simultaneously
 /// and recovery happens in stages.
-#[tokio::test] 
+#[tokio::test]
 async fn test_multiple_concurrent_service_failures() -> TestResult<()> {
     // Arrange: Set up test environment
     let mut test_env = IntegrationTestEnvironment::setup().await?;
-    
+
     let repo = test_env
         .create_test_repository("multi-failure-test")
         .await?;
@@ -271,14 +278,12 @@ async fn test_multiple_concurrent_service_failures() -> TestResult<()> {
         body: "Testing resilience to multiple service failures.".to_string(),
         source_branch: "feature/multi-failure-resilience".to_string(),
         target_branch: "main".to_string(),
-        files: vec![
-            FileSpec {
-                path: "resilience-test.rs".to_string(),
-                content: "// Multi-failure resilience test\n".to_string(),
-                action: FileAction::Add,
-                mime_type: Some("text/x-rust".to_string()),
-            },
-        ],
+        files: vec![FileSpec {
+            path: "resilience-test.rs".to_string(),
+            content: "// Multi-failure resilience test\n".to_string(),
+            action: FileAction::Add,
+            mime_type: Some("text/x-rust".to_string()),
+        }],
         labels: vec![],
         draft: false,
         assignees: vec![],
@@ -286,23 +291,24 @@ async fn test_multiple_concurrent_service_failures() -> TestResult<()> {
     };
 
     // Act: Attempt to create PR during total outage
-    let pr_creation_result = create_test_pull_request_with_retries(&test_env, &repo, &pr_spec).await;
-    
+    let pr_creation_result =
+        create_test_pull_request_with_retries(&test_env, &repo, &pr_spec).await;
+
     // May succeed or fail depending on which services are critical for PR creation
     match pr_creation_result {
         Ok(pr) => {
             // If PR creation succeeded, test graceful degradation
-            
+
             // Wait briefly for any processing attempts
             tokio::time::sleep(Duration::from_secs(5)).await;
 
             // Gradually restore services
             test_env.restore_github_api().await?;
             tokio::time::sleep(Duration::from_secs(2)).await;
-            
+
             test_env.restore_app_config().await?;
             tokio::time::sleep(Duration::from_secs(2)).await;
-            
+
             test_env.restore_key_vault().await?;
 
             // Trigger processing after recovery
@@ -311,19 +317,19 @@ async fn test_multiple_concurrent_service_failures() -> TestResult<()> {
             // Wait for full recovery
             let recovery_result = timeout(
                 Duration::from_secs(30),
-                wait_for_successful_processing(&test_env, &repo, pr.number)
-            ).await;
+                wait_for_successful_processing(&test_env, &repo, pr.number),
+            )
+            .await;
 
             // Assert: Should eventually recover fully
             assert!(
                 recovery_result.is_ok(),
                 "System should recover after all services are restored"
             );
-
         }
         Err(_) => {
             // If PR creation failed, test that it works after service recovery
-            
+
             // Restore services
             test_env.restore_github_api().await?;
             test_env.restore_app_config().await?;
@@ -335,8 +341,9 @@ async fn test_multiple_concurrent_service_failures() -> TestResult<()> {
             // Should process normally now
             let processing_result = timeout(
                 Duration::from_secs(20),
-                wait_for_successful_processing(&test_env, &repo, pr.number)
-            ).await;
+                wait_for_successful_processing(&test_env, &repo, pr.number),
+            )
+            .await;
 
             assert!(
                 processing_result.is_ok(),
@@ -358,19 +365,27 @@ async fn create_test_pull_request_with_retries(
     pr_spec: &PullRequestSpec,
 ) -> TestResult<merge_warden_integration_tests::utils::TestPullRequest> {
     // Create source branch (may fail during outages)
-    let branch_result = test_env.create_branch(repo, &pr_spec.source_branch, "main").await;
-    
+    let branch_result = test_env
+        .create_branch(repo, &pr_spec.source_branch, "main")
+        .await;
+
     match branch_result {
         Ok(_) => {
             // Add files to source branch
             for file_spec in &pr_spec.files {
-                let _file_result = test_env.add_file_to_branch(
-                    repo,
-                    &pr_spec.source_branch,
-                    &file_spec.path,
-                    &file_spec.content,
-                    &format!("{}: {}", file_spec.action.as_commit_message(), file_spec.path)
-                ).await;
+                let _file_result = test_env
+                    .add_file_to_branch(
+                        repo,
+                        &pr_spec.source_branch,
+                        &file_spec.path,
+                        &file_spec.content,
+                        &format!(
+                            "{}: {}",
+                            file_spec.action.as_commit_message(),
+                            file_spec.path
+                        ),
+                    )
+                    .await;
                 // Continue even if file additions fail during outages
             }
 
@@ -378,7 +393,7 @@ async fn create_test_pull_request_with_retries(
             let pr = test_env.create_pull_request(repo, pr_spec).await?;
             Ok(pr)
         }
-        Err(e) => Err(e)
+        Err(e) => Err(e),
     }
 }
 
@@ -405,7 +420,8 @@ async fn trigger_webhook_redelivery(
         }
     });
 
-    test_env.bot_instance
+    test_env
+        .bot_instance
         .simulate_webhook("pull_request", &webhook_payload)
         .await?;
 
@@ -432,7 +448,8 @@ async fn trigger_configuration_service_recovery(
         }
     });
 
-    test_env.bot_instance
+    test_env
+        .bot_instance
         .simulate_webhook("push", &config_event_payload)
         .await?;
 
@@ -450,7 +467,7 @@ async fn wait_for_successful_processing(
 
     while start_time.elapsed() < timeout_duration {
         let checks = test_env.get_pr_checks(repo, pr_number).await?;
-        
+
         if let Some(merge_warden_check) = checks.iter().find(|c| c.name == "merge-warden") {
             if let Some(conclusion) = &merge_warden_check.conclusion {
                 if conclusion == "success" || conclusion == "failure" {
@@ -462,7 +479,10 @@ async fn wait_for_successful_processing(
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
 
-    Err(TestError::timeout("successful processing", timeout_duration))
+    Err(TestError::timeout(
+        "successful processing",
+        timeout_duration.as_secs(),
+    ))
 }
 
 /// Helper function to wait for processing with fallback configuration
@@ -476,9 +496,15 @@ async fn wait_for_processing_with_fallback(
 
     while start_time.elapsed() < timeout_duration {
         // Check for any processing activity (checks or comments)
-        let checks = test_env.get_pr_checks(repo, pr_number).await.unwrap_or_default();
-        let comments = test_env.get_pr_comments(repo, pr_number).await.unwrap_or_default();
-        
+        let checks = test_env
+            .get_pr_checks(repo, pr_number)
+            .await
+            .unwrap_or_default();
+        let comments = test_env
+            .get_pr_comments(repo, pr_number)
+            .await
+            .unwrap_or_default();
+
         if !checks.is_empty() || !comments.is_empty() {
             return Ok(());
         }
@@ -486,5 +512,8 @@ async fn wait_for_processing_with_fallback(
         tokio::time::sleep(Duration::from_secs(2)).await;
     }
 
-    Err(TestError::timeout("processing with fallback", timeout_duration))
+    Err(TestError::timeout(
+        "processing with fallback",
+        timeout_duration.as_secs(),
+    ))
 }

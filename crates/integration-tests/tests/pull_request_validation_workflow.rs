@@ -25,7 +25,7 @@ use merge_warden_integration_tests::{
 /// # Test Scenario Coverage
 ///
 /// 1. **Repository Setup**: Creates test repository with proper configuration
-/// 2. **Bot Configuration**: Installs GitHub App and configures webhooks  
+/// 2. **Bot Configuration**: Installs GitHub App and configures webhooks
 /// 3. **Pull Request Creation**: Creates realistic PR with file changes
 /// 4. **Webhook Processing**: Simulates webhook delivery and processing
 /// 5. **Validation Execution**: Validates PR against configured policies
@@ -38,7 +38,7 @@ use merge_warden_integration_tests::{
 /// # Behavioral Assertions Tested
 ///
 /// - Integration test framework must successfully create test repositories (Assertion #1)
-/// - Bot instance configuration must complete webhook setup within 30 seconds (Assertion #2) 
+/// - Bot instance configuration must complete webhook setup within 30 seconds (Assertion #2)
 /// - Pull request validation workflow must process webhooks within 15 seconds (Assertion #3)
 /// - All test resources must be properly cleaned up (Assertion #7)
 /// - Mock Azure services must accurately simulate real behavior (Assertion #10)
@@ -56,10 +56,13 @@ async fn test_complete_pull_request_validation_workflow() -> TestResult<()> {
 
     // Configure bot instance with webhook endpoints - Assertion #2
     let bot_setup_start = Instant::now();
-    
+
     test_env.bot_instance.setup_local_tunnel().await?;
-    test_env.bot_instance.configure_for_repository(&repo).await?;
-    
+    test_env
+        .bot_instance
+        .configure_for_repository(&repo)
+        .await?;
+
     let bot_setup_duration = bot_setup_start.elapsed();
     assert!(
         bot_setup_duration <= Duration::from_secs(30),
@@ -73,7 +76,8 @@ async fn test_complete_pull_request_validation_workflow() -> TestResult<()> {
     // Create pull request specification with realistic changes
     let pr_spec = PullRequestSpec {
         title: "feat: add new validation feature".to_string(),
-        body: "This PR implements a new validation rule for enhanced security.\n\nFixes #123".to_string(),
+        body: "This PR implements a new validation rule for enhanced security.\n\nFixes #123"
+            .to_string(),
         source_branch: "feature/new-validation".to_string(),
         target_branch: "main".to_string(),
         files: vec![
@@ -110,11 +114,15 @@ async fn test_complete_pull_request_validation_workflow() -> TestResult<()> {
 
     // Simulate webhook delivery for pull request opened event
     let webhook_payload = create_pr_opened_webhook_payload(&repo, &pr, &pr_spec)?;
-    
+
     let webhook_response = timeout(
         Duration::from_secs(15),
-        test_env.bot_instance.simulate_webhook("pull_request", &webhook_payload)
-    ).await.map_err(|_| TestError::timeout("webhook processing", Duration::from_secs(15)))??;
+        test_env
+            .bot_instance
+            .simulate_webhook("pull_request", &webhook_payload),
+    )
+    .await
+    .map_err(|_| TestError::timeout("webhook processing", 15))??;
 
     let processing_duration = processing_start.elapsed();
 
@@ -136,7 +144,7 @@ async fn test_complete_pull_request_validation_workflow() -> TestResult<()> {
 
     // Assert: Verify bot comments were posted
     let comments = test_env.get_pr_comments(&repo, pr.number).await?;
-    
+
     assert!(
         !comments.is_empty(),
         "Bot should have posted at least one comment"
@@ -144,13 +152,15 @@ async fn test_complete_pull_request_validation_workflow() -> TestResult<()> {
 
     // Verify validation summary comment exists
     assert!(
-        comments.iter().any(|c| c.body.contains("Pull Request Validation Summary")),
+        comments
+            .iter()
+            .any(|c| c.body.contains("Pull Request Validation Summary")),
         "Bot should post validation summary comment"
     );
 
-    // Assert: Verify appropriate labels were applied  
+    // Assert: Verify appropriate labels were applied
     let labels = test_env.get_pr_labels(&repo, pr.number).await?;
-    
+
     assert!(
         labels.iter().any(|l| l.name.starts_with("size/")),
         "Size label should be applied based on file changes"
@@ -158,8 +168,9 @@ async fn test_complete_pull_request_validation_workflow() -> TestResult<()> {
 
     // Assert: Verify status checks were updated
     let checks = test_env.get_pr_checks(&repo, pr.number).await?;
-    
-    let merge_warden_check = checks.iter()
+
+    let merge_warden_check = checks
+        .iter()
         .find(|c| c.name == "merge-warden")
         .expect("merge-warden status check should exist");
 
@@ -200,17 +211,25 @@ async fn create_pull_request_in_repository(
     pr_spec: &PullRequestSpec,
 ) -> TestResult<merge_warden_integration_tests::utils::TestPullRequest> {
     // Create source branch with changes
-    test_env.create_branch(&repo, &pr_spec.source_branch, "main").await?;
+    test_env
+        .create_branch(&repo, &pr_spec.source_branch, "main")
+        .await?;
 
     // Add files to source branch
     for file_spec in &pr_spec.files {
-        test_env.add_file_to_branch(
-            &repo,
-            &pr_spec.source_branch,
-            &file_spec.path,
-            &file_spec.content,
-            &format!("{}: {}", file_spec.action.as_commit_message(), file_spec.path)
-        ).await?;
+        test_env
+            .add_file_to_branch(
+                &repo,
+                &pr_spec.source_branch,
+                &file_spec.path,
+                &file_spec.content,
+                &format!(
+                    "{}: {}",
+                    file_spec.action.as_commit_message(),
+                    file_spec.path
+                ),
+            )
+            .await?;
     }
 
     // Create pull request
@@ -279,7 +298,7 @@ async fn wait_for_processing_completion(
 
     while start_time.elapsed() < timeout_duration {
         let checks = test_env.get_pr_checks(repo, pr_number).await?;
-        
+
         if let Some(merge_warden_check) = checks.iter().find(|c| c.name == "merge-warden") {
             if merge_warden_check.conclusion.is_some() {
                 return Ok(());
@@ -289,7 +308,10 @@ async fn wait_for_processing_completion(
         tokio::time::sleep(Duration::from_secs(1)).await;
     }
 
-    Err(TestError::timeout("processing completion", timeout_duration))
+    Err(TestError::timeout(
+        "processing completion",
+        timeout_duration.as_secs(),
+    ))
 }
 
 /// Generates realistic Rust validation file content
@@ -335,7 +357,7 @@ fn generate_updated_readme() -> TestResult<String> {
     Ok("# Merge Warden\n\nAdvanced pull request validation and automation.\n\n## Features\n\n- Enhanced validation\n- Smart sizing\n- Flexible configuration\n".to_string())
 }
 
-/// Generates test file content  
+/// Generates test file content
 fn generate_test_file() -> TestResult<String> {
     Ok("//! Test file for validation\n\n#[cfg(test)]\nmod tests {\n    #[test]\n    fn test_basic() {\n        assert!(true);\n    }\n}".to_string())
 }
