@@ -8,6 +8,7 @@ use std::time::Duration;
 
 use crate::errors::{TestError, TestResult};
 use crate::github::{TestBotInstance, TestRepositoryManager};
+use crate::github::repository_manager::FileAction;
 use crate::mocks::MockServiceProvider;
 
 /// Main integration test environment coordinator.
@@ -277,10 +278,18 @@ impl IntegrationTestEnvironment {
     /// ```
     pub async fn create_test_repository(
         &mut self,
-        _name_suffix: &str,
+        name_suffix: &str,
     ) -> TestResult<TestRepository> {
-        // TODO: implement - Create repository with unique name
-        todo!("Create and configure test repository")
+        // Create repository through manager
+        let repo = self.repository_manager.create_repository(name_suffix).await?;
+        
+        // Track for cleanup
+        self.cleanup_resources.push(CleanupResource::Repository {
+            name: repo.name.clone(),
+            organization: repo.organization.clone(),
+        });
+        
+        Ok(repo)
     }
 
     /// Configures the bot instance for testing with the specified repository.
@@ -517,6 +526,156 @@ impl IntegrationTestEnvironment {
 
         Ok(())
     }
+
+    /// Sets up repository configuration with merge-warden.toml.
+    pub async fn setup_repository_configuration(
+        &mut self,
+        repository: &TestRepository,
+    ) -> TestResult<()> {
+        self.repository_manager
+            .setup_configuration(repository, None)
+            .await
+    }
+
+    /// Adds default content to a repository for testing.
+    pub async fn add_default_repository_content(
+        &self,
+        repository: &TestRepository,
+    ) -> TestResult<()> {
+        // Add basic README
+        let readme_content = format!(
+            "# {}\n\nTest repository for Merge Warden integration testing.\n",
+            repository.name
+        );
+
+        self.repository_manager
+            .add_content(
+                repository,
+                &[(
+                    "README.md".to_string(),
+                    readme_content,
+                    FileAction::Add,
+                )],
+            )
+            .await
+    }
+
+    /// Creates a branch in the repository.
+    pub async fn create_branch(
+        &self,
+        repository: &TestRepository,
+        branch_name: &str,
+        from_branch: &str,
+    ) -> TestResult<()> {
+        self.repository_manager
+            .create_branch(repository, branch_name, from_branch)
+            .await
+    }
+
+    /// Adds a file to a branch.
+    pub async fn add_file_to_branch(
+        &self,
+        repository: &TestRepository,
+        branch: &str,
+        path: &str,
+        content: &str,
+        commit_message: &str,
+    ) -> TestResult<()> {
+        self.repository_manager
+            .add_file(repository, branch, path, content, commit_message)
+            .await
+    }
+
+    /// Updates a file in the repository.
+    pub async fn update_file_in_repository(
+        &self,
+        repository: &TestRepository,
+        path: &str,
+        content: &str,
+        commit_message: &str,
+    ) -> TestResult<()> {
+        self.repository_manager
+            .update_file(repository, "main", path, content, commit_message)
+            .await
+    }
+
+    /// Creates a pull request in the repository.
+    pub async fn create_pull_request(
+        &self,
+        repository: &TestRepository,
+        spec: &crate::utils::PullRequestSpec,
+    ) -> TestResult<crate::utils::TestPullRequest> {
+        self.repository_manager
+            .create_pull_request(repository, spec)
+            .await
+    }
+
+    /// Gets checks for a pull request.
+    pub async fn get_pr_checks(
+        &self,
+        repository: &TestRepository,
+        pr_number: u64,
+    ) -> TestResult<Vec<PullRequestCheck>> {
+        self.repository_manager
+            .get_pr_checks(repository, pr_number)
+            .await
+    }
+
+    /// Gets comments for a pull request.
+    pub async fn get_pr_comments(
+        &self,
+        repository: &TestRepository,
+        pr_number: u64,
+    ) -> TestResult<Vec<PullRequestComment>> {
+        self.repository_manager
+            .get_pr_comments(repository, pr_number)
+            .await
+    }
+
+    /// Gets labels for a pull request.
+    pub async fn get_pr_labels(
+        &self,
+        repository: &TestRepository,
+        pr_number: u64,
+    ) -> TestResult<Vec<PullRequestLabel>> {
+        self.repository_manager
+            .get_pr_labels(repository, pr_number)
+            .await
+    }
+
+    /// Simulates GitHub API failure.
+    pub async fn simulate_github_api_failure(&mut self) -> TestResult<()> {
+        // This would configure the repository manager to simulate failures
+        // For now, we'll just log it
+        println!("Simulating GitHub API failure");
+        Ok(())
+    }
+
+    /// Restores GitHub API.
+    pub async fn restore_github_api(&mut self) -> TestResult<()> {
+        println!("Restoring GitHub API");
+        Ok(())
+    }
+
+    /// Simulates App Config outage.
+    pub async fn simulate_app_config_outage(&mut self) -> TestResult<()> {
+        self.mock_services.simulate_app_config_failure().await
+    }
+
+    /// Restores App Config.
+    pub async fn restore_app_config(&mut self) -> TestResult<()> {
+        self.mock_services.restore_app_config().await
+    }
+
+    /// Simulates Key Vault outage.
+    pub async fn simulate_key_vault_outage(&mut self) -> TestResult<()> {
+        self.mock_services.simulate_key_vault_failure().await
+    }
+
+    /// Restores Key Vault.
+    pub async fn restore_key_vault(&mut self) -> TestResult<()> {
+        self.mock_services.restore_key_vault().await
+    }
 }
 
 /// Automatic cleanup when the test environment is dropped.
@@ -531,6 +690,47 @@ impl Drop for IntegrationTestEnvironment {
             );
         }
     }
+}
+
+/// Pull request check information.
+#[derive(Debug, Clone)]
+pub struct PullRequestCheck {
+    pub id: String,
+    pub name: String,
+    pub conclusion: Option<String>,
+    pub details_url: Option<String>,
+    pub output: CheckOutput,
+}
+
+/// Check output details.
+#[derive(Debug, Clone)]
+pub struct CheckOutput {
+    pub summary: String,
+    pub text: Option<String>,
+}
+
+/// Pull request comment information.
+#[derive(Debug, Clone)]
+pub struct PullRequestComment {
+    pub id: u64,
+    pub body: String,
+    pub user: CommentUser,
+    pub created_at: String,
+}
+
+/// Comment user information.
+#[derive(Debug, Clone)]
+pub struct CommentUser {
+    pub login: String,
+    pub id: u64,
+}
+
+/// Pull request label information.
+#[derive(Debug, Clone)]
+pub struct PullRequestLabel {
+    pub id: u64,
+    pub name: String,
+    pub color: String,
 }
 
 /// Configuration for the integration test environment.

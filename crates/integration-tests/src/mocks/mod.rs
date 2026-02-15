@@ -278,4 +278,28 @@ impl MockServiceProvider {
         self.is_healthy = true;
         Ok(())
     }
+
+    /// Simulates App Config service failure.
+    pub async fn simulate_app_config_failure(&mut self) -> TestResult<()> {
+        self.simulate_outages(1.0, 0.0).await
+    }
+
+    /// Restores App Config service to healthy state.
+    pub async fn restore_app_config(&mut self) -> TestResult<()> {
+        self.app_config.restore_service();
+        self.is_healthy = true;
+        Ok(())
+    }
+
+    /// Simulates Key Vault service failure.
+    pub async fn simulate_key_vault_failure(&mut self) -> TestResult<()> {
+        self.simulate_outages(0.0, 1.0).await
+    }
+
+    /// Restores Key Vault service to healthy state.
+    pub async fn restore_key_vault(&mut self) -> TestResult<()> {
+        self.key_vault.restore_service();
+        self.is_healthy = true;
+        Ok(())
+    }
 }

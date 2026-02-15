@@ -2,7 +2,7 @@
 
 pub mod test_data;
 
-pub use test_data::{CommentSpec, PullRequestSpec, ReviewSpec, TestDataManager};
+pub use test_data::{CommentSpec, PullRequestSpec, ReviewSpec, TestDataManager, TestPullRequest};
 
 use std::time::Duration;
 use tokio::time::timeout;

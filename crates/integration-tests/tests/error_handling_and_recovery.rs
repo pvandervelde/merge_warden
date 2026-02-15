@@ -127,7 +127,7 @@ async fn test_recovery_from_github_api_failures() -> TestResult<()> {
     let merge_warden_check = final_checks
         .iter()
         .find(|c| c.name == "merge-warden")
-        .ok_or_else(|| TestError::validation("merge-warden check not found after recovery"))?;
+        .ok_or_else(|| TestError::validation_failed("merge-warden check", "not found after recovery"))?;
 
     assert!(
         merge_warden_check.conclusion.is_some(),
@@ -416,7 +416,7 @@ async fn trigger_webhook_redelivery(
         "repository": {
             "id": repo.id,
             "name": repo.name,
-            "full_name": format!("{}/{}", repo.owner, repo.name)
+            "full_name": format!("{}/{}", repo.organization, repo.name)
         }
     });
 
@@ -444,7 +444,7 @@ async fn trigger_configuration_service_recovery(
         "repository": {
             "id": repo.id,
             "name": repo.name,
-            "full_name": format!("{}/{}", repo.owner, repo.name)
+            "full_name": format!("{}/{}", repo.organization, repo.name)
         }
     });
 

@@ -84,7 +84,7 @@ async fn test_configuration_changes_are_applied() -> TestResult<()> {
     let merge_warden_check = initial_checks
         .iter()
         .find(|c| c.name == "merge-warden")
-        .ok_or_else(|| TestError::validation("merge-warden check not found"))?;
+        .ok_or_else(|| TestError::validation_failed("merge-warden check", "not found"))?;
 
     assert_eq!(
         merge_warden_check.conclusion.as_ref().unwrap(),
@@ -123,7 +123,7 @@ async fn test_configuration_changes_are_applied() -> TestResult<()> {
     let updated_merge_warden_check = updated_checks
         .iter()
         .find(|c| c.name == "merge-warden")
-        .ok_or_else(|| TestError::validation("merge-warden check not found after update"))?;
+        .ok_or_else(|| TestError::validation_failed("merge-warden check", "not found after update"))?;
 
     assert_eq!(
         updated_merge_warden_check.conclusion.as_ref().unwrap(),
@@ -272,7 +272,7 @@ async fn trigger_configuration_reload(
         "repository": {
             "id": repo.id,
             "name": repo.name,
-            "full_name": format!("{}/{}", repo.owner, repo.name)
+            "full_name": format!("{}/{}", repo.organization, repo.name)
         }
     });
 

@@ -172,7 +172,7 @@ async fn simulate_concurrent_processing(
     // Simulate concurrent processing with futures
     let processing_futures: Vec<_> = specs
         .iter()
-        .map(|spec| simulate_single_pr_processing(spec))
+        .map(simulate_single_pr_processing)
         .collect();
 
     // Wait for all processing to complete (simulated)
@@ -354,6 +354,7 @@ async fn validate_cleanup_completeness(results: &[CleanupResult]) -> TestResult<
 
 /// Specification for concurrent PR processing test
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct ConcurrentPrSpec {
     id: usize,
     title: String,
@@ -364,6 +365,7 @@ struct ConcurrentPrSpec {
 
 /// Result of processing a single PR in concurrent test
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct ProcessingResult {
     pr_id: usize,
     processing_time: Duration,
@@ -374,6 +376,7 @@ struct ProcessingResult {
 
 /// Specification for performance testing under load
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct PerformanceTestSpec {
     id: usize,
     complexity: &'static str,
@@ -383,6 +386,7 @@ struct PerformanceTestSpec {
 
 /// Result of performance testing
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct PerformanceResult {
     spec_id: usize,
     actual_duration: Duration,
@@ -393,6 +397,7 @@ struct PerformanceResult {
 
 /// Test resource for cleanup validation
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct TestResource {
     id: usize,
     resource_type: &'static str,
@@ -402,6 +407,7 @@ struct TestResource {
 
 /// Result of cleanup operation
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct CleanupResult {
     resource_id: usize,
     cleanup_duration: Duration,

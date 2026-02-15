@@ -278,6 +278,18 @@ pub enum FileAction {
     Rename { from: String },
 }
 
+impl FileAction {
+    /// Returns a commit message prefix for this file action.
+    pub fn as_commit_message(&self) -> &str {
+        match self {
+            FileAction::Add => "Add",
+            FileAction::Modify => "Update",
+            FileAction::Delete => "Delete",
+            FileAction::Rename { .. } => "Rename",
+        }
+    }
+}
+
 /// Specification for creating test reviews.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewSpec {
@@ -337,6 +349,25 @@ impl Default for CommentSpec {
             timestamp: None,
         }
     }
+}
+
+/// Handle to a created pull request for testing.
+#[derive(Debug, Clone)]
+pub struct TestPullRequest {
+    /// Pull request number
+    pub number: u64,
+    /// Pull request ID
+    pub id: u64,
+    /// Pull request title
+    pub title: String,
+    /// Pull request body
+    pub body: String,
+    /// Source branch name
+    pub head: String,
+    /// Target branch name
+    pub base: String,
+    /// Repository full name (owner/repo)
+    pub repo_full_name: String,
 }
 
 /// Default values for test data generation.
