@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use crate::errors::{TestError, TestResult};
-use crate::github::{TestBotInstance, TestRepositoryManager};
 use crate::github::repository_manager::FileAction;
+use crate::github::{TestBotInstance, TestRepositoryManager};
 use crate::mocks::MockServiceProvider;
 
 /// Main integration test environment coordinator.
@@ -281,14 +281,17 @@ impl IntegrationTestEnvironment {
         name_suffix: &str,
     ) -> TestResult<TestRepository> {
         // Create repository through manager
-        let repo = self.repository_manager.create_repository(name_suffix).await?;
-        
+        let repo = self
+            .repository_manager
+            .create_repository(name_suffix)
+            .await?;
+
         // Track for cleanup
         self.cleanup_resources.push(CleanupResource::Repository {
             name: repo.name.clone(),
             organization: repo.organization.clone(),
         });
-        
+
         Ok(repo)
     }
 
@@ -551,11 +554,7 @@ impl IntegrationTestEnvironment {
         self.repository_manager
             .add_content(
                 repository,
-                &[(
-                    "README.md".to_string(),
-                    readme_content,
-                    FileAction::Add,
-                )],
+                &[("README.md".to_string(), readme_content, FileAction::Add)],
             )
             .await
     }

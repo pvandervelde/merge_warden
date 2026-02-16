@@ -123,7 +123,9 @@ async fn test_configuration_changes_are_applied() -> TestResult<()> {
     let updated_merge_warden_check = updated_checks
         .iter()
         .find(|c| c.name == "merge-warden")
-        .ok_or_else(|| TestError::validation_failed("merge-warden check", "not found after update"))?;
+        .ok_or_else(|| {
+            TestError::validation_failed("merge-warden check", "not found after update")
+        })?;
 
     assert_eq!(
         updated_merge_warden_check.conclusion.as_ref().unwrap(),

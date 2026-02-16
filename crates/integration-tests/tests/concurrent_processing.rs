@@ -170,10 +170,7 @@ async fn simulate_concurrent_processing(
     let mut results = Vec::with_capacity(specs.len());
 
     // Simulate concurrent processing with futures
-    let processing_futures: Vec<_> = specs
-        .iter()
-        .map(simulate_single_pr_processing)
-        .collect();
+    let processing_futures: Vec<_> = specs.iter().map(simulate_single_pr_processing).collect();
 
     // Wait for all processing to complete (simulated)
     for (index, _future) in processing_futures.iter().enumerate() {
