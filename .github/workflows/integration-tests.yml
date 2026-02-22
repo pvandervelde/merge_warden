@@ -25,6 +25,9 @@ jobs:
 
             - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
 
+            - name: Run structural tests (no credentials required)
+              run: cargo test --package merge-warden-integration-tests --test crate_structure_tests -- --nocapture
+
             - name: Verify integration test credentials
               shell: bash
               run: |
@@ -56,8 +59,9 @@ jobs:
                   TEST_ORGANIZATION: ${{ secrets.TEST_ORGANIZATION }}
                   TEST_TIMEOUT_SECONDS: "30"
                   TEST_CLEANUP_ENABLED: "true"
-                  USE_MOCK_SERVICES: "true"
+                  USE_MOCK_SERVICES: "false"
               run: |
                   cargo test --package merge-warden-integration-tests --test configuration_change_detection -- --nocapture
                   cargo test --package merge-warden-integration-tests --test error_handling_and_recovery -- --nocapture
                   cargo test --package merge-warden-integration-tests --test pull_request_validation_workflow -- --nocapture
+                  cargo test --package merge-warden-integration-tests --test concurrent_processing -- --nocapture
