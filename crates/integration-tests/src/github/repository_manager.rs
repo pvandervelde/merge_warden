@@ -3,9 +3,6 @@
 //! This module provides automated GitHub repository creation, configuration, and cleanup
 //! specifically for integration testing of the Merge Warden bot.
 
-use std::collections::HashMap;
-use uuid::Uuid;
-
 use crate::environment::TestRepository;
 use crate::errors::{TestError, TestResult};
 
@@ -80,14 +77,126 @@ impl TestRepositoryManager {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn new(_github_token: String) -> TestResult<Self> {
-        // TODO: Initialize actual GitHub client when needed
-        let github_client = octocrab::Octocrab::builder().build()?;
+    /// Creates a new repository manager authenticated as the test helper GitHub App.
+    ///
+    /// Generates a JWT from the app credentials, exchanges it for an installation
+    /// access token scoped to `organization`, then builds an authenticated octocrab
+    /// client. No personal access token is required.
+    ///
+    /// # Parameters
+    ///
+    /// - `app_id`: Numeric GitHub App ID for the test helper app
+    /// - `private_key`: PEM-encoded RSA private key for the test helper app
+    /// - `organization`: GitHub organization where test repositories will be created
+    /// - `prefix`: Prefix for repository names (e.g. "merge-warden-test")
+    ///
+    /// # Returns
+    ///
+    /// A configured `TestRepositoryManager` ready for repository operations.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TestError::AuthenticationError` if:
+    /// - The private key cannot be parsed as RSA PEM
+    /// - JWT signing fails
+    ///
+    /// Returns `TestError::GitHubApiError` if:
+    /// - The app installation for the org cannot be found
+    /// - The installation access token request fails
+    pub async fn new(
+        app_id: String,
+        private_key: String,
+        organization: String,
+        prefix: String,
+    ) -> TestResult<Self> {
+        use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let encoding_key = EncodingKey::from_rsa_pem(private_key.as_bytes()).map_err(|e| {
+            TestError::authentication_error("repo_creation_app_private_key", &e.to_string())
+        })?;
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        let app_id_num: u64 = app_id.parse().map_err(|_| {
+            TestError::InvalidConfiguration("REPO_CREATION_APP_ID must be a valid integer".to_string())
+        })?;
+
+        #[derive(serde::Serialize)]
+        struct JwtClaims {
+            iat: i64,
+            exp: i64,
+            iss: u64,
+        }
+
+        let claims = JwtClaims {
+            iat: now - 60,
+            exp: now + 540,
+            iss: app_id_num,
+        };
+
+        let jwt = encode(&Header::new(Algorithm::RS256), &claims, &encoding_key)
+            .map_err(|e| TestError::authentication_error("test_app_jwt", &e.to_string()))?;
+
+        // Use JWT to call GitHub App endpoints
+        let jwt_client = octocrab::Octocrab::builder()
+            .personal_token(jwt)
+            .build()
+            .map_err(|e| TestError::environment_error("build_jwt_client", &e.to_string()))?;
+
+        // Look up the app's installation for the target org
+        let installation: serde_json::Value = jwt_client
+            .get(
+                format!("/orgs/{}/installation", organization),
+                None::<&()>,
+            )
+            .await
+            .map_err(|e| {
+                TestError::github_api_error("get_org_installation", &e.to_string())
+            })?;
+
+        let installation_id = installation["id"].as_u64().ok_or_else(|| {
+            TestError::environment_error(
+                "parse_installation_id",
+                "No installation id found in response",
+            )
+        })?;
+
+        // Exchange for an installation access token
+        let token_response: serde_json::Value = jwt_client
+            .post(
+                format!("/app/installations/{}/access_tokens", installation_id),
+                Some(&serde_json::json!({})),
+            )
+            .await
+            .map_err(|e| {
+                TestError::github_api_error("create_installation_access_token", &e.to_string())
+            })?;
+
+        let access_token = token_response["token"]
+            .as_str()
+            .ok_or_else(|| {
+                TestError::environment_error(
+                    "parse_access_token",
+                    "No token field in installation token response",
+                )
+            })?
+            .to_string();
+
+        let github_client = octocrab::Octocrab::builder()
+            .personal_token(access_token)
+            .build()
+            .map_err(|e| {
+                TestError::environment_error("build_authenticated_client", &e.to_string())
+            })?;
 
         Ok(TestRepositoryManager {
             github_client,
-            organization: "glitchgrove".to_string(),
-            repository_prefix: "merge-warden-test".to_string(),
+            organization,
+            repository_prefix: prefix,
             created_repositories: Vec::new(),
         })
     }

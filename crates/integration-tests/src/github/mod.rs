@@ -63,8 +63,8 @@ impl TestBotInstance {
     ///
     /// # Environment Variables Required
     ///
-    /// - `GITHUB_TEST_APP_ID`: GitHub App ID for testing
-    /// - `GITHUB_TEST_PRIVATE_KEY`: GitHub App private key content
+    /// - `REPO_CREATION_APP_ID`: GitHub App ID for testing
+    /// - `REPO_CREATION_APP_PRIVATE_KEY`: GitHub App private key content
     /// - `GITHUB_TEST_WEBHOOK_SECRET`: Webhook secret for signature validation
     ///
     /// # Environment Variables Optional
@@ -99,16 +99,114 @@ impl TestBotInstance {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn new_for_testing() -> TestResult<Self> {
-        // For now, create a basic bot instance with placeholder values
-        // TODO: Load actual values from environment in future iterations
-        let github_client = octocrab::Octocrab::builder().build()?;
+    /// Creates a `TestBotInstance` from `TestConfig`, authenticating as the
+    /// Merge Warden GitHub App.
+    ///
+    /// Generates a JWT from the Merge Warden app credentials and exchanges it
+    /// for an installation access token scoped to the test organisation, then
+    /// builds an authenticated octocrab client. The instance is ready to read
+    /// PR state and verify that Merge Warden has performed the expected actions.
+    ///
+    /// # Parameters
+    ///
+    /// - `config`: Test configuration containing Merge Warden app credentials
+    ///   and organisation name.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TestError::AuthenticationError` if the private key is invalid
+    /// or JWT signing fails.
+    ///
+    /// Returns `TestError::GitHubApiError` if the installation cannot be found
+    /// or the access token request fails.
+    pub async fn from_config(config: &crate::environment::TestConfig) -> TestResult<Self> {
+        use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let encoding_key = EncodingKey::from_rsa_pem(
+            config.merge_warden_app_private_key.as_bytes(),
+        )
+        .map_err(|e| TestError::authentication_error("merge_warden_private_key", &e.to_string()))?;
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        let app_id_num: u64 = config.merge_warden_app_id.parse().map_err(|_| {
+            TestError::InvalidConfiguration(
+                "MERGE_WARDEN_APP_ID must be a valid integer".to_string(),
+            )
+        })?;
+
+        #[derive(serde::Serialize)]
+        struct JwtClaims {
+            iat: i64,
+            exp: i64,
+            iss: u64,
+        }
+
+        let claims = JwtClaims {
+            iat: now - 60,
+            exp: now + 540,
+            iss: app_id_num,
+        };
+
+        let jwt = encode(&Header::new(Algorithm::RS256), &claims, &encoding_key)
+            .map_err(|e| TestError::authentication_error("merge_warden_jwt", &e.to_string()))?;
+
+        let jwt_client = octocrab::Octocrab::builder()
+            .personal_token(jwt)
+            .build()
+            .map_err(|e| TestError::environment_error("build_mw_jwt_client", &e.to_string()))?;
+
+        let installation: serde_json::Value = jwt_client
+            .get(
+                format!("/orgs/{}/installation", config.github_organization),
+                None::<&()>,
+            )
+            .await
+            .map_err(|e| TestError::github_api_error("get_mw_org_installation", &e.to_string()))?;
+
+        let installation_id = installation["id"].as_u64().ok_or_else(|| {
+            TestError::environment_error(
+                "parse_mw_installation_id",
+                "No installation id found in response",
+            )
+        })?;
+
+        let token_response: serde_json::Value = jwt_client
+            .post(
+                format!("/app/installations/{}/access_tokens", installation_id),
+                Some(&serde_json::json!({})),
+            )
+            .await
+            .map_err(|e| {
+                TestError::github_api_error("create_mw_installation_access_token", &e.to_string())
+            })?;
+
+        let access_token = token_response["token"]
+            .as_str()
+            .ok_or_else(|| {
+                TestError::environment_error(
+                    "parse_mw_access_token",
+                    "No token field in installation token response",
+                )
+            })?
+            .to_string();
+
+        let github_client = octocrab::Octocrab::builder()
+            .personal_token(access_token)
+            .build()
+            .map_err(|e| {
+                TestError::environment_error("build_mw_authenticated_client", &e.to_string())
+            })?;
 
         Ok(TestBotInstance {
-            app_id: "123456".to_string(), // Placeholder
-            private_key: "test-private-key".to_string(),
-            webhook_secret: "test-webhook-secret".to_string(),
-            base_webhook_url: "https://example.com/webhook".to_string(),
+            app_id: config.merge_warden_app_id.clone(),
+            private_key: config.merge_warden_app_private_key.clone(),
+            webhook_secret: config.merge_warden_webhook_secret.clone(),
+            base_webhook_url: config.local_webhook_endpoint.clone(),
             ngrok_tunnel: None,
             github_client,
         })

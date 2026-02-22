@@ -2,14 +2,6 @@ name: End-to-End Tests
 
 on:
     workflow_dispatch:
-    schedule:
-        - cron: "0 2 * * *"
-    push:
-        branches:
-            - "**"
-    pull_request:
-        branches:
-            - master
 
 permissions:
     contents: read
@@ -31,7 +23,7 @@ jobs:
               shell: bash
               run: |
                   missing=0
-                  for var in GITHUB_TEST_TOKEN GITHUB_TEST_APP_ID GITHUB_TEST_PRIVATE_KEY GITHUB_TEST_WEBHOOK_SECRET; do
+                  for var in REPO_CREATION_APP_ID REPO_CREATION_APP_PRIVATE_KEY MERGE_WARDEN_APP_ID MERGE_WARDEN_APP_PRIVATE_KEY MERGE_WARDEN_WEBHOOK_SECRET; do
                     if [ -z "${!var}" ]; then
                       echo "Missing required secret: ${var}"
                       missing=1
@@ -42,18 +34,20 @@ jobs:
                     exit 1
                   fi
               env:
-                  GITHUB_TEST_TOKEN: ${{ secrets.GITHUB_TEST_TOKEN }}
-                  GITHUB_TEST_APP_ID: ${{ secrets.GITHUB_TEST_APP_ID }}
-                  GITHUB_TEST_PRIVATE_KEY: ${{ secrets.GITHUB_TEST_PRIVATE_KEY }}
-                  GITHUB_TEST_WEBHOOK_SECRET: ${{ secrets.GITHUB_TEST_WEBHOOK_SECRET }}
+                  REPO_CREATION_APP_ID: ${{ secrets.REPO_CREATION_APP_ID }}
+                  REPO_CREATION_APP_PRIVATE_KEY: ${{ secrets.REPO_CREATION_APP_PRIVATE_KEY }}
+                  MERGE_WARDEN_APP_ID: ${{ secrets.MERGE_WARDEN_APP_ID }}
+                  MERGE_WARDEN_APP_PRIVATE_KEY: ${{ secrets.MERGE_WARDEN_APP_PRIVATE_KEY }}
+                  MERGE_WARDEN_WEBHOOK_SECRET: ${{ secrets.MERGE_WARDEN_WEBHOOK_SECRET }}
 
             - name: Run end-to-end test suite
               env:
-                  GITHUB_TEST_TOKEN: ${{ secrets.GITHUB_TEST_TOKEN }}
-                  GITHUB_TEST_APP_ID: ${{ secrets.GITHUB_TEST_APP_ID }}
-                  GITHUB_TEST_PRIVATE_KEY: ${{ secrets.GITHUB_TEST_PRIVATE_KEY }}
-                  GITHUB_TEST_WEBHOOK_SECRET: ${{ secrets.GITHUB_TEST_WEBHOOK_SECRET }}
-                  GITHUB_TEST_ORGANIZATION: ${{ secrets.GITHUB_TEST_ORGANIZATION }}
+                  REPO_CREATION_APP_ID: ${{ secrets.REPO_CREATION_APP_ID }}
+                  REPO_CREATION_APP_PRIVATE_KEY: ${{ secrets.REPO_CREATION_APP_PRIVATE_KEY }}
+                  MERGE_WARDEN_APP_ID: ${{ secrets.MERGE_WARDEN_APP_ID }}
+                  MERGE_WARDEN_APP_PRIVATE_KEY: ${{ secrets.MERGE_WARDEN_APP_PRIVATE_KEY }}
+                  MERGE_WARDEN_WEBHOOK_SECRET: ${{ secrets.MERGE_WARDEN_WEBHOOK_SECRET }}
+                  TEST_ORGANIZATION: ${{ secrets.TEST_ORGANIZATION }}
                   TEST_TIMEOUT_SECONDS: "60"
                   TEST_CLEANUP_ENABLED: "true"
                   USE_MOCK_SERVICES: "false"
@@ -65,7 +59,7 @@ jobs:
     e2e-performance-tests:
         name: performance-benchmarks
         runs-on: ubuntu-latest
-        if: github.repository == 'pvandervelde/merge_warden' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        if: github.repository == 'pvandervelde/merge_warden' && github.event_name == 'workflow_dispatch'
         steps:
             - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
 
@@ -76,10 +70,11 @@ jobs:
 
             - name: Run performance benchmarks
               env:
-                  GITHUB_TEST_TOKEN: ${{ secrets.GITHUB_TEST_TOKEN }}
-                  GITHUB_TEST_APP_ID: ${{ secrets.GITHUB_TEST_APP_ID }}
-                  GITHUB_TEST_PRIVATE_KEY: ${{ secrets.GITHUB_TEST_PRIVATE_KEY }}
-                  GITHUB_TEST_WEBHOOK_SECRET: ${{ secrets.GITHUB_TEST_WEBHOOK_SECRET }}
-                  GITHUB_TEST_ORGANIZATION: ${{ secrets.GITHUB_TEST_ORGANIZATION }}
+                  REPO_CREATION_APP_ID: ${{ secrets.REPO_CREATION_APP_ID }}
+                  REPO_CREATION_APP_PRIVATE_KEY: ${{ secrets.REPO_CREATION_APP_PRIVATE_KEY }}
+                  MERGE_WARDEN_APP_ID: ${{ secrets.MERGE_WARDEN_APP_ID }}
+                  MERGE_WARDEN_APP_PRIVATE_KEY: ${{ secrets.MERGE_WARDEN_APP_PRIVATE_KEY }}
+                  MERGE_WARDEN_WEBHOOK_SECRET: ${{ secrets.MERGE_WARDEN_WEBHOOK_SECRET }}
+                  TEST_ORGANIZATION: ${{ secrets.TEST_ORGANIZATION }}
               run: cargo test --package merge-warden-integration-tests --test concurrent_processing test_concurrent_processing_performance -- --nocapture --ignored
               timeout-minutes: 30

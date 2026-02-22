@@ -107,8 +107,8 @@ impl IntegrationTestEnvironment {
     /// # Environment Variables Required
     ///
     /// - `GITHUB_TEST_TOKEN`: GitHub personal access token with repo permissions
-    /// - `GITHUB_TEST_APP_ID`: GitHub App ID for webhook testing
-    /// - `GITHUB_TEST_PRIVATE_KEY`: GitHub App private key content
+    /// - `REPO_CREATION_APP_ID`: GitHub App ID for webhook testing
+    /// - `REPO_CREATION_APP_PRIVATE_KEY`: GitHub App private key content
     /// - `GITHUB_TEST_WEBHOOK_SECRET`: Webhook secret for signature validation
     ///
     /// # Environment Variables Optional
@@ -163,8 +163,8 @@ impl IntegrationTestEnvironment {
     /// async fn test_environment_setup_success() -> Result<(), TestError> {
     ///     // Ensure required environment variables are set
     ///     env::set_var("GITHUB_TEST_TOKEN", "ghp_test_token_123456789");
-    ///     env::set_var("GITHUB_TEST_APP_ID", "123456");
-    ///     env::set_var("GITHUB_TEST_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----");
+    ///     env::set_var("REPO_CREATION_APP_ID", "123456");
+    ///     env::set_var("REPO_CREATION_APP_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----");
     ///     env::set_var("GITHUB_TEST_WEBHOOK_SECRET", "test_webhook_secret");
     ///
     ///     let test_env = IntegrationTestEnvironment::setup().await?;
@@ -211,11 +211,17 @@ impl IntegrationTestEnvironment {
         // Initialize mock services
         let mock_services = MockServiceProvider::new().await?;
 
-        // Initialize repository manager
-        let repository_manager = TestRepositoryManager::new(config.github_token.clone()).await?;
+        // Initialize repository manager using the test helper app's installation token
+        let repository_manager = TestRepositoryManager::new(
+            config.repo_creation_app_id.clone(),
+            config.repo_creation_app_private_key.clone(),
+            config.github_organization.clone(),
+            config.repository_prefix.clone(),
+        )
+        .await?;
 
-        // Initialize bot instance
-        let bot_instance = TestBotInstance::new_for_testing().await?;
+        // Initialize Merge Warden bot instance
+        let bot_instance = TestBotInstance::from_config(&config).await?;
 
         // Initialize cleanup resources list
         let cleanup_resources = Vec::new();
@@ -739,14 +745,16 @@ pub struct PullRequestLabel {
 /// environment-specific settings.
 #[derive(Debug, Clone)]
 pub struct TestConfig {
-    /// GitHub personal access token for API operations
-    pub github_token: String,
-    /// GitHub App ID for webhook testing
-    pub github_app_id: String,
-    /// GitHub App private key content
-    pub github_private_key: String,
-    /// Webhook secret for signature validation
-    pub github_webhook_secret: String,
+    /// GitHub App ID for the test helper app (used for repository and PR management)
+    pub repo_creation_app_id: String,
+    /// GitHub App private key for the test helper app (PEM format)
+    pub repo_creation_app_private_key: String,
+    /// GitHub App ID for the Merge Warden app (the app under test)
+    pub merge_warden_app_id: String,
+    /// GitHub App private key for the Merge Warden app (PEM format)
+    pub merge_warden_app_private_key: String,
+    /// Webhook secret for the Merge Warden app (used for HMAC-SHA256 signature validation)
+    pub merge_warden_webhook_secret: String,
     /// Target GitHub organization for test repositories
     pub github_organization: String,
     /// Prefix for test repository names
@@ -775,12 +783,12 @@ impl TestConfig {
     ///   - Must be a valid GitHub personal access token (starts with `ghp_` or `github_pat_`)
     ///   - Must have `repo` scope for repository operations
     ///   - Must have access to the `glitchgrove` organization
-    /// - `GITHUB_TEST_APP_ID`: GitHub App ID for webhook testing
+    /// - `REPO_CREATION_APP_ID`: GitHub App ID for webhook testing
     ///   - Must be a numeric string representing a valid GitHub App ID
     ///   - App must be installed on the `glitchgrove` organization
-    /// - `GITHUB_TEST_PRIVATE_KEY`: GitHub App private key content
+    /// - `REPO_CREATION_APP_PRIVATE_KEY`: GitHub App private key content
     ///   - Must be valid PEM-formatted RSA private key
-    ///   - Must correspond to the GitHub App specified by `GITHUB_TEST_APP_ID`
+    ///   - Must correspond to the GitHub App specified by `REPO_CREATION_APP_ID`
     /// - `GITHUB_TEST_WEBHOOK_SECRET`: Webhook secret for signature validation
     ///   - Must be a non-empty string used for HMAC-SHA256 signature validation
     ///   - Should be cryptographically secure (minimum 16 characters recommended)
@@ -836,8 +844,8 @@ impl TestConfig {
     /// async fn test_config_loading_with_required_vars() -> Result<(), TestError> {
     ///     // Set required environment variables
     ///     env::set_var("GITHUB_TEST_TOKEN", "ghp_test_token_123456789");
-    ///     env::set_var("GITHUB_TEST_APP_ID", "123456");
-    ///     env::set_var("GITHUB_TEST_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----");
+    ///     env::set_var("REPO_CREATION_APP_ID", "123456");
+    ///     env::set_var("REPO_CREATION_APP_PRIVATE_KEY", "-----BEGIN RSA PRIVATE KEY-----\ntest\n-----END RSA PRIVATE KEY-----");
     ///     env::set_var("GITHUB_TEST_WEBHOOK_SECRET", "test_webhook_secret");
     ///
     ///     let config = TestConfig::from_environment()?;
@@ -866,33 +874,41 @@ impl TestConfig {
         use std::env;
 
         // Load required environment variables
-        let github_token = env::var("GITHUB_TEST_TOKEN").map_err(|_| {
+        let repo_creation_app_id = env::var("REPO_CREATION_APP_ID").map_err(|_| {
             TestError::InvalidConfiguration(
-                "GITHUB_TEST_TOKEN environment variable is required".to_string(),
+                "REPO_CREATION_APP_ID environment variable is required".to_string(),
             )
         })?;
 
-        let github_app_id = env::var("GITHUB_TEST_APP_ID").map_err(|_| {
+        let repo_creation_app_private_key = env::var("REPO_CREATION_APP_PRIVATE_KEY").map_err(|_| {
             TestError::InvalidConfiguration(
-                "GITHUB_TEST_APP_ID environment variable is required".to_string(),
+                "REPO_CREATION_APP_PRIVATE_KEY environment variable is required".to_string(),
             )
         })?;
 
-        let github_private_key = env::var("GITHUB_TEST_PRIVATE_KEY").map_err(|_| {
+        let merge_warden_app_id = env::var("MERGE_WARDEN_APP_ID").map_err(|_| {
             TestError::InvalidConfiguration(
-                "GITHUB_TEST_PRIVATE_KEY environment variable is required".to_string(),
+                "MERGE_WARDEN_APP_ID environment variable is required".to_string(),
             )
         })?;
 
-        let github_webhook_secret = env::var("GITHUB_TEST_WEBHOOK_SECRET").map_err(|_| {
-            TestError::InvalidConfiguration(
-                "GITHUB_TEST_WEBHOOK_SECRET environment variable is required".to_string(),
-            )
-        })?;
+        let merge_warden_app_private_key =
+            env::var("MERGE_WARDEN_APP_PRIVATE_KEY").map_err(|_| {
+                TestError::InvalidConfiguration(
+                    "MERGE_WARDEN_APP_PRIVATE_KEY environment variable is required".to_string(),
+                )
+            })?;
+
+        let merge_warden_webhook_secret =
+            env::var("MERGE_WARDEN_WEBHOOK_SECRET").map_err(|_| {
+                TestError::InvalidConfiguration(
+                    "MERGE_WARDEN_WEBHOOK_SECRET environment variable is required".to_string(),
+                )
+            })?;
 
         // Load optional environment variables with defaults
         let github_organization =
-            env::var("GITHUB_TEST_ORGANIZATION").unwrap_or_else(|_| "glitchgrove".to_string());
+            env::var("TEST_ORGANIZATION").unwrap_or_else(|_| "glitchgrove".to_string());
 
         let repository_prefix =
             env::var("TEST_REPOSITORY_PREFIX").unwrap_or_else(|_| "merge-warden-test".to_string());
@@ -936,10 +952,11 @@ impl TestConfig {
 
         // Create configuration
         let config = Self {
-            github_token,
-            github_app_id,
-            github_private_key,
-            github_webhook_secret,
+            repo_creation_app_id,
+            repo_creation_app_private_key,
+            merge_warden_app_id,
+            merge_warden_app_private_key,
+            merge_warden_webhook_secret,
             github_organization,
             repository_prefix,
             default_timeout,
@@ -1077,62 +1094,70 @@ impl TestConfig {
     /// }
     /// ```
     pub fn validate(&self) -> TestResult<()> {
-        // Validate GitHub token format
-        if self.github_token.is_empty() {
+        // Validate test helper app ID
+        if let Err(_) = self.repo_creation_app_id.parse::<u64>() {
             return Err(TestError::InvalidConfiguration(
-                "GitHub token cannot be empty".to_string(),
+                "REPO_CREATION_APP_ID must be a valid positive integer".to_string(),
             ));
         }
 
-        // Check for valid GitHub token format
-        let has_valid_prefix = self.github_token.starts_with("ghp_")
-            || self.github_token.starts_with("github_pat_")
-            || self.github_token.starts_with("gho_");
-        let is_classic_token = self.github_token.len() >= 40
-            && self.github_token.chars().all(|c| c.is_ascii_hexdigit());
-
-        if !has_valid_prefix && !is_classic_token {
-            return Err(TestError::InvalidConfiguration(
-                "GitHub token format is invalid. Expected format: ghp_*, github_pat_*, gho_*, or classic token (40+ hex characters)".to_string()
-            ));
-        }
-
-        // Validate GitHub App ID
-        if let Err(_) = self.github_app_id.parse::<u64>() {
-            return Err(TestError::InvalidConfiguration(
-                "GitHub App ID must be a valid positive integer".to_string(),
-            ));
-        }
-
-        let app_id: u64 = self.github_app_id.parse().unwrap();
-        if app_id == 0 || app_id > 99_999_999 {
+        let repo_creation_app_id_val: u64 = self.repo_creation_app_id.parse().unwrap();
+        if repo_creation_app_id_val == 0 || repo_creation_app_id_val > 99_999_999 {
             return Err(TestError::InvalidConfiguration(
                 "GitHub App ID must be between 1 and 99999999".to_string(),
             ));
         }
 
-        // Validate private key format
+        // Validate test helper app private key format
         if !self
-            .github_private_key
+            .repo_creation_app_private_key
             .contains("-----BEGIN RSA PRIVATE KEY-----")
             || !self
-                .github_private_key
+                .repo_creation_app_private_key
                 .contains("-----END RSA PRIVATE KEY-----")
         {
             return Err(TestError::InvalidConfiguration(
-                "GitHub private key must be in valid PEM format with RSA private key headers"
+                "Test app private key must be in valid PEM format with RSA private key headers"
                     .to_string(),
             ));
         }
 
-        // Validate webhook secret strength
-        if self.github_webhook_secret.len() < 8 {
+        // Validate Merge Warden app ID
+        if let Err(_) = self.merge_warden_app_id.parse::<u64>() {
+            return Err(TestError::InvalidConfiguration(
+                "MERGE_WARDEN_APP_ID must be a valid positive integer".to_string(),
+            ));
+        }
+
+        let merge_warden_app_id_val: u64 = self.merge_warden_app_id.parse().unwrap();
+        if merge_warden_app_id_val == 0 || merge_warden_app_id_val > 99_999_999 {
+            return Err(TestError::InvalidConfiguration(
+                "Merge Warden App ID must be between 1 and 99999999".to_string(),
+            ));
+        }
+
+        // Validate Merge Warden app private key format
+        if !self
+            .merge_warden_app_private_key
+            .contains("-----BEGIN RSA PRIVATE KEY-----")
+            || !self
+                .merge_warden_app_private_key
+                .contains("-----END RSA PRIVATE KEY-----")
+        {
+            return Err(TestError::InvalidConfiguration(
+                "Merge Warden app private key must be in valid PEM format with RSA private key headers"
+                    .to_string(),
+            ));
+        }
+
+        // Validate Merge Warden webhook secret strength
+        if self.merge_warden_webhook_secret.len() < 8 {
             return Err(TestError::InvalidConfiguration(
                 "Webhook secret must be at least 8 characters for security".to_string(),
             ));
         }
 
-        if self.github_webhook_secret.trim().is_empty() {
+        if self.merge_warden_webhook_secret.trim().is_empty() {
             return Err(TestError::InvalidConfiguration(
                 "Webhook secret cannot be empty or only whitespace".to_string(),
             ));
