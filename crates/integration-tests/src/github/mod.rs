@@ -123,6 +123,21 @@ impl TestBotInstance {
         use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
         use std::time::{SystemTime, UNIX_EPOCH};
 
+        // In mock-services mode, skip real JWT auth and return a stub instance.
+        if config.use_mock_services {
+            let github_client = octocrab::Octocrab::builder().build().map_err(|e| {
+                TestError::environment_error("build_mock_bot_client", &e.to_string())
+            })?;
+            return Ok(TestBotInstance {
+                app_id: config.merge_warden_app_id.clone(),
+                private_key: config.merge_warden_app_private_key.clone(),
+                webhook_secret: config.merge_warden_webhook_secret.clone(),
+                base_webhook_url: config.local_webhook_endpoint.clone(),
+                ngrok_tunnel: None,
+                github_client,
+            });
+        }
+
         let encoding_key = EncodingKey::from_rsa_pem(
             config.merge_warden_app_private_key.as_bytes(),
         )
@@ -438,10 +453,11 @@ impl TestBotInstance {
     ///
     /// # Examples
     ///
-    /// ```rust
-    /// # use merge_warden_integration_tests::TestBotInstance;
+    /// ```rust,no_run
+    /// # use merge_warden_integration_tests::{TestBotInstance, environment::TestConfig};
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let bot = TestBotInstance::new_for_testing().await?;
+    /// # let config: TestConfig = unimplemented!();
+    /// let bot = TestBotInstance::from_config(&config).await?;
     /// let app_id = bot.app_id();
     /// assert!(!app_id.is_empty());
     /// # Ok(())
@@ -460,10 +476,11 @@ impl TestBotInstance {
     ///
     /// # Examples
     ///
-    /// ```rust
-    /// # use merge_warden_integration_tests::TestBotInstance;
+    /// ```rust,no_run
+    /// # use merge_warden_integration_tests::{TestBotInstance, environment::TestConfig};
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let bot = TestBotInstance::new_for_testing().await?;
+    /// # let config: TestConfig = unimplemented!();
+    /// let bot = TestBotInstance::from_config(&config).await?;
     /// let webhook_url = bot.webhook_endpoint();
     /// assert!(webhook_url.starts_with("http"));
     /// # Ok(())

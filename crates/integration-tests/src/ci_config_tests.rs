@@ -140,7 +140,7 @@ async fn test_environment_isolation_configuration() -> TestResult<()> {
         .contains(&"GITHUB_ACTIONS".to_string()));
     assert!(isolation
         .clear_variables
-        .contains(&"GITHUB_TEST_TOKEN".to_string()));
+        .contains(&"REPO_CREATION_APP_ID".to_string()));
     assert_eq!(isolation.test_variable_prefix, "TEST_");
 
     Ok(())

@@ -633,13 +633,14 @@ mod environment_setup_tests {
         env::set_var("TEST_TIMEOUT_SECONDS", "60");
         env::set_var("USE_MOCK_SERVICES", "false");
 
-        // Act: Set up environment
-        let test_env = IntegrationTestEnvironment::setup().await?;
+        // Act: Load config only — this test validates config loading, not full environment setup.
+        // Full setup requires real GitHub credentials when USE_MOCK_SERVICES=false.
+        let config = TestConfig::from_environment()?;
 
         // Assert: Verify custom configuration is applied
-        assert_eq!(test_env.config.github_organization, "custom-test-org");
-        assert_eq!(test_env.config.default_timeout.as_secs(), 60);
-        assert!(!test_env.config.use_mock_services);
+        assert_eq!(config.github_organization, "custom-test-org");
+        assert_eq!(config.default_timeout.as_secs(), 60);
+        assert!(!config.use_mock_services);
 
         cleanup_test_environment();
         Ok(())
@@ -727,6 +728,7 @@ mod environment_setup_tests {
             "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEAtest...\n-----END RSA PRIVATE KEY-----",
         );
         env::set_var("MERGE_WARDEN_WEBHOOK_SECRET", "secure_webhook_secret_123");
+        env::set_var("USE_MOCK_SERVICES", "true");
     }
 
     /// Helper function to clean up test environment
@@ -791,6 +793,7 @@ mod environment_readiness_tests {
             "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEAtest...\n-----END RSA PRIVATE KEY-----",
         );
         env::set_var("MERGE_WARDEN_WEBHOOK_SECRET", "secure_webhook_secret_123");
+        env::set_var("USE_MOCK_SERVICES", "true");
     }
 
     /// Helper function to clean up test environment
@@ -891,6 +894,7 @@ mod outage_simulation_tests {
             "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEAtest...\n-----END RSA PRIVATE KEY-----",
         );
         env::set_var("MERGE_WARDEN_WEBHOOK_SECRET", "secure_webhook_secret_123");
+        env::set_var("USE_MOCK_SERVICES", "true");
     }
 
     /// Helper function to clean up test environment

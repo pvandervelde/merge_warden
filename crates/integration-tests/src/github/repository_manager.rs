@@ -112,6 +112,19 @@ impl TestRepositoryManager {
         use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
         use std::time::{SystemTime, UNIX_EPOCH};
 
+        // In mock-services mode, skip real JWT auth and return a stub instance.
+        if std::env::var("USE_MOCK_SERVICES").unwrap_or_default() == "true" {
+            let github_client = octocrab::Octocrab::builder().build().map_err(|e| {
+                TestError::environment_error("build_mock_repo_client", &e.to_string())
+            })?;
+            return Ok(Self {
+                github_client,
+                organization,
+                repository_prefix: prefix,
+                created_repositories: Vec::new(),
+            });
+        }
+
         let encoding_key = EncodingKey::from_rsa_pem(private_key.as_bytes()).map_err(|e| {
             TestError::authentication_error("repo_creation_app_private_key", &e.to_string())
         })?;
@@ -526,10 +539,10 @@ maxLines = 1000
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```rust,no_run
     /// # use merge_warden_integration_tests::TestRepositoryManager;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let manager = TestRepositoryManager::new("token".to_string()).await?;
+    /// let manager = TestRepositoryManager::new("123456".to_string(), "key".to_string(), "glitchgrove".to_string(), "prefix".to_string()).await?;
     /// assert_eq!(manager.organization(), "glitchgrove");
     /// # Ok(())
     /// # }
@@ -546,10 +559,10 @@ maxLines = 1000
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```rust,no_run
     /// # use merge_warden_integration_tests::TestRepositoryManager;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut manager = TestRepositoryManager::new("token".to_string()).await?;
+    /// let mut manager = TestRepositoryManager::new("123456".to_string(), "key".to_string(), "glitchgrove".to_string(), "prefix".to_string()).await?;
     /// assert_eq!(manager.repository_count(), 0);
     ///
     /// let repo = manager.create_repository("test").await?;
