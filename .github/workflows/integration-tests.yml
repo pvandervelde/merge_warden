@@ -1,0 +1,61 @@
+name: Integration Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  integration-tests:
+    name: integration-tests
+    runs-on: ubuntu-latest
+    if: github.repository == 'pvandervelde/merge_warden'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Install Rust
+        run: rustup update stable
+
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
+
+      - name: Verify integration test credentials
+        shell: bash
+        run: |
+          missing=0
+          for var in GITHUB_TEST_TOKEN GITHUB_TEST_APP_ID GITHUB_TEST_PRIVATE_KEY GITHUB_TEST_WEBHOOK_SECRET; do
+            if [ -z "${!var}" ]; then
+              echo "Missing required secret: ${var}"
+              missing=1
+            fi
+          done
+          if [ "$missing" -eq 1 ]; then
+            echo "Required integration test secrets are missing"
+            exit 1
+          fi
+        env:
+          GITHUB_TEST_TOKEN: ${{ secrets.GITHUB_TEST_TOKEN }}
+          GITHUB_TEST_APP_ID: ${{ secrets.GITHUB_TEST_APP_ID }}
+          GITHUB_TEST_PRIVATE_KEY: ${{ secrets.GITHUB_TEST_PRIVATE_KEY }}
+          GITHUB_TEST_WEBHOOK_SECRET: ${{ secrets.GITHUB_TEST_WEBHOOK_SECRET }}
+
+      - name: Run integration tests
+        env:
+          GITHUB_TEST_TOKEN: ${{ secrets.GITHUB_TEST_TOKEN }}
+          GITHUB_TEST_APP_ID: ${{ secrets.GITHUB_TEST_APP_ID }}
+          GITHUB_TEST_PRIVATE_KEY: ${{ secrets.GITHUB_TEST_PRIVATE_KEY }}
+          GITHUB_TEST_WEBHOOK_SECRET: ${{ secrets.GITHUB_TEST_WEBHOOK_SECRET }}
+          GITHUB_TEST_ORGANIZATION: ${{ secrets.GITHUB_TEST_ORGANIZATION }}
+          TEST_TIMEOUT_SECONDS: "30"
+          TEST_CLEANUP_ENABLED: "true"
+          USE_MOCK_SERVICES: "true"
+        run: |
+          cargo test --package merge-warden-integration-tests --test configuration_change_detection -- --nocapture
+          cargo test --package merge-warden-integration-tests --test error_handling_and_recovery -- --nocapture
+          cargo test --package merge-warden-integration-tests --test pull_request_validation_workflow -- --nocapture

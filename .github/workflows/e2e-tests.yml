@@ -1,0 +1,85 @@
+name: End-to-End Tests
+
+on:
+    workflow_dispatch:
+    schedule:
+        - cron: "0 2 * * *"
+    push:
+        branches:
+            - "**"
+    pull_request:
+        branches:
+            - master
+
+permissions:
+    contents: read
+
+jobs:
+    e2e-tests:
+        name: end-to-end-tests
+        runs-on: ubuntu-latest
+        if: github.repository == 'pvandervelde/merge_warden'
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+            - name: Install Rust
+              run: rustup update stable
+
+            - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
+
+            - name: Verify end-to-end test credentials
+              shell: bash
+              run: |
+                  missing=0
+                  for var in GITHUB_TEST_TOKEN GITHUB_TEST_APP_ID GITHUB_TEST_PRIVATE_KEY GITHUB_TEST_WEBHOOK_SECRET; do
+                    if [ -z "${!var}" ]; then
+                      echo "Missing required secret: ${var}"
+                      missing=1
+                    fi
+                  done
+                  if [ "$missing" -eq 1 ]; then
+                    echo "Required end-to-end test secrets are missing"
+                    exit 1
+                  fi
+              env:
+                  GITHUB_TEST_TOKEN: ${{ secrets.GITHUB_TEST_TOKEN }}
+                  GITHUB_TEST_APP_ID: ${{ secrets.GITHUB_TEST_APP_ID }}
+                  GITHUB_TEST_PRIVATE_KEY: ${{ secrets.GITHUB_TEST_PRIVATE_KEY }}
+                  GITHUB_TEST_WEBHOOK_SECRET: ${{ secrets.GITHUB_TEST_WEBHOOK_SECRET }}
+
+            - name: Run end-to-end test suite
+              env:
+                  GITHUB_TEST_TOKEN: ${{ secrets.GITHUB_TEST_TOKEN }}
+                  GITHUB_TEST_APP_ID: ${{ secrets.GITHUB_TEST_APP_ID }}
+                  GITHUB_TEST_PRIVATE_KEY: ${{ secrets.GITHUB_TEST_PRIVATE_KEY }}
+                  GITHUB_TEST_WEBHOOK_SECRET: ${{ secrets.GITHUB_TEST_WEBHOOK_SECRET }}
+                  GITHUB_TEST_ORGANIZATION: ${{ secrets.GITHUB_TEST_ORGANIZATION }}
+                  TEST_TIMEOUT_SECONDS: "60"
+                  TEST_CLEANUP_ENABLED: "true"
+                  USE_MOCK_SERVICES: "false"
+                  AZURE_APP_CONFIG_ENDPOINT: ${{ secrets.AZURE_APP_CONFIG_ENDPOINT }}
+                  AZURE_KEY_VAULT_ENDPOINT: ${{ secrets.AZURE_KEY_VAULT_ENDPOINT }}
+              run: cargo test --package merge-warden-integration-tests -- --nocapture --test-threads=1
+              timeout-minutes: 30
+
+    e2e-performance-tests:
+        name: performance-benchmarks
+        runs-on: ubuntu-latest
+        if: github.repository == 'pvandervelde/merge_warden' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        steps:
+            - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+            - name: Install Rust
+              run: rustup update stable
+
+            - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
+
+            - name: Run performance benchmarks
+              env:
+                  GITHUB_TEST_TOKEN: ${{ secrets.GITHUB_TEST_TOKEN }}
+                  GITHUB_TEST_APP_ID: ${{ secrets.GITHUB_TEST_APP_ID }}
+                  GITHUB_TEST_PRIVATE_KEY: ${{ secrets.GITHUB_TEST_PRIVATE_KEY }}
+                  GITHUB_TEST_WEBHOOK_SECRET: ${{ secrets.GITHUB_TEST_WEBHOOK_SECRET }}
+                  GITHUB_TEST_ORGANIZATION: ${{ secrets.GITHUB_TEST_ORGANIZATION }}
+              run: cargo test --package merge-warden-integration-tests --test concurrent_processing test_concurrent_processing_performance -- --nocapture --ignored
+              timeout-minutes: 30
