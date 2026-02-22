@@ -880,11 +880,12 @@ impl TestConfig {
             )
         })?;
 
-        let repo_creation_app_private_key = env::var("REPO_CREATION_APP_PRIVATE_KEY").map_err(|_| {
-            TestError::InvalidConfiguration(
-                "REPO_CREATION_APP_PRIVATE_KEY environment variable is required".to_string(),
-            )
-        })?;
+        let repo_creation_app_private_key =
+            env::var("REPO_CREATION_APP_PRIVATE_KEY").map_err(|_| {
+                TestError::InvalidConfiguration(
+                    "REPO_CREATION_APP_PRIVATE_KEY environment variable is required".to_string(),
+                )
+            })?;
 
         let merge_warden_app_id = env::var("MERGE_WARDEN_APP_ID").map_err(|_| {
             TestError::InvalidConfiguration(

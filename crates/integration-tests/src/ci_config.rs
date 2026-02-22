@@ -289,8 +289,8 @@ impl CiTestConfig {
         use std::env;
 
         // Validation passes if we have app credentials OR mock services are enabled
-        let has_app_credentials =
-            env::var("REPO_CREATION_APP_ID").is_ok() && env::var("REPO_CREATION_APP_PRIVATE_KEY").is_ok();
+        let has_app_credentials = env::var("REPO_CREATION_APP_ID").is_ok()
+            && env::var("REPO_CREATION_APP_PRIVATE_KEY").is_ok();
         let has_mock_services = env::var("USE_MOCK_SERVICES").unwrap_or_default() == "true";
 
         if !has_app_credentials && !has_mock_services {

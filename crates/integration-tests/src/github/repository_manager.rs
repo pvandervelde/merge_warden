@@ -122,7 +122,9 @@ impl TestRepositoryManager {
             .as_secs() as i64;
 
         let app_id_num: u64 = app_id.parse().map_err(|_| {
-            TestError::InvalidConfiguration("REPO_CREATION_APP_ID must be a valid integer".to_string())
+            TestError::InvalidConfiguration(
+                "REPO_CREATION_APP_ID must be a valid integer".to_string(),
+            )
         })?;
 
         #[derive(serde::Serialize)]
@@ -149,14 +151,9 @@ impl TestRepositoryManager {
 
         // Look up the app's installation for the target org
         let installation: serde_json::Value = jwt_client
-            .get(
-                format!("/orgs/{}/installation", organization),
-                None::<&()>,
-            )
+            .get(format!("/orgs/{}/installation", organization), None::<&()>)
             .await
-            .map_err(|e| {
-                TestError::github_api_error("get_org_installation", &e.to_string())
-            })?;
+            .map_err(|e| TestError::github_api_error("get_org_installation", &e.to_string()))?;
 
         let installation_id = installation["id"].as_u64().ok_or_else(|| {
             TestError::environment_error(
