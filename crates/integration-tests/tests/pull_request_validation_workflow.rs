@@ -43,6 +43,7 @@ use merge_warden_integration_tests::{
 /// - All test resources must be properly cleaned up (Assertion #7)
 /// - Mock Azure services must accurately simulate real behavior (Assertion #10)
 #[tokio::test]
+#[ignore = "requires GitHub App credentials (REPO_CREATION_APP_ID, MERGE_WARDEN_APP_ID)"]
 async fn test_complete_pull_request_validation_workflow() -> TestResult<()> {
     // Arrange: Set up complete test environment
     let mut test_env = IntegrationTestEnvironment::setup().await?;

@@ -37,6 +37,7 @@ use merge_warden_integration_tests::{
 /// - Integration tests must achieve 95% success rate in CI environment over 100+ consecutive runs (Assertion #8)
 /// - Mock Azure services must accurately simulate real service behavior including failure modes (Assertion #10)
 #[tokio::test]
+#[ignore = "requires GitHub App credentials (REPO_CREATION_APP_ID, MERGE_WARDEN_APP_ID)"]
 async fn test_recovery_from_github_api_failures() -> TestResult<()> {
     // Arrange: Set up test environment
     let mut test_env = IntegrationTestEnvironment::setup().await?;
@@ -167,6 +168,7 @@ async fn test_recovery_from_github_api_failures() -> TestResult<()> {
 /// - System must gracefully handle Azure service simulation failures (Assertion #5)
 /// - Mock Azure services must accurately simulate failure modes (Assertion #10)
 #[tokio::test]
+#[ignore = "requires GitHub App credentials (REPO_CREATION_APP_ID, MERGE_WARDEN_APP_ID)"]
 async fn test_fallback_to_default_config_during_outage() -> TestResult<()> {
     // Arrange: Set up test environment
     let mut test_env = IntegrationTestEnvironment::setup().await?;
@@ -259,6 +261,7 @@ async fn test_fallback_to_default_config_during_outage() -> TestResult<()> {
 /// This test validates system behavior when multiple services fail simultaneously
 /// and recovery happens in stages.
 #[tokio::test]
+#[ignore = "requires GitHub App credentials (REPO_CREATION_APP_ID, MERGE_WARDEN_APP_ID)"]
 async fn test_multiple_concurrent_service_failures() -> TestResult<()> {
     // Arrange: Set up test environment
     let mut test_env = IntegrationTestEnvironment::setup().await?;

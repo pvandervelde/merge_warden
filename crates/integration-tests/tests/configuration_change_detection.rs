@@ -38,6 +38,7 @@ use merge_warden_integration_tests::{
 ///
 /// - Configuration changes to merge-warden.toml must be detected and applied to subsequent PR processing (Assertion #4)
 #[tokio::test]
+#[ignore = "requires GitHub App credentials (REPO_CREATION_APP_ID, MERGE_WARDEN_APP_ID)"]
 async fn test_configuration_changes_are_applied() -> TestResult<()> {
     // Arrange: Set up test environment with strict initial configuration
     let mut test_env = IntegrationTestEnvironment::setup().await?;

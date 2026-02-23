@@ -61,7 +61,9 @@ jobs:
                   TEST_CLEANUP_ENABLED: "true"
                   USE_MOCK_SERVICES: "false"
               run: |
-                  cargo test --package merge-warden-integration-tests --test configuration_change_detection -- --nocapture
-                  cargo test --package merge-warden-integration-tests --test error_handling_and_recovery -- --nocapture
-                  cargo test --package merge-warden-integration-tests --test pull_request_validation_workflow -- --nocapture
-                  cargo test --package merge-warden-integration-tests --test concurrent_processing -- --nocapture
+                  failed=0
+                  cargo test --package merge-warden-integration-tests --test configuration_change_detection -- --ignored --nocapture || failed=1
+                  cargo test --package merge-warden-integration-tests --test error_handling_and_recovery -- --ignored --nocapture || failed=1
+                  cargo test --package merge-warden-integration-tests --test pull_request_validation_workflow -- --ignored --nocapture || failed=1
+                  cargo test --package merge-warden-integration-tests --test concurrent_processing -- --nocapture || failed=1
+                  exit $failed
