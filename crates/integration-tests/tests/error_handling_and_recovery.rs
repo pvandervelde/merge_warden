@@ -79,7 +79,7 @@ async fn test_recovery_from_github_api_failures() -> TestResult<()> {
         .get_pr_checks(&repo, pr.number)
         .await
         .unwrap_or_default();
-    let initial_comments = test_env
+    let _initial_comments = test_env
         .get_pr_comments(&repo, pr.number)
         .await
         .unwrap_or_default();
@@ -102,7 +102,7 @@ async fn test_recovery_from_github_api_failures() -> TestResult<()> {
 
     // Wait for recovery processing
     let recovery_timeout = Duration::from_secs(30);
-    let recovery_result = timeout(
+    let _recovery_result = timeout(
         recovery_timeout,
         wait_for_successful_processing(&test_env, &repo, pr.number),
     )
@@ -205,7 +205,7 @@ async fn test_fallback_to_default_config_during_outage() -> TestResult<()> {
 
     // Wait for processing with default configuration
     let processing_timeout = Duration::from_secs(20);
-    let processing_result = timeout(
+    let _processing_result = timeout(
         processing_timeout,
         wait_for_processing_with_fallback(&test_env, &repo, pr.number),
     )
@@ -437,7 +437,7 @@ async fn trigger_webhook_redelivery(
 async fn trigger_configuration_service_recovery(
     test_env: &IntegrationTestEnvironment,
     repo: &merge_warden_integration_tests::environment::TestRepository,
-    pr: &merge_warden_integration_tests::utils::TestPullRequest,
+    _pr: &merge_warden_integration_tests::utils::TestPullRequest,
 ) -> TestResult<()> {
     // Simulate a configuration change event to trigger reload
     let config_event_payload = serde_json::json!({

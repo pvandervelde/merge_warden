@@ -73,7 +73,7 @@ async fn test_configuration_changes_are_applied() -> TestResult<()> {
 
     // Wait for initial processing with timeout
     let processing_timeout = Duration::from_secs(10);
-    let initial_result = timeout(
+    let _initial_result = timeout(
         processing_timeout,
         wait_for_validation_completion(&test_env, &repo, pr.number),
     )
@@ -103,7 +103,7 @@ async fn test_configuration_changes_are_applied() -> TestResult<()> {
 
     // Wait for configuration change to be detected and applied
     let reeval_timeout = Duration::from_secs(15);
-    let reeval_result = timeout(
+    let _reeval_result = timeout(
         reeval_timeout,
         wait_for_configuration_update_completion(&test_env, &repo, pr.number),
     )

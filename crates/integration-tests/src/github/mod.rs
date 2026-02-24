@@ -329,8 +329,20 @@ impl TestBotInstance {
     /// }
     /// ```
     pub async fn setup_local_tunnel(&mut self) -> TestResult<String> {
-        // TODO: implement - Set up ngrok tunnel for local development
-        todo!("Set up local tunnel for webhook forwarding")
+        // Check if a pre-configured webhook endpoint URL is provided (e.g. deployed bot in CI)
+        if let Ok(url) = std::env::var("WEBHOOK_ENDPOINT_URL") {
+            if !url.is_empty() {
+                self.base_webhook_url = url.clone();
+                self.ngrok_tunnel = Some(url.clone());
+                return Ok(url);
+            }
+        }
+
+        Err(TestError::environment_error(
+            "setup_local_tunnel",
+            "No webhook endpoint configured. Set WEBHOOK_ENDPOINT_URL to the deployed bot \
+             endpoint URL, or install ngrok for local development.",
+        ))
     }
 
     /// Verifies that the bot has all required permissions on a repository.
@@ -441,11 +453,65 @@ impl TestBotInstance {
     /// ```
     pub async fn simulate_webhook(
         &self,
-        _event_type: &str,
-        _payload: &serde_json::Value,
+        event_type: &str,
+        payload: &serde_json::Value,
     ) -> TestResult<WebhookResponse> {
-        // TODO: implement - Simulate webhook delivery
-        todo!("Simulate webhook delivery to bot endpoint")
+        use hmac::{Hmac, Mac};
+        use sha2::Sha256;
+        type HmacSha256 = Hmac<Sha256>;
+
+        if self.base_webhook_url.is_empty() {
+            return Err(TestError::environment_error(
+                "simulate_webhook",
+                "Webhook endpoint URL is not configured. Call setup_local_tunnel() or set \
+                 WEBHOOK_ENDPOINT_URL before simulating webhooks.",
+            ));
+        }
+
+        let payload_bytes =
+            serde_json::to_vec(payload).map_err(|e| TestError::InternalError(e.to_string()))?;
+
+        // Sign the payload with the webhook secret (matches GitHub's signature scheme)
+        let mut mac = HmacSha256::new_from_slice(self.webhook_secret.as_bytes())
+            .map_err(|e| TestError::environment_error("simulate_webhook_hmac", &e.to_string()))?;
+        mac.update(&payload_bytes);
+        let signature = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
+
+        let start = std::time::Instant::now();
+
+        let client = reqwest::Client::new();
+        let response = client
+            .post(&self.base_webhook_url)
+            .header("Content-Type", "application/json")
+            .header("X-GitHub-Event", event_type)
+            .header("X-Hub-Signature-256", &signature)
+            .header("X-GitHub-Delivery", uuid::Uuid::new_v4().to_string())
+            .body(payload_bytes)
+            .send()
+            .await
+            .map_err(|e| TestError::NetworkError(e.to_string()))?;
+
+        let processing_time = start.elapsed();
+        let status_code = response.status().as_u16();
+
+        let mut headers = HashMap::new();
+        for (key, value) in response.headers() {
+            if let Ok(v) = value.to_str() {
+                headers.insert(key.to_string(), v.to_string());
+            }
+        }
+
+        let body = response
+            .text()
+            .await
+            .map_err(|e| TestError::NetworkError(e.to_string()))?;
+
+        Ok(WebhookResponse {
+            status_code,
+            headers,
+            body,
+            processing_time,
+        })
     }
 
     /// Gets the GitHub App ID for this bot instance.
