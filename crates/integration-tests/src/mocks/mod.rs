@@ -15,7 +15,7 @@ pub use azure::{MockAppConfigService, MockKeyVaultService};
 // Future: GCP services will be added here
 // pub mod gcp;
 
-use crate::errors::{TestError, TestResult};
+use crate::errors::TestResult;
 
 /// Provider for all mock Azure services used in integration testing.
 ///

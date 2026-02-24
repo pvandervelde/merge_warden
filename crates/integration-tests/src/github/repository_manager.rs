@@ -331,7 +331,7 @@ impl TestRepositoryManager {
     pub async fn setup_configuration(
         &self,
         repository: &TestRepository,
-        config_spec: Option<&RepositorySpec>,
+        _config_spec: Option<&RepositorySpec>,
     ) -> TestResult<()> {
         // Default merge-warden configuration
         let config_content = r#"schemaVersion = 1

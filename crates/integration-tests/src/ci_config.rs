@@ -637,6 +637,7 @@ pub struct CiTestExecutor {
     /// Test execution state
     execution_state: TestExecutionState,
     /// Resource usage tracking
+    #[allow(dead_code)]
     resource_usage: ResourceUsageTracker,
 }
 
@@ -783,7 +784,7 @@ impl CiTestExecutor {
     ) -> TestResult<TestExecutionResults> {
         use std::time::Instant;
 
-        let start_time = Instant::now();
+        let _start_time = Instant::now();
         let mut results = TestExecutionResults::with_config(self.config.clone());
 
         // Simulate filtering and running tests based on the filter

@@ -1,10 +1,9 @@
 //! Mock Azure Key Vault service for integration testing.
 
-use async_trait::async_trait;
 use std::collections::HashMap;
 use std::time::Duration;
 
-use crate::errors::{TestError, TestResult};
+use crate::errors::TestResult;
 
 /// Mock implementation of Azure Key Vault service.
 ///
@@ -32,6 +31,7 @@ pub struct MockKeyVaultService {
     /// Secret store
     secret_store: HashMap<String, String>,
     /// Simulated response delay
+    #[allow(dead_code)]
     response_delay: Duration,
     /// Failure rate (0.0 to 1.0)
     failure_rate: f32,

@@ -1378,6 +1378,7 @@ impl OutageConfig {
 
 /// Internal resource tracking for cleanup purposes.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 enum CleanupResource {
     Repository { organization: String, name: String },
     Webhook { repository_id: u64, webhook_id: u64 },

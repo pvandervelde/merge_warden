@@ -44,14 +44,17 @@ pub struct TestBotInstance {
     /// GitHub App ID for authentication
     app_id: String,
     /// GitHub App private key content
+    #[allow(dead_code)]
     private_key: String,
     /// Webhook secret for signature validation
+    #[allow(dead_code)]
     webhook_secret: String,
     /// Base URL for webhook endpoints
     base_webhook_url: String,
     /// Optional ngrok tunnel for local development
     ngrok_tunnel: Option<String>,
     /// GitHub API client for app operations
+    #[allow(dead_code)]
     github_client: octocrab::Octocrab,
 }
 
@@ -281,7 +284,7 @@ impl TestBotInstance {
     /// ```
     pub async fn configure_for_repository(
         &mut self,
-        repository: &TestRepository,
+        _repository: &TestRepository,
     ) -> TestResult<BotConfiguration> {
         // TODO: implement - Configure bot for specific repository
         todo!("Configure bot for repository")
@@ -379,7 +382,7 @@ impl TestBotInstance {
     /// ```
     pub async fn verify_permissions(
         &self,
-        repository: &TestRepository,
+        _repository: &TestRepository,
     ) -> TestResult<HashMap<String, String>> {
         // TODO: implement - Verify bot permissions on repository
         todo!("Verify bot permissions")
@@ -438,8 +441,8 @@ impl TestBotInstance {
     /// ```
     pub async fn simulate_webhook(
         &self,
-        event_type: &str,
-        payload: &serde_json::Value,
+        _event_type: &str,
+        _payload: &serde_json::Value,
     ) -> TestResult<WebhookResponse> {
         // TODO: implement - Simulate webhook delivery
         todo!("Simulate webhook delivery to bot endpoint")

@@ -4,8 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::environment::TestRepository;
-use crate::errors::{TestError, TestResult};
+use crate::errors::TestResult;
 
 /// Manager for test data templates and generation.
 ///
@@ -21,6 +20,7 @@ use crate::errors::{TestError, TestResult};
 /// let pr_spec = manager.create_pull_request_spec("feature/test-branch");
 /// assert!(!pr_spec.title.is_empty());
 /// ```
+#[allow(dead_code)]
 pub struct TestDataManager {
     /// Template configurations
     templates: HashMap<String, String>,
@@ -372,6 +372,7 @@ pub struct TestPullRequest {
 
 /// Default values for test data generation.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct TestDataDefaults {
     /// Default organization name
     pub organization: String,
