@@ -329,9 +329,10 @@ impl TestBotInstance {
     /// }
     /// ```
     pub async fn setup_local_tunnel(&mut self) -> TestResult<String> {
-        // Check if a pre-configured webhook endpoint URL is provided (e.g. deployed bot in CI)
-        if let Ok(url) = std::env::var("WEBHOOK_ENDPOINT_URL") {
-            if !url.is_empty() {
+        // Check if a pre-configured webhook endpoint URL is provided (e.g. deployed bot in CI).
+        // Uses the same LOCAL_WEBHOOK_ENDPOINT variable as TestConfig for consistency.
+        if let Ok(url) = std::env::var("LOCAL_WEBHOOK_ENDPOINT") {
+            if !url.is_empty() && !url.starts_with("http://localhost") {
                 self.base_webhook_url = url.clone();
                 self.ngrok_tunnel = Some(url.clone());
                 return Ok(url);
@@ -340,8 +341,8 @@ impl TestBotInstance {
 
         Err(TestError::environment_error(
             "setup_local_tunnel",
-            "No webhook endpoint configured. Set WEBHOOK_ENDPOINT_URL to the deployed bot \
-             endpoint URL, or install ngrok for local development.",
+            "No webhook endpoint configured. Set LOCAL_WEBHOOK_ENDPOINT to the deployed bot \
+             endpoint URL (e.g. https://your-app.azurewebsites.net/api/webhook).",
         ))
     }
 

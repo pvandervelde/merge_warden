@@ -57,6 +57,7 @@ jobs:
                   MERGE_WARDEN_APP_PRIVATE_KEY: ${{ secrets.MERGE_WARDEN_APP_PRIVATE_KEY }}
                   MERGE_WARDEN_WEBHOOK_SECRET: ${{ secrets.MERGE_WARDEN_WEBHOOK_SECRET }}
                   TEST_ORGANIZATION: ${{ secrets.TEST_ORGANIZATION }}
+                  LOCAL_WEBHOOK_ENDPOINT: ${{ secrets.LOCAL_WEBHOOK_ENDPOINT }}
                   TEST_TIMEOUT_SECONDS: "30"
                   TEST_CLEANUP_ENABLED: "true"
                   USE_MOCK_SERVICES: "false"

@@ -668,7 +668,7 @@ maxLines = 1000
         Ok(())
     }
 
-    /// Updates a file in a branch.
+    /// Updates a file in a branch, or creates it if it does not yet exist (upsert).
     pub async fn update_file(
         &self,
         repository: &TestRepository,
@@ -679,8 +679,9 @@ maxLines = 1000
     ) -> TestResult<()> {
         use base64::{engine::general_purpose, Engine as _};
 
-        // Get current file to get its SHA
-        let current_file = self
+        // Attempt to fetch the current file SHA for the update API.
+        // If the file does not exist (e.g. fresh test repo) fall through to create_file.
+        let existing_sha = self
             .github_client
             .repos(&repository.organization, &repository.name)
             .get_content()
@@ -688,12 +689,25 @@ maxLines = 1000
             .r#ref(branch)
             .send()
             .await
-            .map_err(|e| TestError::github_api_error("get_content", &e.to_string()))?;
+            .ok()
+            .and_then(|f| f.items.into_iter().next())
+            .map(|item| item.sha);
 
-        let file_sha = current_file.items[0].sha.clone();
-
-        // Encode new content as base64
         let encoded_content = general_purpose::STANDARD.encode(content.as_bytes());
+
+        if existing_sha.is_none() {
+            // File does not exist yet — create it
+            self.github_client
+                .repos(&repository.organization, &repository.name)
+                .create_file(path, commit_message, &encoded_content)
+                .branch(branch)
+                .send()
+                .await
+                .map_err(|e| TestError::github_api_error("create_file_upsert", &e.to_string()))?;
+            return Ok(());
+        }
+
+        let file_sha = existing_sha.unwrap();
 
         // Update file
         self.github_client
