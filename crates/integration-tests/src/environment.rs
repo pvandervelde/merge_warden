@@ -945,7 +945,9 @@ impl TestConfig {
             .unwrap_or(Ok(true))?;
 
         let local_webhook_endpoint = env::var("LOCAL_WEBHOOK_ENDPOINT")
-            .unwrap_or_else(|_| "http://localhost:7071/api/webhook".to_string());
+            .ok()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| "http://localhost:7071/api/webhook".to_string());
 
         let use_mock_services = env::var("USE_MOCK_SERVICES")
             .map(|s| s.to_lowercase())
