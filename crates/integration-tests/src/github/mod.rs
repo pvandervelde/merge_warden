@@ -53,8 +53,7 @@ pub struct TestBotInstance {
     base_webhook_url: String,
     /// Optional ngrok tunnel for local development
     ngrok_tunnel: Option<String>,
-    /// GitHub API client for app operations
-    #[allow(dead_code)]
+    /// GitHub API client for app operations (org-scoped installation token)
     github_client: octocrab::Octocrab,
 }
 
@@ -328,9 +327,152 @@ impl TestBotInstance {
     ///     Ok(())
     /// }
     /// ```
+    /// Starts an embedded axum HTTP server that processes webhooks using the core
+    /// Merge Warden business logic.
+    ///
+    /// The server binds to a random localhost port, verifies HMAC-SHA256 signatures,
+    /// parses pull_request payloads, loads per-repo merge-warden.toml configuration,
+    /// and runs the full PR validation pipeline — writing check runs and comments back
+    /// to GitHub using the installation-access-token client stored on this instance.
+    ///
+    /// No Azure Key Vault or App Configuration infrastructure is required.
+    ///
+    /// # Returns
+    ///
+    /// The `http://127.0.0.1:{port}/api/webhook` URL on success.
+    pub async fn start_local_webhook_server(&mut self) -> TestResult<String> {
+        use axum::{extract::State, http::HeaderMap, routing::post, Router};
+        use merge_warden_core::{
+            config::{
+                load_merge_warden_config, ApplicationDefaults,
+                CurrentPullRequestValidationConfiguration,
+            },
+            MergeWarden, WebhookPayload,
+        };
+        use merge_warden_developer_platforms::github::GitHubProvider;
+        use std::sync::Arc;
+        use tokio::net::TcpListener;
+
+        struct WebhookState {
+            github_client: octocrab::Octocrab,
+            webhook_secret: String,
+        }
+
+        async fn webhook_handler(
+            State(state): State<Arc<WebhookState>>,
+            headers: HeaderMap,
+            body: String,
+        ) -> axum::http::StatusCode {
+            use hmac::{Hmac, Mac};
+            use sha2::Sha256;
+            type HmacSha256 = Hmac<Sha256>;
+
+            // Verify HMAC-SHA256 signature
+            let signature = match headers.get("X-Hub-Signature-256") {
+                Some(v) => v.to_str().unwrap_or("").to_string(),
+                None => return axum::http::StatusCode::UNAUTHORIZED,
+            };
+            let mut mac = match HmacSha256::new_from_slice(state.webhook_secret.as_bytes()) {
+                Ok(m) => m,
+                Err(_) => return axum::http::StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            mac.update(body.as_bytes());
+            let expected = format!("sha256={}", hex::encode(mac.finalize().into_bytes()));
+            if signature != expected {
+                return axum::http::StatusCode::UNAUTHORIZED;
+            }
+
+            // Parse payload
+            let payload: WebhookPayload = match serde_json::from_str(&body) {
+                Ok(p) => p,
+                Err(_) => return axum::http::StatusCode::BAD_REQUEST,
+            };
+
+            // Only process relevant PR actions
+            let action = payload.action.as_str();
+            if !matches!(
+                action,
+                "opened" | "edited" | "ready_for_review" | "reopened" | "unlocked" | "synchronize"
+            ) {
+                return axum::http::StatusCode::OK;
+            }
+
+            let pr = match payload.pull_request {
+                Some(p) => p,
+                None => return axum::http::StatusCode::BAD_REQUEST,
+            };
+            let repo = match payload.repository {
+                Some(r) => r,
+                None => return axum::http::StatusCode::BAD_REQUEST,
+            };
+
+            let parts: Vec<&str> = repo.full_name.split('/').collect();
+            if parts.len() != 2 {
+                return axum::http::StatusCode::BAD_REQUEST;
+            }
+            let owner = parts[0];
+
+            // Build provider from shared client (org-scoped installation token)
+            let provider = GitHubProvider::new(state.github_client.clone());
+            let app_defaults = ApplicationDefaults::default();
+
+            let validation_config = match load_merge_warden_config(
+                owner,
+                &repo.name,
+                ".github/merge-warden.toml",
+                &provider,
+                &app_defaults,
+            )
+            .await
+            {
+                Ok(cfg) => cfg.to_validation_config(&app_defaults.bypass_rules),
+                Err(_) => CurrentPullRequestValidationConfiguration::default(),
+            };
+
+            let warden = MergeWarden::with_config(provider, validation_config);
+            let _ = warden
+                .process_pull_request(owner, &repo.name, pr.number)
+                .await;
+
+            axum::http::StatusCode::OK
+        }
+
+        let listener = TcpListener::bind("127.0.0.1:0")
+            .await
+            .map_err(|e| TestError::environment_error("bind_webhook_server", &e.to_string()))?;
+        let port = listener
+            .local_addr()
+            .map_err(|e| TestError::environment_error("webhook_server_addr", &e.to_string()))?
+            .port();
+
+        let url = format!("http://127.0.0.1:{}/api/webhook", port);
+
+        let state = Arc::new(WebhookState {
+            github_client: self.github_client.clone(),
+            webhook_secret: self.webhook_secret.clone(),
+        });
+
+        let app = Router::new()
+            .route("/api/webhook", post(webhook_handler))
+            .with_state(state);
+
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap_or_else(|e| {
+                eprintln!("Embedded webhook server error: {}", e);
+            });
+        });
+
+        self.base_webhook_url = url.clone();
+        self.ngrok_tunnel = Some(url.clone());
+        Ok(url)
+    }
+
+    /// Sets up a webhook endpoint for integration testing.
+    ///
+    /// Prefers `LOCAL_WEBHOOK_ENDPOINT` (env var / repo secret pointing at a deployed
+    /// Merge Warden instance) when set to a non-localhost URL. Otherwise starts an
+    /// embedded webhook server on a random localhost port via [`start_local_webhook_server`].
     pub async fn setup_local_tunnel(&mut self) -> TestResult<String> {
-        // Check if a pre-configured webhook endpoint URL is provided (e.g. deployed bot in CI).
-        // Uses the same LOCAL_WEBHOOK_ENDPOINT variable as TestConfig for consistency.
         if let Ok(url) = std::env::var("LOCAL_WEBHOOK_ENDPOINT") {
             if !url.is_empty() && !url.starts_with("http://localhost") {
                 self.base_webhook_url = url.clone();
@@ -339,11 +481,7 @@ impl TestBotInstance {
             }
         }
 
-        Err(TestError::environment_error(
-            "setup_local_tunnel",
-            "No webhook endpoint configured. Set LOCAL_WEBHOOK_ENDPOINT to the deployed bot \
-             endpoint URL (e.g. https://your-app.azurewebsites.net/api/webhook).",
-        ))
+        self.start_local_webhook_server().await
     }
 
     /// Verifies that the bot has all required permissions on a repository.

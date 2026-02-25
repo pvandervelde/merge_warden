@@ -71,6 +71,28 @@ async fn test_configuration_changes_are_applied() -> TestResult<()> {
     // Act: Create pull request and wait for initial processing
     let pr = create_test_pull_request(&test_env, &repo, &pr_spec).await?;
 
+    // Explicitly trigger initial webhook processing (simulates GitHub delivering
+    // a pull_request.opened event to the Merge Warden bot).
+    let initial_webhook_payload = serde_json::json!({
+        "action": "opened",
+        "number": pr.number,
+        "pull_request": {
+            "id": pr.id,
+            "number": pr.number,
+            "head": { "sha": &pr.head, "ref": &pr.head }
+        },
+        "repository": {
+            "id": repo.id,
+            "name": repo.name,
+            "full_name": format!("{}/{}", repo.organization, repo.name)
+        },
+        "installation": { "id": 0 }
+    });
+    test_env
+        .bot_instance
+        .simulate_webhook("pull_request", &initial_webhook_payload)
+        .await?;
+
     // Wait for initial processing with timeout
     let processing_timeout = Duration::from_secs(10);
     let _initial_result = timeout(

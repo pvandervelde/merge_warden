@@ -21,6 +21,7 @@ tokio-test = "0.4"
 # GitHub API and HTTP client
 octocrab = { workspace = true }
 reqwest = { workspace = true, features = ["json"] }
+axum = { workspace = true }
 
 # Serialization and configuration
 serde = { workspace = true }

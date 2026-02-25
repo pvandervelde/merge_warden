@@ -221,7 +221,14 @@ impl IntegrationTestEnvironment {
         .await?;
 
         // Initialize Merge Warden bot instance
-        let bot_instance = TestBotInstance::from_config(&config).await?;
+        let mut bot_instance = TestBotInstance::from_config(&config).await?;
+
+        // Start embedded webhook server so tests can simulate GitHub webhook deliveries
+        // without requiring a deployed Merge Warden instance. Skipped in mock-services
+        // mode where the github_client is an unauthenticated stub.
+        if !config.use_mock_services {
+            bot_instance.start_local_webhook_server().await?;
+        }
 
         // Initialize cleanup resources list
         let cleanup_resources = Vec::new();

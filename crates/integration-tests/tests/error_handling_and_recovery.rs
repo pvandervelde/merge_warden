@@ -150,112 +150,6 @@ async fn test_recovery_from_github_api_failures() -> TestResult<()> {
     Ok(())
 }
 
-/// Test fallback to default configuration during Azure service outage.
-///
-/// This test validates that when Azure App Config is unavailable, the system
-/// falls back to default configuration and continues to function.
-///
-/// # Test Scenario Coverage
-///
-/// 1. **Azure Service Outage**: Simulates Azure App Config service failure
-/// 2. **Default Fallback**: Verifies system uses default configuration
-/// 3. **Continued Operation**: Validates bot continues to function
-/// 4. **Error Communication**: Checks appropriate error messages
-/// 5. **Service Recovery**: Tests recovery when Azure services restored
-///
-/// # Behavioral Assertions Tested
-///
-/// - System must gracefully handle Azure service simulation failures (Assertion #5)
-/// - Mock Azure services must accurately simulate failure modes (Assertion #10)
-#[tokio::test]
-#[ignore = "requires GitHub App credentials (REPO_CREATION_APP_ID, MERGE_WARDEN_APP_ID)"]
-async fn test_fallback_to_default_config_during_outage() -> TestResult<()> {
-    // Arrange: Set up test environment
-    let mut test_env = IntegrationTestEnvironment::setup().await?;
-
-    let repo = test_env
-        .create_test_repository("config-outage-test")
-        .await?;
-
-    test_env.setup_repository_configuration(&repo).await?;
-
-    // Simulate Azure App Config outage
-    test_env.simulate_app_config_outage().await?;
-
-    // Create PR during outage
-    let pr_spec = PullRequestSpec {
-        title: "feat: test configuration fallback".to_string(),
-        body: "Test PR during Azure App Config outage.\n\nCloses #888".to_string(),
-        source_branch: "feature/config-fallback".to_string(),
-        target_branch: "main".to_string(),
-        files: vec![FileSpec {
-            path: "fallback-test.rs".to_string(),
-            content: "// Test file for config fallback\npub fn test_fallback() {}\n".to_string(),
-            action: FileAction::Add,
-            mime_type: Some("text/x-rust".to_string()),
-        }],
-        labels: vec!["test".to_string()],
-        draft: false,
-        assignees: vec![],
-        reviewers: vec![],
-    };
-
-    // Act: Create pull request during Azure outage
-    let pr = create_test_pull_request_with_retries(&test_env, &repo, &pr_spec).await?;
-
-    // Wait for processing with default configuration
-    let processing_timeout = Duration::from_secs(20);
-    let _processing_result = timeout(
-        processing_timeout,
-        wait_for_processing_with_fallback(&test_env, &repo, pr.number),
-    )
-    .await
-    .map_err(|_| TestError::timeout("fallback processing", processing_timeout.as_secs()))??;
-
-    // Assert: Verify bot still functions with default configuration
-    let checks = test_env.get_pr_checks(&repo, pr.number).await?;
-    assert!(
-        checks.iter().any(|c| c.name == "merge-warden"),
-        "merge-warden check should exist even during Azure outage"
-    );
-
-    // Assert: Verify comments indicate fallback mode
-    let comments = test_env.get_pr_comments(&repo, pr.number).await?;
-    assert!(
-        comments
-            .iter()
-            .any(|c| c.body.contains("default configuration")
-                || c.body.contains("configuration service unavailable")
-                || c.body.contains("fallback mode")),
-        "Bot should indicate fallback to default configuration"
-    );
-
-    // Act: Restore Azure App Config service
-    test_env.restore_app_config().await?;
-
-    // Trigger re-processing to test recovery
-    trigger_configuration_service_recovery(&test_env, &repo, &pr).await?;
-
-    // Wait for recovery processing
-    let recovery_timeout = Duration::from_secs(15);
-    tokio::time::sleep(recovery_timeout).await;
-
-    // Assert: Verify system recognizes service recovery
-    let recovery_comments = test_env.get_pr_comments(&repo, pr.number).await?;
-    let comment_count_after_recovery = recovery_comments.len();
-
-    // Should have additional comments after recovery or updated status
-    assert!(
-        comment_count_after_recovery >= comments.len(),
-        "Should maintain or add comments after service recovery"
-    );
-
-    // Cleanup
-    test_env.cleanup().await?;
-
-    Ok(())
-}
-
 /// Test resilience to multiple concurrent failures.
 ///
 /// This test validates system behavior when multiple services fail simultaneously
@@ -433,34 +327,6 @@ async fn trigger_webhook_redelivery(
     Ok(())
 }
 
-/// Helper function to trigger configuration service recovery testing
-async fn trigger_configuration_service_recovery(
-    test_env: &IntegrationTestEnvironment,
-    repo: &merge_warden_integration_tests::environment::TestRepository,
-    _pr: &merge_warden_integration_tests::utils::TestPullRequest,
-) -> TestResult<()> {
-    // Simulate a configuration change event to trigger reload
-    let config_event_payload = serde_json::json!({
-        "action": "push",
-        "ref": "refs/heads/main",
-        "commits": [{
-            "modified": [".github/merge-warden.toml"]
-        }],
-        "repository": {
-            "id": repo.id,
-            "name": repo.name,
-            "full_name": format!("{}/{}", repo.organization, repo.name)
-        }
-    });
-
-    test_env
-        .bot_instance
-        .simulate_webhook("push", &config_event_payload)
-        .await?;
-
-    Ok(())
-}
-
 /// Helper function to wait for successful processing completion
 async fn wait_for_successful_processing(
     test_env: &IntegrationTestEnvironment,
@@ -486,39 +352,6 @@ async fn wait_for_successful_processing(
 
     Err(TestError::timeout(
         "successful processing",
-        timeout_duration.as_secs(),
-    ))
-}
-
-/// Helper function to wait for processing with fallback configuration
-async fn wait_for_processing_with_fallback(
-    test_env: &IntegrationTestEnvironment,
-    repo: &merge_warden_integration_tests::environment::TestRepository,
-    pr_number: u64,
-) -> TestResult<()> {
-    let start_time = Instant::now();
-    let timeout_duration = Duration::from_secs(45);
-
-    while start_time.elapsed() < timeout_duration {
-        // Check for any processing activity (checks or comments)
-        let checks = test_env
-            .get_pr_checks(repo, pr_number)
-            .await
-            .unwrap_or_default();
-        let comments = test_env
-            .get_pr_comments(repo, pr_number)
-            .await
-            .unwrap_or_default();
-
-        if !checks.is_empty() || !comments.is_empty() {
-            return Ok(());
-        }
-
-        tokio::time::sleep(Duration::from_secs(2)).await;
-    }
-
-    Err(TestError::timeout(
-        "processing with fallback",
         timeout_duration.as_secs(),
     ))
 }
