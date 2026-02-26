@@ -623,14 +623,16 @@ impl IntegrationTestEnvironment {
     }
 
     /// Gets checks for a pull request.
+    ///
+    /// Uses the Merge Warden App installation token (via `bot_instance`) rather
+    /// than the Repo-Creation App token, because only the MW App has the
+    /// `checks:read` permission needed to query check runs.
     pub async fn get_pr_checks(
         &self,
         repository: &TestRepository,
         pr_number: u64,
     ) -> TestResult<Vec<PullRequestCheck>> {
-        self.repository_manager
-            .get_pr_checks(repository, pr_number)
-            .await
+        self.bot_instance.get_pr_checks(repository, pr_number).await
     }
 
     /// Gets comments for a pull request.

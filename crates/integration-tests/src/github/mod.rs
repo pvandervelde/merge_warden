@@ -285,8 +285,17 @@ impl TestBotInstance {
         &mut self,
         _repository: &TestRepository,
     ) -> TestResult<BotConfiguration> {
-        // TODO: implement - Configure bot for specific repository
-        todo!("Configure bot for repository")
+        // With the embedded webhook server the MW app is installed at the organisation
+        // level and `start_local_webhook_server` already set `base_webhook_url`. There
+        // is no per-repository installation step required — just return the current
+        // state so callers can inspect the active configuration.
+        Ok(BotConfiguration {
+            installation_id: self.app_id.clone(),
+            access_token: String::new(), // raw token not stored; server uses its own copy
+            webhook_url: self.base_webhook_url.clone(),
+            webhook_secret: self.webhook_secret.clone(),
+            permissions: HashMap::new(),
+        })
     }
 
     /// Sets up a local tunnel for webhook testing during development.
@@ -696,6 +705,51 @@ impl TestBotInstance {
     /// ```
     pub fn webhook_endpoint(&self) -> &str {
         self.ngrok_tunnel.as_ref().unwrap_or(&self.base_webhook_url)
+    }
+
+    /// Gets the check runs for a pull request using the Merge Warden App token.
+    ///
+    /// The Repo-Creation App token does not have `checks:read` permission, so check
+    /// runs must be queried through the MW App installation token held by this
+    /// instance.
+    pub async fn get_pr_checks(
+        &self,
+        repository: &TestRepository,
+        pr_number: u64,
+    ) -> TestResult<Vec<crate::environment::PullRequestCheck>> {
+        let pr = self
+            .github_client
+            .pulls(&repository.organization, &repository.name)
+            .get(pr_number)
+            .await
+            .map_err(|e| TestError::github_api_error("get_pull_request", &e.to_string()))?;
+
+        let head_sha = pr.head.sha;
+
+        let check_runs = self
+            .github_client
+            .checks(&repository.organization, &repository.name)
+            .list_check_runs_for_git_ref(head_sha.into())
+            .send()
+            .await
+            .map_err(|e| TestError::github_api_error("list_check_runs", &e.to_string()))?;
+
+        let checks = check_runs
+            .check_runs
+            .into_iter()
+            .map(|run| crate::environment::PullRequestCheck {
+                id: run.id.to_string(),
+                name: run.name,
+                conclusion: run.conclusion.map(|c| c.to_string()),
+                details_url: run.details_url.map(|u| u.to_string()),
+                output: crate::environment::CheckOutput {
+                    summary: run.output.summary.clone().unwrap_or_default(),
+                    text: run.output.text.clone(),
+                },
+            })
+            .collect();
+
+        Ok(checks)
     }
 
     /// Generates a JWT token for GitHub App authentication.
