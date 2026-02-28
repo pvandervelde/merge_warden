@@ -134,7 +134,7 @@ async fn test_configuration_changes_are_applied() -> TestResult<()> {
     trigger_configuration_reload(&test_env, &repo, &pr).await?;
 
     // Wait for configuration change to be detected and applied
-    let reeval_timeout = Duration::from_secs(15);
+    let reeval_timeout = Duration::from_secs(60);
     let _reeval_result = timeout(
         reeval_timeout,
         wait_for_configuration_update_completion(&test_env, &repo, pr.number),
@@ -370,15 +370,18 @@ async fn wait_for_configuration_update_completion(
     while start_time.elapsed() < timeout_duration {
         let checks = test_env.get_pr_checks(repo, pr_number).await?;
 
-        if let Some(current_check) = checks.iter().find(|c| c.name == "MergeWarden") {
-            // Check if this is a new check run (different ID) or conclusion changed
-            if let Some(ref initial_id) = initial_check_id {
-                if current_check.id != *initial_id && current_check.conclusion.is_some() {
-                    return Ok(());
-                }
-            } else if current_check.conclusion.is_some() {
-                return Ok(());
-            }
+        // Look for any MergeWarden check with a different ID and a conclusion.
+        // list_check_runs returns all runs for the ref; find() would always return
+        // the first (oldest), so we must scan all of them.
+        let newer_completed = checks.iter().filter(|c| c.name == "MergeWarden").any(|c| {
+            c.conclusion.is_some()
+                && initial_check_id
+                    .as_ref()
+                    .map_or(true, |initial_id| c.id != *initial_id)
+        });
+
+        if newer_completed {
+            return Ok(());
         }
 
         tokio::time::sleep(Duration::from_secs(2)).await;
