@@ -148,7 +148,7 @@ async fn test_configuration_changes_are_applied() -> TestResult<()> {
         .find(|c| c.name == "MergeWarden")
         .ok_or_else(|| {
             TestError::validation_failed("MergeWarden check", "not found after update")
-        })?
+        })?;
 
     assert_eq!(
         updated_merge_warden_check.conclusion.as_ref().unwrap(),

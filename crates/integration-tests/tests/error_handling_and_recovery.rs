@@ -130,7 +130,7 @@ async fn test_recovery_from_github_api_failures() -> TestResult<()> {
         .find(|c| c.name == "MergeWarden")
         .ok_or_else(|| {
             TestError::validation_failed("MergeWarden check", "not found after recovery")
-        })?
+        })?;
 
     assert!(
         merge_warden_check.conclusion.is_some(),
