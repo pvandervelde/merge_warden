@@ -351,7 +351,16 @@ async fn wait_for_validation_completion(
     ))
 }
 
-/// Helper function to wait for configuration update completion
+/// Helper function to wait for configuration update completion.
+///
+/// Polls until any `MergeWarden` check on the PR has `conclusion == "success"`,
+/// indicating the bot re-evaluated with the updated (permissive) configuration.
+///
+/// Note: `list_check_runs_for_git_ref` returns only the *latest* check run per
+/// name per app, so comparing check-run IDs is unreliable — the snapshot taken
+/// after the reload webhook has already been processed may already contain the
+/// new check run as the sole entry.  Checking for "success" is both simpler and
+/// correct because the initial strict-config check produced "failure".
 async fn wait_for_configuration_update_completion(
     test_env: &IntegrationTestEnvironment,
     repo: &merge_warden_integration_tests::environment::TestRepository,
@@ -360,27 +369,18 @@ async fn wait_for_configuration_update_completion(
     let start_time = Instant::now();
     let timeout_duration = Duration::from_secs(45);
 
-    // Store initial check state to detect changes
-    let initial_checks = test_env.get_pr_checks(repo, pr_number).await?;
-    let initial_check_id = initial_checks
-        .iter()
-        .find(|c| c.name == "MergeWarden")
-        .map(|c| c.id.clone());
-
     while start_time.elapsed() < timeout_duration {
         let checks = test_env.get_pr_checks(repo, pr_number).await?;
 
-        // Look for any MergeWarden check with a different ID and a conclusion.
-        // list_check_runs returns all runs for the ref; find() would always return
-        // the first (oldest), so we must scan all of them.
-        let newer_completed = checks.iter().filter(|c| c.name == "MergeWarden").any(|c| {
-            c.conclusion.is_some()
-                && initial_check_id
-                    .as_ref()
-                    .map_or(true, |initial_id| c.id != *initial_id)
-        });
+        // The permissive config lets "invalid title format" through → "success".
+        // The initial strict-config check produced "failure", so seeing "success"
+        // means the re-evaluation with the new config completed.
+        let updated = checks
+            .iter()
+            .filter(|c| c.name == "MergeWarden")
+            .any(|c| c.conclusion.as_deref() == Some("success"));
 
-        if newer_completed {
+        if updated {
             return Ok(());
         }
 

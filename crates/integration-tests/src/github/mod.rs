@@ -439,9 +439,18 @@ impl TestBotInstance {
             };
 
             let warden = MergeWarden::with_config(provider, validation_config);
-            let _ = warden
+            match warden
                 .process_pull_request(owner, &repo.name, pr.number)
-                .await;
+                .await
+            {
+                Ok(_) => {}
+                Err(e) => {
+                    eprintln!(
+                        "[webhook-server] process_pull_request({}/{} PR#{}) failed: {:?}",
+                        owner, &repo.name, pr.number, e
+                    );
+                }
+            }
 
             axum::http::StatusCode::OK
         }
