@@ -106,8 +106,8 @@ async fn test_configuration_changes_are_applied() -> TestResult<()> {
     let initial_checks = test_env.get_pr_checks(&repo, pr.number).await?;
     let merge_warden_check = initial_checks
         .iter()
-        .find(|c| c.name == "merge-warden")
-        .ok_or_else(|| TestError::validation_failed("merge-warden check", "not found"))?;
+        .find(|c| c.name == "MergeWarden")
+        .ok_or_else(|| TestError::validation_failed("MergeWarden check", "not found"))?;
 
     assert_eq!(
         merge_warden_check.conclusion.as_ref().unwrap(),
@@ -145,10 +145,10 @@ async fn test_configuration_changes_are_applied() -> TestResult<()> {
     let updated_checks = test_env.get_pr_checks(&repo, pr.number).await?;
     let updated_merge_warden_check = updated_checks
         .iter()
-        .find(|c| c.name == "merge-warden")
+        .find(|c| c.name == "MergeWarden")
         .ok_or_else(|| {
-            TestError::validation_failed("merge-warden check", "not found after update")
-        })?;
+            TestError::validation_failed("MergeWarden check", "not found after update")
+        })?
 
     assert_eq!(
         updated_merge_warden_check.conclusion.as_ref().unwrap(),
@@ -321,7 +321,7 @@ async fn wait_for_validation_completion(
     while start_time.elapsed() < timeout_duration {
         let checks = test_env.get_pr_checks(repo, pr_number).await?;
 
-        if let Some(merge_warden_check) = checks.iter().find(|c| c.name == "merge-warden") {
+        if let Some(merge_warden_check) = checks.iter().find(|c| c.name == "MergeWarden") {
             if merge_warden_check.conclusion.is_some() {
                 return Ok(());
             }
@@ -349,13 +349,13 @@ async fn wait_for_configuration_update_completion(
     let initial_checks = test_env.get_pr_checks(repo, pr_number).await?;
     let initial_check_id = initial_checks
         .iter()
-        .find(|c| c.name == "merge-warden")
+        .find(|c| c.name == "MergeWarden")
         .map(|c| c.id.clone());
 
     while start_time.elapsed() < timeout_duration {
         let checks = test_env.get_pr_checks(repo, pr_number).await?;
 
-        if let Some(current_check) = checks.iter().find(|c| c.name == "merge-warden") {
+        if let Some(current_check) = checks.iter().find(|c| c.name == "MergeWarden") {
             // Check if this is a new check run (different ID) or conclusion changed
             if let Some(ref initial_id) = initial_check_id {
                 if current_check.id != *initial_id && current_check.conclusion.is_some() {

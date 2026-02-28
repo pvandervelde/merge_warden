@@ -172,8 +172,8 @@ async fn test_complete_pull_request_validation_workflow() -> TestResult<()> {
 
     let merge_warden_check = checks
         .iter()
-        .find(|c| c.name == "merge-warden")
-        .expect("merge-warden status check should exist");
+        .find(|c| c.name == "MergeWarden")
+        .expect("MergeWarden status check should exist");
 
     assert!(
         merge_warden_check.conclusion.is_some(),
@@ -301,7 +301,7 @@ async fn wait_for_processing_completion(
     while start_time.elapsed() < timeout_duration {
         let checks = test_env.get_pr_checks(repo, pr_number).await?;
 
-        if let Some(merge_warden_check) = checks.iter().find(|c| c.name == "merge-warden") {
+        if let Some(merge_warden_check) = checks.iter().find(|c| c.name == "MergeWarden") {
             if merge_warden_check.conclusion.is_some() {
                 return Ok(());
             }

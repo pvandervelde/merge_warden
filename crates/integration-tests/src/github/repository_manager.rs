@@ -656,14 +656,37 @@ maxLines = 1000
         // Encode content as base64
         let encoded_content = general_purpose::STANDARD.encode(content.as_bytes());
 
-        // Create or update file
-        self.github_client
+        // Fetch existing file SHA so we can update rather than create when the file
+        // already exists (e.g. auto_init creates README.md on repo creation).
+        let existing_sha = self
+            .github_client
             .repos(&repository.organization, &repository.name)
-            .create_file(path, commit_message, &encoded_content)
-            .branch(branch)
+            .get_content()
+            .path(path)
+            .r#ref(branch)
             .send()
             .await
-            .map_err(|e| TestError::github_api_error("create_file", &e.to_string()))?;
+            .ok()
+            .and_then(|f| f.items.into_iter().next())
+            .map(|item| item.sha);
+
+        if let Some(sha) = existing_sha {
+            self.github_client
+                .repos(&repository.organization, &repository.name)
+                .update_file(path, commit_message, &encoded_content, &sha)
+                .branch(branch)
+                .send()
+                .await
+                .map_err(|e| TestError::github_api_error("update_file", &e.to_string()))?;
+        } else {
+            self.github_client
+                .repos(&repository.organization, &repository.name)
+                .create_file(path, commit_message, &encoded_content)
+                .branch(branch)
+                .send()
+                .await
+                .map_err(|e| TestError::github_api_error("create_file", &e.to_string()))?;
+        }
 
         Ok(())
     }

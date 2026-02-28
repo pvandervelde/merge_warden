@@ -127,10 +127,10 @@ async fn test_recovery_from_github_api_failures() -> TestResult<()> {
 
     let merge_warden_check = final_checks
         .iter()
-        .find(|c| c.name == "merge-warden")
+        .find(|c| c.name == "MergeWarden")
         .ok_or_else(|| {
-            TestError::validation_failed("merge-warden check", "not found after recovery")
-        })?;
+            TestError::validation_failed("MergeWarden check", "not found after recovery")
+        })?
 
     assert!(
         merge_warden_check.conclusion.is_some(),
@@ -339,7 +339,7 @@ async fn wait_for_successful_processing(
     while start_time.elapsed() < timeout_duration {
         let checks = test_env.get_pr_checks(repo, pr_number).await?;
 
-        if let Some(merge_warden_check) = checks.iter().find(|c| c.name == "merge-warden") {
+        if let Some(merge_warden_check) = checks.iter().find(|c| c.name == "MergeWarden") {
             if let Some(conclusion) = &merge_warden_check.conclusion {
                 if conclusion == "success" || conclusion == "failure" {
                     return Ok(());
