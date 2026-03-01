@@ -1,0 +1,34 @@
+[package]
+authors.workspace = true
+description = "Merge Warden webhook/queue server binary"
+edition = "2021"
+license-file.workspace = true
+name = "merge_warden_server"
+repository.workspace = true
+version.workspace = true
+
+[dependencies]
+merge_warden_core = { path = "../core" }
+merge_warden_developer_platforms = { path = "../developer_platforms" }
+async-trait = { workspace = true }
+axum = { workspace = true }
+chrono = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true, features = ["log"] }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
+tracing-opentelemetry = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+
+# See https://github.com/sfackler/rust-openssl/issues/1627
+[target.x86_64-unknown-linux-musl.dependencies]
+openssl = { version = "0.10.72", features = ["vendored"] }
+
+[[bin]]
+name = "merge_warden_server"
+path = "src/main.rs"
