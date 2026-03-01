@@ -2,12 +2,11 @@
 
 pub mod test_data;
 
-pub use test_data::{CommentSpec, PullRequestSpec, ReviewSpec, TestDataManager};
+pub use test_data::{CommentSpec, PullRequestSpec, ReviewSpec, TestDataManager, TestPullRequest};
 
 use std::time::Duration;
-use tokio::time::timeout;
 
-use crate::errors::{TestError, TestResult};
+use crate::errors::TestResult;
 
 /// Waits for a condition to be met with a timeout.
 ///
@@ -49,9 +48,9 @@ use crate::errors::{TestError, TestResult};
 /// }
 /// ```
 pub async fn wait_for_condition<F>(
-    mut condition: F,
-    timeout_duration: Duration,
-    check_interval: Duration,
+    _condition: F,
+    _timeout_duration: Duration,
+    _check_interval: Duration,
 ) -> TestResult<()>
 where
     F: FnMut() -> TestResult<bool>,
@@ -97,8 +96,8 @@ where
 /// }
 /// ```
 pub async fn wait_for_webhook_processing<F, Fut>(
-    check_fn: F,
-    timeout_duration: Duration,
+    _check_fn: F,
+    _timeout_duration: Duration,
 ) -> TestResult<()>
 where
     F: Fn() -> Fut,
@@ -205,7 +204,7 @@ pub fn validate_webhook_signature(payload: &str, signature: &str, secret: &str) 
 /// assert_eq!(parsed["action"], "opened");
 /// ```
 pub fn create_webhook_payload(
-    event_type: &str,
+    _event_type: &str,
     action: &str,
     repository_data: &crate::environment::TestRepository,
 ) -> String {
@@ -274,9 +273,9 @@ pub fn create_webhook_payload(
 /// }
 /// ```
 pub async fn retry_operation<F, Fut, T>(
-    mut operation: F,
-    max_attempts: u32,
-    delay: Duration,
+    _operation: F,
+    _max_attempts: u32,
+    _delay: Duration,
 ) -> TestResult<T>
 where
     F: FnMut() -> Fut,

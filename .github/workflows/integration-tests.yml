@@ -1,0 +1,68 @@
+name: Integration Tests
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  integration-tests:
+    name: integration-tests
+    runs-on: ubuntu-latest
+    if: github.repository == 'pvandervelde/merge_warden'
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4
+
+      - name: Install Rust
+        run: rustup update stable
+
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
+
+      - name: Run structural tests (no credentials required)
+        run: cargo test --package merge-warden-integration-tests --test crate_structure_tests -- --nocapture
+
+      - name: Verify integration test credentials
+        shell: bash
+        run: |
+          missing=0
+          for var in REPO_CREATION_APP_ID REPO_CREATION_APP_PRIVATE_KEY MERGE_WARDEN_APP_ID MERGE_WARDEN_APP_PRIVATE_KEY MERGE_WARDEN_WEBHOOK_SECRET; do
+            if [ -z "${!var}" ]; then
+              echo "Missing required secret: ${var}"
+              missing=1
+            fi
+          done
+          if [ "$missing" -eq 1 ]; then
+            echo "Required integration test secrets are missing"
+            exit 1
+          fi
+        env:
+          REPO_CREATION_APP_ID: ${{ secrets.REPO_CREATION_APP_ID }}
+          REPO_CREATION_APP_PRIVATE_KEY: ${{ secrets.REPO_CREATION_APP_PRIVATE_KEY }}
+          MERGE_WARDEN_APP_ID: ${{ secrets.MERGE_WARDEN_APP_ID }}
+          MERGE_WARDEN_APP_PRIVATE_KEY: ${{ secrets.MERGE_WARDEN_APP_PRIVATE_KEY }}
+          MERGE_WARDEN_WEBHOOK_SECRET: ${{ secrets.MERGE_WARDEN_WEBHOOK_SECRET }}
+
+      - name: Run integration tests
+        env:
+          REPO_CREATION_APP_ID: ${{ secrets.REPO_CREATION_APP_ID }}
+          REPO_CREATION_APP_PRIVATE_KEY: ${{ secrets.REPO_CREATION_APP_PRIVATE_KEY }}
+          MERGE_WARDEN_APP_ID: ${{ secrets.MERGE_WARDEN_APP_ID }}
+          MERGE_WARDEN_APP_PRIVATE_KEY: ${{ secrets.MERGE_WARDEN_APP_PRIVATE_KEY }}
+          MERGE_WARDEN_WEBHOOK_SECRET: ${{ secrets.MERGE_WARDEN_WEBHOOK_SECRET }}
+          TEST_ORGANIZATION: ${{ secrets.TEST_ORGANIZATION }}
+          TEST_TIMEOUT_SECONDS: "30"
+          TEST_CLEANUP_ENABLED: "true"
+          USE_MOCK_SERVICES: "false"
+        run: |
+          failed=0
+          cargo test --package merge-warden-integration-tests --test error_handling_and_recovery -- --ignored --nocapture || failed=1
+          cargo test --package merge-warden-integration-tests --test pull_request_validation_workflow -- --ignored --nocapture || failed=1
+          cargo test --package merge-warden-integration-tests --test concurrent_processing -- --nocapture || failed=1
+          exit $failed

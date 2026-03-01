@@ -35,8 +35,8 @@
 //! The following environment variables must be configured for integration tests:
 //!
 //! - `GITHUB_TEST_TOKEN`: GitHub personal access token with repo permissions in `glitchgrove` org
-//! - `GITHUB_TEST_APP_ID`: Test GitHub App ID for webhook testing
-//! - `GITHUB_TEST_PRIVATE_KEY`: Test GitHub App private key content
+//! - `REPO_CREATION_APP_ID`: Test GitHub App ID for webhook testing
+//! - `REPO_CREATION_APP_PRIVATE_KEY`: Test GitHub App private key content
 //! - `GITHUB_TEST_WEBHOOK_SECRET`: Webhook secret for signature validation
 //! - `GITHUB_TEST_ORGANIZATION`: Target organization for test repositories (default: "glitchgrove")
 

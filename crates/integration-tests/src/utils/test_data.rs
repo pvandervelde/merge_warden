@@ -4,8 +4,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::environment::TestRepository;
-use crate::errors::{TestError, TestResult};
+use crate::errors::TestResult;
 
 /// Manager for test data templates and generation.
 ///
@@ -21,6 +20,7 @@ use crate::errors::{TestError, TestResult};
 /// let pr_spec = manager.create_pull_request_spec("feature/test-branch");
 /// assert!(!pr_spec.title.is_empty());
 /// ```
+#[allow(dead_code)]
 pub struct TestDataManager {
     /// Template configurations
     templates: HashMap<String, String>,
@@ -278,6 +278,18 @@ pub enum FileAction {
     Rename { from: String },
 }
 
+impl FileAction {
+    /// Returns a commit message prefix for this file action.
+    pub fn as_commit_message(&self) -> &str {
+        match self {
+            FileAction::Add => "Add",
+            FileAction::Modify => "Update",
+            FileAction::Delete => "Delete",
+            FileAction::Rename { .. } => "Rename",
+        }
+    }
+}
+
 /// Specification for creating test reviews.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ReviewSpec {
@@ -339,8 +351,28 @@ impl Default for CommentSpec {
     }
 }
 
+/// Handle to a created pull request for testing.
+#[derive(Debug, Clone)]
+pub struct TestPullRequest {
+    /// Pull request number
+    pub number: u64,
+    /// Pull request ID
+    pub id: u64,
+    /// Pull request title
+    pub title: String,
+    /// Pull request body
+    pub body: String,
+    /// Source branch name
+    pub head: String,
+    /// Target branch name
+    pub base: String,
+    /// Repository full name (owner/repo)
+    pub repo_full_name: String,
+}
+
 /// Default values for test data generation.
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct TestDataDefaults {
     /// Default organization name
     pub organization: String,

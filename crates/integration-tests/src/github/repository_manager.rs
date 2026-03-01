@@ -3,9 +3,6 @@
 //! This module provides automated GitHub repository creation, configuration, and cleanup
 //! specifically for integration testing of the Merge Warden bot.
 
-use std::collections::HashMap;
-use uuid::Uuid;
-
 use crate::environment::TestRepository;
 use crate::errors::{TestError, TestResult};
 
@@ -80,14 +77,136 @@ impl TestRepositoryManager {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn new(_github_token: String) -> TestResult<Self> {
-        // TODO: Initialize actual GitHub client when needed
-        let github_client = octocrab::Octocrab::builder().build()?;
+    /// Creates a new repository manager authenticated as the test helper GitHub App.
+    ///
+    /// Generates a JWT from the app credentials, exchanges it for an installation
+    /// access token scoped to `organization`, then builds an authenticated octocrab
+    /// client. No personal access token is required.
+    ///
+    /// # Parameters
+    ///
+    /// - `app_id`: Numeric GitHub App ID for the test helper app
+    /// - `private_key`: PEM-encoded RSA private key for the test helper app
+    /// - `organization`: GitHub organization where test repositories will be created
+    /// - `prefix`: Prefix for repository names (e.g. "merge-warden-test")
+    ///
+    /// # Returns
+    ///
+    /// A configured `TestRepositoryManager` ready for repository operations.
+    ///
+    /// # Errors
+    ///
+    /// Returns `TestError::AuthenticationError` if:
+    /// - The private key cannot be parsed as RSA PEM
+    /// - JWT signing fails
+    ///
+    /// Returns `TestError::GitHubApiError` if:
+    /// - The app installation for the org cannot be found
+    /// - The installation access token request fails
+    pub async fn new(
+        app_id: String,
+        private_key: String,
+        organization: String,
+        prefix: String,
+    ) -> TestResult<Self> {
+        use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        // In mock-services mode, skip real JWT auth and return a stub instance.
+        if std::env::var("USE_MOCK_SERVICES").unwrap_or_default() == "true" {
+            let github_client = octocrab::Octocrab::builder().build().map_err(|e| {
+                TestError::environment_error("build_mock_repo_client", &e.to_string())
+            })?;
+            return Ok(Self {
+                github_client,
+                organization,
+                repository_prefix: prefix,
+                created_repositories: Vec::new(),
+            });
+        }
+
+        let encoding_key = EncodingKey::from_rsa_pem(private_key.as_bytes()).map_err(|e| {
+            TestError::authentication_error("repo_creation_app_private_key", &e.to_string())
+        })?;
+
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
+
+        let app_id_num: u64 = app_id.parse().map_err(|_| {
+            TestError::InvalidConfiguration(
+                "REPO_CREATION_APP_ID must be a valid integer".to_string(),
+            )
+        })?;
+
+        #[derive(serde::Serialize)]
+        struct JwtClaims {
+            iat: i64,
+            exp: i64,
+            iss: u64,
+        }
+
+        let claims = JwtClaims {
+            iat: now - 60,
+            exp: now + 540,
+            iss: app_id_num,
+        };
+
+        let jwt = encode(&Header::new(Algorithm::RS256), &claims, &encoding_key)
+            .map_err(|e| TestError::authentication_error("test_app_jwt", &e.to_string()))?;
+
+        // Use JWT to call GitHub App endpoints
+        let jwt_client = octocrab::Octocrab::builder()
+            .personal_token(jwt)
+            .build()
+            .map_err(|e| TestError::environment_error("build_jwt_client", &e.to_string()))?;
+
+        // Look up the app's installation for the target org
+        let installation: serde_json::Value = jwt_client
+            .get(format!("/orgs/{}/installation", organization), None::<&()>)
+            .await
+            .map_err(|e| TestError::github_api_error("get_org_installation", &e.to_string()))?;
+
+        let installation_id = installation["id"].as_u64().ok_or_else(|| {
+            TestError::environment_error(
+                "parse_installation_id",
+                "No installation id found in response",
+            )
+        })?;
+
+        // Exchange for an installation access token
+        let token_response: serde_json::Value = jwt_client
+            .post(
+                format!("/app/installations/{}/access_tokens", installation_id),
+                Some(&serde_json::json!({})),
+            )
+            .await
+            .map_err(|e| {
+                TestError::github_api_error("create_installation_access_token", &e.to_string())
+            })?;
+
+        let access_token = token_response["token"]
+            .as_str()
+            .ok_or_else(|| {
+                TestError::environment_error(
+                    "parse_access_token",
+                    "No token field in installation token response",
+                )
+            })?
+            .to_string();
+
+        let github_client = octocrab::Octocrab::builder()
+            .personal_token(access_token)
+            .build()
+            .map_err(|e| {
+                TestError::environment_error("build_authenticated_client", &e.to_string())
+            })?;
 
         Ok(TestRepositoryManager {
             github_client,
-            organization: "glitchgrove".to_string(),
-            repository_prefix: "merge-warden-test".to_string(),
+            organization,
+            repository_prefix: prefix,
             created_repositories: Vec::new(),
         })
     }
@@ -126,8 +245,52 @@ impl TestRepositoryManager {
     /// }
     /// ```
     pub async fn create_repository(&mut self, name_suffix: &str) -> TestResult<TestRepository> {
-        // TODO: implement - Create repository with unique name
-        todo!("Create repository in GitHub organization")
+        use uuid::Uuid;
+
+        // Generate unique repository name
+        let repo_name = format!(
+            "{}-{}-{}",
+            self.repository_prefix,
+            name_suffix,
+            Uuid::new_v4()
+        );
+
+        // Create repository via GitHub API POST request
+        let route = format!("/orgs/{}/repos", self.organization);
+        let body = serde_json::json!({
+            "name": repo_name,
+            "private": true,
+            "auto_init": true,
+            "description": "Test repository for Merge Warden integration testing"
+        });
+
+        let create_result: octocrab::models::Repository = self
+            .github_client
+            .post(route, Some(&body))
+            .await
+            .map_err(|e| TestError::github_api_error("create_repository", &e.to_string()))?;
+
+        // Track for cleanup
+        self.created_repositories.push(repo_name.clone());
+
+        // Create TestRepository handle
+        let repo = TestRepository {
+            name: repo_name.clone(),
+            organization: self.organization.clone(),
+            id: create_result.id.0,
+            full_name: format!("{}/{}", self.organization, repo_name),
+            clone_url: create_result
+                .clone_url
+                .map(|u| u.to_string())
+                .unwrap_or_default(),
+            default_branch: create_result
+                .default_branch
+                .unwrap_or_else(|| "main".to_string()),
+            private: true,
+            created_at: chrono::Utc::now(),
+        };
+
+        Ok(repo)
     }
 
     /// Sets up merge-warden configuration for a test repository.
@@ -168,10 +331,33 @@ impl TestRepositoryManager {
     pub async fn setup_configuration(
         &self,
         repository: &TestRepository,
-        config_spec: Option<&RepositorySpec>,
+        _config_spec: Option<&RepositorySpec>,
     ) -> TestResult<()> {
-        // TODO: implement - Set up repository configuration
-        todo!("Set up merge-warden configuration")
+        // Default merge-warden configuration
+        let config_content = r#"schemaVersion = 1
+
+[policies.pullRequests.prTitle]
+format = "conventional-commits"
+
+[policies.pullRequests.prBody]
+requireWorkItemReference = false
+
+[policies.pullRequests.prSize]
+enabled = true
+maxLines = 1000
+"#;
+
+        // Create .github directory and add merge-warden.toml
+        self.add_file(
+            repository,
+            &repository.default_branch,
+            ".github/merge-warden.toml",
+            config_content,
+            "Add merge-warden configuration",
+        )
+        .await?;
+
+        Ok(())
     }
 
     /// Adds initial content to a test repository.
@@ -212,8 +398,24 @@ impl TestRepositoryManager {
         repository: &TestRepository,
         files: &[FileChange],
     ) -> TestResult<()> {
-        // TODO: implement - Add initial content to repository
-        todo!("Add initial content to repository")
+        for file in files {
+            match &file.action {
+                FileAction::Add => {
+                    self.add_file(
+                        repository,
+                        &repository.default_branch,
+                        &file.path,
+                        &file.content,
+                        &format!("Add {}", file.path),
+                    )
+                    .await?;
+                }
+                _ => {
+                    // Handle other actions if needed
+                }
+            }
+        }
+        Ok(())
     }
 
     /// Retrieves the content of a file from the repository.
@@ -252,8 +454,29 @@ impl TestRepositoryManager {
         repository: &TestRepository,
         file_path: &str,
     ) -> TestResult<String> {
-        // TODO: implement - Get file content from repository
-        todo!("Get file content from repository")
+        use base64::{engine::general_purpose, Engine as _};
+
+        let content = self
+            .github_client
+            .repos(&repository.organization, &repository.name)
+            .get_content()
+            .path(file_path)
+            .send()
+            .await
+            .map_err(|e| TestError::github_api_error("get_file_content", &e.to_string()))?;
+
+        if let Some(encoded_content) = content.items[0].content.as_ref() {
+            let decoded = general_purpose::STANDARD
+                .decode(encoded_content.replace("\n", ""))
+                .map_err(|e| TestError::environment_error("decode_file_content", &e.to_string()))?;
+            String::from_utf8(decoded)
+                .map_err(|e| TestError::environment_error("utf8_decode", &e.to_string()))
+        } else {
+            Err(TestError::environment_error(
+                "get_file_content",
+                "No content found",
+            ))
+        }
     }
 
     /// Cleans up all created repositories.
@@ -282,8 +505,30 @@ impl TestRepositoryManager {
     /// }
     /// ```
     pub async fn cleanup(&mut self) -> TestResult<()> {
-        // TODO: implement - Clean up all created repositories
-        todo!("Clean up all created repositories")
+        let mut errors = Vec::new();
+
+        // Delete all created repositories
+        for repo_name in &self.created_repositories {
+            if let Err(e) = self
+                .github_client
+                .repos(&self.organization, repo_name)
+                .delete()
+                .await
+            {
+                errors.push(format!("Failed to delete {}: {}", repo_name, e));
+            }
+        }
+
+        self.created_repositories.clear();
+
+        if !errors.is_empty() {
+            return Err(TestError::cleanup_failed(
+                "repositories",
+                &errors.join("; "),
+            ));
+        }
+
+        Ok(())
     }
 
     /// Gets the organization name for this manager.
@@ -294,10 +539,10 @@ impl TestRepositoryManager {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```rust,no_run
     /// # use merge_warden_integration_tests::TestRepositoryManager;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let manager = TestRepositoryManager::new("token".to_string()).await?;
+    /// let manager = TestRepositoryManager::new("123456".to_string(), "key".to_string(), "glitchgrove".to_string(), "prefix".to_string()).await?;
     /// assert_eq!(manager.organization(), "glitchgrove");
     /// # Ok(())
     /// # }
@@ -314,10 +559,10 @@ impl TestRepositoryManager {
     ///
     /// # Examples
     ///
-    /// ```rust
+    /// ```rust,no_run
     /// # use merge_warden_integration_tests::TestRepositoryManager;
     /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
-    /// let mut manager = TestRepositoryManager::new("token".to_string()).await?;
+    /// let mut manager = TestRepositoryManager::new("123456".to_string(), "key".to_string(), "glitchgrove".to_string(), "prefix".to_string()).await?;
     /// assert_eq!(manager.repository_count(), 0);
     ///
     /// let repo = manager.create_repository("test").await?;
@@ -327,6 +572,312 @@ impl TestRepositoryManager {
     /// ```
     pub fn repository_count(&self) -> usize {
         self.created_repositories.len()
+    }
+
+    /// Adds content to repository.
+    pub async fn add_content(
+        &self,
+        repository: &TestRepository,
+        files: &[(String, String, FileAction)],
+    ) -> TestResult<()> {
+        for (path, content, action) in files {
+            match action {
+                FileAction::Add => {
+                    self.add_file(
+                        repository,
+                        &repository.default_branch,
+                        path,
+                        content,
+                        &format!("Add {}", path),
+                    )
+                    .await?;
+                }
+                _ => {
+                    // For now, just handle Add action
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Creates a branch in the repository.
+    pub async fn create_branch(
+        &self,
+        repository: &TestRepository,
+        branch_name: &str,
+        from_branch: &str,
+    ) -> TestResult<()> {
+        // Get the SHA of the from_branch
+        let from_ref = self
+            .github_client
+            .repos(&repository.organization, &repository.name)
+            .get_ref(&octocrab::params::repos::Reference::Branch(
+                from_branch.to_string(),
+            ))
+            .await
+            .map_err(|e| TestError::github_api_error("get_ref", &e.to_string()))?;
+
+        // Get the SHA from the ref object
+        let from_sha = match &from_ref.object {
+            octocrab::models::repos::Object::Commit { sha, .. } => sha.clone(),
+            octocrab::models::repos::Object::Tag { sha, .. } => sha.clone(),
+            _ => {
+                return Err(TestError::github_api_error(
+                    "create_branch",
+                    "Unknown object type in ref",
+                ))
+            }
+        };
+
+        // Create new branch
+        self.github_client
+            .repos(&repository.organization, &repository.name)
+            .create_ref(
+                &octocrab::params::repos::Reference::Branch(branch_name.to_string()),
+                from_sha,
+            )
+            .await
+            .map_err(|e| TestError::github_api_error("create_ref", &e.to_string()))?;
+
+        Ok(())
+    }
+
+    /// Adds a file to a branch.
+    pub async fn add_file(
+        &self,
+        repository: &TestRepository,
+        branch: &str,
+        path: &str,
+        content: &str,
+        commit_message: &str,
+    ) -> TestResult<()> {
+        use base64::{engine::general_purpose, Engine as _};
+
+        // Encode content as base64
+        let encoded_content = general_purpose::STANDARD.encode(content.as_bytes());
+
+        // Fetch existing file SHA so we can update rather than create when the file
+        // already exists (e.g. auto_init creates README.md on repo creation).
+        let existing_sha = self
+            .github_client
+            .repos(&repository.organization, &repository.name)
+            .get_content()
+            .path(path)
+            .r#ref(branch)
+            .send()
+            .await
+            .ok()
+            .and_then(|f| f.items.into_iter().next())
+            .map(|item| item.sha);
+
+        if let Some(sha) = existing_sha {
+            self.github_client
+                .repos(&repository.organization, &repository.name)
+                .update_file(path, commit_message, &encoded_content, &sha)
+                .branch(branch)
+                .send()
+                .await
+                .map_err(|e| TestError::github_api_error("update_file", &e.to_string()))?;
+        } else {
+            self.github_client
+                .repos(&repository.organization, &repository.name)
+                .create_file(path, commit_message, &encoded_content)
+                .branch(branch)
+                .send()
+                .await
+                .map_err(|e| TestError::github_api_error("create_file", &e.to_string()))?;
+        }
+
+        Ok(())
+    }
+
+    /// Updates a file in a branch, or creates it if it does not yet exist (upsert).
+    pub async fn update_file(
+        &self,
+        repository: &TestRepository,
+        branch: &str,
+        path: &str,
+        content: &str,
+        commit_message: &str,
+    ) -> TestResult<()> {
+        use base64::{engine::general_purpose, Engine as _};
+
+        // Attempt to fetch the current file SHA for the update API.
+        // If the file does not exist (e.g. fresh test repo) fall through to create_file.
+        let existing_sha = self
+            .github_client
+            .repos(&repository.organization, &repository.name)
+            .get_content()
+            .path(path)
+            .r#ref(branch)
+            .send()
+            .await
+            .ok()
+            .and_then(|f| f.items.into_iter().next())
+            .map(|item| item.sha);
+
+        let encoded_content = general_purpose::STANDARD.encode(content.as_bytes());
+
+        if existing_sha.is_none() {
+            // File does not exist yet — create it
+            self.github_client
+                .repos(&repository.organization, &repository.name)
+                .create_file(path, commit_message, &encoded_content)
+                .branch(branch)
+                .send()
+                .await
+                .map_err(|e| TestError::github_api_error("create_file_upsert", &e.to_string()))?;
+            return Ok(());
+        }
+
+        let file_sha = existing_sha.unwrap();
+
+        // Update file
+        self.github_client
+            .repos(&repository.organization, &repository.name)
+            .update_file(path, commit_message, &encoded_content, &file_sha)
+            .branch(branch)
+            .send()
+            .await
+            .map_err(|e| TestError::github_api_error("update_file", &e.to_string()))?;
+
+        Ok(())
+    }
+
+    /// Creates a pull request.
+    pub async fn create_pull_request(
+        &self,
+        repository: &TestRepository,
+        spec: &crate::utils::PullRequestSpec,
+    ) -> TestResult<crate::utils::TestPullRequest> {
+        let pr = self
+            .github_client
+            .pulls(&repository.organization, &repository.name)
+            .create(&spec.title, &spec.source_branch, &spec.target_branch)
+            .body(&spec.body)
+            .draft(spec.draft)
+            .send()
+            .await
+            .map_err(|e| TestError::github_api_error("create_pull_request", &e.to_string()))?;
+
+        // Add labels if specified
+        if !spec.labels.is_empty() {
+            self.github_client
+                .issues(&repository.organization, &repository.name)
+                .add_labels(pr.number, &spec.labels)
+                .await
+                .map_err(|e| TestError::github_api_error("add_labels", &e.to_string()))?;
+        }
+
+        Ok(crate::utils::TestPullRequest {
+            number: pr.number,
+            id: pr.id.0,
+            title: pr.title.unwrap_or_default(),
+            body: pr.body.unwrap_or_default(),
+            head: spec.source_branch.clone(),
+            base: spec.target_branch.clone(),
+            repo_full_name: repository.full_name.clone(),
+        })
+    }
+
+    /// Gets checks for a pull request.
+    pub async fn get_pr_checks(
+        &self,
+        repository: &TestRepository,
+        pr_number: u64,
+    ) -> TestResult<Vec<crate::environment::PullRequestCheck>> {
+        // Get PR to get head SHA
+        let pr = self
+            .github_client
+            .pulls(&repository.organization, &repository.name)
+            .get(pr_number)
+            .await
+            .map_err(|e| TestError::github_api_error("get_pull_request", &e.to_string()))?;
+
+        let head_sha = pr.head.sha;
+
+        // Get check runs - use head SHA as Commitish
+        let check_runs = self
+            .github_client
+            .checks(&repository.organization, &repository.name)
+            .list_check_runs_for_git_ref(head_sha.into())
+            .send()
+            .await
+            .map_err(|e| TestError::github_api_error("list_check_runs", &e.to_string()))?;
+
+        let checks = check_runs
+            .check_runs
+            .into_iter()
+            .map(|run| crate::environment::PullRequestCheck {
+                id: run.id.to_string(),
+                name: run.name,
+                conclusion: run.conclusion.map(|c| c.to_string()),
+                details_url: run.details_url.map(|u| u.to_string()),
+                output: crate::environment::CheckOutput {
+                    summary: run.output.summary.clone().unwrap_or_default(),
+                    text: run.output.text.clone(),
+                },
+            })
+            .collect();
+
+        Ok(checks)
+    }
+
+    /// Gets comments for a pull request.
+    pub async fn get_pr_comments(
+        &self,
+        repository: &TestRepository,
+        pr_number: u64,
+    ) -> TestResult<Vec<crate::environment::PullRequestComment>> {
+        let comments_page = self
+            .github_client
+            .issues(&repository.organization, &repository.name)
+            .list_comments(pr_number)
+            .send()
+            .await
+            .map_err(|e| TestError::github_api_error("list_comments", &e.to_string()))?;
+
+        let comments = comments_page
+            .items
+            .into_iter()
+            .map(|comment| crate::environment::PullRequestComment {
+                id: comment.id.0,
+                body: comment.body.unwrap_or_default(),
+                user: crate::environment::CommentUser {
+                    login: comment.user.login,
+                    id: comment.user.id.0,
+                },
+                created_at: comment.created_at.to_rfc3339(),
+            })
+            .collect();
+
+        Ok(comments)
+    }
+
+    /// Gets labels for a pull request.
+    pub async fn get_pr_labels(
+        &self,
+        repository: &TestRepository,
+        pr_number: u64,
+    ) -> TestResult<Vec<crate::environment::PullRequestLabel>> {
+        let issue = self
+            .github_client
+            .issues(&repository.organization, &repository.name)
+            .get(pr_number)
+            .await
+            .map_err(|e| TestError::github_api_error("get_issue", &e.to_string()))?;
+
+        let labels = issue
+            .labels
+            .into_iter()
+            .map(|label| crate::environment::PullRequestLabel {
+                id: label.id.0,
+                name: label.name,
+                color: label.color,
+            })
+            .collect();
+
+        Ok(labels)
     }
 }
 

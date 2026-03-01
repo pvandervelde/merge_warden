@@ -288,13 +288,14 @@ impl CiTestConfig {
         // Check required environment variables for GitHub testing
         use std::env;
 
-        // Validation passes if we have token OR mock services are enabled
-        let has_token = env::var("GITHUB_TEST_TOKEN").is_ok();
+        // Validation passes if we have app credentials OR mock services are enabled
+        let has_app_credentials = env::var("REPO_CREATION_APP_ID").is_ok()
+            && env::var("REPO_CREATION_APP_PRIVATE_KEY").is_ok();
         let has_mock_services = env::var("USE_MOCK_SERVICES").unwrap_or_default() == "true";
 
-        if !has_token && !has_mock_services {
+        if !has_app_credentials && !has_mock_services {
             return Err(TestError::CiConfigurationError(
-                "GITHUB_TEST_TOKEN environment variable is required for integration tests"
+                "REPO_CREATION_APP_ID and REPO_CREATION_APP_PRIVATE_KEY environment variables are required for integration tests"
                     .to_string(),
             ));
         }
@@ -535,10 +536,11 @@ impl Default for EnvironmentIsolation {
                 "CI".to_string(),
             ],
             clear_variables: vec![
-                "GITHUB_TEST_TOKEN".to_string(),
-                "GITHUB_TEST_APP_ID".to_string(),
-                "GITHUB_TEST_PRIVATE_KEY".to_string(),
-                "GITHUB_TEST_WEBHOOK_SECRET".to_string(),
+                "REPO_CREATION_APP_ID".to_string(),
+                "REPO_CREATION_APP_PRIVATE_KEY".to_string(),
+                "MERGE_WARDEN_APP_ID".to_string(),
+                "MERGE_WARDEN_APP_PRIVATE_KEY".to_string(),
+                "MERGE_WARDEN_WEBHOOK_SECRET".to_string(),
                 "USE_MOCK_SERVICES".to_string(),
             ],
             test_variable_prefix: "TEST_".to_string(),
@@ -635,6 +637,7 @@ pub struct CiTestExecutor {
     /// Test execution state
     execution_state: TestExecutionState,
     /// Resource usage tracking
+    #[allow(dead_code)]
     resource_usage: ResourceUsageTracker,
 }
 
@@ -781,7 +784,7 @@ impl CiTestExecutor {
     ) -> TestResult<TestExecutionResults> {
         use std::time::Instant;
 
-        let start_time = Instant::now();
+        let _start_time = Instant::now();
         let mut results = TestExecutionResults::with_config(self.config.clone());
 
         // Simulate filtering and running tests based on the filter

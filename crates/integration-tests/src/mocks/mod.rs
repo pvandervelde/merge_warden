@@ -15,7 +15,7 @@ pub use azure::{MockAppConfigService, MockKeyVaultService};
 // Future: GCP services will be added here
 // pub mod gcp;
 
-use crate::errors::{TestError, TestResult};
+use crate::errors::TestResult;
 
 /// Provider for all mock Azure services used in integration testing.
 ///
@@ -275,6 +275,30 @@ impl MockServiceProvider {
     pub async fn reset(&mut self) -> TestResult<()> {
         self.app_config.reset();
         self.key_vault.reset();
+        self.is_healthy = true;
+        Ok(())
+    }
+
+    /// Simulates App Config service failure.
+    pub async fn simulate_app_config_failure(&mut self) -> TestResult<()> {
+        self.simulate_outages(1.0, 0.0).await
+    }
+
+    /// Restores App Config service to healthy state.
+    pub async fn restore_app_config(&mut self) -> TestResult<()> {
+        self.app_config.restore_service();
+        self.is_healthy = true;
+        Ok(())
+    }
+
+    /// Simulates Key Vault service failure.
+    pub async fn simulate_key_vault_failure(&mut self) -> TestResult<()> {
+        self.simulate_outages(0.0, 1.0).await
+    }
+
+    /// Restores Key Vault service to healthy state.
+    pub async fn restore_key_vault(&mut self) -> TestResult<()> {
+        self.key_vault.restore_service();
         self.is_healthy = true;
         Ok(())
     }
