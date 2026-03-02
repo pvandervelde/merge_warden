@@ -137,4 +137,14 @@ pub enum Error {
     /// The string parameter contains specific details about the conflict.
     #[error("Review operation conflict: {0}")]
     ReviewConflict(String),
+
+    /// Installation access token could not be refreshed before expiry.
+    ///
+    /// This error is raised by the `github-bot-sdk` integration (task 1.0) when
+    /// a background token refresh for a GitHub App installation fails. The application
+    /// should re-authenticate from scratch on the next request.
+    ///
+    /// Parameters: installation ID, error message from the SDK.
+    #[error("Failed to refresh installation token for installation {0}: {1}")]
+    TokenRefreshFailed(u64, String),
 }

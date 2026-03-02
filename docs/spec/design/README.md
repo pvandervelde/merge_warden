@@ -42,6 +42,24 @@ Automatic labeling and categorization system design. Covers size-based labeling,
 
 Design of bypass logging, audit trails, and governance features. Details the bypass system architecture, permission models, and compliance tracking.
 
+### [github-bot-sdk Migration](./github-bot-sdk-migration.md)
+
+Migration boundary and strategy for replacing the `octocrab` + manual JWT/HMAC layer in
+`developer_platforms` with the `github-bot-sdk` crate. Defines what changes, what stays, and
+the `EventEnvelope` type that downstream features rely on.
+
+### [Containerisation](./containerisation.md)
+
+Design for converting the `azure-functions` binary into a portable container (`server` crate).
+Covers secret and configuration injection via environment variables, optional OTLP telemetry,
+Dockerfile strategy, and GitHub Container Registry publishing.
+
+### [Queue Architecture](./queue-architecture.md)
+
+Design for the `EventIngress` abstraction and queue-based webhook decoupling. Defines
+`ProcessableEvent`, `WebhookIngress`, `QueueIngress`, the `WebhookQueueMessage` schema,
+session ID convention, and the phased migration strategy.
+
 ## Key Design Patterns
 
 ### Event-Driven Architecture
