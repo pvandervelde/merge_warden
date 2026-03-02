@@ -4,7 +4,13 @@
 
 use std::sync::Arc;
 
-use axum::{extract::State, http::StatusCode, response::IntoResponse, routing::{get, post}, Router};
+use axum::{
+    extract::State,
+    http::StatusCode,
+    response::IntoResponse,
+    routing::{get, post},
+    Router,
+};
 use merge_warden_core::config::ApplicationDefaults;
 
 /// Shared state threaded through the Axum router and the event-processor task.
