@@ -1,0 +1,200 @@
+name: Cleanup Test Repositories
+
+# Deletes stale test repositories created by integration and e2e test runs in the
+# configured GitHub organisation. Repositories matching the test prefix that are
+# older than the configured age threshold are deleted using the same GitHub App
+# (REPO_CREATION_APP_ID / REPO_CREATION_APP_PRIVATE_KEY) that creates them.
+#
+# The workflow runs automatically every day and can also be triggered manually
+# with optional overrides for the age threshold and a dry-run flag.
+
+on:
+    schedule:
+        # Run daily at 03:00 UTC, well outside normal CI/CD windows
+        - cron: "0 3 * * *"
+    push:
+        paths:
+            - ".github/workflows/cleanup-test-repositories.yml"
+    workflow_dispatch:
+        inputs:
+            max_age_hours:
+                description: "Maximum age (hours) before a test repository is deleted"
+                required: false
+                default: "2"
+                type: string
+            dry_run:
+                description: "Dry run – list matching repos without deleting them"
+                required: false
+                default: "false"
+                type: boolean
+
+permissions:
+    contents: read
+
+jobs:
+    cleanup-test-repos:
+        name: cleanup-test-repositories
+        runs-on: ubuntu-latest
+        if: github.repository == 'pvandervelde/merge_warden'
+        steps:
+            - name: Verify cleanup credentials
+              shell: bash
+              run: |
+                  missing=0
+                  for var in REPO_CREATION_APP_ID REPO_CREATION_APP_PRIVATE_KEY TEST_ORGANIZATION; do
+                    if [ -z "${!var}" ]; then
+                      echo "Missing required secret: ${var}"
+                      missing=1
+                    fi
+                  done
+                  if [ "$missing" -eq 1 ]; then
+                    echo "Required secrets for repository cleanup are missing"
+                    exit 1
+                  fi
+              env:
+                  REPO_CREATION_APP_ID: ${{ secrets.REPO_CREATION_APP_ID }}
+                  REPO_CREATION_APP_PRIVATE_KEY: ${{ secrets.REPO_CREATION_APP_PRIVATE_KEY }}
+                  TEST_ORGANIZATION: ${{ secrets.TEST_ORGANIZATION }}
+
+            # Generate a short-lived GitHub App installation access token so that
+            # the gh CLI can authenticate against the test organisation.  The same
+            # App (REPO_CREATION_APP_ID) that is used to *create* test repositories
+            # is used here to *delete* them, so no extra permissions are required.
+            - name: Generate GitHub App installation token
+              id: app-token
+              shell: bash
+              env:
+                  REPO_CREATION_APP_ID: ${{ secrets.REPO_CREATION_APP_ID }}
+                  REPO_CREATION_APP_PRIVATE_KEY: ${{ secrets.REPO_CREATION_APP_PRIVATE_KEY }}
+                  TEST_ORGANIZATION: ${{ secrets.TEST_ORGANIZATION }}
+              run: |
+                  APP_ID="${REPO_CREATION_APP_ID}"
+                  PRIVATE_KEY="${REPO_CREATION_APP_PRIVATE_KEY}"
+
+                  # Build a signed JWT valid for up to 10 minutes.
+                  # iat is backdated by 60 seconds to allow for clock skew.
+                  NOW=$(date +%s)
+                  IAT=$((NOW - 60))
+                  EXP=$((NOW + 600))
+
+                  HEADER=$(printf '{"alg":"RS256","typ":"JWT"}' \
+                    | base64 | tr -d '=' | tr '+/' '-_' | tr -d '\n')
+                  PAYLOAD=$(printf '{"iat":%d,"exp":%d,"iss":"%s"}' \
+                    "${IAT}" "${EXP}" "${APP_ID}" \
+                    | base64 | tr -d '=' | tr '+/' '-_' | tr -d '\n')
+
+                  SIGNING_INPUT="${HEADER}.${PAYLOAD}"
+                  SIGNATURE=$(printf '%s' "${SIGNING_INPUT}" \
+                    | openssl dgst -sha256 -sign <(printf '%s' "${PRIVATE_KEY}") \
+                    | base64 | tr -d '=' | tr '+/' '-_' | tr -d '\n')
+
+                  JWT="${SIGNING_INPUT}.${SIGNATURE}"
+
+                  # Resolve the installation ID for the target organisation.
+                  INSTALLATION_ID=$(curl --silent \
+                    --header "Authorization: Bearer ${JWT}" \
+                    --header "Accept: application/vnd.github.v3+json" \
+                    "https://api.github.com/app/installations" \
+                    | jq -r --arg org "${TEST_ORGANIZATION}" \
+                      '.[] | select(.account.login == $org) | .id')
+
+                  if [ -z "${INSTALLATION_ID}" ]; then
+                    echo "Error: no GitHub App installation found for organisation '${TEST_ORGANIZATION}'"
+                    exit 1
+                  fi
+
+                  # Exchange the JWT for a scoped installation access token.
+                  ACCESS_TOKEN=$(curl --silent \
+                    --request POST \
+                    --header "Authorization: Bearer ${JWT}" \
+                    --header "Accept: application/vnd.github.v3+json" \
+                    "https://api.github.com/app/installations/${INSTALLATION_ID}/access_tokens" \
+                    | jq -r '.token')
+
+                  if [ -z "${ACCESS_TOKEN}" ] || [ "${ACCESS_TOKEN}" = "null" ]; then
+                    echo "Error: failed to obtain installation access token"
+                    exit 1
+                  fi
+
+                  # Mask the token so it never appears in plain text in the log.
+                  echo "::add-mask::${ACCESS_TOKEN}"
+                  echo "access_token=${ACCESS_TOKEN}" >> "${GITHUB_OUTPUT}"
+
+            - name: Delete stale test repositories
+              shell: bash
+              env:
+                  GH_TOKEN: ${{ steps.app-token.outputs.access_token }}
+                  TEST_ORGANIZATION: ${{ secrets.TEST_ORGANIZATION }}
+                  # Age threshold: repos older than this many hours are candidates
+                  # for deletion.  Defaults to 2 hours to catch repositories left
+                  # behind by crashed or cancelled test runs while leaving repos
+                  # from in-progress runs alone.
+                  MAX_AGE_HOURS: ${{ inputs.max_age_hours || '2' }}
+                  DRY_RUN: ${{ inputs.dry_run || 'false' }}
+                  # Must match the TEST_REPOSITORY_PREFIX default used by the
+                  # integration-test environment (see environment.rs).
+                  REPO_PREFIX: "merge-warden-test"
+              run: |
+                  echo "Organisation  : ${TEST_ORGANIZATION}"
+                  echo "Prefix filter : ${REPO_PREFIX}"
+                  echo "Max age       : ${MAX_AGE_HOURS} hours"
+                  echo "Dry run       : ${DRY_RUN}"
+                  echo ""
+
+                  # Everything older than this Unix timestamp is a deletion candidate.
+                  CUTOFF_TS=$(date -d "${MAX_AGE_HOURS} hours ago" +%s)
+                  echo "Cutoff (UTC)  : $(date -d "@${CUTOFF_TS}" --utc '+%Y-%m-%dT%H:%M:%SZ')"
+                  echo ""
+
+                  deleted_count=0
+                  skipped_count=0
+                  error_count=0
+
+                  # Stream name<TAB>created_at pairs for all repos whose name
+                  # starts with the expected prefix.  --paginate follows Link
+                  # headers so organisations with many repositories are handled
+                  # correctly.
+                  while IFS=$'\t' read -r repo_name created_at; do
+                    repo_ts=$(date -d "${created_at}" +%s 2>/dev/null || echo 0)
+
+                    if [ "${repo_ts}" -lt "${CUTOFF_TS}" ]; then
+                      if [ "${DRY_RUN}" = "true" ]; then
+                        echo "[DRY RUN] Would delete: ${TEST_ORGANIZATION}/${repo_name}  (created: ${created_at})"
+                        deleted_count=$((deleted_count + 1))
+                      else
+                        echo "Deleting: ${TEST_ORGANIZATION}/${repo_name}  (created: ${created_at})"
+                        if gh repo delete "${TEST_ORGANIZATION}/${repo_name}" --yes; then
+                          echo "  ✓ Deleted ${repo_name}"
+                          deleted_count=$((deleted_count + 1))
+                        else
+                          echo "  ✗ Failed to delete ${repo_name}" >&2
+                          error_count=$((error_count + 1))
+                        fi
+                      fi
+                    else
+                      echo "Skipping (too recent): ${TEST_ORGANIZATION}/${repo_name}  (created: ${created_at})"
+                      skipped_count=$((skipped_count + 1))
+                    fi
+                  done < <(
+                    gh api --paginate "orgs/${TEST_ORGANIZATION}/repos" \
+                      --jq ".[] | select(.name | startswith(\"${REPO_PREFIX}\")) | [.name, .created_at] | @tsv"
+                  )
+
+                  echo ""
+                  echo "=== Summary ==="
+                  if [ "${DRY_RUN}" = "true" ]; then
+                    echo "Would delete : ${deleted_count}"
+                  else
+                    echo "Deleted      : ${deleted_count}"
+                    echo "Errors       : ${error_count}"
+                  fi
+                  echo "Skipped      : ${skipped_count} (within age threshold)"
+
+                  if [ "${error_count}" -gt 0 ]; then
+                    echo ""
+                    echo "Cleanup completed with ${error_count} deletion error(s). Review the log above."
+                    exit 1
+                  fi
+
+                  echo ""
+                  echo "Cleanup completed successfully."
