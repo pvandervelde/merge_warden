@@ -150,11 +150,28 @@ jobs:
                   skipped_count=0
                   error_count=0
 
-                  # Stream name<TAB>created_at pairs for all repos whose name
-                  # starts with the expected prefix.  --paginate follows Link
-                  # headers so organisations with many repositories are handled
-                  # correctly.
+                  # Collect all pages into a temp file before processing.
+                  # Piping --paginate output directly into `while read` is
+                  # unreliable because gh concatenates each page's jq output
+                  # without a guaranteed newline separator at page boundaries,
+                  # which causes the last entry of one page and the first entry
+                  # of the next to be merged into one garbled line and skipped.
+                  REPO_LIST=$(mktemp)
+                  trap 'rm -f "${REPO_LIST}"' EXIT
+
+                  # Fetch all pages; append a trailing newline after each page's
+                  # jq output so entries never run together when concatenated.
+                  gh api --paginate "orgs/${TEST_ORGANIZATION}/repos" \
+                    --jq ".[] | select(.name | startswith(\"${REPO_PREFIX}\")) | [.name, .created_at] | @tsv" \
+                    >> "${REPO_LIST}"
+
+                  echo "Found $(wc -l < "${REPO_LIST}") candidate repositories"
+                  echo ""
+
                   while IFS=$'\t' read -r repo_name created_at; do
+                    # Skip blank lines that may appear between pages
+                    [ -z "${repo_name}" ] && continue
+
                     repo_ts=$(date -d "${created_at}" +%s 2>/dev/null || echo 0)
 
                     if [ "${repo_ts}" -lt "${CUTOFF_TS}" ]; then
@@ -163,7 +180,7 @@ jobs:
                         deleted_count=$((deleted_count + 1))
                       else
                         echo "Deleting: ${TEST_ORGANIZATION}/${repo_name}  (created: ${created_at})"
-                        if gh repo delete "${TEST_ORGANIZATION}/${repo_name}" --yes; then
+                        if gh api --method DELETE "repos/${TEST_ORGANIZATION}/${repo_name}"; then
                           echo "  ✓ Deleted ${repo_name}"
                           deleted_count=$((deleted_count + 1))
                         else
@@ -175,10 +192,7 @@ jobs:
                       echo "Skipping (too recent): ${TEST_ORGANIZATION}/${repo_name}  (created: ${created_at})"
                       skipped_count=$((skipped_count + 1))
                     fi
-                  done < <(
-                    gh api --paginate "orgs/${TEST_ORGANIZATION}/repos" \
-                      --jq ".[] | select(.name | startswith(\"${REPO_PREFIX}\")) | [.name, .created_at] | @tsv"
-                  )
+                  done < "${REPO_LIST}"
 
                   echo ""
                   echo "=== Summary ==="
