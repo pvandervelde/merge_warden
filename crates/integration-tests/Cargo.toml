@@ -10,7 +10,7 @@ edition = "2021"
 # Workspace dependencies
 merge_warden_core = { path = "../core" }
 merge_warden_developer_platforms = { path = "../developer_platforms" }
-az_handler = { path = "../azure-functions" }
+github-bot-sdk = { workspace = true }
 
 # Async runtime and testing
 async-trait = { workspace = true }
@@ -46,7 +46,6 @@ tracing-subscriber = { workspace = true }
 base64 = "0.22"
 hex = { workspace = true }
 hmac = { workspace = true }
-jsonwebtoken = { workspace = true }
 sha2 = { workspace = true }
 
 # Time and random utilities
