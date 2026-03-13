@@ -109,8 +109,8 @@ impl TestRepositoryManager {
         organization: String,
         prefix: String,
     ) -> TestResult<Self> {
-        use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
-        use std::time::{SystemTime, UNIX_EPOCH};
+        use github_bot_sdk::auth::{AuthenticationProvider, InstallationId};
+        use merge_warden_developer_platforms::app_auth::AppAuthProvider;
 
         // In mock-services mode, skip real JWT auth and return a stub instance.
         if std::env::var("USE_MOCK_SERVICES").unwrap_or_default() == "true" {
@@ -125,48 +125,38 @@ impl TestRepositoryManager {
             });
         }
 
-        let encoding_key = EncodingKey::from_rsa_pem(private_key.as_bytes()).map_err(|e| {
-            TestError::authentication_error("repo_creation_app_private_key", &e.to_string())
-        })?;
-
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
-
         let app_id_num: u64 = app_id.parse().map_err(|_| {
             TestError::InvalidConfiguration(
                 "REPO_CREATION_APP_ID must be a valid integer".to_string(),
             )
         })?;
 
-        #[derive(serde::Serialize)]
-        struct JwtClaims {
-            iat: i64,
-            exp: i64,
-            iss: u64,
-        }
+        let auth_provider =
+            AppAuthProvider::new(app_id_num, &private_key, "https://api.github.com").map_err(
+                |e| TestError::authentication_error("repo_creation_auth_provider", &e.to_string()),
+            )?;
 
-        let claims = JwtClaims {
-            iat: now - 60,
-            exp: now + 540,
-            iss: app_id_num,
-        };
-
-        let jwt = encode(&Header::new(Algorithm::RS256), &claims, &encoding_key)
+        let jwt = auth_provider
+            .app_token()
+            .await
             .map_err(|e| TestError::authentication_error("test_app_jwt", &e.to_string()))?;
 
-        // Use JWT to call GitHub App endpoints
-        let jwt_client = octocrab::Octocrab::builder()
-            .personal_token(jwt)
-            .build()
-            .map_err(|e| TestError::environment_error("build_jwt_client", &e.to_string()))?;
-
-        // Look up the app's installation for the target org
-        let installation: serde_json::Value = jwt_client
-            .get(format!("/orgs/{}/installation", organization), None::<&()>)
+        // Look up the app's installation for the target org using the JWT via reqwest
+        let http_client = reqwest::Client::new();
+        let installation: serde_json::Value = http_client
+            .get(format!(
+                "https://api.github.com/orgs/{}/installation",
+                organization
+            ))
+            .header("Authorization", format!("Bearer {}", jwt.token()))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "merge-warden-integration-tests")
+            .send()
             .await
-            .map_err(|e| TestError::github_api_error("get_org_installation", &e.to_string()))?;
+            .map_err(|e| TestError::github_api_error("get_org_installation", &e.to_string()))?
+            .json::<serde_json::Value>()
+            .await
+            .map_err(|e| TestError::github_api_error("parse_org_installation", &e.to_string()))?;
 
         let installation_id = installation["id"].as_u64().ok_or_else(|| {
             TestError::environment_error(
@@ -175,29 +165,16 @@ impl TestRepositoryManager {
             )
         })?;
 
-        // Exchange for an installation access token
-        let token_response: serde_json::Value = jwt_client
-            .post(
-                format!("/app/installations/{}/access_tokens", installation_id),
-                Some(&serde_json::json!({})),
-            )
+        // Exchange for an installation access token via AppAuthProvider
+        let token = auth_provider
+            .installation_token(InstallationId::new(installation_id))
             .await
             .map_err(|e| {
-                TestError::github_api_error("create_installation_access_token", &e.to_string())
+                TestError::authentication_error("repo_creation_installation_token", &e.to_string())
             })?;
 
-        let access_token = token_response["token"]
-            .as_str()
-            .ok_or_else(|| {
-                TestError::environment_error(
-                    "parse_access_token",
-                    "No token field in installation token response",
-                )
-            })?
-            .to_string();
-
         let github_client = octocrab::Octocrab::builder()
-            .personal_token(access_token)
+            .personal_token(token.token().to_string())
             .build()
             .map_err(|e| {
                 TestError::environment_error("build_authenticated_client", &e.to_string())
