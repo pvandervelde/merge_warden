@@ -227,10 +227,16 @@ impl AuthenticationProvider for AppAuthProvider {
     ///
     /// Returns the cached token if still valid; otherwise exchanges a fresh JWT
     /// for a new installation token and caches it.
+    ///
+    /// Uses a double-check locking pattern to avoid a thundering-herd: the common
+    /// case (valid cached token) is served under a shared read lock, while the slow
+    /// path acquires the write lock and re-checks before making the network call,
+    /// so at most one concurrent fetch occurs per installation ID.
     async fn installation_token(
         &self,
         installation_id: InstallationId,
     ) -> Result<InstallationToken, AuthError> {
+        // Fast path: serve from cache under a shared read lock.
         {
             let cache = self.token_cache.read().await;
             if let Some(token) = cache.get(&installation_id.as_u64()) {
@@ -241,13 +247,32 @@ impl AuthenticationProvider for AppAuthProvider {
                     );
                     return Ok(token.clone());
                 }
-                warn!(
-                    installation_id = installation_id.as_u64(),
-                    "Cached installation token expired — refreshing"
-                );
             }
         }
-        self.refresh_installation_token(installation_id).await
+        // Read lock is dropped here.
+
+        // Slow path: acquire exclusive write lock and re-check before fetching.
+        // This serialises concurrent callers so only one network round-trip is made
+        // per installation ID when the cached token is missing or expired.
+        let mut cache = self.token_cache.write().await;
+        if let Some(token) = cache.get(&installation_id.as_u64()) {
+            if !token.is_expired() {
+                debug!(
+                    installation_id = installation_id.as_u64(),
+                    "Using installation token refreshed by concurrent task"
+                );
+                return Ok(token.clone());
+            }
+            warn!(
+                installation_id = installation_id.as_u64(),
+                "Cached installation token expired — refreshing"
+            );
+        }
+
+        let jwt = self.generate_app_jwt().await?;
+        let token = self.fetch_installation_token(installation_id, &jwt).await?;
+        cache.insert(installation_id.as_u64(), token.clone());
+        Ok(token)
     }
 
     /// Forces a refresh of the installation token, bypassing the cache.
