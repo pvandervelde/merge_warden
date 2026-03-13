@@ -76,7 +76,7 @@ pub struct AppState {
 ///
 /// # Returns
 ///
-/// Returns a `Result` containing an `Octocrab` instance if successful, or a `CliError`
+/// Returns a `Result` containing a `GitHubClient` instance if successful, or an `AzureFunctionsError`
 /// if an error occurs during the authentication process.
 ///
 /// # Errors
@@ -584,17 +584,25 @@ fn verify_github_signature(secret: &str, headers: &HeaderMap, body: &str) -> boo
         None => return false,
     };
 
+    let hex_digest = match signature.strip_prefix("sha256=") {
+        Some(hex) => hex,
+        None => return false,
+    };
+
+    let received_bytes = match hex::decode(hex_digest) {
+        Ok(bytes) => bytes,
+        Err(_) => return false,
+    };
+
     let mut mac =
         Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
     mac.update(body.as_bytes());
-    let result = mac.finalize();
-    let computed_signature = format!("sha256={}", hex::encode(result.into_bytes()));
-    debug!(
-        github_signature = signature,
-        computed_signature, "Comparing the GitHub signature with the computed signature"
-    );
 
-    signature == computed_signature
+    // Use constant-time comparison to prevent timing-based side-channel attacks.
+    // `Mac::verify_slice` is equivalent to computing the MAC and comparing with
+    // subtle::ConstantTimeEq, so an attacker cannot determine correctness from
+    // response timing.
+    mac.verify_slice(&received_bytes).is_ok()
 }
 
 #[tokio::main]

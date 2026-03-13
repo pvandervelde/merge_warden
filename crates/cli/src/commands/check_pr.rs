@@ -77,7 +77,7 @@ pub struct ValidationResult {
 ///
 /// # Returns
 ///
-/// Returns a `Result` containing an `Octocrab` instance if successful, or a `CliError`
+/// Returns a `Result` containing a `GitHubClient` instance if successful, or a `CliError`
 /// if an error occurs during the authentication process.
 ///
 /// # Errors
