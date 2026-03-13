@@ -122,10 +122,17 @@ impl GitHubProvider {
 
         let json: serde_json::Value = response.json().await.map_err(|_| Error::InvalidResponse)?;
 
-        let branch = json["default_branch"]
-            .as_str()
-            .unwrap_or("main")
-            .to_string();
+        let branch = match json["default_branch"].as_str() {
+            Some(b) => b.to_string(),
+            None => {
+                error!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    "GitHub API response is missing 'default_branch' field"
+                );
+                return Err(Error::InvalidResponse);
+            }
+        };
 
         debug!(owner = repo_owner, repo = repo_name, branch = %branch, "Resolved default branch");
         Ok(branch)
@@ -151,9 +158,19 @@ impl GitHubProvider {
         path: &str,
         reference: &str,
     ) -> Result<Option<String>, Error> {
+        // Percent-encode path segments so that branch names or file paths
+        // containing characters such as `#`, `+`, or spaces produce a valid URL.
+        // The `path` component uses standard percent-encoding; the `ref` query
+        // parameter value uses form-encoded rules (spaces → `%20`, not `+`).
+        let encoded_path = reference
+            .split('/')
+            .map(|s| urlencoding::encode(s).into_owned())
+            .collect::<Vec<_>>()
+            .join("/");
+        let encoded_ref = urlencoding::encode(reference);
         let url_path = format!(
             "/repos/{}/{}/contents/{}?ref={}",
-            repo_owner, repo_name, path, reference
+            repo_owner, repo_name, encoded_path, encoded_ref
         );
 
         let response = match self.client.get(&url_path).await {
