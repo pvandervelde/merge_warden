@@ -14,9 +14,9 @@ axum = { workspace = true }
 axum-macros = { workspace = true }
 azure_identity = "0.23.0"
 azure_security_keyvault_secrets = "0.2.0"
+github-bot-sdk = { workspace = true }
 hex.workspace = true
 hmac.workspace = true
-octocrab = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

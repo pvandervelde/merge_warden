@@ -19,15 +19,14 @@ axum = { workspace = true }
 axum-macros = { workspace = true }
 clap = { workspace = true }
 dirs = "6.0"
+github-bot-sdk = { workspace = true }
 hex.workspace = true
 hmac.workspace = true
-jsonwebtoken.workspace = true
 keyring = { version = "3.6.2", features = [
     "apple-native",
     "linux-native",
     "windows-native",
 ] }
-octocrab = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 sha2.workspace = true

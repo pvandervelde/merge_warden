@@ -1,8 +1,860 @@
+//! Tests for the `GitHubProvider` implementation using WireMock to mock GitHub API calls.
+//!
+//! Each test spins up a WireMock server, wires a `GitHubProvider` pointing at it,
+//! and verifies the correct HTTP path, method, and request/response mapping.
+
+use async_trait::async_trait;
+use github_bot_sdk::{
+    auth::{
+        AuthenticationProvider, GitHubAppId, Installation, InstallationId, InstallationPermissions,
+        InstallationToken, JsonWebToken,
+    },
+    client::{ClientConfig, GitHubClient},
+    error::AuthError,
+};
+use serde_json::json;
+use wiremock::{
+    matchers::{method, path},
+    Mock, MockServer, ResponseTemplate,
+};
+
+use super::GitHubProvider;
+use crate::errors::Error;
+use crate::{ConfigFetcher, PullRequestProvider};
+
+// ---------------------------------------------------------------------------
+// Test helper: mock authentication provider
+// ---------------------------------------------------------------------------
+
+/// Minimal `AuthenticationProvider` suitable for unit tests.
+///
+/// Returns a pre-configured installation token for any installation ID.
+#[derive(Clone)]
+struct MockAuth {
+    token: String,
+}
+
+impl MockAuth {
+    fn new(token: &str) -> Self {
+        Self {
+            token: token.to_string(),
+        }
+    }
+}
+
+#[async_trait]
+impl AuthenticationProvider for MockAuth {
+    async fn app_token(&self) -> Result<JsonWebToken, AuthError> {
+        let app_id = GitHubAppId::new(1);
+        let expires_at = chrono::Utc::now() + chrono::Duration::minutes(10);
+        Ok(JsonWebToken::new(
+            "test.jwt.token".to_string(),
+            app_id,
+            expires_at,
+        ))
+    }
+
+    async fn installation_token(
+        &self,
+        _installation_id: InstallationId,
+    ) -> Result<InstallationToken, AuthError> {
+        let id = InstallationId::new(12345);
+        let expires_at = chrono::Utc::now() + chrono::Duration::hours(1);
+        Ok(InstallationToken::new(
+            self.token.clone(),
+            id,
+            expires_at,
+            InstallationPermissions::default(),
+            vec![],
+        ))
+    }
+
+    async fn refresh_installation_token(
+        &self,
+        installation_id: InstallationId,
+    ) -> Result<InstallationToken, AuthError> {
+        self.installation_token(installation_id).await
+    }
+
+    async fn list_installations(&self) -> Result<Vec<Installation>, AuthError> {
+        Ok(vec![])
+    }
+
+    async fn get_installation_repositories(
+        &self,
+        _installation_id: InstallationId,
+    ) -> Result<Vec<github_bot_sdk::auth::Repository>, AuthError> {
+        Ok(vec![])
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Test helper: create provider pointing at WireMock
+// ---------------------------------------------------------------------------
+
+/// Constructs a `GitHubProvider` pointing at the WireMock server URI.
+async fn make_provider(server_uri: &str) -> GitHubProvider {
+    let auth = MockAuth::new("ghs_test_token");
+    let github_client = GitHubClient::builder(auth)
+        .config(
+            ClientConfig::default()
+                .with_github_api_url(server_uri.to_string())
+                .with_max_retries(0),
+        )
+        .build()
+        .expect("Failed to build GitHubClient");
+
+    let installation_id = InstallationId::new(12345);
+    let installation_client = github_client
+        .installation_by_id(installation_id)
+        .await
+        .expect("Failed to create InstallationClient");
+
+    GitHubProvider::new(installation_client)
+}
+
+// ---------------------------------------------------------------------------
+// add_comment
+// ---------------------------------------------------------------------------
+
 #[tokio::test]
-async fn test_github_provider_error_handling() {
-    // TODO: Implement a real error scenario for GitHubProvider.
-    // let provider = GitHubProvider::default();
-    // let result = provider.some_method_that_can_fail().await;
-    // assert!(result.is_err());
-    // Test is disabled because the method does not exist.
+async fn test_add_comment_success() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/repos/owner/repo/issues/42/comments"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "id": 1,
+            "node_id": "IC_1",
+            "body": "Hello from the bot",
+            "user": { "login": "bot", "id": 1, "node_id": "U_1", "type": "Bot" },
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z",
+            "html_url": "https://github.com/owner/repo/issues/42#issuecomment-1"
+        })))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .add_comment("owner", "repo", 42, "Hello from the bot")
+        .await;
+
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_add_comment_not_found_returns_error() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/repos/owner/repo/issues/99/comments"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("Not Found"))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider.add_comment("owner", "repo", 99, "text").await;
+
+    assert!(matches!(result, Err(Error::FailedToUpdatePullRequest(_))));
+}
+
+// ---------------------------------------------------------------------------
+// add_labels
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_add_labels_success() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/repos/owner/repo/issues/5/labels"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "id": 1, "node_id": "L_1", "name": "bug", "color": "ff0000",
+              "description": null, "default": false }
+        ])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .add_labels("owner", "repo", 5, &["bug".to_string()])
+        .await;
+
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_add_labels_api_error_returns_error() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("POST"))
+        .and(path("/repos/owner/repo/issues/5/labels"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("Internal Server Error"))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .add_labels("owner", "repo", 5, &["bug".to_string()])
+        .await;
+
+    assert!(matches!(result, Err(Error::FailedToUpdatePullRequest(_))));
+}
+
+// ---------------------------------------------------------------------------
+// delete_comment
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_delete_comment_success() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("DELETE"))
+        .and(path("/repos/owner/repo/issues/comments/777"))
+        .respond_with(ResponseTemplate::new(204))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider.delete_comment("owner", "repo", 777).await;
+
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_delete_comment_not_found_is_error() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("DELETE"))
+        .and(path("/repos/owner/repo/issues/comments/999"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("Not Found"))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider.delete_comment("owner", "repo", 999).await;
+
+    assert!(result.is_err());
+}
+
+// ---------------------------------------------------------------------------
+// get_pull_request
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_get_pull_request_returns_pr_data() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 1001,
+            "node_id": "PR_1",
+            "number": 1,
+            "title": "feat: add new feature",
+            "body": "This adds a great feature",
+            "state": "open",
+            "user": { "login": "alice", "id": 42, "node_id": "U_42", "type": "User" },
+            "head": {
+                "ref": "feature-branch",
+                "sha": "abc123",
+                "repo": { "id": 9, "name": "repo", "full_name": "owner/repo" }
+            },
+            "base": {
+                "ref": "main",
+                "sha": "def456",
+                "repo": { "id": 9, "name": "repo", "full_name": "owner/repo" }
+            },
+            "draft": false,
+            "merged": false,
+            "mergeable": null,
+            "merge_commit_sha": null,
+            "assignees": [],
+            "requested_reviewers": [],
+            "labels": [],
+            "milestone": null,
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z",
+            "closed_at": null,
+            "merged_at": null,
+            "html_url": "https://github.com/owner/repo/pull/1"
+        })))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let pr = provider.get_pull_request("owner", "repo", 1).await.unwrap();
+
+    assert_eq!(pr.number, 1);
+    assert_eq!(pr.title, "feat: add new feature");
+    assert_eq!(pr.body, Some("This adds a great feature".to_string()));
+    assert!(!pr.draft);
+    assert_eq!(pr.author.as_ref().unwrap().login, "alice");
+}
+
+#[tokio::test]
+async fn test_get_pull_request_draft_flag() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 1002,
+            "node_id": "PR_2",
+            "number": 2,
+            "title": "WIP: draft pr",
+            "body": null,
+            "state": "open",
+            "user": { "login": "bob", "id": 43, "node_id": "U_43", "type": "User" },
+            "head": {
+                "ref": "wip-branch",
+                "sha": "aaa111",
+                "repo": { "id": 9, "name": "repo", "full_name": "owner/repo" }
+            },
+            "base": {
+                "ref": "main",
+                "sha": "bbb222",
+                "repo": { "id": 9, "name": "repo", "full_name": "owner/repo" }
+            },
+            "draft": true,
+            "merged": false,
+            "mergeable": null,
+            "merge_commit_sha": null,
+            "assignees": [],
+            "requested_reviewers": [],
+            "labels": [],
+            "milestone": null,
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z",
+            "closed_at": null,
+            "merged_at": null,
+            "html_url": "https://github.com/owner/repo/pull/2"
+        })))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let pr = provider.get_pull_request("owner", "repo", 2).await.unwrap();
+
+    assert!(pr.draft);
+    assert_eq!(pr.body, None);
+}
+
+#[tokio::test]
+async fn test_get_pull_request_not_found() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/999"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("Not Found"))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider.get_pull_request("owner", "repo", 999).await;
+
+    assert!(matches!(result, Err(Error::InvalidResponse)));
+}
+
+// ---------------------------------------------------------------------------
+// get_pull_request_files
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_get_pull_request_files_returns_list() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/1/files"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "filename": "src/main.rs",
+                "status": "modified",
+                "additions": 10,
+                "deletions": 3,
+                "changes": 13
+            },
+            {
+                "filename": "tests/lib.rs",
+                "status": "added",
+                "additions": 50,
+                "deletions": 0,
+                "changes": 50
+            }
+        ])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let files = provider
+        .get_pull_request_files("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    assert_eq!(files.len(), 2);
+    assert_eq!(files[0].filename, "src/main.rs");
+    assert_eq!(files[0].additions, 10);
+    assert_eq!(files[0].deletions, 3);
+    assert_eq!(files[0].status, "modified");
+    assert_eq!(files[1].filename, "tests/lib.rs");
+    assert_eq!(files[1].status, "added");
+}
+
+#[tokio::test]
+async fn test_get_pull_request_files_empty() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/3/files"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let files = provider
+        .get_pull_request_files("owner", "repo", 3)
+        .await
+        .unwrap();
+
+    assert!(files.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// list_applied_labels
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_list_applied_labels_returns_pr_labels() {
+    let server = MockServer::start().await;
+
+    // list_applied_labels calls get_pull_request to read the labels field
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 1001,
+            "node_id": "PR_1",
+            "number": 1,
+            "title": "feat: labelled pr",
+            "body": null,
+            "state": "open",
+            "user": { "login": "alice", "id": 42, "node_id": "U_42", "type": "User" },
+            "head": {
+                "ref": "feature-branch",
+                "sha": "abc123",
+                "repo": { "id": 9, "name": "repo", "full_name": "owner/repo" }
+            },
+            "base": {
+                "ref": "main",
+                "sha": "def456",
+                "repo": { "id": 9, "name": "repo", "full_name": "owner/repo" }
+            },
+            "draft": false,
+            "merged": false,
+            "mergeable": null,
+            "merge_commit_sha": null,
+            "assignees": [],
+            "requested_reviewers": [],
+            "labels": [
+                { "id": 1, "node_id": "L_1", "name": "enhancement",
+                  "color": "84b6eb", "description": "An enhancement", "default": false },
+                { "id": 2, "node_id": "L_2", "name": "good first issue",
+                  "color": "0075ca", "description": null, "default": true }
+            ],
+            "milestone": null,
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z",
+            "closed_at": null,
+            "merged_at": null,
+            "html_url": "https://github.com/owner/repo/pull/1"
+        })))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let labels = provider
+        .list_applied_labels("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    assert_eq!(labels.len(), 2);
+    assert_eq!(labels[0].name, "enhancement");
+    assert_eq!(labels[0].description, Some("An enhancement".to_string()));
+    assert_eq!(labels[1].name, "good first issue");
+    assert_eq!(labels[1].description, None);
+}
+
+#[tokio::test]
+async fn test_list_applied_labels_empty() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/7"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 1007,
+            "node_id": "PR_7",
+            "number": 7,
+            "title": "feat: unlabelled pr",
+            "body": null,
+            "state": "open",
+            "user": { "login": "carol", "id": 50, "node_id": "U_50", "type": "User" },
+            "head": {
+                "ref": "fix-branch",
+                "sha": "fff000",
+                "repo": { "id": 9, "name": "repo", "full_name": "owner/repo" }
+            },
+            "base": {
+                "ref": "main",
+                "sha": "eee999",
+                "repo": { "id": 9, "name": "repo", "full_name": "owner/repo" }
+            },
+            "draft": false,
+            "merged": false,
+            "mergeable": null,
+            "merge_commit_sha": null,
+            "assignees": [],
+            "requested_reviewers": [],
+            "labels": [],
+            "milestone": null,
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z",
+            "closed_at": null,
+            "merged_at": null,
+            "html_url": "https://github.com/owner/repo/pull/7"
+        })))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let labels = provider
+        .list_applied_labels("owner", "repo", 7)
+        .await
+        .unwrap();
+
+    assert!(labels.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// list_available_labels
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_list_available_labels_returns_repo_labels() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/labels"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "id": 1, "node_id": "L_1", "name": "bug",
+              "color": "d73a4a", "description": "Something wrong", "default": true },
+            { "id": 2, "node_id": "L_2", "name": "enhancement",
+              "color": "84b6eb", "description": null, "default": false }
+        ])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let labels = provider
+        .list_available_labels("owner", "repo")
+        .await
+        .unwrap();
+
+    assert_eq!(labels.len(), 2);
+    assert_eq!(labels[0].name, "bug");
+    assert_eq!(labels[0].description, Some("Something wrong".to_string()));
+    assert_eq!(labels[1].name, "enhancement");
+}
+
+// ---------------------------------------------------------------------------
+// list_comments
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_list_comments_returns_all_comments() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/issues/3/comments"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "id": 100,
+                "node_id": "IC_100",
+                "body": "First comment",
+                "user": { "login": "alice", "id": 42, "node_id": "U_42", "type": "User" },
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2024-01-01T00:00:00Z",
+                "html_url": "https://github.com/owner/repo/issues/3#issuecomment-100"
+            },
+            {
+                "id": 101,
+                "node_id": "IC_101",
+                "body": "Second comment",
+                "user": { "login": "bob", "id": 43, "node_id": "U_43", "type": "User" },
+                "created_at": "2024-01-02T00:00:00Z",
+                "updated_at": "2024-01-02T00:00:00Z",
+                "html_url": "https://github.com/owner/repo/issues/3#issuecomment-101"
+            }
+        ])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let comments = provider.list_comments("owner", "repo", 3).await.unwrap();
+
+    assert_eq!(comments.len(), 2);
+    assert_eq!(comments[0].id, 100);
+    assert_eq!(comments[0].body, "First comment");
+    assert_eq!(comments[0].user.login, "alice");
+    assert_eq!(comments[1].id, 101);
+    assert_eq!(comments[1].body, "Second comment");
+}
+
+#[tokio::test]
+async fn test_list_comments_empty() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/issues/4/comments"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let comments = provider.list_comments("owner", "repo", 4).await.unwrap();
+
+    assert!(comments.is_empty());
+}
+
+// ---------------------------------------------------------------------------
+// remove_label
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_remove_label_success() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("DELETE"))
+        .and(path("/repos/owner/repo/issues/5/labels/bug"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider.remove_label("owner", "repo", 5, "bug").await;
+
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_remove_label_not_found_is_error() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("DELETE"))
+        .and(path("/repos/owner/repo/issues/5/labels/nonexistent"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("Not Found"))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .remove_label("owner", "repo", 5, "nonexistent")
+        .await;
+
+    assert!(matches!(result, Err(Error::FailedToUpdatePullRequest(_))));
+}
+
+// ---------------------------------------------------------------------------
+// update_pr_check_status
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_update_pr_check_status_success() {
+    let server = MockServer::start().await;
+
+    // First: GET pull request to retrieve head SHA
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 1010,
+            "node_id": "PR_10",
+            "number": 10,
+            "title": "feat: check test",
+            "body": null,
+            "state": "open",
+            "user": { "login": "dave", "id": 55, "node_id": "U_55", "type": "User" },
+            "head": {
+                "ref": "check-branch",
+                "sha": "deadbeef",
+                "repo": { "id": 9, "name": "repo", "full_name": "owner/repo" }
+            },
+            "base": {
+                "ref": "main",
+                "sha": "cafebabe",
+                "repo": { "id": 9, "name": "repo", "full_name": "owner/repo" }
+            },
+            "draft": false,
+            "merged": false,
+            "mergeable": null,
+            "merge_commit_sha": null,
+            "assignees": [],
+            "requested_reviewers": [],
+            "labels": [],
+            "milestone": null,
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z",
+            "closed_at": null,
+            "merged_at": null,
+            "html_url": "https://github.com/owner/repo/pull/10"
+        })))
+        .mount(&server)
+        .await;
+
+    // Second: POST check run
+    Mock::given(method("POST"))
+        .and(path("/repos/owner/repo/check-runs"))
+        .respond_with(ResponseTemplate::new(201).set_body_json(json!({
+            "id": 5001,
+            "name": "MergeWarden",
+            "status": "completed",
+            "conclusion": "success"
+        })))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .update_pr_check_status(
+            "owner",
+            "repo",
+            10,
+            "success",
+            "All checks passed",
+            "PR meets all requirements",
+            "Everything looks good",
+        )
+        .await;
+
+    assert!(result.is_ok());
+}
+
+// ---------------------------------------------------------------------------
+// fetch_config (ConfigFetcher)
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_fetch_config_returns_file_content() {
+    use base64::Engine;
+    let server = MockServer::start().await;
+    let content_b64 = base64::engine::general_purpose::STANDARD.encode(b"key = \"value\"\n");
+
+    // First: GET repository to get default branch
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 1,
+            "name": "repo",
+            "full_name": "owner/repo",
+            "default_branch": "main",
+            "private": false,
+            "html_url": "https://github.com/owner/repo"
+        })))
+        .mount(&server)
+        .await;
+
+    // Second: GET file contents
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/contents/.merge-warden.toml"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "type": "file",
+            "encoding": "base64",
+            "name": ".merge-warden.toml",
+            "path": ".merge-warden.toml",
+            "content": format!("{}\n", content_b64)
+        })))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .fetch_config("owner", "repo", ".merge-warden.toml")
+        .await
+        .unwrap();
+
+    assert_eq!(result, Some("key = \"value\"\n".to_string()));
+}
+
+#[tokio::test]
+async fn test_fetch_config_missing_file_returns_none() {
+    let server = MockServer::start().await;
+
+    // GET repository to get default branch
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "id": 1,
+            "name": "repo",
+            "full_name": "owner/repo",
+            "default_branch": "main",
+            "private": false,
+            "html_url": "https://github.com/owner/repo"
+        })))
+        .mount(&server)
+        .await;
+
+    // GET file: 404 (does not exist)
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/contents/.merge-warden.toml"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("Not Found"))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .fetch_config("owner", "repo", ".merge-warden.toml")
+        .await
+        .unwrap();
+
+    assert_eq!(result, None);
+}
+
+// ---------------------------------------------------------------------------
+// Error mapping
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_rate_limit_error_maps_correctly() {
+    let server = MockServer::start().await;
+
+    // Simulate GitHub rate limiting on a PR fetch
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/1"))
+        .respond_with(
+            ResponseTemplate::new(429)
+                .append_header("x-ratelimit-reset", "9999999999")
+                .set_body_string("rate limit exceeded"),
+        )
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider.get_pull_request("owner", "repo", 1).await;
+
+    // 429 maps to RateLimitExceeded
+    assert!(matches!(result, Err(Error::RateLimitExceeded)));
+}
+
+#[tokio::test]
+async fn test_auth_error_maps_correctly() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/1"))
+        .respond_with(ResponseTemplate::new(401).set_body_string("Unauthorized"))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider.get_pull_request("owner", "repo", 1).await;
+
+    assert!(matches!(result, Err(Error::AuthError(_))));
 }
