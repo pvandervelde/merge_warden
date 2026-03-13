@@ -6,18 +6,18 @@ use axum::routing::post;
 use axum::Router;
 use axum_macros::debug_handler;
 use clap::Args;
+use github_bot_sdk::{
+    auth::InstallationId,
+    client::{ClientConfig, GitHubClient},
+};
 use hmac::{Hmac, Mac};
 use keyring::Entry;
 use merge_warden_core::config::{
     load_merge_warden_config, CurrentPullRequestValidationConfiguration,
 };
 use merge_warden_core::{MergeWarden, WebhookPayload};
-use merge_warden_developer_platforms::github::GitHubProvider;
 use merge_warden_developer_platforms::app_auth::AppAuthProvider;
-use github_bot_sdk::{
-    auth::InstallationId,
-    client::{ClientConfig, GitHubClient},
-};
+use merge_warden_developer_platforms::github::GitHubProvider;
 use serde::Serialize;
 use sha2::Sha256;
 use std::fs;
@@ -167,10 +167,7 @@ async fn create_github_app(config: &AppConfig) -> Result<GitHubClient, CliError>
 
             let auth = AppAuthProvider::new(app_id_number, &app_key, "https://api.github.com")
                 .map_err(|e| {
-                    CliError::AuthError(format!(
-                        "Failed to create GitHub App auth provider: {}",
-                        e
-                    ))
+                    CliError::AuthError(format!("Failed to create GitHub App auth provider: {}", e))
                 })?;
 
             let client = GitHubClient::builder(auth)

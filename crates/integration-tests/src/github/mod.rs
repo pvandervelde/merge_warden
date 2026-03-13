@@ -192,18 +192,16 @@ impl TestBotInstance {
             let github_client = octocrab::Octocrab::builder().build().map_err(|e| {
                 TestError::environment_error("build_mock_bot_client", &e.to_string())
             })?;
-            let mock_sdk_client =
-                GitHubClient::builder(MockAuthProvider).build().map_err(|e| {
+            let mock_sdk_client = GitHubClient::builder(MockAuthProvider)
+                .build()
+                .map_err(|e| {
                     TestError::environment_error("build_mock_sdk_client", &e.to_string())
                 })?;
             let installation_client = mock_sdk_client
                 .installation_by_id(InstallationId::new(0))
                 .await
                 .map_err(|e| {
-                    TestError::environment_error(
-                        "build_mock_installation_client",
-                        &e.to_string(),
-                    )
+                    TestError::environment_error("build_mock_installation_client", &e.to_string())
                 })?;
             return Ok(TestBotInstance {
                 app_id: config.merge_warden_app_id.clone(),
@@ -278,9 +276,7 @@ impl TestBotInstance {
         // Build an SDK InstallationClient for the embedded webhook server.
         let github_sdk_client = GitHubClient::builder(auth_provider)
             .build()
-            .map_err(|e| {
-                TestError::environment_error("build_mw_sdk_client", &e.to_string())
-            })?;
+            .map_err(|e| TestError::environment_error("build_mw_sdk_client", &e.to_string()))?;
         let installation_client = github_sdk_client
             .installation_by_id(InstallationId::new(installation_id))
             .await

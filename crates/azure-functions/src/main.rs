@@ -11,6 +11,10 @@ use axum_macros::debug_handler;
 use azure_core::credentials::TokenCredential;
 use azure_identity::ManagedIdentityCredentialOptions;
 use azure_security_keyvault_secrets::SecretClient;
+use github_bot_sdk::{
+    auth::InstallationId,
+    client::{ClientConfig, GitHubClient},
+};
 use hmac::{Hmac, Mac};
 use merge_warden_core::{
     config::{
@@ -19,10 +23,6 @@ use merge_warden_core::{
     MergeWarden, WebhookPayload,
 };
 use merge_warden_developer_platforms::{app_auth::AppAuthProvider, github::GitHubProvider};
-use github_bot_sdk::{
-    auth::InstallationId,
-    client::{ClientConfig, GitHubClient},
-};
 use reqwest::{header::HeaderMap, StatusCode};
 use sha2::Sha256;
 use std::{env, sync::Arc};
@@ -114,14 +114,14 @@ async fn create_github_app(secrets: &AppSecrets) -> Result<GitHubClient, AzureFu
     info!("Creating GitHub app client");
     info!(message = "Using GitHub App authentication");
 
-    let auth =
-        AppAuthProvider::new(secrets.app_id, &secrets.app_private_key, "https://api.github.com")
-            .map_err(|e| {
-                AzureFunctionsError::AuthError(format!(
-                    "Failed to create GitHub App auth provider: {}",
-                    e
-                ))
-            })?;
+    let auth = AppAuthProvider::new(
+        secrets.app_id,
+        &secrets.app_private_key,
+        "https://api.github.com",
+    )
+    .map_err(|e| {
+        AzureFunctionsError::AuthError(format!("Failed to create GitHub App auth provider: {}", e))
+    })?;
 
     let client = GitHubClient::builder(auth)
         .config(ClientConfig::default())
