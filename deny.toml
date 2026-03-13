@@ -113,6 +113,9 @@ confidence-threshold = 0.93
 # # Allow 1 or more licenses on a per-crate basis, so that particular licenses
 # # aren't accepted for every possible crate as with the normal allow list
 exceptions = [
+    { name = "aws-lc-sys", allow = [
+        "OpenSSL",
+    ] },
     { name = "ring", allow = [
         "OpenSSL",
     ] },
@@ -121,6 +124,9 @@ exceptions = [
     ] },
     { name = "rustls-webpki", allow = [
         "BSD-3-Clause",
+    ] },
+    { name = "webpki-root-certs", allow = [
+        "CDLA-Permissive-2.0",
     ] },
 ]
 
@@ -254,7 +260,7 @@ allow-git = []
 
 [sources.allow-org]
 # 1 or more github.com organizations to allow git sources for
-github = [""]
+github = ["pvandervelde"]
 # 1 or more gitlab.com organizations to allow git sources for
 gitlab = [""]
 # 1 or more bitbucket.org organizations to allow git sources for
