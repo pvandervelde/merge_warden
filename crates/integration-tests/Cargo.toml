@@ -47,6 +47,10 @@ base64 = "0.22"
 hex = { workspace = true }
 hmac = { workspace = true }
 sha2 = { workspace = true }
+# Rustls crypto provider selection — required when both reqwest v0.12 (ring) and
+# reqwest v0.13 (aws-lc-rs) are in the dependency tree, because rustls v0.23
+# cannot auto-select a provider when multiple backends are present.
+rustls = { version = "0.23", features = ["aws-lc-rs"], default-features = false }
 
 # Time and random utilities
 chrono = { version = "0.4", features = ["serde"] }
