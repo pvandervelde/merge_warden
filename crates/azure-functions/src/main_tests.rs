@@ -1,22 +1,85 @@
 use crate::AppState;
 
 use super::{handle_post_request, verify_github_signature};
+use async_trait::async_trait;
 use axum::{extract::State, http::HeaderMap};
+use chrono::Utc;
+use github_bot_sdk::{
+    auth::{
+        AuthenticationProvider, GitHubAppId, Installation, InstallationId, InstallationPermissions,
+        InstallationToken, JsonWebToken, Repository,
+    },
+    client::{ClientConfig, GitHubClient},
+    error::AuthError,
+};
 use hmac::{Hmac, Mac};
 use merge_warden_core::config::{ApplicationDefaults, BypassRules, ChangeTypeLabelConfig};
-use merge_warden_developer_platforms::models::User;
-use octocrab::Octocrab;
 use sha2::Sha256;
 use std::sync::Arc;
+
+/// Minimal mock authentication provider for unit tests.
+///
+/// Returns pre-configured tokens without making any network calls.
+struct MockAuth;
+
+#[async_trait]
+impl AuthenticationProvider for MockAuth {
+    async fn app_token(&self) -> Result<JsonWebToken, AuthError> {
+        let app_id = GitHubAppId::new(1);
+        let expires_at = Utc::now() + chrono::Duration::minutes(10);
+        Ok(JsonWebToken::new(
+            "test.jwt.token".to_string(),
+            app_id,
+            expires_at,
+        ))
+    }
+
+    async fn installation_token(
+        &self,
+        _installation_id: InstallationId,
+    ) -> Result<InstallationToken, AuthError> {
+        let id = InstallationId::new(12345);
+        let expires_at = Utc::now() + chrono::Duration::hours(1);
+        Ok(InstallationToken::new(
+            "test_token".to_string(),
+            id,
+            expires_at,
+            InstallationPermissions::default(),
+            vec![],
+        ))
+    }
+
+    async fn refresh_installation_token(
+        &self,
+        installation_id: InstallationId,
+    ) -> Result<InstallationToken, AuthError> {
+        self.installation_token(installation_id).await
+    }
+
+    async fn list_installations(&self) -> Result<Vec<Installation>, AuthError> {
+        Ok(vec![])
+    }
+
+    async fn get_installation_repositories(
+        &self,
+        _installation_id: InstallationId,
+    ) -> Result<Vec<Repository>, AuthError> {
+        Ok(vec![])
+    }
+}
+
+/// Creates a `GitHubClient` backed by the mock auth provider for use in tests.
+fn make_test_github_client() -> GitHubClient {
+    GitHubClient::builder(MockAuth)
+        .config(ClientConfig::default())
+        .build()
+        .expect("Failed to build test GitHubClient")
+}
 
 #[tokio::test]
 async fn test_handle_webhook() {
     let state = Arc::new(AppState {
-        octocrab: Octocrab::default(),
-        user: User {
-            id: 10,
-            login: "a".to_string(),
-        },
+        github_client: make_test_github_client(),
         policies: ApplicationDefaults {
             enable_title_validation: false,
             default_title_pattern: "ab".to_string(),
@@ -125,12 +188,8 @@ async fn test_create_github_app_invalid_key() {
 
 #[tokio::test]
 async fn test_handle_post_request_invalid_signature() {
-    use super::AppState;
-    use axum::http::HeaderMap;
-    use std::sync::Arc;
     let state = Arc::new(AppState {
-        octocrab: octocrab::Octocrab::default(),
-        user: merge_warden_developer_platforms::models::User::default(),
+        github_client: make_test_github_client(),
         policies: merge_warden_core::config::ApplicationDefaults::default(),
         webhook_secret: "secret".to_string(),
     });

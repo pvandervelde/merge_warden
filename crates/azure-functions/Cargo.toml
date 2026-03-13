@@ -27,6 +27,10 @@ tracing = { workspace = true, features = ["log"] }
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 azure_core = "0.23"
 
+[dev-dependencies]
+async-trait.workspace = true
+chrono.workspace = true
+
 # See https://github.com/sfackler/rust-openssl/issues/1627
 # and https://docs.rs/openssl/latest/openssl/#vendored
 [target.x86_64-unknown-linux-musl.dependencies]
