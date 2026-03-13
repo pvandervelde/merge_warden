@@ -18,11 +18,11 @@ use merge_warden_core::{
     },
     MergeWarden, WebhookPayload,
 };
-use merge_warden_developer_platforms::{
-    github::{authenticate_with_access_token, create_app_client, GitHubProvider},
-    models::User,
+use merge_warden_developer_platforms::{app_auth::AppAuthProvider, github::GitHubProvider};
+use github_bot_sdk::{
+    auth::InstallationId,
+    client::{ClientConfig, GitHubClient},
 };
-use octocrab::Octocrab;
 use reqwest::{header::HeaderMap, StatusCode};
 use sha2::Sha256;
 use std::{env, sync::Arc};
@@ -55,10 +55,8 @@ struct AppSecrets {
 
 /// Application state shared across Azure Function handlers
 pub struct AppState {
-    /// Authenticated GitHub API client
-    pub octocrab: Octocrab,
-    /// GitHub user information for the authenticated app
-    pub user: User,
+    /// GitHub App client used to create installation-scoped clients per webhook event
+    pub github_client: GitHubClient,
     /// Application-wide policy configurations
     pub policies: ApplicationDefaults,
     /// Secret key for webhook payload verification
@@ -112,20 +110,28 @@ pub struct AppState {
 ///     Ok(())
 /// }
 /// ```
-async fn create_github_app(secrets: &AppSecrets) -> Result<(Octocrab, User), AzureFunctionsError> {
+async fn create_github_app(secrets: &AppSecrets) -> Result<GitHubClient, AzureFunctionsError> {
     info!("Creating GitHub app client");
     info!(message = "Using GitHub App authentication");
-    let app_id = secrets.app_id;
-    let app_key = secrets.app_private_key.as_str();
 
-    let provider = create_app_client(app_id, app_key).await.map_err(|e| {
-        AzureFunctionsError::AuthError(
-            format!("Failed to load the GitHub provider. Error was: {}", e).to_string(),
-        )
-    })?;
+    let auth =
+        AppAuthProvider::new(secrets.app_id, &secrets.app_private_key, "https://api.github.com")
+            .map_err(|e| {
+                AzureFunctionsError::AuthError(format!(
+                    "Failed to create GitHub App auth provider: {}",
+                    e
+                ))
+            })?;
+
+    let client = GitHubClient::builder(auth)
+        .config(ClientConfig::default())
+        .build()
+        .map_err(|e| {
+            AzureFunctionsError::AuthError(format!("Failed to build GitHub client: {}", e))
+        })?;
+
     debug!(message = "GitHub App client created successfully");
-
-    Ok(provider)
+    Ok(client)
 }
 
 /// Retrieves application secrets from Azure Key Vault.
@@ -464,28 +470,25 @@ async fn handle_post_request(
         "Processing pull request"
     );
 
-    let api_with_pat = match authenticate_with_access_token(
-        &state.octocrab,
-        installation_id,
-        repo_owner,
-        &repository.name,
-    )
-    .await
+    let installation_client = match state
+        .github_client
+        .installation_by_id(InstallationId::new(installation_id))
+        .await
     {
-        Ok(o) => o,
+        Ok(c) => c,
         Err(e) => {
             error!(
                 repository_owner = repo_owner,
                 repository = &repository.name,
                 pull_request = pr.number,
                 error = e.to_string(),
-                "Failed to authenticate with GitHub"
+                "Failed to create installation client"
             );
             return Err(StatusCode::UNAUTHORIZED);
         }
     };
 
-    let provider = GitHubProvider::new(api_with_pat);
+    let provider = GitHubProvider::new(installation_client);
 
     // Load the merge-warden TOML config file
     let merge_warden_config_path = ".github/merge-warden.toml";
@@ -612,7 +615,7 @@ async fn main() -> Result<(), AzureFunctionsError> {
         ApplicationDefaults::default()
     });
 
-    let (octocrab, user) = create_github_app(&app_secrets).await?;
+    let github_client = create_github_app(&app_secrets).await?;
 
     let port_key = "FUNCTIONS_CUSTOMHANDLER_PORT";
     let port: u16 = match env::var(port_key) {
@@ -624,8 +627,7 @@ async fn main() -> Result<(), AzureFunctionsError> {
     let addr = format!("0.0.0.0:{}", port);
 
     let state = Arc::new(AppState {
-        octocrab,
-        user,
+        github_client,
         policies: application_config,
         webhook_secret: app_secrets.webhook_secret,
     });

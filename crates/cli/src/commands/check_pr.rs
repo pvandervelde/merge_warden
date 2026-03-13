@@ -12,11 +12,12 @@ use merge_warden_core::config::{
     load_merge_warden_config, CurrentPullRequestValidationConfiguration,
 };
 use merge_warden_core::{MergeWarden, WebhookPayload};
-use merge_warden_developer_platforms::github::{
-    authenticate_with_access_token, create_app_client, GitHubProvider,
+use merge_warden_developer_platforms::github::GitHubProvider;
+use merge_warden_developer_platforms::app_auth::AppAuthProvider;
+use github_bot_sdk::{
+    auth::InstallationId,
+    client::{ClientConfig, GitHubClient},
 };
-use merge_warden_developer_platforms::models::User;
-use octocrab::Octocrab;
 use serde::Serialize;
 use sha2::Sha256;
 use std::fs;
@@ -33,8 +34,8 @@ use super::auth::KEY_RING_WEB_HOOK_SECRET;
 
 /// Application state for the PR checking functionality
 pub struct AppState {
-    /// Authenticated GitHub API client
-    pub octocrab: Octocrab,
+    /// GitHub App client used to create installation-scoped clients per webhook event
+    pub github_client: GitHubClient,
     /// Application configuration
     pub config: AppConfig,
     /// Webhook secret for payload verification
@@ -110,9 +111,9 @@ pub struct ValidationResult {
 ///     Ok(())
 /// }
 /// ```
-async fn create_github_app(config: &AppConfig) -> Result<(Octocrab, User), CliError> {
+async fn create_github_app(config: &AppConfig) -> Result<GitHubClient, CliError> {
     debug!("Creating GitHub app client");
-    let provider = match config.authentication.auth_method.as_str() {
+    match config.authentication.auth_method.as_str() {
         "token" => {
             let err = CliError::InvalidArguments(
                 format!(
@@ -122,7 +123,7 @@ async fn create_github_app(config: &AppConfig) -> Result<(Octocrab, User), CliEr
                 .to_string(),
             );
             error!(message = "Failed to create GitHub app client", error = ?err);
-            return Err(err);
+            Err(err)
         }
         "app" => {
             info!(message = "Using GitHub App authentication");
@@ -163,15 +164,24 @@ async fn create_github_app(config: &AppConfig) -> Result<(Octocrab, User), CliEr
                     .to_string(),
                 )
             })?;
-            let pair = create_app_client(app_id_number, &app_key)
-                .await
+
+            let auth = AppAuthProvider::new(app_id_number, &app_key, "https://api.github.com")
                 .map_err(|e| {
-                    CliError::AuthError(
-                        format!("Failed to load the GitHub provider. Error was: {}", e).to_string(),
-                    )
+                    CliError::AuthError(format!(
+                        "Failed to create GitHub App auth provider: {}",
+                        e
+                    ))
                 })?;
+
+            let client = GitHubClient::builder(auth)
+                .config(ClientConfig::default())
+                .build()
+                .map_err(|e| {
+                    CliError::AuthError(format!("Failed to build GitHub client: {}", e))
+                })?;
+
             debug!(message = "GitHub App client created successfully");
-            pair
+            Ok(client)
         }
         _ => {
             let err = CliError::InvalidArguments(
@@ -182,11 +192,9 @@ async fn create_github_app(config: &AppConfig) -> Result<(Octocrab, User), CliEr
                 .to_string(),
             );
             error!(message = "Failed to create GitHub app client", error = ?err);
-            return Err(err);
+            Err(err)
         }
-    };
-
-    Ok(provider)
+    }
 }
 
 /// Executes the `check-pr` command.
@@ -230,13 +238,13 @@ pub async fn execute(args: CheckPrArgs) -> Result<(), CliError> {
     let config = AppConfig::load(&config_path)
         .map_err(|e| CliError::ConfigError(format!("Failed to load configuration: {}", e)))?;
 
-    let (octocrab, _user) = create_github_app(&config).await?;
+    let github_client = create_github_app(&config).await?;
     let webhook_secret = retrieve_webhook_secret()?;
 
     let addr = format!("0.0.0.0:{}", config.webhooks.port);
 
     let state = Arc::new(AppState {
-        octocrab,
+        github_client,
         config,
         webhook_secret,
     });
@@ -353,28 +361,25 @@ async fn handle_webhook(
         "Processing pull request"
     );
 
-    let api_with_pat = match authenticate_with_access_token(
-        &state.octocrab,
-        installation_id,
-        repo_owner,
-        &repository.name,
-    )
-    .await
+    let installation_client = match state
+        .github_client
+        .installation_by_id(InstallationId::new(installation_id))
+        .await
     {
-        Ok(o) => o,
+        Ok(c) => c,
         Err(e) => {
             error!(
                 repository_owner = repo_owner,
                 repository = &repository.name,
                 pull_request = pr.number,
                 error = e.to_string(),
-                "Failed to authenticate with GitHub"
+                "Failed to create installation client"
             );
             return Err(StatusCode::UNAUTHORIZED);
         }
     };
 
-    let provider = GitHubProvider::new(api_with_pat);
+    let provider = GitHubProvider::new(installation_client);
 
     // Load the merge-warden TOML config file
     let merge_warden_config_path = ".github/merge-warden.toml";
