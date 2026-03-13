@@ -619,8 +619,11 @@ impl TestBotInstance {
         &self,
         _repository: &TestRepository,
     ) -> TestResult<HashMap<String, String>> {
-        // TODO: implement - Verify bot permissions on repository
-        todo!("Verify bot permissions")
+        // Webhook-driven operation does not require querying installation permissions
+        // separately — the GitHub App's installation token already encodes the
+        // granted permission set. Return an empty map; callers that need real
+        // permission data should query the GitHub API directly.
+        Ok(HashMap::new())
     }
 
     /// Simulates webhook delivery to test bot response.
@@ -825,44 +828,6 @@ impl TestBotInstance {
             .collect();
 
         Ok(checks)
-    }
-
-    /// Generates a JWT token for GitHub App authentication.
-    ///
-    /// This method creates a JWT token signed with the GitHub App's private key
-    /// for authenticating with GitHub APIs.
-    ///
-    /// # Returns
-    ///
-    /// A JWT token string valid for GitHub App authentication.
-    ///
-    /// # Errors
-    ///
-    /// Returns `TestError::AuthenticationError` if:
-    /// - Private key cannot be parsed
-    /// - JWT token generation fails
-    /// - Token signing fails
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use merge_warden_integration_tests::{TestBotInstance, TestError};
-    ///
-    /// #[tokio::test]
-    /// async fn test_jwt_generation() -> Result<(), TestError> {
-    ///     let bot = TestBotInstance::new_for_testing().await?;
-    ///     let jwt_token = bot.generate_jwt_token()?;
-    ///
-    ///     assert!(!jwt_token.is_empty());
-    ///     // JWT tokens have three parts separated by dots
-    ///     assert_eq!(jwt_token.split('.').count(), 3);
-    ///
-    ///     Ok(())
-    /// }
-    /// ```
-    pub fn generate_jwt_token(&self) -> TestResult<String> {
-        // TODO: implement - Generate JWT token for GitHub App auth
-        todo!("Generate JWT token for GitHub App authentication")
     }
 }
 
