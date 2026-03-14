@@ -1,19 +1,20 @@
 use crate::AppState;
 
-use super::{handle_post_request, verify_github_signature};
+use super::handle_post_request;
 use async_trait::async_trait;
 use axum::{extract::State, http::HeaderMap};
 use chrono::Utc;
 use github_bot_sdk::{
     auth::{
         AuthenticationProvider, GitHubAppId, Installation, InstallationId, InstallationPermissions,
-        InstallationToken, JsonWebToken, Repository,
+        InstallationToken, JsonWebToken, Repository, SecretProvider,
     },
     client::{ClientConfig, GitHubClient},
-    error::AuthError,
+    error::{AuthError, SecretError},
+    events::{EventProcessor, ProcessorConfig},
+    webhook::WebhookReceiver,
 };
 use hmac::{Hmac, Mac};
-use merge_warden_core::config::{ApplicationDefaults, BypassRules, ChangeTypeLabelConfig};
 use sha2::Sha256;
 use std::sync::Arc;
 
@@ -68,6 +69,34 @@ impl AuthenticationProvider for MockAuth {
     }
 }
 
+/// `SecretProvider` backed by a known in-memory secret for unit tests.
+struct TestSecretProvider {
+    webhook_secret: String,
+}
+
+#[async_trait]
+impl SecretProvider for TestSecretProvider {
+    async fn get_private_key(&self) -> Result<github_bot_sdk::auth::PrivateKey, SecretError> {
+        Err(SecretError::NotFound {
+            key: "private_key".to_string(),
+        })
+    }
+
+    async fn get_app_id(&self) -> Result<GitHubAppId, SecretError> {
+        Err(SecretError::NotFound {
+            key: "app_id".to_string(),
+        })
+    }
+
+    async fn get_webhook_secret(&self) -> Result<String, SecretError> {
+        Ok(self.webhook_secret.clone())
+    }
+
+    fn cache_duration(&self) -> chrono::Duration {
+        chrono::Duration::hours(1)
+    }
+}
+
 /// Creates a `GitHubClient` backed by the mock auth provider for use in tests.
 fn make_test_github_client() -> GitHubClient {
     GitHubClient::builder(MockAuth)
@@ -76,95 +105,93 @@ fn make_test_github_client() -> GitHubClient {
         .expect("Failed to build test GitHubClient")
 }
 
-#[tokio::test]
-async fn test_handle_webhook() {
-    let state = Arc::new(AppState {
-        github_client: make_test_github_client(),
-        policies: ApplicationDefaults {
-            enable_title_validation: false,
-            default_title_pattern: "ab".to_string(),
-            default_invalid_title_label: None,
-            enable_work_item_validation: false,
-            default_work_item_pattern: "cd".to_string(),
-            default_missing_work_item_label: None,
-            bypass_rules: BypassRules::default(),
-            pr_size_check: Default::default(),
-            change_type_labels: ChangeTypeLabelConfig::default(),
-        },
-        webhook_secret: "test_secret".to_string(),
+/// Builds a test `AppState` backed by the given webhook secret and no-op handler.
+async fn make_test_app_state(webhook_secret: &str) -> Arc<AppState> {
+    let secret_provider = Arc::new(TestSecretProvider {
+        webhook_secret: webhook_secret.to_string(),
     });
+    let processor = EventProcessor::new(ProcessorConfig::default());
+    let receiver = WebhookReceiver::new(secret_provider, processor);
+    // No handlers registered — tests only exercise validation/routing.
+    Arc::new(AppState { receiver })
+}
 
+/// Computes the expected `X-Hub-Signature-256` header value for a given secret and body.
+fn make_signature(secret: &str, body: &[u8]) -> String {
+    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).unwrap();
+    mac.update(body);
+    format!("sha256={}", hex::encode(mac.finalize().into_bytes()))
+}
+
+#[tokio::test]
+async fn test_handle_webhook_missing_signature_returns_error() {
+    let state = make_test_app_state("test_secret").await;
     let headers = HeaderMap::new();
     let body = "{}".to_string();
 
     let result = handle_post_request(State(state), headers, body).await;
     assert!(
         result.is_err(),
-        "Webhook handling should fail with invalid data"
+        "Webhook handling should fail when X-Hub-Signature-256 is absent"
     );
 }
 
-#[test]
-fn test_verify_github_signature() {
-    let secret = "test_secret";
-    let headers = HeaderMap::new();
-    let body = "test_body";
+#[tokio::test]
+async fn test_handle_webhook_invalid_signature_returns_error() {
+    let state = make_test_app_state("secret").await;
 
-    let result = verify_github_signature(secret, &headers, body);
-    assert!(
-        !result,
-        "Signature verification should fail with missing headers"
-    );
-}
-
-#[test]
-fn test_verify_github_signature_valid_signature() {
-    let secret = "test_secret";
     let mut headers = HeaderMap::new();
-    let body = "test_body";
+    headers.insert("X-Hub-Signature-256", "sha256=badhash".parse().unwrap());
+    headers.insert("X-GitHub-Event", "pull_request".parse().unwrap());
 
-    let mut mac = Hmac::<Sha256>::new_from_slice(secret.as_bytes()).unwrap();
-    mac.update(body.as_bytes());
-    let result = mac.finalize();
-    let computed_signature = format!("sha256={}", hex::encode(result.into_bytes()));
-
-    headers.insert("X-Hub-Signature-256", computed_signature.parse().unwrap());
-
-    let result = verify_github_signature(secret, &headers, body);
+    let body = "{}".to_string();
+    let result = handle_post_request(State(state), headers, body).await;
     assert!(
-        result,
-        "Signature verification should pass with a valid signature"
+        result.is_err(),
+        "Webhook handling should fail with an invalid signature"
     );
 }
 
-#[test]
-fn test_verify_github_signature_invalid_signature() {
+#[tokio::test]
+async fn test_handle_webhook_valid_signature_non_pr_event_returns_ok() {
     let secret = "test_secret";
+    // EventProcessor requires a full repository object to parse the payload.
+    let body = r#"{
+        "ref": "refs/heads/main",
+        "repository": {
+            "id": 123,
+            "name": "test-repo",
+            "full_name": "test-owner/test-repo",
+            "owner": {
+                "login": "test-owner",
+                "id": 456,
+                "avatar_url": "https://avatars.githubusercontent.com/u/456",
+                "type": "User"
+            },
+            "description": null,
+            "private": false,
+            "default_branch": "main",
+            "html_url": "https://github.com/test-owner/test-repo",
+            "clone_url": "https://github.com/test-owner/test-repo.git",
+            "ssh_url": "git@github.com:test-owner/test-repo.git",
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z"
+        }
+    }"#;
+    let sig = make_signature(secret, body.as_bytes());
+
+    let state = make_test_app_state(secret).await;
     let mut headers = HeaderMap::new();
-    let body = "test_body";
+    headers.insert("X-Hub-Signature-256", sig.parse().unwrap());
+    headers.insert("X-GitHub-Event", "push".parse().unwrap());
+    headers.insert("X-GitHub-Delivery", "abc123".parse().unwrap());
 
-    headers.insert(
-        "X-Hub-Signature-256",
-        "sha256=invalid_signature".parse().unwrap(),
-    );
-
-    let result = verify_github_signature(secret, &headers, body);
+    let result = handle_post_request(State(state), headers, body.to_string()).await;
+    // push events are not pull_request; receiver accepts them (200) and the
+    // handler (none registered) silently no-ops.
     assert!(
-        !result,
-        "Signature verification should fail with an invalid signature"
-    );
-}
-
-#[test]
-fn test_verify_github_signature_missing_header() {
-    let secret = "test_secret";
-    let headers = HeaderMap::new();
-    let body = "test_body";
-
-    let result = verify_github_signature(secret, &headers, body);
-    assert!(
-        !result,
-        "Signature verification should fail when the header is missing"
+        result.is_ok(),
+        "Non-PR events with valid signature should return 200"
     );
 }
 
@@ -187,12 +214,8 @@ async fn test_create_github_app_invalid_key() {
 }
 
 #[tokio::test]
-async fn test_handle_post_request_invalid_signature() {
-    let state = Arc::new(AppState {
-        github_client: make_test_github_client(),
-        policies: merge_warden_core::config::ApplicationDefaults::default(),
-        webhook_secret: "secret".to_string(),
-    });
+async fn test_handle_post_request_missing_signature_returns_unauthorized() {
+    let state = make_test_app_state("secret").await;
     let headers = HeaderMap::new();
     let body = "{}".to_string();
     let result = super::handle_post_request(axum::extract::State(state), headers, body).await;

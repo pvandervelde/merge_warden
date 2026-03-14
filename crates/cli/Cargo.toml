@@ -19,9 +19,9 @@ axum = { workspace = true }
 axum-macros = { workspace = true }
 clap = { workspace = true }
 dirs = "6.0"
+async-trait = { workspace = true }
+chrono = { workspace = true }
 github-bot-sdk = { workspace = true }
-hex.workspace = true
-hmac.workspace = true
 keyring = { version = "3.6.2", features = [
     "apple-native",
     "linux-native",
@@ -29,7 +29,6 @@ keyring = { version = "3.6.2", features = [
 ] }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sha2.workspace = true
 thiserror = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }
