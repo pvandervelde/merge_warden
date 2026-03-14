@@ -202,6 +202,13 @@ impl IntegrationTestEnvironment {
     /// }
     /// ```
     pub async fn setup() -> TestResult<Self> {
+        // Install a default TLS crypto provider for rustls.  With both reqwest v0.12
+        // (which enables the `ring` rustls backend) and reqwest v0.13 (which enables
+        // `aws-lc-rs`) present in the dependency tree, rustls v0.23 cannot determine
+        // the provider automatically and panics unless one is installed explicitly.
+        // The error is ignored when another task already installed the provider.
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+
         // Load configuration from environment
         let config = TestConfig::from_environment()?;
 

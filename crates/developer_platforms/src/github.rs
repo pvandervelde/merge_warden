@@ -1,8 +1,9 @@
 use async_trait::async_trait;
 use base64::Engine;
-use jsonwebtoken::EncodingKey;
-use octocrab::Octocrab;
-use serde::{Deserialize, Serialize};
+use github_bot_sdk::{
+    client::{CreateCommentRequest, InstallationClient},
+    error::ApiError,
+};
 use serde_json::json;
 use tracing::{debug, error, info, instrument, warn};
 
@@ -16,481 +17,252 @@ use crate::{
 #[path = "github_tests.rs"]
 mod tests;
 
-#[derive(Debug, Serialize, Deserialize)]
-/// JWT claims structure for GitHub App authentication.
+/// Maps a `github_bot_sdk` [`ApiError`] to the crate-local [`Error`] type.
 ///
-/// This struct represents the claims that are included in a JSON Web Token (JWT)
-/// when authenticating as a GitHub App. The JWT is used to obtain installation
-/// access tokens from GitHub's API.
-///
-/// # JWT Authentication Flow
-///
-/// 1. Create a JWT with these claims signed by the app's private key
-/// 2. Use the JWT to authenticate with GitHub's API
-/// 3. Exchange the JWT for an installation access token
-/// 4. Use the installation token for API operations
-struct JWTClaims {
-    /// Issued at timestamp (Unix timestamp in seconds).
-    ///
-    /// This field indicates when the JWT was created. GitHub requires
-    /// this to be no more than 60 seconds in the past.
-    iat: u64,
-
-    /// Expiration timestamp (Unix timestamp in seconds).
-    ///
-    /// This field indicates when the JWT expires. GitHub requires
-    /// JWTs to expire within 10 minutes of the issued at time.
-    exp: u64,
-
-    /// Issuer - the GitHub App ID.
-    ///
-    /// This field contains the numeric ID of the GitHub App that
-    /// is making the authentication request. This can be found
-    /// in the app's settings page on GitHub.
-    iss: u64,
-}
-
-/// Authenticates with GitHub using an installation access token for a specific app installation.
-///
-/// This function retrieves an access token for a GitHub App installation and creates a new
-/// `Octocrab` client authenticated with that token. It is useful for performing API operations
-/// on behalf of a GitHub App installation.
-///
-/// # Arguments
-///
-/// * `octocrab` - An existing `Octocrab` client instance.
-/// * `installation_id` - The ID of the GitHub App installation.
-/// * `repository_owner` - The owner of the repository associated with the installation.
-/// * `source_repository` - The name of the repository associated with the installation.
-///
-/// # Returns
-///
-/// A `Result` containing a new `Octocrab` client authenticated with the installation access token,
-/// or an `Error` if the operation fails.
-///
-/// # Errors
-///
-/// This function returns an `Error` in the following cases:
-/// - If the app installation cannot be found.
-/// - If the access token cannot be created.
-/// - If the new `Octocrab` client cannot be built.
-///
-/// # Example
-///
-/// ```rust,no_run
-/// use anyhow::Result;
-/// use octocrab::Octocrab;
-/// use merge_warden_developer_platforms::github::authenticate_with_access_token;
-///
-/// #[tokio::main]
-/// async fn main() -> Result<()> {
-///     let octocrab = Octocrab::builder().build().unwrap();
-///     let installation_id = 12345678; // Replace with your installation ID
-///     let repository_owner = "example-owner";
-///     let source_repository = "example-repo";
-///
-///     let authenticated_client = authenticate_with_access_token(
-///         &octocrab,
-///         installation_id,
-///         repository_owner,
-///         source_repository,
-///     )
-///     .await?;
-///
-///     // Use `authenticated_client` to perform API operations
-///     Ok(())
-/// }
-/// ```
-#[instrument]
-pub async fn authenticate_with_access_token(
-    octocrab: &Octocrab,
-    installation_id: u64,
-    repository_owner: &str,
-    source_repository: &str,
-) -> Result<Octocrab, Error> {
-    debug!(
-        repository_owner = repository_owner,
-        repository = source_repository,
-        installation_id,
-        "Finding installation"
-    );
-
-    let (api_with_token, _) = octocrab
-        .installation_and_token(installation_id.into())
-        .await
-        .map_err(|_| {
-            error!(
-                repository_owner = repository_owner,
-                repository = source_repository,
-                installation_id,
-                "Failed to create a token for the installation",
-            );
-
-            Error::InvalidResponse
-        })?;
-
-    info!(
-        repository_owner = repository_owner,
-        repository = source_repository,
-        installation_id,
-        "Created access token for installation",
-    );
-
-    Ok(api_with_token)
-}
-
-/// Creates an `Octocrab` client authenticated as a GitHub App using a JWT token.
-///
-/// This function generates a JSON Web Token (JWT) for the specified GitHub App ID and private key,
-/// and uses it to create an authenticated `Octocrab` client. The client can then be used to perform
-/// API operations on behalf of the GitHub App.
-///
-/// # Arguments
-///
-/// * `app_id` - The ID of the GitHub App.
-/// * `private_key` - The private key associated with the GitHub App, in PEM format.
-///
-/// # Returns
-///
-/// A `Result` containing an authenticated `Octocrab` client, or an `Error` if the operation fails.
-///
-/// # Errors
-///
-/// This function returns an `Error` in the following cases:
-/// - If the private key cannot be parsed.
-/// - If the JWT token cannot be created.
-/// - If the `Octocrab` client cannot be built.
-///
-/// # Example
-///
-/// ```rust,no_run
-/// use anyhow::Result;
-/// use merge_warden_developer_platforms::github::create_app_client;
-///
-/// #[tokio::main]
-/// async fn main() -> Result<()> {
-///     let app_id = 123456; // Replace with your GitHub App ID
-///     let private_key = r#"
-/// -----BEGIN RSA PRIVATE KEY-----
-/// ...
-/// -----END RSA PRIVATE KEY-----
-/// "#; // Replace with your GitHub App private key
-///
-///     let client = create_app_client(app_id, private_key).await?;
-///
-///     // Use `client` to perform API operations
-///     Ok(())
-/// }
-/// ```
-#[instrument(skip(private_key))]
-pub async fn create_app_client(app_id: u64, private_key: &str) -> Result<(Octocrab, User), Error> {
-    //let app_id_struct = AppId::from(app_id);
-    let key = EncodingKey::from_rsa_pem(private_key.as_bytes()).map_err(|e| {
-        Error::AuthError(
-            format!("Failed to translate the private key. Error was: {}", e).to_string(),
-        )
-    })?;
-
-    let octocrab = Octocrab::builder()
-        .app(app_id.into(), key)
-        .build()
-        .map_err(|_| {
-            Error::AuthError("Failed to get a personal token for the app install.".to_string())
-        })?;
-
-    info!("Created access token for the GitHub app",);
-
-    let author = match octocrab.current().app().await {
-        Ok(a) => a,
-        Err(e) => {
-            log_octocrab_error(
-                "Failed to retreive App information for the currently authenticated app",
-                e,
-            );
-            return Err(Error::InvalidResponse);
-        }
-    };
-
-    let user = User {
-        id: author.id.into_inner(),
-        login: author.name,
-    };
-
-    Ok((octocrab, user))
-}
-
-/// Creates a GitHub client authenticated with a personal access token.
-///
-/// # Arguments
-///
-/// * `token` - The personal access token for authentication
-///
-/// # Returns
-///
-/// A `Result` containing the authenticated GitHub client
-///
-/// # Errors
-///
-/// Returns `Error::ApiError` if the client cannot be created
-#[instrument(skip(token))]
-pub fn create_token_client(token: &str) -> Result<Octocrab, Error> {
-    Octocrab::builder()
-        .personal_token(token.to_string())
-        .build()
-        .map_err(|_| Error::ApiError())
-}
-
-/// Logs detailed error information from Octocrab GitHub API errors.
-///
-/// This private function takes an Octocrab error and logs it with appropriate
-/// detail based on the error type. It extracts specific information like
-/// error messages, backtraces, and error context to provide comprehensive
-/// debugging information.
-///
-/// # Arguments
-///
-/// * `message` - A contextual message describing what operation failed
-/// * `e` - The Octocrab error to log
-///
-/// # Error Types Handled
-///
-/// - `GitHub` - GitHub API errors with detailed error messages
-/// - `UriParse` - URI parsing failures
-/// - `Uri` - URI construction failures
-/// - `InvalidHeaderValue` - HTTP header validation errors
-/// - `InvalidUtf8` - UTF-8 encoding errors
-/// - Other - Generic error logging for unmatched types
-fn log_octocrab_error(message: &str, e: octocrab::Error) {
+/// Provides a consistent, single-purpose mapping between the SDK error hierarchy and
+/// the error types used throughout this crate. Auth errors, rate limit signals, and
+/// token failures are mapped to their semantic equivalents; all other SDK errors fall
+/// back to the generic [`Error::ApiError`].
+fn map_api_error(e: ApiError) -> Error {
     match e {
-        octocrab::Error::GitHub { source, backtrace } => {
-            let err = *source;
-            error!(
-                error_message = err.message,
-                backtrace = backtrace.to_string(),
-                "{}. Received an error from GitHub",
-                message
-            )
+        ApiError::AuthenticationFailed | ApiError::AuthorizationFailed => {
+            Error::AuthError(e.to_string())
         }
-        octocrab::Error::UriParse { source, backtrace } => error!(
-            error_message = source.to_string(),
-            backtrace = backtrace.to_string(),
-            "{}. Failed to parse URI.",
-            message
-        ),
-
-        octocrab::Error::Uri { source, backtrace } => error!(
-            error_message = source.to_string(),
-            backtrace = backtrace.to_string(),
-            "{}, Failed to parse URI.",
-            message
-        ),
-        octocrab::Error::InvalidHeaderValue { source, backtrace } => error!(
-            error_message = source.to_string(),
-            backtrace = backtrace.to_string(),
-            "{}. One of the header values was invalid.",
-            message
-        ),
-        octocrab::Error::InvalidUtf8 { source, backtrace } => error!(
-            error_message = source.to_string(),
-            backtrace = backtrace.to_string(),
-            "{}. The message wasn't valid UTF-8.",
-            message,
-        ),
-        _ => error!(error_message = e.to_string(), message),
-    };
+        ApiError::RateLimitExceeded { .. } | ApiError::SecondaryRateLimit => {
+            Error::RateLimitExceeded
+        }
+        // 429 after retry exhaustion: execute_with_retry converts to HttpError { status: 429 }
+        ApiError::HttpError { status: 429, .. } => Error::RateLimitExceeded,
+        ApiError::NotFound => Error::InvalidResponse,
+        ApiError::TokenGenerationFailed { message } | ApiError::TokenExchangeFailed { message } => {
+            Error::TokenRefreshFailed(0, message)
+        }
+        _ => Error::ApiError(),
+    }
 }
 
-/// GitHub implementation of the developer platform traits.
+/// GitHub implementation of developer platform traits.
 ///
-/// This struct provides GitHub-specific implementations for interacting with
-/// pull requests, comments, labels, and other GitHub features.
-#[derive(Debug, Default)]
+/// Wraps an installation-scoped [`InstallationClient`] to expose it through the
+/// [`PullRequestProvider`] and [`ConfigFetcher`] interfaces.  All operations are
+/// performed within the permission context of the bound GitHub App installation.
+///
+/// # Construction
+///
+/// Obtain an [`InstallationClient`] from
+/// [`github_bot_sdk::client::GitHubClient::installation_by_id`] and pass it here:
+///
+/// ```rust,no_run
+/// use github_bot_sdk::{client::{GitHubClient, ClientConfig}, auth::InstallationId};
+/// use merge_warden_developer_platforms::github::GitHubProvider;
+///
+/// # async fn example(github_client: GitHubClient) -> Result<(), Box<dyn std::error::Error>> {
+/// let installation_client = github_client
+///     .installation_by_id(InstallationId::new(12345))
+///     .await?;
+/// let provider = GitHubProvider::new(installation_client);
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Debug)]
 pub struct GitHubProvider {
-    /// The authenticated GitHub client
-    client: Octocrab,
+    /// Installation-scoped GitHub API client.
+    client: InstallationClient,
 }
 
 impl GitHubProvider {
-    /// Fetches the default branch name for a repository.
+    /// Creates a `GitHubProvider` from an installation-scoped client.
     ///
     /// # Arguments
     ///
-    /// * `repo_owner` - The owner of the repository
-    /// * `repo_name` - The name of the repository
+    /// * `client` - An [`InstallationClient`] authenticated for a specific GitHub App installation.
+    pub fn new(client: InstallationClient) -> Self {
+        Self { client }
+    }
+
+    /// Fetches the default branch name for a repository.
     ///
-    /// # Returns
-    ///
-    /// A `Result` containing the default branch name
+    /// Uses a raw `GET /repos/{owner}/{repo}` request and extracts the
+    /// `default_branch` field from the JSON response.
     ///
     /// # Errors
     ///
-    /// Returns an error if the repository cannot be found or accessed
-    pub async fn fetch_default_branch(
+    /// Returns [`Error::InvalidResponse`] if the repository cannot be reached or
+    /// the response cannot be parsed.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name))]
+    async fn fetch_default_branch(
         &self,
         repo_owner: &str,
         repo_name: &str,
-    ) -> Result<String, crate::errors::Error> {
-        let repo = match self.client.repos(repo_owner, repo_name).get().await {
+    ) -> Result<String, Error> {
+        let path = format!("/repos/{}/{}", repo_owner, repo_name);
+
+        let response = match self.client.get(&path).await {
             Ok(r) => r,
             Err(e) => {
-                log_octocrab_error("Failed to get repository information", e);
+                error!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    error = %e,
+                    "Failed to get repository info"
+                );
+                return Err(map_api_error(e));
+            }
+        };
+
+        if !response.status().is_success() {
+            error!(
+                owner = repo_owner,
+                repo = repo_name,
+                status = response.status().as_u16(),
+                "Non-success status fetching repository"
+            );
+            return Err(Error::InvalidResponse);
+        }
+
+        let json: serde_json::Value = response.json().await.map_err(|_| Error::InvalidResponse)?;
+
+        let branch = match json["default_branch"].as_str() {
+            Some(b) => b.to_string(),
+            None => {
+                error!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    "GitHub API response is missing 'default_branch' field"
+                );
                 return Err(Error::InvalidResponse);
             }
         };
-        let branch = repo.default_branch.unwrap_or("main".to_string());
 
+        debug!(owner = repo_owner, repo = repo_name, branch = %branch, "Resolved default branch");
         Ok(branch)
     }
 
-    /// Fetches the content of a file from a repository.
+    /// Fetches the raw string content of a file from a repository at a given ref.
     ///
-    /// This method retrieves the content of a specific file from a GitHub repository
-    /// at the given path and reference (branch/commit/tag). The content is automatically
-    /// decoded from GitHub's base64 encoding.
+    /// Uses `GET /repos/{owner}/{repo}/contents/{path}?ref={reference}`.  GitHub
+    /// returns file contents as base64-encoded strings, which this function decodes
+    /// automatically.
     ///
-    /// # Arguments
-    ///
-    /// * `repo_owner` - The owner of the repository
-    /// * `repo_name` - The name of the repository
-    /// * `path` - The path to the file within the repository
-    /// * `reference` - Optional branch, commit SHA, or tag (defaults to "main")
-    ///
-    /// # Returns
-    ///
-    /// * `Ok(Some(content))` - If the file exists and was successfully retrieved
-    /// * `Ok(None)` - If the file does not exist (404 error)
-    /// * `Err(Error)` - If there was an API error or decoding failure
+    /// Returns `Ok(None)` when the file does not exist (HTTP 404).
     ///
     /// # Errors
     ///
-    /// This function will return an error if:
-    /// - The repository cannot be accessed
-    /// - The file content cannot be decoded from base64
-    /// - The decoded content is not valid UTF-8
-    /// - There's a network or API error (other than 404)
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use merge_warden_developer_platforms::github::GitHubProvider;
-    /// use octocrab::Octocrab;
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let client = Octocrab::builder().personal_token("token".to_string()).build()?;
-    ///     let provider = GitHubProvider::new(client);
-    ///
-    ///     // Fetch README from main branch
-    ///     if let Some(content) = provider.fetch_file_content(
-    ///         "owner",
-    ///         "repo",
-    ///         "README.md",
-    ///         None
-    ///     ).await? {
-    ///         println!("README content: {}", content);
-    ///     }
-    ///
-    ///     // Fetch specific file from a branch
-    ///     if let Some(content) = provider.fetch_file_content(
-    ///         "owner",
-    ///         "repo",
-    ///         "src/main.rs",
-    ///         Some("develop")
-    ///     ).await? {
-    ///         println!("Source code: {}", content);
-    ///     }
-    ///
-    ///     Ok(())
-    /// }
-    /// ```
-    pub async fn fetch_file_content(
+    /// Returns an error for any API failure other than 404, or if the base64
+    /// content cannot be decoded to valid UTF-8.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, path, reference))]
+    async fn fetch_file_content(
         &self,
         repo_owner: &str,
         repo_name: &str,
         path: &str,
-        reference: Option<&str>,
-    ) -> Result<Option<String>, crate::errors::Error> {
-        let content_result = self
-            .client
-            .repos(repo_owner, repo_name)
-            .get_content()
-            .path(path)
-            .r#ref(reference.unwrap_or("main"))
-            .send()
-            .await;
+        reference: &str,
+    ) -> Result<Option<String>, Error> {
+        // Percent-encode path segments so that branch names or file paths
+        // containing characters such as `#`, `+`, or spaces produce a valid URL.
+        // The `path` component uses standard percent-encoding; the `ref` query
+        // parameter value uses form-encoded rules (spaces → `%20`, not `+`).
+        let encoded_path = path
+            .split('/')
+            .map(|s| urlencoding::encode(s).into_owned())
+            .collect::<Vec<_>>()
+            .join("/");
+        let encoded_ref = urlencoding::encode(reference);
+        let url_path = format!(
+            "/repos/{}/{}/contents/{}?ref={}",
+            repo_owner, repo_name, encoded_path, encoded_ref
+        );
 
-        match content_result {
-            Ok(response) => {
-                if let Some(file) = response.items.into_iter().next() {
-                    if let Some(content) = file.content {
-                        // GitHub API returns base64 encoded content with newlines
-                        let decoded = base64::engine::general_purpose::STANDARD
-                            .decode(content.replace('\n', ""))
-                            .map_err(|_| crate::errors::Error::InvalidResponse)?;
-                        let content_str = String::from_utf8(decoded)
-                            .map_err(|_| crate::errors::Error::InvalidResponse)?;
-                        Ok(Some(content_str))
-                    } else {
-                        Ok(None)
-                    }
-                } else {
-                    Ok(None)
-                }
+        let response = match self.client.get(&url_path).await {
+            Ok(r) => r,
+            Err(ApiError::NotFound) => {
+                debug!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    path,
+                    "File not found (404)"
+                );
+                return Ok(None);
             }
             Err(e) => {
-                // If 404, treat as not found
-                if e.to_string().contains("404") {
-                    Ok(None)
-                } else {
-                    Err(crate::errors::Error::ApiError())
-                }
+                error!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    path,
+                    error = %e,
+                    "Error fetching file content"
+                );
+                return Err(map_api_error(e));
             }
-        }
-    }
+        };
 
-    /// Creates a new GitHubProvider with the given authenticated client.
-    ///
-    /// # Arguments
-    ///
-    /// * `client` - An authenticated Octocrab client for GitHub API access
-    ///
-    /// # Returns
-    ///
-    /// A new GitHubProvider instance
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use merge_warden_developer_platforms::github::GitHubProvider;
-    /// use octocrab::Octocrab;
-    ///
-    /// let client = Octocrab::builder().personal_token("token".to_string()).build().unwrap();
-    /// let provider = GitHubProvider::new(client);
-    /// ```
-    pub fn new(client: Octocrab) -> Self {
-        Self { client }
+        if !response.status().is_success() {
+            // 404 is already handled above via ApiError::NotFound → Ok(None).
+            // Other non-success codes (403 permission denied, 500 server error, etc.)
+            // are not "file not found" and should not be silently treated as such.
+            return Err(Error::InvalidResponse);
+        }
+
+        let json: serde_json::Value = response.json().await.map_err(|_| Error::InvalidResponse)?;
+
+        let content = match json["content"].as_str() {
+            Some(c) => c.to_string(),
+            None => return Ok(None),
+        };
+
+        // GitHub encodes file content as base64 with embedded newlines — strip them.
+        let cleaned = content.replace('\n', "").replace(' ', "");
+        let decoded = base64::engine::general_purpose::STANDARD
+            .decode(&cleaned)
+            .map_err(|e| {
+                error!(error = %e, "Failed to decode base64 file content");
+                Error::InvalidResponse
+            })?;
+
+        let text = String::from_utf8(decoded).map_err(|e| {
+            error!(error = %e, "File content is not valid UTF-8");
+            Error::InvalidResponse
+        })?;
+
+        debug!(
+            owner = repo_owner,
+            repo = repo_name,
+            path,
+            "Successfully fetched file content"
+        );
+        Ok(Some(text))
     }
 }
 
 #[async_trait]
 impl ConfigFetcher for GitHubProvider {
-    #[instrument]
+    /// Fetches the content of a configuration file from the repository's default branch.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner` — Repository owner.
+    /// * `repo_name` — Repository name.
+    /// * `path` — Path to the configuration file.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(Some(content))` if found, `Ok(None)` if not found, `Err` on failure.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, path))]
     async fn fetch_config(
         &self,
         repo_owner: &str,
         repo_name: &str,
         path: &str,
     ) -> Result<Option<String>, Error> {
-        let default_branch_name = self.fetch_default_branch(repo_owner, repo_name).await?;
-
+        let default_branch = self.fetch_default_branch(repo_owner, repo_name).await?;
         info!(
-            repository_owner = repo_owner,
-            repository = repo_name,
-            path = path,
-            branch = default_branch_name,
-            "Fetching configuration file from default branch in repository ...",
+            owner = repo_owner,
+            repo = repo_name,
+            path,
+            branch = %default_branch,
+            "Fetching configuration file from default branch"
         );
-        self.fetch_file_content(repo_owner, repo_name, path, Some(&default_branch_name))
+        self.fetch_file_content(repo_owner, repo_name, path, &default_branch)
             .await
     }
 }
@@ -499,8 +271,8 @@ impl ConfigFetcher for GitHubProvider {
 impl PullRequestProvider for GitHubProvider {
     /// Adds a comment to a pull request.
     ///
-    /// This method posts a new comment to the specified pull request using
-    /// GitHub's Issues API (since PR comments use the same endpoint as issue comments).
+    /// Posts a new comment using GitHub's Issues API (PR comments share the same
+    /// endpoint as issue comments).
     ///
     /// # Arguments
     ///
@@ -511,38 +283,12 @@ impl PullRequestProvider for GitHubProvider {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if the comment was successfully added, or an `Error` if the operation failed.
+    /// Returns `Ok(())` if the comment was successfully added.
     ///
     /// # Errors
     ///
-    /// This function will return an error if:
-    /// - The repository or pull request doesn't exist
-    /// - The authenticated user lacks permission to comment
-    /// - There's a network or API error
-    /// - The comment content violates GitHub's content policies
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use merge_warden_developer_platforms::{PullRequestProvider, github::GitHubProvider};
-    /// use octocrab::Octocrab;
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let client = Octocrab::builder().personal_token("token".to_string()).build()?;
-    ///     let provider = GitHubProvider::new(client);
-    ///
-    ///     provider.add_comment(
-    ///         "owner",
-    ///         "repo",
-    ///         123,
-    ///         "Thanks for the contribution! Please update the PR title."
-    ///     ).await?;
-    ///
-    ///     Ok(())
-    /// }
-    /// ```
-    #[instrument]
+    /// Returns [`Error::FailedToUpdatePullRequest`] if the API call fails for any reason.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number))]
     async fn add_comment(
         &self,
         repo_owner: &str,
@@ -550,64 +296,48 @@ impl PullRequestProvider for GitHubProvider {
         pr_number: u64,
         comment: &str,
     ) -> Result<(), Error> {
-        match self
-            .client
-            .issues(repo_owner, repo_name)
-            .create_comment(pr_number, comment)
+        self.client
+            .create_issue_comment(
+                repo_owner,
+                repo_name,
+                pr_number,
+                CreateCommentRequest {
+                    body: comment.to_string(),
+                },
+            )
             .await
-        {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                log_octocrab_error("Failed to add pull request comment", e);
-                return Err(Error::FailedToUpdatePullRequest(
-                    "Failed to add comment".to_string(),
-                ));
-            }
-        }
+            .map(|_| ())
+            .map_err(|e| {
+                warn!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr_number,
+                    error = %e,
+                    "Failed to add pull request comment"
+                );
+                Error::FailedToUpdatePullRequest("Failed to add comment".to_string())
+            })
     }
 
     /// Adds multiple labels to a pull request.
     ///
-    /// This method adds the specified labels to a pull request. If any of the labels
-    /// don't exist in the repository, they will be ignored by GitHub's API.
-    /// Existing labels on the PR are preserved.
+    /// Adds the specified labels to a pull request. Existing labels on the PR are preserved.
     ///
     /// # Arguments
     ///
     /// * `repo_owner` - The owner of the repository
     /// * `repo_name` - The name of the repository
     /// * `pr_number` - The pull request number
-    /// * `labels` - Array of label names to add
+    /// * `labels` - Slice of label names to add
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if the labels were successfully added, or an `Error` if the operation failed.
+    /// Returns `Ok(())` if the labels were successfully added.
     ///
     /// # Errors
     ///
-    /// This function will return an error if:
-    /// - The repository or pull request doesn't exist
-    /// - The authenticated user lacks permission to modify labels
-    /// - There's a network or API error
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use merge_warden_developer_platforms::{PullRequestProvider, github::GitHubProvider};
-    /// use octocrab::Octocrab;
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let client = Octocrab::builder().personal_token("token".to_string()).build()?;
-    ///     let provider = GitHubProvider::new(client);
-    ///
-    ///     let labels = vec!["bug".to_string(), "high-priority".to_string()];
-    ///     provider.add_labels("owner", "repo", 123, &labels).await?;
-    ///
-    ///     Ok(())
-    /// }
-    /// ```
-    #[instrument]
+    /// Returns [`Error::FailedToUpdatePullRequest`] if the API call fails.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number))]
     async fn add_labels(
         &self,
         repo_owner: &str,
@@ -615,26 +345,25 @@ impl PullRequestProvider for GitHubProvider {
         pr_number: u64,
         labels: &[String],
     ) -> Result<(), Error> {
-        match self
-            .client
-            .issues(repo_owner, repo_name)
-            .add_labels(pr_number, labels)
+        self.client
+            .add_labels_to_pull_request(repo_owner, repo_name, pr_number, labels.to_vec())
             .await
-        {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                log_octocrab_error("Failed to add new labels", e);
-                return Err(Error::FailedToUpdatePullRequest(
-                    "Failed to add labels".to_string(),
-                ));
-            }
-        }
+            .map(|_| ())
+            .map_err(|e| {
+                warn!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr_number,
+                    error = %e,
+                    "Failed to add labels to pull request"
+                );
+                Error::FailedToUpdatePullRequest("Failed to add labels".to_string())
+            })
     }
 
     /// Deletes a specific comment from a pull request.
     ///
-    /// This method removes a comment from a pull request using the comment's unique ID.
-    /// Only the comment author or users with sufficient permissions can delete comments.
+    /// Removes a comment using its unique ID.
     ///
     /// # Arguments
     ///
@@ -644,33 +373,12 @@ impl PullRequestProvider for GitHubProvider {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if the comment was successfully deleted, or an `Error` if the operation failed.
+    /// Returns `Ok(())` if the comment was successfully deleted.
     ///
     /// # Errors
     ///
-    /// This function will return an error if:
-    /// - The comment doesn't exist
-    /// - The authenticated user lacks permission to delete the comment
-    /// - There's a network or API error
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use merge_warden_developer_platforms::{PullRequestProvider, github::GitHubProvider};
-    /// use octocrab::Octocrab;
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let client = Octocrab::builder().personal_token("token".to_string()).build()?;
-    ///     let provider = GitHubProvider::new(client);
-    ///
-    ///     // Delete comment with ID 456789
-    ///     provider.delete_comment("owner", "repo", 456789).await?;
-    ///
-    ///     Ok(())
-    /// }
-    /// ```
-    #[instrument]
+    /// Returns [`Error::FailedToUpdatePullRequest`] if the API call fails.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, comment = comment_id))]
     async fn delete_comment(
         &self,
         repo_owner: &str,
@@ -678,15 +386,15 @@ impl PullRequestProvider for GitHubProvider {
         comment_id: u64,
     ) -> Result<(), Error> {
         self.client
-            .issues(repo_owner, repo_name)
-            .delete_comment(comment_id.into())
+            .delete_issue_comment(repo_owner, repo_name, comment_id)
             .await
             .map_err(|e| {
                 warn!(
-                    repository_owner = repo_owner,
-                    repository = repo_name,
+                    owner = repo_owner,
+                    repo = repo_name,
                     comment = comment_id,
-                    "Failed to delete pr comment",
+                    error = %e,
+                    "Failed to delete pull request comment"
                 );
                 Error::FailedToUpdatePullRequest(format!("Failed to delete comment: {}", e))
             })
@@ -694,8 +402,8 @@ impl PullRequestProvider for GitHubProvider {
 
     /// Retrieves detailed information about a specific pull request.
     ///
-    /// This method fetches comprehensive information about a pull request including
-    /// its title, description, draft status, and author information.
+    /// Fetches comprehensive PR information including title, description, draft status,
+    /// and author information.
     ///
     /// # Arguments
     ///
@@ -705,67 +413,50 @@ impl PullRequestProvider for GitHubProvider {
     ///
     /// # Returns
     ///
-    /// Returns a `PullRequest` struct containing the PR information, or an `Error` if the operation failed.
+    /// Returns a [`PullRequest`] struct containing the PR information.
     ///
     /// # Errors
     ///
-    /// This function will return an error if:
-    /// - The repository or pull request doesn't exist
-    /// - The authenticated user lacks permission to access the repository
-    /// - There's a network or API error
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use merge_warden_developer_platforms::{PullRequestProvider, github::GitHubProvider};
-    /// use octocrab::Octocrab;
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let client = Octocrab::builder().personal_token("token".to_string()).build()?;
-    ///     let provider = GitHubProvider::new(client);
-    ///
-    ///     let pr = provider.get_pull_request("owner", "repo", 123).await?;
-    ///     println!("PR Title: {}", pr.title);
-    ///     println!("Is Draft: {}", pr.draft);
-    ///
-    ///     Ok(())
-    /// }
-    /// ```
-    #[instrument]
+    /// Returns an error mapping through [`map_api_error`] if the API call fails
+    /// (including `NotFound` → `InvalidResponse`, rate limit and auth errors).
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number))]
     async fn get_pull_request(
         &self,
         repo_owner: &str,
         repo_name: &str,
         pr_number: u64,
     ) -> Result<PullRequest, Error> {
-        match self
+        let pr = self
             .client
-            .pulls(repo_owner, repo_name)
-            .get(pr_number)
+            .get_pull_request(repo_owner, repo_name, pr_number)
             .await
-        {
-            Ok(pr) => Ok(PullRequest {
-                number: pr.number,
-                title: pr.title.unwrap_or(String::new()),
-                draft: pr.draft.unwrap_or_default(),
-                body: pr.body,
-                author: pr.user.map(|user| User {
-                    id: user.id.0,
-                    login: user.login,
-                }),
+            .map_err(|e| {
+                error!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr_number,
+                    error = %e,
+                    "Failed to get pull request"
+                );
+                map_api_error(e)
+            })?;
+
+        Ok(PullRequest {
+            number: pr.number,
+            title: pr.title,
+            draft: pr.draft,
+            body: pr.body,
+            author: Some(User {
+                id: pr.user.id,
+                login: pr.user.login,
             }),
-            Err(e) => {
-                log_octocrab_error("Failed to get pull request information", e);
-                return Err(Error::InvalidResponse);
-            }
-        }
+        })
     }
 
     /// Retrieves the list of files changed in a pull request.
     ///
-    /// This method fetches information about all files that were modified, added, or deleted
-    /// in the pull request, including line count statistics and change status for each file.
+    /// Uses a raw `GET /repos/{owner}/{repo}/pulls/{number}/files` request and
+    /// parses the JSON array response.
     ///
     /// # Arguments
     ///
@@ -775,103 +466,74 @@ impl PullRequestProvider for GitHubProvider {
     ///
     /// # Returns
     ///
-    /// Returns a vector of `PullRequestFile` structs containing file change information,
-    /// or an `Error` if the operation failed.
+    /// Returns a vector of [`PullRequestFile`] structs.
     ///
     /// # Errors
     ///
-    /// This function will return an error if:
-    /// - The repository or pull request doesn't exist
-    /// - The authenticated user lacks permission to access the repository
-    /// - There's a network or API error
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use merge_warden_developer_platforms::{PullRequestProvider, github::GitHubProvider};
-    /// use octocrab::Octocrab;
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let client = Octocrab::builder().personal_token("token".to_string()).build()?;
-    ///     let provider = GitHubProvider::new(client);
-    ///
-    ///     let files = provider.get_pull_request_files("owner", "repo", 123).await?;
-    ///     for file in files {
-    ///         println!("File: {} (+{} -{} lines)", file.filename, file.additions, file.deletions);
-    ///     }
-    ///
-    ///     Ok(())
-    /// }
-    /// ```
-    #[instrument]
+    /// Returns [`Error::InvalidResponse`] if the API call fails or the response
+    /// cannot be parsed.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number))]
     async fn get_pull_request_files(
         &self,
         repo_owner: &str,
         repo_name: &str,
         pr_number: u64,
     ) -> Result<Vec<PullRequestFile>, Error> {
-        match self
-            .client
-            .pulls(repo_owner, repo_name)
-            .list_files(pr_number)
-            .await
-        {
-            Ok(response) => {
-                let files: Vec<PullRequestFile> = response
-                    .items
-                    .into_iter()
-                    .map(|file| PullRequestFile {
-                        filename: file.filename,
-                        additions: file.additions as u32,
-                        deletions: file.deletions as u32,
-                        changes: file.changes as u32,
-                        status: match file.status {
-                            octocrab::models::repos::DiffEntryStatus::Added => "added".to_string(),
-                            octocrab::models::repos::DiffEntryStatus::Removed => {
-                                "removed".to_string()
-                            }
-                            octocrab::models::repos::DiffEntryStatus::Modified => {
-                                "modified".to_string()
-                            }
-                            octocrab::models::repos::DiffEntryStatus::Renamed => {
-                                "renamed".to_string()
-                            }
-                            octocrab::models::repos::DiffEntryStatus::Copied => {
-                                "copied".to_string()
-                            }
-                            octocrab::models::repos::DiffEntryStatus::Changed => {
-                                "changed".to_string()
-                            }
-                            octocrab::models::repos::DiffEntryStatus::Unchanged => {
-                                "unchanged".to_string()
-                            }
-                            _ => "unknown".to_string(),
-                        },
-                    })
-                    .collect();
+        let path = format!(
+            "/repos/{}/{}/pulls/{}/files",
+            repo_owner, repo_name, pr_number
+        );
 
-                debug!(
-                    "Retrieved {} file(s) for PR #{} in {}/{}",
-                    files.len(),
-                    pr_number,
-                    repo_owner,
-                    repo_name
-                );
+        let response = self.client.get(&path).await.map_err(|e| {
+            error!(
+                owner = repo_owner,
+                repo = repo_name,
+                pr = pr_number,
+                error = %e,
+                "Failed to get pull request files"
+            );
+            map_api_error(e)
+        })?;
 
-                Ok(files)
-            }
-            Err(e) => {
-                log_octocrab_error("Failed to get pull request files", e);
-                Err(Error::InvalidResponse)
-            }
+        if !response.status().is_success() {
+            error!(
+                owner = repo_owner,
+                repo = repo_name,
+                pr = pr_number,
+                status = response.status().as_u16(),
+                "Non-success status fetching pull request files"
+            );
+            return Err(Error::InvalidResponse);
         }
+
+        let items: Vec<serde_json::Value> =
+            response.json().await.map_err(|_| Error::InvalidResponse)?;
+
+        let files: Vec<PullRequestFile> = items
+            .into_iter()
+            .map(|v| PullRequestFile {
+                filename: v["filename"].as_str().unwrap_or_default().to_string(),
+                additions: v["additions"].as_u64().unwrap_or_default() as u32,
+                deletions: v["deletions"].as_u64().unwrap_or_default() as u32,
+                changes: v["changes"].as_u64().unwrap_or_default() as u32,
+                status: v["status"].as_str().unwrap_or_default().to_string(),
+            })
+            .collect();
+
+        debug!(
+            owner = repo_owner,
+            repo = repo_name,
+            pr = pr_number,
+            count = files.len(),
+            "Fetched pull request files"
+        );
+
+        Ok(files)
     }
 
     /// Lists all labels currently applied to a pull request.
     ///
-    /// This method retrieves all labels that are currently attached to the specified
-    /// pull request, including both labels added automatically and those added manually.
+    /// Fetches the pull request and extracts its `labels` field.
     ///
     /// # Arguments
     ///
@@ -881,159 +543,83 @@ impl PullRequestProvider for GitHubProvider {
     ///
     /// # Returns
     ///
-    /// Returns a vector of `Label` structs containing the applied labels,
-    /// or an `Error` if the operation failed.
+    /// Returns a vector of [`Label`] structs currently applied to the PR.
     ///
     /// # Errors
     ///
-    /// This function will return an error if:
-    /// - The repository or pull request doesn't exist
-    /// - The authenticated user lacks permission to access the repository
-    /// - There's a network or API error
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use merge_warden_developer_platforms::{PullRequestProvider, github::GitHubProvider};
-    /// use octocrab::Octocrab;
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let client = Octocrab::builder().personal_token("token".to_string()).build()?;
-    ///     let provider = GitHubProvider::new(client);
-    ///
-    ///     let labels = provider.list_applied_labels("owner", "repo", 123).await?;
-    ///     for label in labels {
-    ///         println!("Applied label: {}", label.name);
-    ///     }
-    ///
-    ///     Ok(())
-    /// }
-    /// ```
-    #[instrument]
+    /// Returns an error (via [`map_api_error`]) if the pull request cannot be fetched.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number))]
     async fn list_applied_labels(
         &self,
         repo_owner: &str,
         repo_name: &str,
         pr_number: u64,
     ) -> Result<Vec<Label>, Error> {
-        let mut current_page = match self
+        let pr = self
             .client
-            .issues(repo_owner, repo_name)
-            .list_labels_for_issue(pr_number)
-            .send()
+            .get_pull_request(repo_owner, repo_name, pr_number)
             .await
-        {
-            Ok(p) => p,
-            Err(e) => {
-                log_octocrab_error("Failed to list all labels for pull request", e);
-                return Err(Error::InvalidResponse);
-            }
-        };
+            .map_err(|e| {
+                error!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr_number,
+                    error = %e,
+                    "Failed to get pull request for applied labels"
+                );
+                map_api_error(e)
+            })?;
 
-        let mut labels = current_page.take_items();
-        while let Ok(Some(mut new_page)) = self.client.get_page(&current_page.next).await {
-            labels.extend(new_page.take_items());
-
-            current_page = new_page;
-        }
-
-        let result = labels
+        Ok(pr
+            .labels
             .into_iter()
             .map(|l| Label {
                 name: l.name,
                 description: l.description,
             })
-            .collect();
-
-        Ok(result)
+            .collect())
     }
 
     /// Lists all labels available in the repository.
     ///
-    /// This method retrieves all labels that have been defined in the repository
-    /// and can potentially be applied to pull requests and issues.
+    /// Uses `GET /repos/{owner}/{repo}/labels` via the SDK.
     ///
     /// # Arguments
     ///
     /// * `repo_owner` - The owner of the repository
-    /// * `repo_name` - The name of the repository
+    /// * `repo_name` - The repository name
     ///
     /// # Returns
     ///
-    /// Returns a vector of `Label` structs containing all available labels,
-    /// or an `Error` if the operation failed.
+    /// Returns a vector of all [`Label`] structs defined in the repository.
     ///
     /// # Errors
     ///
-    /// This function will return an error if:
-    /// - The repository doesn't exist
-    /// - The authenticated user lacks permission to access the repository
-    /// - There's a network or API error
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use merge_warden_developer_platforms::{PullRequestProvider, github::GitHubProvider};
-    /// use octocrab::Octocrab;
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let client = Octocrab::builder().personal_token("token".to_string()).build()?;
-    ///     let provider = GitHubProvider::new(client);
-    ///
-    ///     let labels = provider.list_available_labels("owner", "repo").await?;
-    ///     for label in labels {
-    ///         println!("Available label: {} - {}", label.name,
-    ///                 label.description.unwrap_or("No description".to_string()));
-    ///     }
-    ///
-    ///     Ok(())
-    /// }
-    /// ```
-    #[instrument]
+    /// Returns an error (via [`map_api_error`]) if the API call fails.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name))]
     async fn list_available_labels(
         &self,
         repo_owner: &str,
         repo_name: &str,
     ) -> Result<Vec<Label>, Error> {
-        let mut current_page = match self
-            .client
-            .issues(repo_owner, repo_name)
-            .list_labels_for_repo()
-            .send()
+        self.client
+            .list_labels(repo_owner, repo_name)
             .await
-        {
-            Ok(p) => p,
-            Err(e) => {
-                log_octocrab_error("Failed to list all repository labels", e);
-                return Err(Error::InvalidResponse);
-            }
-        };
-
-        let mut labels = current_page.take_items();
-        while let Ok(Some(mut new_page)) = self.client.get_page(&current_page.next).await {
-            labels.extend(new_page.take_items());
-
-            current_page = new_page;
-        }
-
-        let result = labels
-            .into_iter()
-            .map(|l| Label {
-                name: l.name,
-                description: l.description,
+            .map(|labels| {
+                labels
+                    .into_iter()
+                    .map(|l| Label {
+                        name: l.name,
+                        description: l.description,
+                    })
+                    .collect()
             })
-            .collect();
-
-        Ok(result)
+            .map_err(map_api_error)
     }
 
     /// Lists all comments on a pull request.
     ///
-    /// This method retrieves all comments that have been posted on the specified
-    /// pull request, including both automated and manual comments. The comments
-    /// are returned in chronological order.
+    /// Uses `GET /repos/{owner}/{repo}/issues/{number}/comments` via the SDK.
     ///
     /// # Arguments
     ///
@@ -1043,82 +629,38 @@ impl PullRequestProvider for GitHubProvider {
     ///
     /// # Returns
     ///
-    /// Returns a vector of `Comment` structs containing all comments,
-    /// or an `Error` if the operation failed.
+    /// Returns a vector of [`Comment`] structs.
     ///
     /// # Errors
     ///
-    /// This function will return an error if:
-    /// - The repository or pull request doesn't exist
-    /// - The authenticated user lacks permission to access the repository
-    /// - There's a network or API error
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use merge_warden_developer_platforms::{PullRequestProvider, github::GitHubProvider};
-    /// use octocrab::Octocrab;
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let client = Octocrab::builder().personal_token("token".to_string()).build()?;
-    ///     let provider = GitHubProvider::new(client);
-    ///
-    ///     let comments = provider.list_comments("owner", "repo", 123).await?;
-    ///     for comment in comments {
-    ///         println!("Comment by {}: {}", comment.user.login, comment.body);
-    ///     }
-    ///
-    ///     Ok(())
-    /// }
-    /// ```
-    #[instrument]
+    /// Returns an error (via [`map_api_error`]) if the API call fails.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number))]
     async fn list_comments(
         &self,
         repo_owner: &str,
         repo_name: &str,
         pr_number: u64,
     ) -> Result<Vec<Comment>, Error> {
-        let mut current_page = match self
-            .client
-            .issues(repo_owner, repo_name)
-            .list_comments(pr_number)
-            .send()
+        self.client
+            .list_issue_comments(repo_owner, repo_name, pr_number)
             .await
-        {
-            Ok(p) => p,
-            Err(e) => {
-                log_octocrab_error("Failed to list comments for pull request", e);
-                return Err(Error::InvalidResponse);
-            }
-        };
-
-        let mut comments = current_page.take_items();
-        while let Ok(Some(mut new_page)) = self.client.get_page(&current_page.next).await {
-            comments.extend(new_page.take_items());
-
-            current_page = new_page;
-        }
-
-        let result = comments
-            .into_iter()
-            .map(|c| Comment {
-                id: c.id.0,
-                body: c.body.unwrap_or_default(),
-                user: User {
-                    id: c.user.id.into_inner(),
-                    login: c.user.login,
-                },
+            .map(|comments| {
+                comments
+                    .into_iter()
+                    .map(|c| Comment {
+                        id: c.id,
+                        body: c.body,
+                        user: User {
+                            id: c.user.id,
+                            login: c.user.login,
+                        },
+                    })
+                    .collect()
             })
-            .collect();
-
-        Ok(result)
+            .map_err(map_api_error)
     }
 
     /// Removes a specific label from a pull request.
-    ///
-    /// This method removes the specified label from a pull request if it's currently applied.
-    /// If the label is not applied to the PR, the operation succeeds without error.
     ///
     /// # Arguments
     ///
@@ -1129,34 +671,12 @@ impl PullRequestProvider for GitHubProvider {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if the label was successfully removed (or wasn't applied),
-    /// or an `Error` if the operation failed.
+    /// Returns `Ok(())` if the label was successfully removed.
     ///
     /// # Errors
     ///
-    /// This function will return an error if:
-    /// - The repository or pull request doesn't exist
-    /// - The authenticated user lacks permission to modify labels
-    /// - There's a network or API error
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use merge_warden_developer_platforms::{PullRequestProvider, github::GitHubProvider};
-    /// use octocrab::Octocrab;
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let client = Octocrab::builder().personal_token("token".to_string()).build()?;
-    ///     let provider = GitHubProvider::new(client);
-    ///
-    ///     // Remove the "bug" label from PR #123
-    ///     provider.remove_label("owner", "repo", 123, "bug").await?;
-    ///
-    ///     Ok(())
-    /// }
-    /// ```
-    #[instrument]
+    /// Returns [`Error::FailedToUpdatePullRequest`] if the API call fails.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number))]
     async fn remove_label(
         &self,
         repo_owner: &str,
@@ -1164,27 +684,26 @@ impl PullRequestProvider for GitHubProvider {
         pr_number: u64,
         label: &str,
     ) -> Result<(), Error> {
-        match self
-            .client
-            .issues(repo_owner, repo_name)
-            .remove_label(pr_number, label)
+        self.client
+            .remove_label_from_pull_request(repo_owner, repo_name, pr_number, label)
             .await
-        {
-            Ok(_) => Ok(()),
-            Err(e) => {
-                log_octocrab_error("Failed to remove label", e);
-                return Err(Error::FailedToUpdatePullRequest(
-                    "Failed to remove label".to_string(),
-                ));
-            }
-        }
+            .map_err(|e| {
+                warn!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr_number,
+                    label,
+                    error = %e,
+                    "Failed to remove label from pull request"
+                );
+                Error::FailedToUpdatePullRequest(format!("Failed to remove label '{}'", label))
+            })
     }
 
-    /// Updates or creates a check run status for a pull request.
+    /// Creates or updates a GitHub check run for the pull request.
     ///
-    /// This method creates or updates a GitHub check run for the pull request,
-    /// which appears in the PR's status checks section. This is useful for
-    /// reporting the results of automated validation or CI processes.
+    /// Fetches the PR head commit SHA and then POSTs to
+    /// `POST /repos/{owner}/{repo}/check-runs`.
     ///
     /// # Arguments
     ///
@@ -1198,42 +717,13 @@ impl PullRequestProvider for GitHubProvider {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if the check run was successfully created/updated,
-    /// or an `Error` if the operation failed.
+    /// Returns `Ok(())` if the check run was successfully created/updated.
     ///
     /// # Errors
     ///
-    /// This function will return an error if:
-    /// - The repository or pull request doesn't exist
-    /// - The authenticated user/app lacks permission to create check runs
-    /// - There's a network or API error
-    /// - The check run data is invalid
-    ///
-    /// # Examples
-    ///
-    /// ```rust,no_run
-    /// use merge_warden_developer_platforms::{PullRequestProvider, github::GitHubProvider};
-    /// use octocrab::Octocrab;
-    ///
-    /// #[tokio::main]
-    /// async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    ///     let client = Octocrab::builder().personal_token("token".to_string()).build()?;
-    ///     let provider = GitHubProvider::new(client);
-    ///
-    ///     provider.update_pr_check_status(
-    ///         "owner",
-    ///         "repo",
-    ///         123,
-    ///         "success",
-    ///         "All validations passed",
-    ///         "PR title and description meet all requirements",
-    ///         "✅ Title follows conventional commits format\n✅ Work item referenced"
-    ///     ).await?;
-    ///
-    ///     Ok(())
-    /// }
-    /// ```
-    #[instrument]
+    /// Returns an error if the pull request cannot be fetched or the check run
+    /// POST fails.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number))]
     async fn update_pr_check_status(
         &self,
         repo_owner: &str,
@@ -1244,23 +734,27 @@ impl PullRequestProvider for GitHubProvider {
         output_summary: &str,
         output_text: &str,
     ) -> Result<(), Error> {
-        // Get the commit SHA for the PR head
-        let pr_data = self
+        // Fetch the PR to get the head commit SHA for the check run.
+        let pr = self
             .client
-            .pulls(repo_owner, repo_name)
-            .get(pr_number)
+            .get_pull_request(repo_owner, repo_name, pr_number)
             .await
             .map_err(|e| {
-                log_octocrab_error("Failed to get PR for check run", e);
-                Error::InvalidResponse
+                error!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr_number,
+                    error = %e,
+                    "Failed to get PR head SHA for check run"
+                );
+                map_api_error(e)
             })?;
-        let head_sha = pr_data.head.sha;
 
-        // Prepare the check run payload
-        let check_name = "MergeWarden";
+        let head_sha = pr.head.sha;
+
         let url = format!("/repos/{}/{}/check-runs", repo_owner, repo_name);
         let payload = json!({
-            "name": check_name,
+            "name": "MergeWarden",
             "head_sha": head_sha,
             "status": "completed",
             "conclusion": conclusion,
@@ -1271,11 +765,38 @@ impl PullRequestProvider for GitHubProvider {
             }
         });
 
-        // POST the check run
-        self.client._post(url, Some(&payload)).await.map_err(|e| {
-            log_octocrab_error("Failed to create/update check run", e);
-            Error::FailedToUpdatePullRequest("Failed to create/update check run".to_string())
+        let response = self.client.post(&url, &payload).await.map_err(|e| {
+            error!(
+                owner = repo_owner,
+                repo = repo_name,
+                pr = pr_number,
+                error = %e,
+                "Failed to post check run"
+            );
+            map_api_error(e)
         })?;
+
+        if !response.status().is_success() {
+            error!(
+                owner = repo_owner,
+                repo = repo_name,
+                pr = pr_number,
+                status = response.status().as_u16(),
+                "Non-success status creating check run"
+            );
+            return Err(Error::FailedToUpdatePullRequest(
+                "Failed to create/update check run".to_string(),
+            ));
+        }
+
+        info!(
+            owner = repo_owner,
+            repo = repo_name,
+            pr = pr_number,
+            conclusion,
+            "Successfully updated PR check run status"
+        );
+
         Ok(())
     }
 }

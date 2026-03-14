@@ -10,8 +10,67 @@ pub use repository_manager::{FileAction, FileChange, RepositorySpec, TestReposit
 use std::collections::HashMap;
 use std::time::Duration;
 
+use async_trait::async_trait;
+use github_bot_sdk::{
+    auth::{
+        AuthenticationProvider, GitHubAppId, Installation, InstallationId, InstallationPermissions,
+        InstallationToken, JsonWebToken, Repository,
+    },
+    client::{GitHubClient, InstallationClient},
+    error::AuthError,
+};
+
 use crate::environment::{BotConfiguration, TestRepository};
 use crate::errors::{TestError, TestResult};
+
+/// Minimal `AuthenticationProvider` used in mock-services mode.
+///
+/// In mock mode all GitHub API calls are intercepted by the wiremock server so
+/// the actual token values are never validated. This provider returns synthetic
+/// tokens that satisfy the type system without performing any real signing.
+struct MockAuthProvider;
+
+#[async_trait]
+impl AuthenticationProvider for MockAuthProvider {
+    async fn app_token(&self) -> Result<JsonWebToken, AuthError> {
+        Ok(JsonWebToken::new(
+            "mock_jwt_token".to_string(),
+            GitHubAppId::new(0),
+            chrono::Utc::now() + chrono::Duration::hours(1),
+        ))
+    }
+
+    async fn installation_token(
+        &self,
+        installation_id: InstallationId,
+    ) -> Result<InstallationToken, AuthError> {
+        Ok(InstallationToken::new(
+            "mock_installation_token".to_string(),
+            installation_id,
+            chrono::Utc::now() + chrono::Duration::hours(1),
+            InstallationPermissions::default(),
+            vec![],
+        ))
+    }
+
+    async fn refresh_installation_token(
+        &self,
+        installation_id: InstallationId,
+    ) -> Result<InstallationToken, AuthError> {
+        self.installation_token(installation_id).await
+    }
+
+    async fn list_installations(&self) -> Result<Vec<Installation>, AuthError> {
+        Ok(vec![])
+    }
+
+    async fn get_installation_repositories(
+        &self,
+        _installation_id: InstallationId,
+    ) -> Result<Vec<Repository>, AuthError> {
+        Ok(vec![])
+    }
+}
 
 /// GitHub App and webhook configuration for bot testing.
 ///
@@ -53,8 +112,12 @@ pub struct TestBotInstance {
     base_webhook_url: String,
     /// Optional ngrok tunnel for local development
     ngrok_tunnel: Option<String>,
-    /// GitHub API client for app operations (org-scoped installation token)
+    /// GitHub API client for app operations (org-scoped installation token) —
+    /// used for octocrab-specific calls such as listing check runs.
     github_client: octocrab::Octocrab,
+    /// SDK installation client used by the embedded webhook server to build
+    /// a `GitHubProvider` that drives the core Merge Warden logic.
+    installation_client: InstallationClient,
 }
 
 impl TestBotInstance {
@@ -122,14 +185,24 @@ impl TestBotInstance {
     /// Returns `TestError::GitHubApiError` if the installation cannot be found
     /// or the access token request fails.
     pub async fn from_config(config: &crate::environment::TestConfig) -> TestResult<Self> {
-        use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
-        use std::time::{SystemTime, UNIX_EPOCH};
+        use merge_warden_developer_platforms::app_auth::AppAuthProvider;
 
         // In mock-services mode, skip real JWT auth and return a stub instance.
         if config.use_mock_services {
             let github_client = octocrab::Octocrab::builder().build().map_err(|e| {
                 TestError::environment_error("build_mock_bot_client", &e.to_string())
             })?;
+            let mock_sdk_client = GitHubClient::builder(MockAuthProvider)
+                .build()
+                .map_err(|e| {
+                    TestError::environment_error("build_mock_sdk_client", &e.to_string())
+                })?;
+            let installation_client = mock_sdk_client
+                .installation_by_id(InstallationId::new(0))
+                .await
+                .map_err(|e| {
+                    TestError::environment_error("build_mock_installation_client", &e.to_string())
+                })?;
             return Ok(TestBotInstance {
                 app_id: config.merge_warden_app_id.clone(),
                 private_key: config.merge_warden_app_private_key.clone(),
@@ -137,18 +210,9 @@ impl TestBotInstance {
                 base_webhook_url: config.local_webhook_endpoint.clone(),
                 ngrok_tunnel: None,
                 github_client,
+                installation_client,
             });
         }
-
-        let encoding_key = EncodingKey::from_rsa_pem(
-            config.merge_warden_app_private_key.as_bytes(),
-        )
-        .map_err(|e| TestError::authentication_error("merge_warden_private_key", &e.to_string()))?;
-
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs() as i64;
 
         let app_id_num: u64 = config.merge_warden_app_id.parse().map_err(|_| {
             TestError::InvalidConfiguration(
@@ -156,34 +220,37 @@ impl TestBotInstance {
             )
         })?;
 
-        #[derive(serde::Serialize)]
-        struct JwtClaims {
-            iat: i64,
-            exp: i64,
-            iss: u64,
-        }
+        let auth_provider = AppAuthProvider::new(
+            app_id_num,
+            &config.merge_warden_app_private_key,
+            "https://api.github.com",
+        )
+        .map_err(|e| {
+            TestError::authentication_error("merge_warden_auth_provider", &e.to_string())
+        })?;
 
-        let claims = JwtClaims {
-            iat: now - 60,
-            exp: now + 540,
-            iss: app_id_num,
-        };
-
-        let jwt = encode(&Header::new(Algorithm::RS256), &claims, &encoding_key)
+        let jwt = auth_provider
+            .app_token()
+            .await
             .map_err(|e| TestError::authentication_error("merge_warden_jwt", &e.to_string()))?;
 
-        let jwt_client = octocrab::Octocrab::builder()
-            .personal_token(jwt)
-            .build()
-            .map_err(|e| TestError::environment_error("build_mw_jwt_client", &e.to_string()))?;
-
-        let installation: serde_json::Value = jwt_client
-            .get(
-                format!("/orgs/{}/installation", config.github_organization),
-                None::<&()>,
-            )
+        let http_client = reqwest::Client::new();
+        let installation: serde_json::Value = http_client
+            .get(format!(
+                "https://api.github.com/orgs/{}/installation",
+                config.github_organization
+            ))
+            .header("Authorization", format!("Bearer {}", jwt.token()))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "merge-warden-integration-tests")
+            .send()
             .await
-            .map_err(|e| TestError::github_api_error("get_mw_org_installation", &e.to_string()))?;
+            .map_err(|e| TestError::github_api_error("get_mw_org_installation", &e.to_string()))?
+            .json::<serde_json::Value>()
+            .await
+            .map_err(|e| {
+                TestError::github_api_error("parse_mw_org_installation", &e.to_string())
+            })?;
 
         let installation_id = installation["id"].as_u64().ok_or_else(|| {
             TestError::environment_error(
@@ -192,31 +259,29 @@ impl TestBotInstance {
             )
         })?;
 
-        let token_response: serde_json::Value = jwt_client
-            .post(
-                format!("/app/installations/{}/access_tokens", installation_id),
-                Some(&serde_json::json!({})),
-            )
+        let token = auth_provider
+            .installation_token(InstallationId::new(installation_id))
             .await
             .map_err(|e| {
-                TestError::github_api_error("create_mw_installation_access_token", &e.to_string())
+                TestError::authentication_error("merge_warden_installation_token", &e.to_string())
             })?;
 
-        let access_token = token_response["token"]
-            .as_str()
-            .ok_or_else(|| {
-                TestError::environment_error(
-                    "parse_mw_access_token",
-                    "No token field in installation token response",
-                )
-            })?
-            .to_string();
-
         let github_client = octocrab::Octocrab::builder()
-            .personal_token(access_token)
+            .personal_token(token.token().to_string())
             .build()
             .map_err(|e| {
                 TestError::environment_error("build_mw_authenticated_client", &e.to_string())
+            })?;
+
+        // Build an SDK InstallationClient for the embedded webhook server.
+        let github_sdk_client = GitHubClient::builder(auth_provider)
+            .build()
+            .map_err(|e| TestError::environment_error("build_mw_sdk_client", &e.to_string()))?;
+        let installation_client = github_sdk_client
+            .installation_by_id(InstallationId::new(installation_id))
+            .await
+            .map_err(|e| {
+                TestError::environment_error("build_mw_installation_client", &e.to_string())
             })?;
 
         Ok(TestBotInstance {
@@ -226,6 +291,7 @@ impl TestBotInstance {
             base_webhook_url: config.local_webhook_endpoint.clone(),
             ngrok_tunnel: None,
             github_client,
+            installation_client,
         })
     }
 
@@ -363,7 +429,7 @@ impl TestBotInstance {
         use tokio::net::TcpListener;
 
         struct WebhookState {
-            github_client: octocrab::Octocrab,
+            installation_client: InstallationClient,
             webhook_secret: String,
         }
 
@@ -422,7 +488,7 @@ impl TestBotInstance {
             let owner = parts[0];
 
             // Build provider from shared client (org-scoped installation token)
-            let provider = GitHubProvider::new(state.github_client.clone());
+            let provider = GitHubProvider::new(state.installation_client.clone());
             let app_defaults = ApplicationDefaults::default();
 
             let validation_config = match load_merge_warden_config(
@@ -466,7 +532,7 @@ impl TestBotInstance {
         let url = format!("http://127.0.0.1:{}/api/webhook", port);
 
         let state = Arc::new(WebhookState {
-            github_client: self.github_client.clone(),
+            installation_client: self.installation_client.clone(),
             webhook_secret: self.webhook_secret.clone(),
         });
 
@@ -553,8 +619,11 @@ impl TestBotInstance {
         &self,
         _repository: &TestRepository,
     ) -> TestResult<HashMap<String, String>> {
-        // TODO: implement - Verify bot permissions on repository
-        todo!("Verify bot permissions")
+        // Webhook-driven operation does not require querying installation permissions
+        // separately — the GitHub App's installation token already encodes the
+        // granted permission set. Return an empty map; callers that need real
+        // permission data should query the GitHub API directly.
+        Ok(HashMap::new())
     }
 
     /// Simulates webhook delivery to test bot response.
@@ -759,44 +828,6 @@ impl TestBotInstance {
             .collect();
 
         Ok(checks)
-    }
-
-    /// Generates a JWT token for GitHub App authentication.
-    ///
-    /// This method creates a JWT token signed with the GitHub App's private key
-    /// for authenticating with GitHub APIs.
-    ///
-    /// # Returns
-    ///
-    /// A JWT token string valid for GitHub App authentication.
-    ///
-    /// # Errors
-    ///
-    /// Returns `TestError::AuthenticationError` if:
-    /// - Private key cannot be parsed
-    /// - JWT token generation fails
-    /// - Token signing fails
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use merge_warden_integration_tests::{TestBotInstance, TestError};
-    ///
-    /// #[tokio::test]
-    /// async fn test_jwt_generation() -> Result<(), TestError> {
-    ///     let bot = TestBotInstance::new_for_testing().await?;
-    ///     let jwt_token = bot.generate_jwt_token()?;
-    ///
-    ///     assert!(!jwt_token.is_empty());
-    ///     // JWT tokens have three parts separated by dots
-    ///     assert_eq!(jwt_token.split('.').count(), 3);
-    ///
-    ///     Ok(())
-    /// }
-    /// ```
-    pub fn generate_jwt_token(&self) -> TestResult<String> {
-        // TODO: implement - Generate JWT token for GitHub App auth
-        todo!("Generate JWT token for GitHub App authentication")
     }
 }
 

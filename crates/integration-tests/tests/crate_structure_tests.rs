@@ -56,7 +56,11 @@ async fn test_external_dependency_availability() {
     // Test that required external dependencies are available
     // This validates the Cargo.toml dependency configuration
 
-    // GitHub API client should be available
+    // GitHub SDK should be available via developer_platforms
+    use merge_warden_developer_platforms::app_auth::AppAuthProvider;
+    let _app_auth_type: Option<AppAuthProvider> = None;
+
+    // GitHub API client should be available (used for test infrastructure)
     let _octocrab = octocrab::OctocrabBuilder::new();
 
     // HTTP client should be available

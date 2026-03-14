@@ -1,4 +1,4 @@
-use anyhow::Result;
+use async_trait::async_trait;
 use axum::body::Bytes;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
@@ -6,19 +6,23 @@ use axum::routing::post;
 use axum::Router;
 use axum_macros::debug_handler;
 use clap::Args;
-use hmac::{Hmac, Mac};
+use github_bot_sdk::{
+    auth::{GitHubAppId, InstallationId, PrivateKey, SecretProvider},
+    client::{ClientConfig, GitHubClient},
+    error::SecretError,
+    events::{EventEnvelope, EventProcessor, ProcessorConfig},
+    webhook::{WebhookHandler, WebhookReceiver, WebhookRequest},
+};
 use keyring::Entry;
 use merge_warden_core::config::{
     load_merge_warden_config, CurrentPullRequestValidationConfiguration,
 };
-use merge_warden_core::{MergeWarden, WebhookPayload};
-use merge_warden_developer_platforms::github::{
-    authenticate_with_access_token, create_app_client, GitHubProvider,
-};
-use merge_warden_developer_platforms::models::User;
-use octocrab::Octocrab;
+use merge_warden_core::MergeWarden;
+use merge_warden_developer_platforms::app_auth::AppAuthProvider;
+use merge_warden_developer_platforms::github::GitHubProvider;
 use serde::Serialize;
-use sha2::Sha256;
+use std::collections::HashMap;
+use std::env;
 use std::fs;
 use std::sync::Arc;
 use tracing::{debug, error, info, instrument, warn};
@@ -33,12 +37,210 @@ use super::auth::KEY_RING_WEB_HOOK_SECRET;
 
 /// Application state for the PR checking functionality
 pub struct AppState {
-    /// Authenticated GitHub API client
-    pub octocrab: Octocrab,
-    /// Application configuration
-    pub config: AppConfig,
-    /// Webhook secret for payload verification
-    pub webhook_secret: String,
+    /// Webhook receiver: validates HMAC-SHA256 signatures and dispatches events
+    pub receiver: WebhookReceiver,
+    /// Event processor, kept separately for the signature-bypass dev path
+    pub processor: EventProcessor,
+    /// The merge-warden business logic handler, kept separately for the bypass path
+    pub handler: Arc<dyn WebhookHandler>,
+    /// When true (set via MERGE_WARDEN_SKIP_SIGNATURE_VALIDATION env var), signature
+    /// validation is skipped. For development proxy scenarios only.
+    pub skip_signature_validation: bool,
+}
+
+/// `SecretProvider` backed by a webhook secret already loaded from the keyring.
+///
+/// `SignatureValidator` (inside `WebhookReceiver`) only calls `get_webhook_secret`.
+/// The other methods are not invoked here and return `SecretError::NotFound`.
+struct WebhookSecretProvider {
+    /// The webhook secret retrieved from the system keyring at startup
+    webhook_secret: String,
+}
+
+#[async_trait]
+impl SecretProvider for WebhookSecretProvider {
+    async fn get_private_key(&self) -> Result<PrivateKey, SecretError> {
+        Err(SecretError::NotFound {
+            key: "private_key".to_string(),
+        })
+    }
+
+    async fn get_app_id(&self) -> Result<GitHubAppId, SecretError> {
+        Err(SecretError::NotFound {
+            key: "app_id".to_string(),
+        })
+    }
+
+    async fn get_webhook_secret(&self) -> Result<String, SecretError> {
+        Ok(self.webhook_secret.clone())
+    }
+
+    fn cache_duration(&self) -> chrono::Duration {
+        chrono::Duration::hours(1)
+    }
+}
+
+/// `WebhookHandler` implementation that runs Merge Warden's PR validation logic.
+///
+/// Registered on the `WebhookReceiver` at startup. Handles `pull_request` events
+/// by creating an installation-scoped GitHub client and running `process_pull_request`.
+struct MergeWardenWebhookHandler {
+    /// App-level GitHub client; used to create installation-scoped clients per event
+    github_client: GitHubClient,
+    /// Application configuration loaded from the config file
+    config: AppConfig,
+}
+
+#[async_trait]
+impl WebhookHandler for MergeWardenWebhookHandler {
+    async fn handle_event(
+        &self,
+        envelope: &EventEnvelope,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if envelope.event_type != "pull_request" {
+            return Ok(());
+        }
+
+        let action = envelope.payload.raw()["action"].as_str().unwrap_or("");
+        match action {
+            "opened" | "edited" | "ready_for_review" | "reopened" | "unlocked" | "synchronize" => {}
+            _ => {
+                info!(action, "Pull request action does not require processing");
+                return Ok(());
+            }
+        }
+
+        let pr_number = envelope
+            .entity_id
+            .as_deref()
+            .and_then(|id| id.parse::<u32>().ok())
+            .or_else(|| {
+                envelope.payload.raw()["pull_request"]["number"]
+                    .as_u64()
+                    .map(|n| n as u32)
+            });
+
+        let pr_number = match pr_number {
+            Some(n) => n,
+            None => {
+                error!(
+                    repository = envelope.repository.full_name.as_str(),
+                    "Webhook payload missing pull request number"
+                );
+                return Err(Box::from("Missing pull request number in webhook payload"));
+            }
+        };
+
+        let installation_id = match envelope.payload.raw()["installation"]["id"].as_u64() {
+            Some(id) => id,
+            None => {
+                error!(
+                    repository = envelope.repository.full_name.as_str(),
+                    pull_request = pr_number,
+                    "Webhook payload missing installation ID"
+                );
+                return Err(Box::from("Missing installation ID in webhook payload"));
+            }
+        };
+
+        let repo_owner = &envelope.repository.owner.login;
+        let repo_name = &envelope.repository.name;
+
+        info!(
+            repository_owner = repo_owner.as_str(),
+            repository = repo_name.as_str(),
+            pull_request = pr_number,
+            action,
+            "Processing pull request"
+        );
+
+        let installation_client = self
+            .github_client
+            .installation_by_id(InstallationId::new(installation_id))
+            .await
+            .map_err(|e| {
+                error!(
+                    repository_owner = repo_owner.as_str(),
+                    repository = repo_name.as_str(),
+                    pull_request = pr_number,
+                    error = e.to_string(),
+                    "Failed to create installation client"
+                );
+                Box::new(e) as Box<dyn std::error::Error + Send + Sync>
+            })?;
+
+        let provider = GitHubProvider::new(installation_client);
+
+        let merge_warden_config_path = ".github/merge-warden.toml";
+        let validation_config = match load_merge_warden_config(
+            repo_owner,
+            repo_name,
+            merge_warden_config_path,
+            &provider,
+            &self.config.policies,
+        )
+        .await
+        {
+            Ok(merge_warden_config) => {
+                info!(
+                    "Loaded merge-warden config from {}",
+                    merge_warden_config_path
+                );
+                merge_warden_config.to_validation_config(&self.config.policies.bypass_rules)
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to load merge-warden config from {}: {}. Falling back to defaults.",
+                    merge_warden_config_path, e
+                );
+                CurrentPullRequestValidationConfiguration {
+                    enforce_title_convention: self.config.policies.enable_title_validation,
+                    title_pattern: self.config.policies.default_title_pattern.clone(),
+                    invalid_title_label: self.config.policies.default_invalid_title_label.clone(),
+                    enforce_work_item_references: self.config.policies.enable_work_item_validation,
+                    work_item_reference_pattern: self
+                        .config
+                        .policies
+                        .default_work_item_pattern
+                        .clone(),
+                    missing_work_item_label: self
+                        .config
+                        .policies
+                        .default_missing_work_item_label
+                        .clone(),
+                    pr_size_check: merge_warden_core::config::PrSizeCheckConfig::default(),
+                    change_type_labels: Some(
+                        merge_warden_core::config::ChangeTypeLabelConfig::default(),
+                    ),
+                    bypass_rules: self.config.policies.bypass_rules.clone(),
+                }
+            }
+        };
+
+        let warden = MergeWarden::with_config(provider, validation_config);
+
+        info!(
+            message = "Processing pull request",
+            pull_request = pr_number,
+            repository = repo_name.as_str()
+        );
+
+        warden
+            .process_pull_request(repo_owner, repo_name, pr_number.into())
+            .await
+            .map_err(|e| {
+                error!(
+                    repository_owner = repo_owner.as_str(),
+                    repository = repo_name.as_str(),
+                    pull_request = pr_number,
+                    error = e.to_string(),
+                    "Failed to process pull request"
+                );
+                Box::new(e) as Box<dyn std::error::Error + Send + Sync>
+            })?;
+
+        Ok(())
+    }
 }
 
 /// Arguments for the check-pr command
@@ -76,7 +278,7 @@ pub struct ValidationResult {
 ///
 /// # Returns
 ///
-/// Returns a `Result` containing an `Octocrab` instance if successful, or a `CliError`
+/// Returns a `Result` containing a `GitHubClient` instance if successful, or a `CliError`
 /// if an error occurs during the authentication process.
 ///
 /// # Errors
@@ -110,9 +312,9 @@ pub struct ValidationResult {
 ///     Ok(())
 /// }
 /// ```
-async fn create_github_app(config: &AppConfig) -> Result<(Octocrab, User), CliError> {
+async fn create_github_app(config: &AppConfig) -> Result<GitHubClient, CliError> {
     debug!("Creating GitHub app client");
-    let provider = match config.authentication.auth_method.as_str() {
+    match config.authentication.auth_method.as_str() {
         "token" => {
             let err = CliError::InvalidArguments(
                 format!(
@@ -122,7 +324,7 @@ async fn create_github_app(config: &AppConfig) -> Result<(Octocrab, User), CliEr
                 .to_string(),
             );
             error!(message = "Failed to create GitHub app client", error = ?err);
-            return Err(err);
+            Err(err)
         }
         "app" => {
             info!(message = "Using GitHub App authentication");
@@ -163,15 +365,21 @@ async fn create_github_app(config: &AppConfig) -> Result<(Octocrab, User), CliEr
                     .to_string(),
                 )
             })?;
-            let pair = create_app_client(app_id_number, &app_key)
-                .await
+
+            let auth = AppAuthProvider::new(app_id_number, &app_key, "https://api.github.com")
                 .map_err(|e| {
-                    CliError::AuthError(
-                        format!("Failed to load the GitHub provider. Error was: {}", e).to_string(),
-                    )
+                    CliError::AuthError(format!("Failed to create GitHub App auth provider: {}", e))
                 })?;
+
+            let client = GitHubClient::builder(auth)
+                .config(ClientConfig::default())
+                .build()
+                .map_err(|e| {
+                    CliError::AuthError(format!("Failed to build GitHub client: {}", e))
+                })?;
+
             debug!(message = "GitHub App client created successfully");
-            pair
+            Ok(client)
         }
         _ => {
             let err = CliError::InvalidArguments(
@@ -182,11 +390,9 @@ async fn create_github_app(config: &AppConfig) -> Result<(Octocrab, User), CliEr
                 .to_string(),
             );
             error!(message = "Failed to create GitHub app client", error = ?err);
-            return Err(err);
+            Err(err)
         }
-    };
-
-    Ok(provider)
+    }
 }
 
 /// Executes the `check-pr` command.
@@ -225,20 +431,39 @@ async fn create_github_app(config: &AppConfig) -> Result<(Octocrab, User), CliEr
 /// until manually stopped.
 #[instrument]
 pub async fn execute(args: CheckPrArgs) -> Result<(), CliError> {
-    // Load configuration
     let config_path = get_config_path(args.config.as_deref());
     let config = AppConfig::load(&config_path)
         .map_err(|e| CliError::ConfigError(format!("Failed to load configuration: {}", e)))?;
 
-    let (octocrab, _user) = create_github_app(&config).await?;
+    let github_client = create_github_app(&config).await?;
     let webhook_secret = retrieve_webhook_secret()?;
+
+    let skip_validation = env::var("MERGE_WARDEN_SKIP_SIGNATURE_VALIDATION")
+        .map(|v| v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+    if skip_validation {
+        warn!("Signature validation bypassed via MERGE_WARDEN_SKIP_SIGNATURE_VALIDATION=true — do not use in production");
+    }
 
     let addr = format!("0.0.0.0:{}", config.webhooks.port);
 
-    let state = Arc::new(AppState {
-        octocrab,
+    let secret_provider: Arc<dyn SecretProvider> =
+        Arc::new(WebhookSecretProvider { webhook_secret });
+    let processor_config = ProcessorConfig::default();
+    let bypass_processor = EventProcessor::new(processor_config.clone());
+    let receiver_processor = EventProcessor::new(processor_config);
+    let handler: Arc<dyn WebhookHandler> = Arc::new(MergeWardenWebhookHandler {
+        github_client,
         config,
-        webhook_secret,
+    });
+    let mut receiver = WebhookReceiver::new(secret_provider, receiver_processor);
+    receiver.add_handler(handler.clone()).await;
+
+    let state = Arc::new(AppState {
+        receiver,
+        processor: bypass_processor,
+        handler,
+        skip_signature_validation: skip_validation,
     });
 
     let app = Router::new()
@@ -254,26 +479,21 @@ pub async fn execute(args: CheckPrArgs) -> Result<(), CliError> {
 
 /// Handles incoming GitHub webhook requests in CLI webhook server mode.
 ///
-/// This function processes GitHub webhook events for pull request operations when
-/// running the CLI in webhook server mode. It validates webhook signatures, parses
-/// the payload, and delegates processing to the Merge Warden engine.
+/// In normal operation the HMAC-SHA256 signature is validated by `WebhookReceiver`.
+/// When `MERGE_WARDEN_SKIP_SIGNATURE_VALIDATION=true` (dev-proxy mode only),
+/// the signature check is bypassed and the event is dispatched directly.
 ///
 /// # Arguments
 ///
-/// * `state` - Application state containing GitHub client and configuration
-/// * `headers` - HTTP request headers including webhook signature
-/// * `body` - Raw bytes of the JSON payload from GitHub webhook
+/// * `state` - Application state containing the receiver, processor, and handler
+/// * `headers` - HTTP request headers including the event type and optional signature
+/// * `body` - Raw webhook payload bytes
 ///
 /// # Returns
 ///
-/// * `Ok(StatusCode::OK)` - Successfully processed the webhook
-/// * `Err(StatusCode::UNAUTHORIZED)` - Invalid webhook signature
-/// * `Err(StatusCode::BAD_REQUEST)` - Malformed payload or missing required fields
-///
-/// # Security
-///
-/// All webhook payloads are verified using HMAC-SHA256 signature validation
-/// before processing to ensure they originated from GitHub.
+/// * `Ok(StatusCode::OK)` - Successfully accepted the webhook
+/// * `Err(StatusCode::UNAUTHORIZED)` - Invalid or missing webhook signature
+/// * `Err(StatusCode::BAD_REQUEST)` - Malformed payload or missing event header
 #[debug_handler]
 #[instrument(skip(state, headers, body))]
 async fn handle_webhook(
@@ -283,169 +503,53 @@ async fn handle_webhook(
 ) -> Result<StatusCode, StatusCode> {
     info!("Received webhook call from Github");
 
-    if !verify_github_signature(&state.webhook_secret, &headers, &body) {
-        warn!("Webhook did not have valid signature");
-        return Err(StatusCode::UNAUTHORIZED);
-    }
+    // Dev-proxy bypass: skip signature validation but still parse and dispatch.
+    if state.skip_signature_validation {
+        let event_type = headers
+            .get("x-github-event")
+            .or_else(|| headers.get("X-GitHub-Event"))
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        let delivery_id = headers
+            .get("x-github-delivery")
+            .or_else(|| headers.get("X-GitHub-Delivery"))
+            .and_then(|v| v.to_str().ok());
 
-    info!("Webhook has valid signature. Processing information ...");
-    let body_str = std::str::from_utf8(&body).map_err(|_| StatusCode::BAD_REQUEST)?;
-    let payload: WebhookPayload = serde_json::from_str(body_str).map_err(|e| {
-        error!(
-            body = body_str.to_string(),
-            error = e.to_string(),
-            "Could not extract webhook payload from request body"
-        );
-        StatusCode::BAD_REQUEST
-    })?;
+        let envelope = state
+            .processor
+            .process_webhook(event_type, &body, delivery_id)
+            .await
+            .map_err(|_| StatusCode::BAD_REQUEST)?;
 
-    debug!(action = payload.action.as_str(), "Github action");
-    let action = payload.action.as_str();
-    if action != "opened"
-        && action != "edited"
-        && action != "ready_for_review"
-        && action != "reopened"
-        && action != "unlocked"
-        && action != "synchronize"
-    {
-        info!(
-            action = payload.action.as_str(),
-            message = "Pull request change type means no scanning required."
-        );
+        if let Err(e) = state.handler.handle_event(&envelope).await {
+            error!(error = e.to_string(), "Handler failed in bypass mode");
+        }
+        // Always return 200 in bypass mode: GitHub must receive a fast response
+        // within its 10-second timeout, and the bypass path is only used in
+        // dev-proxy scenarios where delivery acknowledgement is decoupled from
+        // processing outcome.
         return Ok(StatusCode::OK);
     }
 
-    let Some(installation) = payload.installation else {
-        warn!(message = "Web hook payload did not include installation information. Cannot process changes.");
-        return Err(StatusCode::BAD_REQUEST);
-    };
-    let installation_id = installation.id;
+    // Normal path: full signature validation + fire-and-forget dispatch.
+    let request = WebhookRequest::new(
+        headers
+            .iter()
+            .filter_map(|(k, v)| {
+                v.to_str()
+                    .ok()
+                    .map(|v| (k.as_str().to_lowercase(), v.to_string()))
+            })
+            .collect::<HashMap<String, String>>(),
+        body,
+    );
 
-    let Some(repository) = payload.repository else {
-        warn!(
-            message =
-                "Web hook payload did not include repository information. Cannot process changes."
-        );
-        return Err(StatusCode::BAD_REQUEST);
-    };
-
-    let Some(pr) = payload.pull_request else {
-        warn!(message = "Web hook payload did not include pull request information. Cannot process changes.");
-        return Err(StatusCode::BAD_REQUEST);
-    };
-
-    let parts: Vec<&str> = repository.full_name.split('/').collect();
-    if parts.len() != 2 {
-        warn!(
-            repository = &repository.name,
-            pull_request = pr.number,
-            "Failed to extract the name of the repository owner"
-        );
-        return Err(StatusCode::BAD_REQUEST);
+    let response = state.receiver.receive_webhook(request).await;
+    match response.status_code() {
+        200 => Ok(StatusCode::OK),
+        401 => Err(StatusCode::UNAUTHORIZED),
+        _ => Err(StatusCode::BAD_REQUEST),
     }
-
-    let repo_owner = parts[0];
-
-    info!(
-        repository_owner = repo_owner,
-        repository = &repository.name,
-        pull_request = pr.number,
-        "Processing pull request"
-    );
-
-    let api_with_pat = match authenticate_with_access_token(
-        &state.octocrab,
-        installation_id,
-        repo_owner,
-        &repository.name,
-    )
-    .await
-    {
-        Ok(o) => o,
-        Err(e) => {
-            error!(
-                repository_owner = repo_owner,
-                repository = &repository.name,
-                pull_request = pr.number,
-                error = e.to_string(),
-                "Failed to authenticate with GitHub"
-            );
-            return Err(StatusCode::UNAUTHORIZED);
-        }
-    };
-
-    let provider = GitHubProvider::new(api_with_pat);
-
-    // Load the merge-warden TOML config file
-    let merge_warden_config_path = ".github/merge-warden.toml";
-    let validation_config = match load_merge_warden_config(
-        repo_owner,
-        &repository.name,
-        merge_warden_config_path,
-        &provider,
-        &state.config.policies,
-    )
-    .await
-    {
-        Ok(merge_warden_config) => {
-            info!(
-                "Loaded merge-warden config from {}",
-                merge_warden_config_path
-            );
-            merge_warden_config.to_validation_config(&state.config.policies.bypass_rules)
-        }
-        Err(e) => {
-            warn!(
-                "Failed to load merge-warden config from {}: {}. Falling back to defaults.",
-                merge_warden_config_path, e
-            );
-            CurrentPullRequestValidationConfiguration {
-                enforce_title_convention: state.config.policies.enable_title_validation,
-                title_pattern: state.config.policies.default_title_pattern.clone(),
-                invalid_title_label: state.config.policies.default_invalid_title_label.clone(),
-                enforce_work_item_references: state.config.policies.enable_work_item_validation,
-                work_item_reference_pattern: state
-                    .config
-                    .policies
-                    .default_work_item_pattern
-                    .clone(),
-                missing_work_item_label: state
-                    .config
-                    .policies
-                    .default_missing_work_item_label
-                    .clone(),
-                pr_size_check: merge_warden_core::config::PrSizeCheckConfig::default(),
-                change_type_labels: Some(
-                    merge_warden_core::config::ChangeTypeLabelConfig::default(),
-                ),
-                bypass_rules: state.config.policies.bypass_rules.clone(),
-            }
-        }
-    };
-
-    // Create a MergeWarden instance with loaded or fallback configuration
-    let warden = MergeWarden::with_config(provider, validation_config);
-
-    // Process a pull request
-    info!(
-        message = "Processing pull request",
-        pull_request = pr.number,
-        repository = &repository.name
-    );
-    let _ = warden
-        .process_pull_request(repo_owner, &repository.name, pr.number)
-        .await
-        .inspect_err(|e| {
-            error!(
-                repository_owner = repo_owner,
-                repository = &repository.name,
-                pull_request = pr.number,
-                error = e.to_string(),
-                "Failed to process pull request"
-            );
-        });
-
-    Ok(StatusCode::OK)
 }
 
 /// Retrieves the webhook secret from the system keyring.
@@ -480,69 +584,4 @@ fn retrieve_webhook_secret() -> Result<String, CliError> {
 
     debug!(message = "Webhook secret retrieved successfully");
     Ok(webhook_secret)
-}
-
-/// Verifies the authenticity of a GitHub webhook payload using HMAC-SHA256 signature validation.
-///
-/// This CLI version of signature verification is designed for development and testing scenarios.
-/// Unlike the production Azure Functions version, this implementation includes additional debugging
-/// and currently returns `true` for compatibility with proxy scenarios during development.
-///
-/// # Arguments
-///
-/// * `secret` - The webhook secret configured in GitHub and stored in the keyring
-/// * `headers` - HTTP request headers containing the GitHub signature
-/// * `payload` - The raw request payload bytes that were signed by GitHub
-///
-/// # Returns
-///
-/// * `true` - Always returns true in CLI mode to accommodate development proxies
-/// * The actual signature validation logic is implemented but currently bypassed
-///
-/// # Development Note
-///
-/// This function currently returns `true` to support development workflows where
-/// webhooks may pass through proxies that modify the payload, invalidating signatures.
-/// In production, proper signature validation should be enabled.
-#[instrument]
-fn verify_github_signature(secret: &str, headers: &HeaderMap, payload: &[u8]) -> bool {
-    let prefix = "sha256=";
-
-    let signature_header = match headers.get("X-Hub-Signature-256") {
-        Some(value) => value.to_str().unwrap_or(""),
-        None => return false,
-    };
-
-    if !signature_header.starts_with(prefix) {
-        error!("Missing 'sha256=' prefix in signature header");
-        return false;
-    }
-
-    let received_sig = &signature_header[prefix.len()..];
-    let received_bytes = match hex::decode(received_sig) {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            error!("Failed to decode signature: {:?}", e);
-            return false;
-        }
-    };
-
-    let mut mac =
-        Hmac::<Sha256>::new_from_slice(secret.as_bytes()).expect("HMAC can take key of any size");
-    mac.update(payload);
-
-    let expected_mac = mac.finalize();
-    let expected_bytes = expected_mac.into_bytes();
-
-    //debug!("Expected signature: {}", hex::encode(expected_bytes));
-    //debug!("Received signature: {}", received_sig);
-
-    let _result = expected_bytes.as_slice() == received_bytes;
-    //debug!("Match result: {}", result);
-
-    // For now just return true. If you're running this as a CLI it is likely that
-    // you're running through some kind of proxy. It is highly likely that this proxy
-    // reads the information from GitHub, translates it and then resends it. This will
-    // most likely screw with the signature.
-    true
 }

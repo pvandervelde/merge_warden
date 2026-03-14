@@ -21,6 +21,7 @@ anyhow = "1.0"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 axum = "0.8.3"
+github-bot-sdk = { git = "https://github.com/pvandervelde/github-bot-sdk", rev = "ba1e456cb25ea038e69b78432c2bb8f2050ef65d" }
 axum-macros = "0.5.0"
 clap = { version = "4.5", features = ["derive"] }
 hex = "0.4"
@@ -32,7 +33,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
 thiserror = "2.0"
-tokio = { version = "1.44.2", features = ["full"] }
+tokio = { version = "1.49", features = ["full"] }
 tracing = "0.1"
 tracing-subscriber = "0.3.20"
 tracing-opentelemetry = "0.30.0"
@@ -44,3 +45,4 @@ opentelemetry-otlp = { version = "0.29.0", features = [
 ] }
 reqwest = "0.12.15"
 toml = "0.9"
+urlencoding = "2.1"

@@ -19,12 +19,15 @@
 //!
 //! ```rust,no_run
 //! use merge_warden_developer_platforms::{PullRequestProvider, github::GitHubProvider};
-//! use octocrab::Octocrab;
 //! use merge_warden_developer_platforms::errors::Error;
+//! use github_bot_sdk::{client::{GitHubClient, ClientConfig}, auth::InstallationId};
 //!
-//! async fn example() -> Result<(), Error> {
-//!     let octocrab = Octocrab::builder().build().map_err(|_| Error::ApiError())?;
-//!     let github = GitHubProvider::new(octocrab);
+//! async fn example(github_client: GitHubClient) -> Result<(), Error> {
+//!     let installation_client = github_client
+//!         .installation_by_id(InstallationId::new(12345))
+//!         .await
+//!         .map_err(|_| Error::ApiError())?;
+//!     let github = GitHubProvider::new(installation_client);
 //!     let pr = github.get_pull_request("owner", "repo", 123).await?;
 //!     println!("PR title: {}", pr.title);
 //!     Ok(())
@@ -35,6 +38,9 @@
 #![deny(clippy::missing_docs_in_private_items)]
 
 use async_trait::async_trait;
+
+/// GitHub App authentication provider for webhook-driven deployments.
+pub mod app_auth;
 
 /// Error types for developer platform operations.
 pub mod errors;
