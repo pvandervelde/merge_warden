@@ -524,6 +524,10 @@ async fn handle_webhook(
         if let Err(e) = state.handler.handle_event(&envelope).await {
             error!(error = e.to_string(), "Handler failed in bypass mode");
         }
+        // Always return 200 in bypass mode: GitHub must receive a fast response
+        // within its 10-second timeout, and the bypass path is only used in
+        // dev-proxy scenarios where delivery acknowledgement is decoupled from
+        // processing outcome.
         return Ok(StatusCode::OK);
     }
 

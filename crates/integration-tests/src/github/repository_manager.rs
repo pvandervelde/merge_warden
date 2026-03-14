@@ -737,13 +737,22 @@ maxLines = 1000
             .await
             .map_err(|e| TestError::github_api_error("create_pull_request", &e.to_string()))?;
 
-        // Add labels if specified
+        // Add labels if specified. Treat failures as non-fatal: freshly created
+        // test repositories may not have all label names pre-created, and label
+        // assignment is not critical to PR creation itself.
         if !spec.labels.is_empty() {
-            self.github_client
+            if let Err(e) = self
+                .github_client
                 .issues(&repository.organization, &repository.name)
                 .add_labels(pr.number, &spec.labels)
                 .await
-                .map_err(|e| TestError::github_api_error("add_labels", &e.to_string()))?;
+            {
+                tracing::warn!(
+                    pr_number = pr.number,
+                    error = e.to_string(),
+                    "Failed to add labels to pull request (non-fatal)"
+                );
+            }
         }
 
         Ok(crate::utils::TestPullRequest {

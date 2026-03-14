@@ -162,7 +162,7 @@ impl GitHubProvider {
         // containing characters such as `#`, `+`, or spaces produce a valid URL.
         // The `path` component uses standard percent-encoding; the `ref` query
         // parameter value uses form-encoded rules (spaces → `%20`, not `+`).
-        let encoded_path = reference
+        let encoded_path = path
             .split('/')
             .map(|s| urlencoding::encode(s).into_owned())
             .collect::<Vec<_>>()
@@ -197,7 +197,10 @@ impl GitHubProvider {
         };
 
         if !response.status().is_success() {
-            return Ok(None);
+            // 404 is already handled above via ApiError::NotFound → Ok(None).
+            // Other non-success codes (403 permission denied, 500 server error, etc.)
+            // are not "file not found" and should not be silently treated as such.
+            return Err(Error::InvalidResponse);
         }
 
         let json: serde_json::Value = response.json().await.map_err(|_| Error::InvalidResponse)?;
