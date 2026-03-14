@@ -58,4 +58,4 @@ rand = "0.8"
 
 [dev-dependencies]
 # Additional test dependencies can be added here if needed
-pretty_assertions = "1.4"
+pretty_assertions = "=1.4.1"
