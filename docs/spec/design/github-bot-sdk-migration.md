@@ -2,7 +2,20 @@
 
 ## Status
 
-Draft — awaiting implementation (Phase 1.0)
+Complete — all in-scope steps implemented in this PR.
+
+**Completed (this PR)**
+
+- Step 1: Added `github-bot-sdk` as workspace dependency, pinned to commit SHA
+- Step 2: Migrated `developer_platforms::github::GitHubProvider` internals from
+  `Octocrab` to `InstallationClient`; deleted `authenticate_with_access_token`,
+  `create_app_client`, `JWTClaims`; implemented `AppAuthProvider`
+- Step 3: Replaced `verify_github_signature` with SDK `WebhookReceiver`
+  (`SignatureValidator`); replaced manual `WebhookPayload` deserialization with
+  `EventProcessor` → `EventEnvelope`; replaced inline action dispatch with
+  `WebhookHandler` impl in both `az_handler` and `merge_warden_cli`
+- Step 4: Removed `hmac`, `sha2`, `hex` from production dependencies in both
+  crates (retained as dev-dependencies in `az_handler` for test helpers only)
 
 ## Context
 
