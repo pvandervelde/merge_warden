@@ -2,84 +2,293 @@
 // See docs/spec/interfaces/developer-platforms-sdk.md — MergeWardenWebhookHandler
 // See docs/spec/design/containerisation.md       — HTTP routes
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
+use async_trait::async_trait;
 use axum::{
+    body::Bytes,
     extract::State,
-    http::StatusCode,
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
     routing::{get, post},
     Router,
 };
-use merge_warden_core::config::ApplicationDefaults;
+use github_bot_sdk::{
+    auth::{GitHubAppId, InstallationId, PrivateKey, SecretProvider},
+    client::GitHubClient,
+    error::SecretError,
+    events::{EventEnvelope, EventProcessor, ProcessorConfig},
+    webhook::{WebhookHandler, WebhookReceiver, WebhookRequest},
+};
+use merge_warden_core::{
+    config::{
+        load_merge_warden_config, ApplicationDefaults, CurrentPullRequestValidationConfiguration,
+    },
+    MergeWarden,
+};
+use merge_warden_developer_platforms::github::GitHubProvider;
+use tracing::{debug, error, info, instrument, warn};
+
+use crate::errors::ServerError;
+
+#[cfg(test)]
+#[path = "webhook_tests.rs"]
+mod tests;
+
+// ---------------------------------------------------------------------------
+// WebhookSecretProvider
+// ---------------------------------------------------------------------------
+
+/// [`SecretProvider`] backed by a webhook secret already loaded at startup.
+///
+/// The [`WebhookReceiver`] uses this only for HMAC-SHA256 signature validation.
+/// The `get_private_key` and `get_app_id` methods are not called in this path.
+struct WebhookSecretProvider {
+    webhook_secret: String,
+}
+
+#[async_trait]
+impl SecretProvider for WebhookSecretProvider {
+    async fn get_private_key(&self) -> Result<PrivateKey, SecretError> {
+        // Not invoked by SignatureValidator.
+        Err(SecretError::NotFound {
+            key: "private_key".to_string(),
+        })
+    }
+
+    async fn get_app_id(&self) -> Result<GitHubAppId, SecretError> {
+        // Not invoked by SignatureValidator.
+        Err(SecretError::NotFound {
+            key: "app_id".to_string(),
+        })
+    }
+
+    async fn get_webhook_secret(&self) -> Result<String, SecretError> {
+        Ok(self.webhook_secret.clone())
+    }
+
+    fn cache_duration(&self) -> chrono::Duration {
+        chrono::Duration::hours(1)
+    }
+}
+
+// ---------------------------------------------------------------------------
+// AppState
+// ---------------------------------------------------------------------------
 
 /// Shared state threaded through the Axum router and the event-processor task.
 ///
 /// Constructed once in `main()` from [`crate::config::ServerSecrets`] and
-/// [`crate::config::ServerConfig`].
-///
-/// **NOTE TO IMPLEMENTOR (task 1.0)**: Replace the `github_app_id`,
-/// `github_app_private_key`, and `webhook_secret` fields with an
-/// `Arc<github_bot_sdk::client::GitHubClient>` once the SDK is integrated. The
-/// raw private key must not be stored as a plain `String` in production.
+/// [`crate::config::ServerConfig`] and then wrapped in `Arc` before passing
+/// to [`build_router`].
 ///
 /// See docs/spec/interfaces/server-ingress.md — `AppState`
-#[derive(Clone)]
 pub struct AppState {
-    /// Numeric GitHub App ID.
-    pub github_app_id: u64,
-    /// PEM-encoded private key. Stored as `String` so it can be cheaply cloned
-    /// into request handlers. **Do not log this value.**
-    pub github_app_private_key: String,
-    /// Webhook HMAC signing secret. **Do not log this value.**
-    pub webhook_secret: String,
+    /// SDK webhook receiver: validates HMAC signatures and dispatches validated
+    /// events to registered [`WebhookHandler`]s asynchronously (fire-and-forget).
+    pub receiver: WebhookReceiver,
+    /// GitHub App client for creating installation-scoped API clients.
+    ///
+    /// `Clone` is cheap — it shares `Arc<dyn AuthenticationProvider>` internally.
+    #[allow(dead_code)]
+    pub github_client: GitHubClient,
     /// Application policy defaults loaded from configuration.
+    #[allow(dead_code)]
     pub policies: ApplicationDefaults,
-    /// Channel sender for queue mode. `None` in webhook mode.
-    pub event_sender: Option<tokio::sync::mpsc::Sender<crate::ingress::EventEnvelope>>,
 }
 
 // ---------------------------------------------------------------------------
 // MergeWardenWebhookHandler
 // ---------------------------------------------------------------------------
 
-/// Dispatches validated GitHub webhook events into the ingress pipeline.
+/// Dispatches validated GitHub webhook events into the Merge Warden processing
+/// pipeline.
 ///
-/// **NOTE TO IMPLEMENTOR (task 1.0)**: This struct should implement
-/// `github_bot_sdk::webhook::WebhookHandler` once the SDK is wired in. The
-/// `handle()` method should match on `envelope.event_type` and dispatch to
-/// the appropriate domain handler (currently only `"pull_request"` is handled;
-/// all other event types are silently ignored).
-///
-/// # Dispatch logic (pseudocode)
-/// ```text
-/// match envelope.event_type.as_str() {
-///     "pull_request" => handle_pull_request(envelope, state).await,
-///     _ => Ok(()),
-/// }
-/// ```
+/// Registered on [`WebhookReceiver`] during startup. Implements the SDK's
+/// [`WebhookHandler`] trait, which fires the handler asynchronously after the
+/// HTTP response is sent to GitHub, satisfying GitHub's 10-second timeout.
 ///
 /// See docs/spec/interfaces/developer-platforms-sdk.md — `MergeWardenWebhookHandler`
 pub struct MergeWardenWebhookHandler {
-    state: Arc<AppState>,
+    /// GitHub App client. `Clone` is cheap (Arc-backed internally).
+    github_client: GitHubClient,
+    /// Policy defaults used when no per-repo config file is found.
+    policies: ApplicationDefaults,
 }
 
 impl MergeWardenWebhookHandler {
-    /// Creates a new handler sharing the given application state.
-    pub fn new(state: Arc<AppState>) -> Self {
-        MergeWardenWebhookHandler { state }
+    /// Creates a new handler from the given client and policy defaults.
+    pub fn new(github_client: GitHubClient, policies: ApplicationDefaults) -> Self {
+        MergeWardenWebhookHandler {
+            github_client,
+            policies,
+        }
     }
 
-    /// Processes a `pull_request` event.
+    /// Creates a new handler sharing the state already constructed for [`AppState`].
+    #[allow(dead_code)]
+    pub fn new_from_state(state: &AppState) -> Self {
+        Self::new(state.github_client.clone(), state.policies.clone())
+    }
+
+    /// Processes a `pull_request` webhook event.
     ///
-    /// Extracts the PR details from `envelope.payload`, builds a
-    /// `GitHubProvider` (task 1.0: from `state.client`), and delegates to
-    /// `merge_warden_core::check_pull_request()`.
-    async fn handle_pull_request(
+    /// Validates the action, extracts PR metadata, builds a per-installation
+    /// GitHub client, loads the repo-level config, and delegates to
+    /// [`MergeWarden::process_pull_request`].
+    pub async fn handle_pull_request(&self, envelope: &EventEnvelope) -> Result<(), ServerError> {
+        let action = envelope.payload.raw()["action"].as_str().unwrap_or("");
+        match action {
+            "opened" | "edited" | "ready_for_review" | "reopened" | "unlocked" | "synchronize" => {}
+            _ => {
+                info!(action, "Pull request action does not require processing");
+                return Ok(());
+            }
+        }
+
+        let pr_number = envelope
+            .entity_id
+            .as_deref()
+            .and_then(|id| id.parse::<u32>().ok())
+            .or_else(|| {
+                envelope.payload.raw()["pull_request"]["number"]
+                    .as_u64()
+                    .map(|n| n as u32)
+            });
+
+        let pr_number = match pr_number {
+            Some(n) => n,
+            None => {
+                error!(
+                    repository = envelope.repository.full_name.as_str(),
+                    "Webhook payload missing pull request number"
+                );
+                return Err(ServerError::AuthError(
+                    "Missing pull request number in webhook payload".to_string(),
+                ));
+            }
+        };
+
+        let installation_id = match envelope.payload.raw()["installation"]["id"].as_u64() {
+            Some(id) => id,
+            None => {
+                error!(
+                    repository = envelope.repository.full_name.as_str(),
+                    pull_request = pr_number,
+                    "Webhook payload missing installation ID"
+                );
+                return Err(ServerError::AuthError(
+                    "Missing installation ID in webhook payload".to_string(),
+                ));
+            }
+        };
+
+        let repo_owner = &envelope.repository.owner.login;
+        let repo_name = &envelope.repository.name;
+
+        info!(
+            repository_owner = repo_owner.as_str(),
+            repository = repo_name.as_str(),
+            pull_request = pr_number,
+            action,
+            "Processing pull request"
+        );
+
+        let installation_client = self
+            .github_client
+            .installation_by_id(InstallationId::new(installation_id))
+            .await
+            .map_err(|e| {
+                error!(
+                    repository_owner = repo_owner.as_str(),
+                    repository = repo_name.as_str(),
+                    pull_request = pr_number,
+                    error = %e,
+                    "Failed to create installation client"
+                );
+                ServerError::AuthError(format!("Failed to create installation client: {}", e))
+            })?;
+
+        let provider = GitHubProvider::new(installation_client);
+
+        let merge_warden_config_path = ".github/merge-warden.toml";
+
+        let validation_config = match load_merge_warden_config(
+            repo_owner,
+            repo_name,
+            merge_warden_config_path,
+            &provider,
+            &self.policies,
+        )
+        .await
+        {
+            Ok(config) => {
+                info!(
+                    "Loaded merge-warden config from {}",
+                    merge_warden_config_path
+                );
+                config.to_validation_config(&self.policies.bypass_rules)
+            }
+            Err(e) => {
+                warn!(
+                    "Failed to load merge-warden config from {}: {}. Using defaults.",
+                    merge_warden_config_path, e
+                );
+                CurrentPullRequestValidationConfiguration {
+                    enforce_title_convention: self.policies.enable_title_validation,
+                    title_pattern: self.policies.default_title_pattern.clone(),
+                    invalid_title_label: self.policies.default_invalid_title_label.clone(),
+                    enforce_work_item_references: self.policies.enable_work_item_validation,
+                    work_item_reference_pattern: self.policies.default_work_item_pattern.clone(),
+                    missing_work_item_label: self.policies.default_missing_work_item_label.clone(),
+                    pr_size_check: self.policies.pr_size_check.clone(),
+                    change_type_labels: Some(self.policies.change_type_labels.clone()),
+                    bypass_rules: self.policies.bypass_rules.clone(),
+                }
+            }
+        };
+
+        let warden = MergeWarden::with_config(provider, validation_config);
+
+        warden
+            .process_pull_request(repo_owner, repo_name, pr_number.into())
+            .await
+            .map_err(|e| {
+                error!(
+                    repository_owner = repo_owner.as_str(),
+                    repository = repo_name.as_str(),
+                    pull_request = pr_number,
+                    error = %e,
+                    "Failed to process pull request"
+                );
+                ServerError::AuthError(format!("Failed to process pull request: {}", e))
+            })?;
+
+        info!(
+            repository_owner = repo_owner.as_str(),
+            repository = repo_name.as_str(),
+            pull_request = pr_number,
+            "Pull request processing completed"
+        );
+
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl WebhookHandler for MergeWardenWebhookHandler {
+    async fn handle_event(
         &self,
-        envelope: crate::ingress::EventEnvelope,
-    ) -> Result<(), crate::errors::ServerError> {
-        todo!("See docs/spec/interfaces/developer-platforms-sdk.md — MergeWardenWebhookHandler")
+        envelope: &EventEnvelope,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if envelope.event_type != "pull_request" {
+            debug!(event_type = %envelope.event_type, "Ignoring non-pull-request event");
+            return Ok(());
+        }
+
+        self.handle_pull_request(envelope)
+            .await
+            .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>)
     }
 }
 
@@ -87,38 +296,54 @@ impl MergeWardenWebhookHandler {
 // HTTP route handlers
 // ---------------------------------------------------------------------------
 
-/// `POST /webhook` — receives a raw GitHub webhook POST, validates the HMAC
-/// signature, and forwards the event to the ingress pipeline.
-///
-/// # Request requirements
-/// - `X-Hub-Signature-256` header must be present and valid.
-/// - `X-GitHub-Event` header identifies the event type.
-/// - `X-GitHub-Delivery` header provides the idempotency UUID.
+/// `POST /api/merge_warden` — receives a raw GitHub webhook POST, validates the
+/// HMAC-SHA256 signature, and dispatches the validated event asynchronously.
 ///
 /// # Responses
-/// - `202 Accepted` — event accepted for processing (or enqueued in queue mode).
+/// - `202 Accepted` — event accepted for processing.
 /// - `400 Bad Request` — missing required headers or malformed body.
 /// - `401 Unauthorized` — HMAC signature validation failed.
-/// - `500 Internal Server Error` — unexpected error forwarding the event.
+/// - `500 Internal Server Error` — unexpected processing error.
 ///
 /// See docs/spec/design/containerisation.md — HTTP routes
+#[instrument(skip(state, headers, body))]
 pub async fn handle_webhook(
-    State(_state): State<Arc<AppState>>,
-    _request: axum::http::Request<axum::body::Body>,
+    State(state): State<Arc<AppState>>,
+    headers: HeaderMap,
+    body: Bytes,
 ) -> impl IntoResponse {
-    todo!("See docs/spec/design/containerisation.md — POST /webhook handler")
-        as (StatusCode, &'static str)
+    debug!("Received webhook POST");
+
+    let header_map: HashMap<String, String> = headers
+        .iter()
+        .filter_map(|(k, v)| {
+            v.to_str()
+                .ok()
+                .map(|v| (k.as_str().to_lowercase(), v.to_string()))
+        })
+        .collect();
+
+    let request = WebhookRequest::new(header_map, body);
+    let response = state.receiver.receive_webhook(request).await;
+
+    match response.status_code() {
+        200 => (StatusCode::ACCEPTED, response.message().to_string()),
+        401 => (StatusCode::UNAUTHORIZED, response.message().to_string()),
+        500 => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            response.message().to_string(),
+        ),
+        _ => (StatusCode::BAD_REQUEST, response.message().to_string()),
+    }
 }
 
-/// `GET /health` — liveness probe endpoint for container orchestrators.
+/// `GET /api/merge_warden` — liveness probe for container orchestrators.
 ///
-/// Returns `200 OK` with an empty body when the server process is healthy.
-/// Does not check external dependencies (GitHub API, queue).
+/// Returns `200 OK` without checking external dependencies (GitHub API, queue).
 ///
 /// See docs/spec/design/containerisation.md — health check
 pub async fn health_check() -> impl IntoResponse {
-    todo!("See docs/spec/design/containerisation.md — GET /health handler")
-        as (StatusCode, &'static str)
+    StatusCode::OK
 }
 
 // ---------------------------------------------------------------------------
@@ -128,10 +353,36 @@ pub async fn health_check() -> impl IntoResponse {
 /// Builds the Axum [`Router`] with all routes and shared state attached.
 ///
 /// Routes:
-/// - `POST /webhook` → [`handle_webhook`]
-/// - `GET  /health`  → [`health_check`]
+/// - `GET  /api/merge_warden` → [`health_check`]
+/// - `POST /api/merge_warden` → [`handle_webhook`]
 ///
 /// See docs/spec/design/containerisation.md — HTTP routes
 pub fn build_router(state: Arc<AppState>) -> Router {
-    todo!("See docs/spec/design/containerisation.md — build_router()")
+    Router::new()
+        .route("/api/merge_warden", get(health_check))
+        .route("/api/merge_warden", post(handle_webhook))
+        .with_state(state)
+}
+
+// ---------------------------------------------------------------------------
+// Startup helpers
+// ---------------------------------------------------------------------------
+
+/// Builds a [`WebhookReceiver`] with the [`MergeWardenWebhookHandler`] registered,
+/// ready to be stored in [`AppState`].
+pub async fn build_webhook_receiver(
+    webhook_secret: &str,
+    github_client: GitHubClient,
+    policies: ApplicationDefaults,
+) -> WebhookReceiver {
+    let secret_provider = Arc::new(WebhookSecretProvider {
+        webhook_secret: webhook_secret.to_string(),
+    });
+    let processor = EventProcessor::new(ProcessorConfig::default());
+    let mut receiver = WebhookReceiver::new(secret_provider, processor);
+
+    let handler = Arc::new(MergeWardenWebhookHandler::new(github_client, policies));
+    receiver.add_handler(handler).await;
+
+    receiver
 }

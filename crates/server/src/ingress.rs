@@ -1,30 +1,27 @@
 // See docs/spec/interfaces/server-ingress.md for the full contract.
-
+//
+// NOTE: Many items in this module are not yet wired into main() — they are
+// the Task 3.0 queue-mode foundation. Dead-code warnings are suppressed so
+// that the fully-specified interface compiles cleanly prior to wiring.
+#![allow(dead_code)]
 use std::sync::Arc;
 
+use github_bot_sdk::webhook::WebhookHandler;
+use tracing::error;
+
+#[cfg(test)]
+#[path = "ingress_tests.rs"]
+mod tests;
+
 // ---------------------------------------------------------------------------
-// EventEnvelope (local placeholder)
+// EventEnvelope
 // ---------------------------------------------------------------------------
 
-/// Local placeholder for the event envelope supplied by `github-bot-sdk`.
-///
-/// **NOTE TO IMPLEMENTOR (task 1.0)**: Remove this struct and replace every
-/// reference with `github_bot_sdk::events::EventEnvelope` once the SDK crate
-/// is wired into the workspace `Cargo.toml`.
+/// The canonical event envelope type for this crate — re-exported from the
+/// `github-bot-sdk` so all modules share a single definition.
 ///
 /// See docs/spec/interfaces/server-ingress.md — `EventEnvelope`
-/// See docs/spec/design/github-bot-sdk-migration.md
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct EventEnvelope {
-    /// Value of the `X-GitHub-Event` header (e.g. `"pull_request"`).
-    pub event_type: String,
-    /// Value of the `X-GitHub-Delivery` header (UUID string).
-    pub delivery_id: String,
-    /// GitHub App installation id extracted from the JWT payload, when present.
-    pub installation_id: Option<u64>,
-    /// Full JSON body deserialized as an opaque value.
-    pub payload: serde_json::Value,
-}
+pub use github_bot_sdk::events::EventEnvelope;
 
 // ---------------------------------------------------------------------------
 // IngressError
@@ -197,7 +194,14 @@ impl WebhookIngress {
 #[async_trait::async_trait]
 impl EventIngress for WebhookIngress {
     async fn next_event(&mut self) -> Result<Option<ProcessableEvent>, IngressError> {
-        todo!("See docs/spec/interfaces/server-ingress.md — WebhookIngress::next_event()")
+        match self.receiver.recv().await {
+            Some(envelope) => Ok(Some(ProcessableEvent {
+                envelope,
+                ack: Box::new(NoOpAck),
+            })),
+            // All senders have been dropped — signal EOF.
+            None => Ok(None),
+        }
     }
 }
 
@@ -256,5 +260,27 @@ pub async fn run_event_processor(
     mut ingress: Box<dyn EventIngress + Send>,
     state: Arc<crate::webhook::AppState>,
 ) -> Result<(), IngressError> {
-    todo!("See docs/spec/interfaces/server-ingress.md — run_event_processor()")
+    let handler = crate::webhook::MergeWardenWebhookHandler::new(
+        state.github_client.clone(),
+        state.policies.clone(),
+    );
+
+    while let Some(event) = ingress.next_event().await? {
+        match handler.handle_event(&event.envelope).await {
+            Ok(()) => {
+                if let Err(e) = event.ack.complete().await {
+                    error!(error = %e, "Failed to acknowledge processed event");
+                }
+            }
+            Err(e) => {
+                let reason = e.to_string();
+                error!(error = %e, "Event processing failed; dead-lettering");
+                if let Err(ack_err) = event.ack.reject(&reason).await {
+                    error!(error = %ack_err, "Failed to dead-letter failed event");
+                }
+            }
+        }
+    }
+
+    Ok(())
 }

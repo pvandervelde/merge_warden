@@ -2,6 +2,10 @@
 
 use std::{fmt, path::PathBuf};
 
+#[cfg(test)]
+#[path = "config_tests.rs"]
+mod tests;
+
 use merge_warden_core::config::ApplicationDefaults;
 
 use crate::errors::ServerError;
@@ -85,6 +89,7 @@ pub enum ReceiverMode {
 /// Queue provider settings, present only when `receiver_mode == ReceiverMode::Queue`.
 ///
 /// See docs/spec/interfaces/server-config.md — `QueueServerConfig`
+#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct QueueServerConfig {
     /// Queue provider identifier (e.g. `"azure"`). From `MERGE_WARDEN_QUEUE_PROVIDER`.
@@ -113,10 +118,12 @@ pub struct ServerConfig {
     /// Ingress mode. From `MERGE_WARDEN_RECEIVER_MODE`. Default: `Webhook`.
     pub receiver_mode: ReceiverMode,
     /// Optional path to a TOML policy configuration file. From `MERGE_WARDEN_CONFIG_FILE`.
+    #[allow(dead_code)]
     pub config_file_path: Option<PathBuf>,
     /// Merge-warden application policy defaults (from TOML file or `ApplicationDefaults::default()`).
     pub application_defaults: ApplicationDefaults,
     /// Queue-mode settings. `Some(...)` only when `receiver_mode == ReceiverMode::Queue`.
+    #[allow(dead_code)]
     pub queue: Option<QueueServerConfig>,
 }
 
@@ -132,7 +139,27 @@ pub struct ServerConfig {
 /// - [`ServerError::MissingEnvVar`] when any required variable is absent.
 /// - [`ServerError::InvalidEnvVar`] when `GITHUB_APP_ID` is not a valid `u64`.
 pub fn load_secrets() -> Result<ServerSecrets, ServerError> {
-    todo!("See docs/spec/interfaces/server-config.md — load_secrets()")
+    let app_id_str = std::env::var("GITHUB_APP_ID")
+        .map_err(|_| ServerError::MissingEnvVar("GITHUB_APP_ID".to_string()))?;
+
+    let github_app_id: u64 = app_id_str.parse().map_err(|e| ServerError::InvalidEnvVar {
+        name: "GITHUB_APP_ID".to_string(),
+        message: format!("Expected an unsigned integer: {}", e),
+    })?;
+
+    let github_app_private_key = std::env::var("GITHUB_APP_PRIVATE_KEY")
+        .map(SecretString::new)
+        .map_err(|_| ServerError::MissingEnvVar("GITHUB_APP_PRIVATE_KEY".to_string()))?;
+
+    let github_webhook_secret = std::env::var("GITHUB_WEBHOOK_SECRET")
+        .map(SecretString::new)
+        .map_err(|_| ServerError::MissingEnvVar("GITHUB_WEBHOOK_SECRET".to_string()))?;
+
+    Ok(ServerSecrets {
+        github_app_id,
+        github_app_private_key,
+        github_webhook_secret,
+    })
 }
 
 /// Builds [`ServerConfig`] from environment variables and an optional TOML file.
@@ -144,5 +171,92 @@ pub fn load_secrets() -> Result<ServerSecrets, ServerError> {
 /// - [`ServerError::MissingEnvVar`] for `MERGE_WARDEN_QUEUE_PROVIDER` in queue mode.
 /// - [`ServerError::ConfigError`] if the TOML file cannot be parsed.
 pub fn load_config() -> Result<ServerConfig, ServerError> {
-    todo!("See docs/spec/interfaces/server-config.md — load_config()")
+    use tracing::info;
+
+    // --- Port ---
+    let port = match std::env::var("MERGE_WARDEN_PORT") {
+        Ok(val) => val.parse::<u16>().map_err(|e| ServerError::InvalidEnvVar {
+            name: "MERGE_WARDEN_PORT".to_string(),
+            message: format!("Expected a TCP port number (1–65535): {}", e),
+        })?,
+        Err(_) => 3000,
+    };
+
+    // --- Receiver mode ---
+    let receiver_mode_val = std::env::var("MERGE_WARDEN_RECEIVER_MODE")
+        .unwrap_or_else(|_| "webhook".to_string())
+        .to_lowercase();
+
+    let receiver_mode = match receiver_mode_val.as_str() {
+        "webhook" => ReceiverMode::Webhook,
+        "queue" => ReceiverMode::Queue,
+        other => {
+            return Err(ServerError::InvalidEnvVar {
+                name: "MERGE_WARDEN_RECEIVER_MODE".to_string(),
+                message: format!("Expected 'webhook' or 'queue', got '{}'", other),
+            })
+        }
+    };
+
+    // --- Config file path ---
+    let config_file_path = std::env::var("MERGE_WARDEN_CONFIG_FILE")
+        .ok()
+        .map(PathBuf::from);
+
+    // --- Application defaults: TOML file → env overrides → compiled defaults ---
+    let application_defaults = if let Some(ref path) = config_file_path {
+        let content = std::fs::read_to_string(path).map_err(|e| {
+            ServerError::ConfigError(format!("Failed to read '{}': {}", path.display(), e))
+        })?;
+
+        // The TOML file uses a `[policies]` section to hold `ApplicationDefaults`.
+        #[derive(serde::Deserialize, Default)]
+        struct ServerTomlConfig {
+            #[serde(default)]
+            policies: ApplicationDefaults,
+        }
+
+        let parsed: ServerTomlConfig = toml::from_str(&content).map_err(|e| {
+            ServerError::ConfigError(format!("Failed to parse '{}': {}", path.display(), e))
+        })?;
+
+        info!(path = %path.display(), "Loaded application defaults from TOML config file");
+        parsed.policies
+    } else {
+        info!("No MERGE_WARDEN_CONFIG_FILE set; using compiled-in application defaults");
+        ApplicationDefaults::default()
+    };
+
+    // --- Queue config (only in queue mode) ---
+    let queue = if receiver_mode == ReceiverMode::Queue {
+        let provider = std::env::var("MERGE_WARDEN_QUEUE_PROVIDER")
+            .map_err(|_| ServerError::MissingEnvVar("MERGE_WARDEN_QUEUE_PROVIDER".to_string()))?;
+
+        let queue_name = std::env::var("MERGE_WARDEN_QUEUE_NAME")
+            .unwrap_or_else(|_| "merge-warden-events".to_string());
+
+        let concurrency = std::env::var("MERGE_WARDEN_QUEUE_CONCURRENCY")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(4);
+
+        let namespace = std::env::var("AZURE_SERVICEBUS_NAMESPACE").ok();
+
+        Some(QueueServerConfig {
+            provider,
+            queue_name,
+            concurrency,
+            namespace,
+        })
+    } else {
+        None
+    };
+
+    Ok(ServerConfig {
+        port,
+        receiver_mode,
+        config_file_path,
+        application_defaults,
+        queue,
+    })
 }

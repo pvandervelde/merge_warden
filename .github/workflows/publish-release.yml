@@ -10,6 +10,7 @@ on:
 
 permissions:
   contents: write # To push tags and to create GitHub Releases
+  packages: write # To push container images to GHCR
 
 jobs:
   publish-release:
@@ -97,3 +98,20 @@ jobs:
           gh release create "${RELEASE_VERSION}" \
             --title "Release ${RELEASE_VERSION}" \
             --notes "${{ steps.extract_notes.outputs.notes }}"
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push container image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: crates/server/Dockerfile
+          push: true
+          tags: |
+            ghcr.io/pvandervelde/merge_warden/server:latest
+            ghcr.io/pvandervelde/merge_warden/server:${{ steps.get_version.outputs.RELEASE_VERSION }}
