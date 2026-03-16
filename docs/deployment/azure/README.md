@@ -1,8 +1,76 @@
 # Azure Deployment Guide
 
-This guide explains how to deploy the Merge Warden Azure Function using the artifacts provided in GitHub releases.
+> **Recommended approach:** Deploy the OCI container image on
+> [Azure Container Apps](https://learn.microsoft.com/en-us/azure/container-apps/).
+> See the [container deployment guide](../README.md) for environment variable
+> reference and quick-start instructions.
+>
+> The Azure Functions deployment described below is the **legacy** method and will
+> not receive new features. It remains documented for existing deployments.
 
-## Overview
+---
+
+## Azure Container Apps (Recommended)
+
+Run the published image on Azure Container Apps. Secrets are injected as environment
+variable references to Azure Key Vault, which is the native ACA pattern.
+
+### Minimal deployment
+
+```bash
+# Create a resource group and Container Apps environment
+az group create --name rg-merge-warden --location australiaeast
+az containerapp env create \
+  --name cae-merge-warden \
+  --resource-group rg-merge-warden \
+  --location australiaeast
+
+# Store secrets in Key Vault
+az keyvault secret set --vault-name kv-merge-warden \
+  --name github-app-id       --value "12345"
+az keyvault secret set --vault-name kv-merge-warden \
+  --name github-app-key      --value "$(cat private-key.pem)"
+az keyvault secret set --vault-name kv-merge-warden \
+  --name github-webhook-secret --value "supersecret"
+
+# Deploy the container
+az containerapp create \
+  --name merge-warden \
+  --resource-group rg-merge-warden \
+  --environment cae-merge-warden \
+  --image ghcr.io/pvandervelde/merge_warden/server:latest \
+  --target-port 3000 \
+  --ingress external \
+  --secrets \
+    "app-id=keyvaultref:<KEY_VAULT_SECRET_URI_FOR_APP_ID>,identityref:<MANAGED_IDENTITY_ID>" \
+    "app-key=keyvaultref:<KEY_VAULT_SECRET_URI_FOR_KEY>,identityref:<MANAGED_IDENTITY_ID>" \
+    "webhook-secret=keyvaultref:<KEY_VAULT_SECRET_URI_FOR_WEBHOOK>,identityref:<MANAGED_IDENTITY_ID>" \
+  --env-vars \
+    "GITHUB_APP_ID=secretref:app-id" \
+    "GITHUB_APP_PRIVATE_KEY=secretref:app-key" \
+    "GITHUB_WEBHOOK_SECRET=secretref:webhook-secret" \
+    "OTEL_EXPORTER_OTLP_ENDPOINT=http://your-otel-collector:4318"
+```
+
+### Health probe
+
+Azure Container Apps supports HTTP liveness and readiness probes. Configure them to
+use `GET /api/merge_warden` on port `3000`.
+
+### OTLP telemetry on Azure
+
+Enable the [Azure Monitor OpenTelemetry Distro](https://learn.microsoft.com/en-us/azure/azure-monitor/app/opentelemetry-enable)
+collector sidecar and set `OTEL_EXPORTER_OTLP_ENDPOINT` to the sidecar's OTLP
+endpoint. No Application Insights SDK is required in the binary.
+
+---
+
+## Azure Functions (Legacy)
+
+This guide explains how to deploy the Merge Warden Azure Function using the
+artifacts provided in GitHub releases.
+
+### Overview
 
 The Merge Warden Azure Function is distributed as a pre-built deployment package that can be deployed to Azure Functions using infrastructure-as-code tools like Terraform. This approach separates application code from infrastructure configuration, allowing you to maintain your own deployment infrastructure while using the official Merge Warden binaries.
 
