@@ -975,9 +975,7 @@ pub async fn load_merge_warden_config(
 
     let mut config: RepositoryProvidedConfig = RepositoryProvidedConfig::default();
     let mut is_valid_config = true;
-    if potential_content.is_some() {
-        let content = potential_content.unwrap();
-
+    if let Some(content) = potential_content {
         config = toml::from_str(&content)?;
         if config.schema_version != 1 {
             error!(

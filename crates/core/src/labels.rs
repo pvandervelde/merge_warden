@@ -495,7 +495,7 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
             size_info.size_category.as_str()
         );
         provider
-            .add_labels(owner, repo, pr_number, &[label_name.clone()])
+            .add_labels(owner, repo, pr_number, std::slice::from_ref(label_name))
             .await
             .map_err(|e| {
                 warn!(
@@ -527,7 +527,12 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
         );
 
         provider
-            .add_labels(owner, repo, pr_number, &[fallback_label.clone()])
+            .add_labels(
+                owner,
+                repo,
+                pr_number,
+                std::slice::from_ref(&fallback_label),
+            )
             .await
             .map_err(|e| {
                 warn!(
