@@ -12,7 +12,9 @@ ghcr.io/pvandervelde/merge_warden/server:<version>
 
 Images are built from `crates/server/Dockerfile` and published automatically on each
 release via the [publish-release](.../../.github/workflows/publish-release.yml)
-workflow.
+workflow. Both `linux/amd64` and `linux/arm64` manifests are published in the same
+multi-arch image so the same tag works on x86-64 servers, AWS Graviton, and Apple
+Silicon dev containers.
 
 The runtime image is based on `gcr.io/distroless/cc-debian12` — it contains only the
 compiled binary and the minimal shared-library set (libc, libgcc). There is no shell

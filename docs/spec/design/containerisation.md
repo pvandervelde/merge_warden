@@ -114,7 +114,9 @@ Add an optional OpenTelemetry OTLP export layer activated by the standard
 ```
 tracing subscriber stack:
   console layer (fmt, always on)
-  + OTLP/gRPC layer (on when OTEL_EXPORTER_OTLP_ENDPOINT is set)
+  + OTLP/HTTP layer (on when OTEL_EXPORTER_OTLP_ENDPOINT is set)
+    Transport: HTTP (port 4318); include /v1/traces suffix in the endpoint
+    URL if required by the collector. gRPC (port 4317) is not used.
 ```
 
 **Azure**: Azure Monitor OpenTelemetry Distro accepts OTLP — no Application
@@ -171,15 +173,24 @@ EXPOSE 3000
 ENTRYPOINT ["/merge_warden_server"]
 ```
 
-**Health check** (for container orchestrators):
+**Health check** — delegated to the orchestrator's external HTTP probe:
 
-```dockerfile
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-  CMD ["/merge_warden_server", "--health-check"]
+The runtime image is `gcr.io/distroless/cc-debian12`, which contains no shell or
+HTTP client. A Dockerfile `HEALTHCHECK CMD` cannot be used. Instead, configure the
+container orchestrator to probe:
+
+```
+GET http://<container>:3000/api/merge_warden  → 200 OK
 ```
 
-Or rely on the existing `GET /api/merge_warden` → 200 OK as the health probe URL
-(preferred — no extra binary flag needed).
+The Dockerfile therefore declares `HEALTHCHECK NONE` explicitly, and the binary does
+not implement a `--health-check` CLI flag.
+
+Orchestrator-specific configuration:
+
+- **ECS**: set `healthCheck.command` in the task definition to `curl -f http://localhost:3000/api/merge_warden`
+- **Azure Container Apps**: configure the liveness probe to HTTP GET `/api/merge_warden` on port 3000
+- **Kubernetes**: use an `httpGet` liveness/readiness probe on path `/api/merge_warden`, port 3000
 
 ---
 
