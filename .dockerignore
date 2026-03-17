@@ -1,0 +1,40 @@
+# Exclude version control metadata
+.git
+.gitignore
+.gitattributes
+
+# Exclude build artifacts — the builder stage recompiles from source
+target
+
+# Exclude documentation and non-Rust files that are not part of the build
+docs
+samples
+resources
+*.md
+CHANGELOG.md
+LICENSE
+AGENTS.md
+
+# Exclude CI/CD and tooling configuration
+.github
+.llm
+.roo
+cliff.toml
+deny.toml
+cross.toml
+renovate.json
+GitVersion.yml
+lcov.info
+
+# Exclude local environment and secret files
+.env*
+*.pem
+*.key
+
+# Exclude IDE and editor directories
+.vscode
+.idea
+*.iml
+
+# All crates/* directories are included — the workspace Cargo.toml and
+# individual crate sources are required by `cargo build --release -p merge_warden_server`.

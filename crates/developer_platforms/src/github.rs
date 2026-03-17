@@ -211,7 +211,7 @@ impl GitHubProvider {
         };
 
         // GitHub encodes file content as base64 with embedded newlines — strip them.
-        let cleaned = content.replace('\n', "").replace(' ', "");
+        let cleaned = content.replace(['\n', ' '], "");
         let decoded = base64::engine::general_purpose::STANDARD
             .decode(&cleaned)
             .map_err(|e| {

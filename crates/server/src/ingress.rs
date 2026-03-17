@@ -1,30 +1,27 @@
 // See docs/spec/interfaces/server-ingress.md for the full contract.
-
+//
+// NOTE: Several items in this module are not yet wired into main() — they are
+// the Task 3.0 queue-mode foundation and will be used once that task is
+// implemented. Item-level #[allow(dead_code)] is used rather than a module-wide
+// suppression so that genuinely unreachable code cannot hide behind it.
 use std::sync::Arc;
 
+use github_bot_sdk::webhook::WebhookHandler;
+use tracing::error;
+
+#[cfg(test)]
+#[path = "ingress_tests.rs"]
+mod tests;
+
 // ---------------------------------------------------------------------------
-// EventEnvelope (local placeholder)
+// EventEnvelope
 // ---------------------------------------------------------------------------
 
-/// Local placeholder for the event envelope supplied by `github-bot-sdk`.
-///
-/// **NOTE TO IMPLEMENTOR (task 1.0)**: Remove this struct and replace every
-/// reference with `github_bot_sdk::events::EventEnvelope` once the SDK crate
-/// is wired into the workspace `Cargo.toml`.
+/// The canonical event envelope type for this crate — re-exported from the
+/// `github-bot-sdk` so all modules share a single definition.
 ///
 /// See docs/spec/interfaces/server-ingress.md — `EventEnvelope`
-/// See docs/spec/design/github-bot-sdk-migration.md
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct EventEnvelope {
-    /// Value of the `X-GitHub-Event` header (e.g. `"pull_request"`).
-    pub event_type: String,
-    /// Value of the `X-GitHub-Delivery` header (UUID string).
-    pub delivery_id: String,
-    /// GitHub App installation id extracted from the JWT payload, when present.
-    pub installation_id: Option<u64>,
-    /// Full JSON body deserialized as an opaque value.
-    pub payload: serde_json::Value,
-}
+pub use github_bot_sdk::events::EventEnvelope;
 
 // ---------------------------------------------------------------------------
 // IngressError
@@ -33,6 +30,7 @@ pub struct EventEnvelope {
 /// All errors that can arise inside the ingress layer.
 ///
 /// See docs/spec/interfaces/server-ingress.md — `IngressError`
+#[allow(dead_code)]
 #[derive(Debug, thiserror::Error)]
 pub enum IngressError {
     /// The in-process event channel was closed before the receiver could drain it.
@@ -63,6 +61,7 @@ pub enum IngressError {
 /// Lifecycle hook for acknowledging an event to the underlying broker.
 ///
 /// See docs/spec/interfaces/server-ingress.md — `EventAcknowledger`
+#[allow(dead_code)]
 #[async_trait::async_trait]
 pub trait EventAcknowledger: Send {
     /// Marks the event as successfully processed.
@@ -95,6 +94,7 @@ pub trait EventAcknowledger: Send {
 /// processing to avoid message redelivery in queue mode.
 ///
 /// See docs/spec/interfaces/server-ingress.md — `ProcessableEvent`
+#[allow(dead_code)]
 pub struct ProcessableEvent {
     /// The event payload.
     pub envelope: EventEnvelope,
@@ -113,6 +113,7 @@ pub struct ProcessableEvent {
 /// lost.
 ///
 /// See docs/spec/interfaces/server-ingress.md — `EventIngress`
+#[allow(dead_code)]
 #[async_trait::async_trait]
 pub trait EventIngress: Send {
     /// Returns the next available event, or `None` when the source has closed.
@@ -137,6 +138,7 @@ pub trait EventIngress: Send {
 /// message envelope, NOT in this struct.
 ///
 /// See docs/spec/interfaces/server-ingress.md — `WebhookQueueMessage`
+#[allow(dead_code)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WebhookQueueMessage {
     /// Schema version byte for forward-compatible migration. Currently `1`.
@@ -160,6 +162,7 @@ pub struct WebhookQueueMessage {
 /// [`EventAcknowledger`] for webhook mode — both operations are no-ops.
 ///
 /// See docs/spec/interfaces/server-ingress.md — `NoOpAck`
+#[allow(dead_code)]
 pub struct NoOpAck;
 
 #[async_trait::async_trait]
@@ -183,12 +186,14 @@ impl EventAcknowledger for NoOpAck {
 /// owned by the Axum POST handler. EOF is signalled by dropping all senders.
 ///
 /// See docs/spec/interfaces/server-ingress.md — `WebhookIngress`
+#[allow(dead_code)]
 pub struct WebhookIngress {
     receiver: tokio::sync::mpsc::Receiver<EventEnvelope>,
 }
 
 impl WebhookIngress {
     /// Creates a new `WebhookIngress` from the receiving end of the channel.
+    #[allow(dead_code)]
     pub fn new(receiver: tokio::sync::mpsc::Receiver<EventEnvelope>) -> Self {
         WebhookIngress { receiver }
     }
@@ -197,7 +202,14 @@ impl WebhookIngress {
 #[async_trait::async_trait]
 impl EventIngress for WebhookIngress {
     async fn next_event(&mut self) -> Result<Option<ProcessableEvent>, IngressError> {
-        todo!("See docs/spec/interfaces/server-ingress.md — WebhookIngress::next_event()")
+        match self.receiver.recv().await {
+            Some(envelope) => Ok(Some(ProcessableEvent {
+                envelope,
+                ack: Box::new(NoOpAck),
+            })),
+            // All senders have been dropped — signal EOF.
+            None => Ok(None),
+        }
     }
 }
 
@@ -215,6 +227,7 @@ impl EventIngress for WebhookIngress {
 /// `Cargo.toml`.
 ///
 /// See docs/spec/interfaces/server-ingress.md — `QueueIngress`
+#[allow(dead_code)]
 pub struct QueueIngress {
     /// Name of the queue to consume.
     pub queue_name: String,
@@ -224,6 +237,7 @@ pub struct QueueIngress {
 
 impl QueueIngress {
     /// Creates a new `QueueIngress`.
+    #[allow(dead_code)]
     pub fn new(queue_name: String, concurrency: usize) -> Self {
         QueueIngress {
             queue_name,
@@ -252,9 +266,32 @@ impl EventIngress for QueueIngress {
 ///
 /// # Errors
 /// Returns the first [`IngressError`] that is not recoverable in the loop.
+#[allow(dead_code)]
 pub async fn run_event_processor(
     mut ingress: Box<dyn EventIngress + Send>,
     state: Arc<crate::webhook::AppState>,
 ) -> Result<(), IngressError> {
-    todo!("See docs/spec/interfaces/server-ingress.md — run_event_processor()")
+    let handler = crate::webhook::MergeWardenWebhookHandler::new(
+        state.github_client.clone(),
+        state.policies.clone(),
+    );
+
+    while let Some(event) = ingress.next_event().await? {
+        match handler.handle_event(&event.envelope).await {
+            Ok(()) => {
+                if let Err(e) = event.ack.complete().await {
+                    error!(error = %e, "Failed to acknowledge processed event");
+                }
+            }
+            Err(e) => {
+                let reason = e.to_string();
+                error!(error = %e, "Event processing failed; dead-lettering");
+                if let Err(ack_err) = event.ack.reject(&reason).await {
+                    error!(error = %ack_err, "Failed to dead-letter failed event");
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
