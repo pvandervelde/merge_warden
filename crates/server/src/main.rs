@@ -12,6 +12,7 @@ mod webhook;
 
 use std::sync::Arc;
 
+use config::ReceiverMode;
 use errors::ServerError;
 use github_bot_sdk::client::{ClientConfig, GitHubClient};
 use merge_warden_developer_platforms::app_auth::AppAuthProvider;
@@ -38,6 +39,16 @@ async fn main() -> Result<(), ServerError> {
         receiver_mode = ?server_config.receiver_mode,
         "Configuration loaded"
     );
+
+    // Queue mode is not yet implemented (task 3.0). Fail fast with a clear
+    // message rather than starting in webhook mode silently.
+    if server_config.receiver_mode == ReceiverMode::Queue {
+        return Err(ServerError::ConfigError(
+            "Queue mode is not yet implemented. \
+             Set MERGE_WARDEN_RECEIVER_MODE=webhook or leave it unset."
+                .to_string(),
+        ));
+    }
 
     // 4. Initialise GitHub App client.
     debug!(
@@ -81,14 +92,14 @@ async fn main() -> Result<(), ServerError> {
     let addr = format!("0.0.0.0:{}", server_config.port);
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
-        .map_err(|e| ServerError::AuthError(format!("Failed to bind {}: {}", addr, e)))?;
+        .map_err(|e| ServerError::StartupError(format!("Failed to bind {}: {}", addr, e)))?;
 
     info!(address = addr.as_str(), "Listening for requests");
 
     // 8. Serve. Queue mode processor (task 3.0) would be spawned here.
     axum::serve(listener, router)
         .await
-        .map_err(|e| ServerError::AuthError(format!("Server error: {}", e)))?;
+        .map_err(|e| ServerError::StartupError(format!("Server error: {}", e)))?;
 
     Ok(())
 }

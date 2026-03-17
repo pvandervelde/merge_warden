@@ -235,10 +235,13 @@ pub fn load_config() -> Result<ServerConfig, ServerError> {
         let queue_name = std::env::var("MERGE_WARDEN_QUEUE_NAME")
             .unwrap_or_else(|_| "merge-warden-events".to_string());
 
-        let concurrency = std::env::var("MERGE_WARDEN_QUEUE_CONCURRENCY")
-            .ok()
-            .and_then(|v| v.parse::<usize>().ok())
-            .unwrap_or(4);
+        let concurrency = match std::env::var("MERGE_WARDEN_QUEUE_CONCURRENCY") {
+            Ok(v) => v.parse::<usize>().map_err(|e| ServerError::InvalidEnvVar {
+                name: "MERGE_WARDEN_QUEUE_CONCURRENCY".to_string(),
+                message: format!("Expected a positive integer: {}", e),
+            })?,
+            Err(_) => 4,
+        };
 
         let namespace = std::env::var("AZURE_SERVICEBUS_NAMESPACE").ok();
 

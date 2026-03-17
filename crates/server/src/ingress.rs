@@ -1,9 +1,9 @@
 // See docs/spec/interfaces/server-ingress.md for the full contract.
 //
-// NOTE: Many items in this module are not yet wired into main() — they are
-// the Task 3.0 queue-mode foundation. Dead-code warnings are suppressed so
-// that the fully-specified interface compiles cleanly prior to wiring.
-#![allow(dead_code)]
+// NOTE: Several items in this module are not yet wired into main() — they are
+// the Task 3.0 queue-mode foundation and will be used once that task is
+// implemented. Item-level #[allow(dead_code)] is used rather than a module-wide
+// suppression so that genuinely unreachable code cannot hide behind it.
 use std::sync::Arc;
 
 use github_bot_sdk::webhook::WebhookHandler;
@@ -30,6 +30,7 @@ pub use github_bot_sdk::events::EventEnvelope;
 /// All errors that can arise inside the ingress layer.
 ///
 /// See docs/spec/interfaces/server-ingress.md — `IngressError`
+#[allow(dead_code)]
 #[derive(Debug, thiserror::Error)]
 pub enum IngressError {
     /// The in-process event channel was closed before the receiver could drain it.
@@ -60,6 +61,7 @@ pub enum IngressError {
 /// Lifecycle hook for acknowledging an event to the underlying broker.
 ///
 /// See docs/spec/interfaces/server-ingress.md — `EventAcknowledger`
+#[allow(dead_code)]
 #[async_trait::async_trait]
 pub trait EventAcknowledger: Send {
     /// Marks the event as successfully processed.
@@ -92,6 +94,7 @@ pub trait EventAcknowledger: Send {
 /// processing to avoid message redelivery in queue mode.
 ///
 /// See docs/spec/interfaces/server-ingress.md — `ProcessableEvent`
+#[allow(dead_code)]
 pub struct ProcessableEvent {
     /// The event payload.
     pub envelope: EventEnvelope,
@@ -110,6 +113,7 @@ pub struct ProcessableEvent {
 /// lost.
 ///
 /// See docs/spec/interfaces/server-ingress.md — `EventIngress`
+#[allow(dead_code)]
 #[async_trait::async_trait]
 pub trait EventIngress: Send {
     /// Returns the next available event, or `None` when the source has closed.
@@ -134,6 +138,7 @@ pub trait EventIngress: Send {
 /// message envelope, NOT in this struct.
 ///
 /// See docs/spec/interfaces/server-ingress.md — `WebhookQueueMessage`
+#[allow(dead_code)]
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct WebhookQueueMessage {
     /// Schema version byte for forward-compatible migration. Currently `1`.
@@ -157,6 +162,7 @@ pub struct WebhookQueueMessage {
 /// [`EventAcknowledger`] for webhook mode — both operations are no-ops.
 ///
 /// See docs/spec/interfaces/server-ingress.md — `NoOpAck`
+#[allow(dead_code)]
 pub struct NoOpAck;
 
 #[async_trait::async_trait]
@@ -180,12 +186,14 @@ impl EventAcknowledger for NoOpAck {
 /// owned by the Axum POST handler. EOF is signalled by dropping all senders.
 ///
 /// See docs/spec/interfaces/server-ingress.md — `WebhookIngress`
+#[allow(dead_code)]
 pub struct WebhookIngress {
     receiver: tokio::sync::mpsc::Receiver<EventEnvelope>,
 }
 
 impl WebhookIngress {
     /// Creates a new `WebhookIngress` from the receiving end of the channel.
+    #[allow(dead_code)]
     pub fn new(receiver: tokio::sync::mpsc::Receiver<EventEnvelope>) -> Self {
         WebhookIngress { receiver }
     }
@@ -219,6 +227,7 @@ impl EventIngress for WebhookIngress {
 /// `Cargo.toml`.
 ///
 /// See docs/spec/interfaces/server-ingress.md — `QueueIngress`
+#[allow(dead_code)]
 pub struct QueueIngress {
     /// Name of the queue to consume.
     pub queue_name: String,
@@ -228,6 +237,7 @@ pub struct QueueIngress {
 
 impl QueueIngress {
     /// Creates a new `QueueIngress`.
+    #[allow(dead_code)]
     pub fn new(queue_name: String, concurrency: usize) -> Self {
         QueueIngress {
             queue_name,
@@ -256,6 +266,7 @@ impl EventIngress for QueueIngress {
 ///
 /// # Errors
 /// Returns the first [`IngressError`] that is not recoverable in the loop.
+#[allow(dead_code)]
 pub async fn run_event_processor(
     mut ingress: Box<dyn EventIngress + Send>,
     state: Arc<crate::webhook::AppState>,

@@ -44,6 +44,15 @@ mod tests;
 /// The [`WebhookReceiver`] uses this only for HMAC-SHA256 signature validation.
 /// The `get_private_key` and `get_app_id` methods are not called in this path.
 struct WebhookSecretProvider {
+    /// The webhook signing secret used for HMAC-SHA256 validation.
+    ///
+    /// Stored as a plain `String` (not `SecretString`) because:
+    /// 1. This struct is private and never derived `Debug`, so the value
+    ///    cannot leak into log output inadvertently.
+    /// 2. The SDK's `SecretProvider::get_webhook_secret` returns `String`,
+    ///    so a `SecretString` would need to be exposed immediately anyway.
+    /// 3. The struct is short-lived: created once at startup and then moved
+    ///    into `Arc<dyn SecretProvider>` inside `WebhookReceiver`.
     webhook_secret: String,
 }
 
@@ -163,7 +172,7 @@ impl MergeWardenWebhookHandler {
                     repository = envelope.repository.full_name.as_str(),
                     "Webhook payload missing pull request number"
                 );
-                return Err(ServerError::AuthError(
+                return Err(ServerError::ProcessingError(
                     "Missing pull request number in webhook payload".to_string(),
                 ));
             }
@@ -177,7 +186,7 @@ impl MergeWardenWebhookHandler {
                     pull_request = pr_number,
                     "Webhook payload missing installation ID"
                 );
-                return Err(ServerError::AuthError(
+                return Err(ServerError::ProcessingError(
                     "Missing installation ID in webhook payload".to_string(),
                 ));
             }
@@ -261,7 +270,7 @@ impl MergeWardenWebhookHandler {
                     error = %e,
                     "Failed to process pull request"
                 );
-                ServerError::AuthError(format!("Failed to process pull request: {}", e))
+                ServerError::ProcessingError(format!("Failed to process pull request: {}", e))
             })?;
 
         info!(

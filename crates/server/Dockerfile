@@ -9,4 +9,10 @@ RUN cargo build --release -p merge_warden_server
 FROM gcr.io/distroless/cc-debian12
 COPY --from=builder /app/target/release/merge_warden_server /merge_warden_server
 EXPOSE 3000
+# The distroless runtime image contains no shell or HTTP client, so a
+# Dockerfile-native HEALTHCHECK cannot run curl/wget. Container orchestrators
+# (ECS, Azure Container Apps, Kubernetes) must configure an external HTTP
+# liveness/readiness probe targeting GET /api/merge_warden on port 3000.
+# This explicit NONE makes the intent clear rather than leaving it absent.
+HEALTHCHECK NONE
 ENTRYPOINT ["/merge_warden_server"]

@@ -24,6 +24,17 @@ pub enum ServerError {
     #[error("GitHub authentication error: {0}")]
     AuthError(String),
 
+    /// TCP bind, listener creation, or `axum::serve` failure at startup.
+    #[error("Server startup error: {0}")]
+    StartupError(String),
+
+    /// An error that occurred while processing an individual webhook event.
+    ///
+    /// Distinct from `AuthError` so alerting rules can distinguish
+    /// "GitHub auth broken" from "bad payload on one event".
+    #[error("Request processing error: {0}")]
+    ProcessingError(String),
+
     /// The `tracing` subscriber could not be installed.
     #[error("Telemetry initialization failed: {0}")]
     TelemetryInitFailed(String),

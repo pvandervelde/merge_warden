@@ -28,11 +28,6 @@ impl TelemetryConfig {
     /// Never fails — absent variables produce default values.
     ///
     /// See docs/spec/interfaces/server-config.md — `TelemetryConfig::from_env()`
-    /// Reads OTLP and service-metadata settings from standard environment variables.
-    ///
-    /// Never fails — absent variables produce default values.
-    ///
-    /// See docs/spec/interfaces/server-config.md — `TelemetryConfig::from_env()`
     pub fn from_env() -> Self {
         TelemetryConfig {
             otlp_endpoint: std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok(),
@@ -47,8 +42,14 @@ impl TelemetryConfig {
 /// Initialises the global `tracing` subscriber.
 ///
 /// Always installs a `fmt` (console) layer filtered by `RUST_LOG`. When
-/// `config.otlp_endpoint` is `Some`, also installs an OTLP gRPC export layer
+/// `config.otlp_endpoint` is `Some`, also installs an OTLP **HTTP** export layer
 /// via `opentelemetry-otlp` and `tracing-opentelemetry`.
+///
+/// The endpoint should be the full OTLP HTTP collector URL including the
+/// `/v1/traces` path suffix if required by the collector (e.g.
+/// `http://localhost:4318/v1/traces` for an OTEL Collector, or just
+/// `http://localhost:4318` for collectors that auto-append the path).
+/// gRPC transport is not used; the default port is 4318 (HTTP), not 4317 (gRPC).
 ///
 /// Must be called exactly once before any `tracing::*` macro invocations.
 ///
