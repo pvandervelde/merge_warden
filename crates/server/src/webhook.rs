@@ -27,6 +27,8 @@ use merge_warden_core::{
     MergeWarden,
 };
 use merge_warden_developer_platforms::github::GitHubProvider;
+use queue_runtime::{Message, QueueClient, QueueName, SessionId};
+use tokio::sync::mpsc;
 use tracing::{debug, error, info, instrument, warn};
 
 use crate::errors::ServerError;
@@ -99,10 +101,8 @@ pub struct AppState {
     /// GitHub App client for creating installation-scoped API clients.
     ///
     /// `Clone` is cheap — it shares `Arc<dyn AuthenticationProvider>` internally.
-    #[allow(dead_code)]
     pub github_client: GitHubClient,
     /// Application policy defaults loaded from configuration.
-    #[allow(dead_code)]
     pub policies: ApplicationDefaults,
 }
 
@@ -302,6 +302,140 @@ impl WebhookHandler for MergeWardenWebhookHandler {
 }
 
 // ---------------------------------------------------------------------------
+// ChannelForwardingHandler
+// ---------------------------------------------------------------------------
+
+/// [`WebhookHandler`] for webhook receiver mode.
+///
+/// Registered on [`WebhookReceiver`] when `MERGE_WARDEN_RECEIVER_MODE=webhook`
+/// (the default). Forwards validated [`EventEnvelope`]s into an in-process
+/// `mpsc` channel so the shared [`crate::ingress::run_event_processor`] loop
+/// can process them through [`crate::ingress::WebhookIngress`].
+///
+/// The HTTP handler returns 202 immediately after the SDK validates the
+/// signature and before this handler is called, so the channel send does not
+/// block the HTTP response path.
+///
+/// The `mpsc` channel capacity (set in [`build_webhook_receiver`]) provides
+/// back-pressure: if the processing loop falls behind, sends will yield until
+/// a slot is available.
+pub(crate) struct ChannelForwardingHandler {
+    sender: mpsc::Sender<crate::ingress::EventEnvelope>,
+}
+
+#[async_trait]
+impl WebhookHandler for ChannelForwardingHandler {
+    async fn handle_event(
+        &self,
+        envelope: &EventEnvelope,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.sender
+            .send(envelope.clone())
+            .await
+            .map_err(|e| format!("Failed to forward event to processing channel: {e}").into())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// QueueEnqueueHandler
+// ---------------------------------------------------------------------------
+
+/// [`WebhookHandler`] for queue receiver mode.
+///
+/// Registered on [`WebhookReceiver`] when `MERGE_WARDEN_RECEIVER_MODE=queue`.
+/// Instead of executing the processing pipeline inline, it serialises the
+/// validated `EventEnvelope` into a [`WebhookQueueMessage`] and enqueues it
+/// for asynchronous processing by the [`crate::ingress::QueueIngress`] task.
+///
+/// The session ID is set to `"{repo_full_name}/{pr_number}"` so that all
+/// events for the same PR are processed in arrival order.
+///
+/// See docs/spec/design/queue-architecture.md — Component Responsibilities
+pub struct QueueEnqueueHandler {
+    queue_client: Arc<dyn QueueClient>,
+    queue_name: QueueName,
+}
+
+impl QueueEnqueueHandler {
+    /// Creates a new `QueueEnqueueHandler`.
+    pub fn new(queue_client: Arc<dyn QueueClient>, queue_name: QueueName) -> Self {
+        QueueEnqueueHandler {
+            queue_client,
+            queue_name,
+        }
+    }
+}
+
+#[async_trait]
+impl WebhookHandler for QueueEnqueueHandler {
+    async fn handle_event(
+        &self,
+        envelope: &EventEnvelope,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        use crate::ingress::WebhookQueueMessage;
+        use bytes::Bytes;
+
+        // Only enqueue PR-related events; drop the rest.
+        if envelope.event_type != "pull_request" && envelope.event_type != "pull_request_review" {
+            debug!(event_type = %envelope.event_type, "Skipping non-PR event in queue mode");
+            return Ok(());
+        }
+
+        let raw_payload = serde_json::to_string(envelope.payload.raw())
+            .map_err(|e| format!("Failed to serialise payload: {e}"))?;
+
+        let installation_id = envelope.payload.raw()["installation"]["id"]
+            .as_u64()
+            .unwrap_or(0);
+
+        let delivery_id = envelope
+            .metadata
+            .delivery_id
+            .clone()
+            .unwrap_or_else(|| envelope.event_id.to_string());
+
+        let queue_msg = WebhookQueueMessage {
+            schema_version: 1,
+            event_type: envelope.event_type.clone(),
+            delivery_id,
+            installation_id,
+            received_at: chrono::Utc::now(),
+            raw_payload,
+        };
+
+        let body_bytes = serde_json::to_vec(&queue_msg)
+            .map_err(|e| format!("Failed to serialise queue message: {e}"))?;
+
+        // Build session ID: "{repo_full_name}/{pr_number}" for ordered per-PR processing.
+        let repo_full_name = &envelope.repository.full_name;
+        let pr_number = envelope
+            .entity_id
+            .as_deref()
+            .unwrap_or("0");
+        let session_str = format!("{}/{}", repo_full_name, pr_number);
+
+        let session_id = SessionId::new(session_str.clone()).map_err(|e| {
+            format!("Invalid session ID '{session_str}': {e}")
+        })?;
+
+        let message = Message::new(Bytes::from(body_bytes)).with_session_id(session_id);
+
+        self.queue_client
+            .send_message(&self.queue_name, message)
+            .await
+            .map_err(|e| format!("Failed to enqueue message: {e}"))?;
+
+        debug!(
+            event_type = %envelope.event_type,
+            session_id = %session_str,
+            "Enqueued event for queue processing"
+        );
+
+        Ok(())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // HTTP route handlers
 // ---------------------------------------------------------------------------
 
@@ -377,21 +511,38 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 // Startup helpers
 // ---------------------------------------------------------------------------
 
-/// Builds a [`WebhookReceiver`] with the [`MergeWardenWebhookHandler`] registered,
-/// ready to be stored in [`AppState`].
+/// Builds a [`WebhookReceiver`] configured for the active receiver mode.
+///
+/// **Webhook mode** (`queue_client == None`): registers a
+/// [`ChannelForwardingHandler`] that pushes validated events into an in-process
+/// `mpsc` channel. Returns `Some(receiver)` so the caller can hand it off to
+/// [`crate::ingress::WebhookIngress`] running in the shared processor loop.
+///
+/// **Queue mode** (`queue_client == Some(...)`): registers a
+/// [`QueueEnqueueHandler`] that serialises events into the external queue.
+/// Returns `None` for the channel receiver — the processor loop reads from the
+/// queue instead.
+///
+/// The channel capacity is set to 64, providing back-pressure for webhook
+/// bursts without unbounded memory growth.
 pub async fn build_webhook_receiver(
     webhook_secret: &str,
-    github_client: GitHubClient,
-    policies: ApplicationDefaults,
-) -> WebhookReceiver {
+    queue_client: Option<(Arc<dyn QueueClient>, QueueName)>,
+) -> (WebhookReceiver, Option<mpsc::Receiver<crate::ingress::EventEnvelope>>) {
     let secret_provider = Arc::new(WebhookSecretProvider {
         webhook_secret: webhook_secret.to_string(),
     });
     let processor = EventProcessor::new(ProcessorConfig::default());
     let mut receiver = WebhookReceiver::new(secret_provider, processor);
 
-    let handler = Arc::new(MergeWardenWebhookHandler::new(github_client, policies));
-    receiver.add_handler(handler).await;
-
-    receiver
+    if let Some((client, queue_name)) = queue_client {
+        let handler = Arc::new(QueueEnqueueHandler::new(client, queue_name));
+        receiver.add_handler(handler).await;
+        (receiver, None)
+    } else {
+        let (tx, rx) = mpsc::channel(64);
+        let handler = Arc::new(ChannelForwardingHandler { sender: tx });
+        receiver.add_handler(handler).await;
+        (receiver, Some(rx))
+    }
 }

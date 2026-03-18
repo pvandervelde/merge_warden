@@ -3,6 +3,7 @@
 // See docs/spec/interfaces/server-config.md    — startup configuration
 // See docs/spec/interfaces/server-ingress.md   — event ingress abstraction
 // See docs/spec/design/containerisation.md     — deployment spec
+// See docs/spec/design/queue-architecture.md   — queue-mode wiring
 
 mod config;
 mod errors;
@@ -16,7 +17,8 @@ use config::ReceiverMode;
 use errors::ServerError;
 use github_bot_sdk::client::{ClientConfig, GitHubClient};
 use merge_warden_developer_platforms::app_auth::AppAuthProvider;
-use tracing::{debug, info};
+use queue_runtime::{QueueClientFactory, QueueName};
+use tracing::{debug, error, info};
 
 #[tokio::main]
 async fn main() -> Result<(), ServerError> {
@@ -40,16 +42,6 @@ async fn main() -> Result<(), ServerError> {
         "Configuration loaded"
     );
 
-    // Queue mode is not yet implemented (task 3.0). Fail fast with a clear
-    // message rather than starting in webhook mode silently.
-    if server_config.receiver_mode == ReceiverMode::Queue {
-        return Err(ServerError::ConfigError(
-            "Queue mode is not yet implemented. \
-             Set MERGE_WARDEN_RECEIVER_MODE=webhook or leave it unset."
-                .to_string(),
-        ));
-    }
-
     // 4. Initialise GitHub App client.
     debug!(
         app_id = secrets.github_app_id,
@@ -71,24 +63,117 @@ async fn main() -> Result<(), ServerError> {
 
     debug!("GitHub App client initialised");
 
-    // 5. Build the WebhookReceiver with the MergeWardenWebhookHandler registered.
-    let receiver = webhook::build_webhook_receiver(
+    // 5. Optionally create the queue client (queue mode only).
+    let queue_pair: Option<(Arc<dyn queue_runtime::QueueClient>, QueueName)> =
+        if server_config.receiver_mode == ReceiverMode::Queue {
+            let queue_cfg = server_config
+                .queue
+                .as_ref()
+                .expect("queue config present when mode=queue")
+                .to_queue_config()?;
+
+            let queue_name_str = server_config
+                .queue
+                .as_ref()
+                .expect("queue config present when mode=queue")
+                .queue_name
+                .clone();
+
+            let queue_name = QueueName::new(queue_name_str.clone()).map_err(|e| {
+                ServerError::ConfigError(format!("Invalid queue name '{}': {}", queue_name_str, e))
+            })?;
+
+            info!(queue_name = %queue_name, "Creating queue client");
+
+            let client = QueueClientFactory::create_client(queue_cfg)
+                .await
+                .map_err(|e| {
+                    ServerError::ConfigError(format!("Failed to create queue client: {}", e))
+                })?;
+
+            Some((Arc::from(client), queue_name))
+        } else {
+            None
+        };
+
+    // 6. Build the WebhookReceiver with the appropriate handler.
+    let (receiver, webhook_rx) = webhook::build_webhook_receiver(
         secrets.github_webhook_secret.expose(),
-        github_client.clone(),
-        server_config.application_defaults.clone(),
+        queue_pair.clone(),
     )
     .await;
 
-    // 6. Build AppState and Axum router.
+    // 7. Build AppState and Axum router.
+    let (queue_client_opt, queue_name_opt) = match queue_pair {
+        Some((c, n)) => (Some(c), Some(n)),
+        None => (None, None),
+    };
+
     let state = Arc::new(webhook::AppState {
         receiver,
-        github_client,
-        policies: server_config.application_defaults,
+        github_client: github_client.clone(),
+        policies: server_config.application_defaults.clone(),
     });
+
+    // 8. Spawn processor tasks.
+    //
+    //    Webhook mode: one worker reads from the in-process mpsc channel via
+    //    `WebhookIngress`. All events flow through the same `run_event_processor`
+    //    loop regardless of mode, giving consistent failure handling and observability.
+    //
+    //    Queue mode: `concurrency` workers each hold an independent session lock,
+    //    so different PRs are processed concurrently while per-PR ordering is
+    //    preserved within a session.
+    let processor_handles: Vec<tokio::task::JoinHandle<()>> =
+        if server_config.receiver_mode == ReceiverMode::Queue {
+            let client = queue_client_opt
+                .as_ref()
+                .expect("queue client present when mode=queue");
+            let name = queue_name_opt
+                .as_ref()
+                .expect("queue name present when mode=queue");
+            let concurrency = server_config
+                .queue
+                .as_ref()
+                .expect("queue config present when mode=queue")
+                .concurrency;
+
+            info!(workers = concurrency, "Spawning queue processor tasks");
+
+            (0..concurrency)
+                .map(|worker_id| {
+                    let worker_client = Arc::clone(client);
+                    let worker_name = name.clone();
+                    let processor_state = Arc::clone(&state);
+
+                    tokio::spawn(async move {
+                        let ingress =
+                            Box::new(ingress::QueueIngress::new(worker_client, worker_name));
+                        if let Err(e) =
+                            ingress::run_event_processor(ingress, processor_state).await
+                        {
+                            error!(worker = worker_id, error = %e, "Queue processor task terminated with error");
+                        }
+                    })
+                })
+                .collect()
+        } else {
+            let rx = webhook_rx.expect("mpsc receiver present in webhook mode");
+            let processor_state = Arc::clone(&state);
+
+            info!("Spawning webhook processor task");
+
+            vec![tokio::spawn(async move {
+                let ingress = Box::new(ingress::WebhookIngress::new(rx));
+                if let Err(e) = ingress::run_event_processor(ingress, processor_state).await {
+                    error!(error = %e, "Webhook processor task terminated with error");
+                }
+            })]
+        };
 
     let router = webhook::build_router(Arc::clone(&state));
 
-    // 7. Bind the TCP listener.
+    // 9. Bind the TCP listener.
     let addr = format!("0.0.0.0:{}", server_config.port);
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
@@ -96,10 +181,14 @@ async fn main() -> Result<(), ServerError> {
 
     info!(address = addr.as_str(), "Listening for requests");
 
-    // 8. Serve. Queue mode processor (task 3.0) would be spawned here.
+    // 10. Serve.  On shutdown abort all processor tasks.
     axum::serve(listener, router)
         .await
         .map_err(|e| ServerError::StartupError(format!("Server error: {}", e)))?;
+
+    for handle in processor_handles {
+        handle.abort();
+    }
 
     Ok(())
 }

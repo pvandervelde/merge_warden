@@ -89,7 +89,6 @@ pub enum ReceiverMode {
 /// Queue provider settings, present only when `receiver_mode == ReceiverMode::Queue`.
 ///
 /// See docs/spec/interfaces/server-config.md — `QueueServerConfig`
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct QueueServerConfig {
     /// Queue provider identifier (e.g. `"azure"`). From `MERGE_WARDEN_QUEUE_PROVIDER`.
@@ -101,6 +100,56 @@ pub struct QueueServerConfig {
     /// Provider-specific namespace (e.g. Azure Service Bus namespace). From
     /// `AZURE_SERVICEBUS_NAMESPACE`.
     pub namespace: Option<String>,
+}
+
+impl QueueServerConfig {
+    /// Converts this configuration into a [`queue_runtime::QueueConfig`] suitable
+    /// for passing to [`queue_runtime::QueueClientFactory::create_client`].
+    ///
+    /// # Errors
+    /// Returns [`ServerError::ConfigError`] when `provider` is unrecognised or
+    /// a required provider-specific variable (e.g. `AZURE_SERVICEBUS_NAMESPACE`)
+    /// is absent.
+    pub fn to_queue_config(&self) -> Result<queue_runtime::QueueConfig, crate::errors::ServerError> {
+        use queue_runtime::{
+            AzureAuthMethod, AzureServiceBusConfig, AwsSqsConfig, InMemoryConfig, ProviderConfig,
+            QueueConfig,
+        };
+
+        let provider = match self.provider.to_lowercase().as_str() {
+            "azure" => {
+                let namespace =
+                    self.namespace.clone().ok_or_else(|| crate::errors::ServerError::MissingEnvVar(
+                        "AZURE_SERVICEBUS_NAMESPACE".to_string(),
+                    ))?;
+                ProviderConfig::AzureServiceBus(AzureServiceBusConfig {
+                    connection_string: None,
+                    namespace: Some(namespace),
+                    auth_method: AzureAuthMethod::DefaultCredential,
+                    use_sessions: true,
+                    session_timeout: chrono::Duration::minutes(5),
+                })
+            }
+            "aws" => ProviderConfig::AwsSqs(AwsSqsConfig {
+                region: std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
+                access_key_id: std::env::var("AWS_ACCESS_KEY_ID").ok(),
+                secret_access_key: std::env::var("AWS_SECRET_ACCESS_KEY").ok(),
+                use_fifo_queues: true,
+            }),
+            "memory" | "" => ProviderConfig::InMemory(InMemoryConfig::default()),
+            other => {
+                return Err(crate::errors::ServerError::ConfigError(format!(
+                    "Unknown queue provider '{}'. Expected 'azure', 'aws', or 'memory'.",
+                    other
+                )))
+            }
+        };
+
+        Ok(QueueConfig {
+            provider,
+            ..QueueConfig::default()
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -118,12 +167,12 @@ pub struct ServerConfig {
     /// Ingress mode. From `MERGE_WARDEN_RECEIVER_MODE`. Default: `Webhook`.
     pub receiver_mode: ReceiverMode,
     /// Optional path to a TOML policy configuration file. From `MERGE_WARDEN_CONFIG_FILE`.
+    /// Populated at startup and available for hot-reload or diagnostic introspection.
     #[allow(dead_code)]
     pub config_file_path: Option<PathBuf>,
     /// Merge-warden application policy defaults (from TOML file or `ApplicationDefaults::default()`).
     pub application_defaults: ApplicationDefaults,
     /// Queue-mode settings. `Some(...)` only when `receiver_mode == ReceiverMode::Queue`.
-    #[allow(dead_code)]
     pub queue: Option<QueueServerConfig>,
 }
 

@@ -12,8 +12,10 @@ merge_warden_core = { path = "../core" }
 merge_warden_developer_platforms = { path = "../developer_platforms" }
 async-trait = { workspace = true }
 axum = { workspace = true }
+bytes = "1.11.0"
 github-bot-sdk = { workspace = true }
 chrono = { workspace = true }
+queue-runtime = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
