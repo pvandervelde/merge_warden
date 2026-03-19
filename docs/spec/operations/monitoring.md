@@ -81,6 +81,71 @@ pub enum BusinessEvent {
 - Network metrics (latency, throughput, errors)
 - Cost and billing metrics
 
+## Queue Mode Observability
+
+When `MERGE_WARDEN_RECEIVER_MODE=queue`, the following additional signals are critical for operational health. All metrics are emitted as structured `tracing` events and are exportable via OTLP.
+
+### Queue-Specific Metrics and Alert Thresholds
+
+| Metric | Description | Alert threshold |
+|--------|-------------|----------------|
+| `ingress.queue.enqueue_duration_ms` | Time from webhook receipt to message enqueued | p95 > 100 ms |
+| `ingress.queue.processing_duration_ms` | End-to-end processing time per event | p95 > 30 000 ms |
+| `ingress.queue.depth` | Approximate number of messages waiting in the queue | > 100 |
+| `ingress.queue.age_oldest_message_secs` | Age of the oldest unprocessed message | > 300 s (5 min) |
+| `ingress.queue.dlq_count` | Messages moved to the dead-letter queue | > 0 |
+| `processing.success_rate` | Fraction of events processed without rejection | < 99.9% |
+| `ingress.queue.worker_errors` | Worker task terminations due to unrecoverable errors | > 0 |
+
+### Dead-Letter Queue Monitoring
+
+Messages land in the DLQ when:
+
+1. The `WebhookQueueMessage` body cannot be deserialised (corrupted or malformed message)
+2. The `schema_version` field is not `1` (forward-incompatible message from a newer binary)
+3. `EventEnvelope` reconstruction fails (payload rejected by `github-bot-sdk`)
+4. `MergeWardenWebhookHandler` returns an error during PR processing
+
+**Alert:** any non-zero DLQ count should be investigated immediately. DLQ messages include a `DeadLetterReason` property with the exact failure message to aid diagnosis.
+
+**Remediation:**
+
+- Inspect the DLQ message body and `DeadLetterReason` in the provider console (Azure Service Bus Explorer, AWS SQS console)
+- For schema version mismatches: roll back the binary to the version that wrote the message, or update the processor to handle the new schema
+- For processing errors: fix the underlying issue (GitHub API credentials, config) then re-enqueue or replay from the DLQ
+
+### Structured Log Fields (Queue Mode)
+
+All queue-related log entries include these fields for filtering and correlation:
+
+| Field | Values | Example |
+|-------|--------|---------|
+| `worker` | worker task index (queue mode) | `0`, `1`, `2` |
+| `event_type` | GitHub event type | `pull_request` |
+| `session_id` | `{org}/{repo}/{pr_number}` | `acme/webapp/42` |
+| `delivery_id` | X-GitHub-Delivery UUID | `abc-123-def` |
+| `schema_version` | message schema version | `1` |
+
+**Example KQL query — DLQ events over time:**
+
+```kusto
+traces
+| where customDimensions.target contains "ingress"
+| where message contains "dead-lettering"
+| summarize DLQCount = count() by bin(timestamp, 1h)
+| render timechart
+```
+
+**Example KQL query — slow processing events:**
+
+```kusto
+traces
+| where customDimensions.target contains "run_event_processor"
+| where todouble(customDimensions["ingress.queue.processing_duration_ms"]) > 10000
+| project timestamp, customDimensions.session_id, customDimensions.delivery_id, duration_ms = customDimensions["ingress.queue.processing_duration_ms"]
+| order by timestamp desc
+```
+
 ## Application Performance Monitoring
 
 ### Key Performance Indicators

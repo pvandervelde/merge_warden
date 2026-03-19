@@ -27,6 +27,7 @@ use merge_warden_core::{
     MergeWarden,
 };
 use merge_warden_developer_platforms::github::GitHubProvider;
+use tokio::sync::mpsc;
 use tracing::{debug, error, info, instrument, warn};
 
 use crate::errors::ServerError;
@@ -95,14 +96,15 @@ impl SecretProvider for WebhookSecretProvider {
 pub struct AppState {
     /// SDK webhook receiver: validates HMAC signatures and dispatches validated
     /// events to registered [`WebhookHandler`]s asynchronously (fire-and-forget).
-    pub receiver: WebhookReceiver,
+    ///
+    /// `None` in queue mode — the server does not receive GitHub webhooks in that
+    /// mode; a separate service owns reception and enqueueing.
+    pub receiver: Option<WebhookReceiver>,
     /// GitHub App client for creating installation-scoped API clients.
     ///
     /// `Clone` is cheap — it shares `Arc<dyn AuthenticationProvider>` internally.
-    #[allow(dead_code)]
     pub github_client: GitHubClient,
     /// Application policy defaults loaded from configuration.
-    #[allow(dead_code)]
     pub policies: ApplicationDefaults,
 }
 
@@ -132,12 +134,6 @@ impl MergeWardenWebhookHandler {
             github_client,
             policies,
         }
-    }
-
-    /// Creates a new handler sharing the state already constructed for [`AppState`].
-    #[allow(dead_code)]
-    pub fn new_from_state(state: &AppState) -> Self {
-        Self::new(state.github_client.clone(), state.policies.clone())
     }
 
     /// Processes a `pull_request` webhook event.
@@ -302,11 +298,43 @@ impl WebhookHandler for MergeWardenWebhookHandler {
 }
 
 // ---------------------------------------------------------------------------
+// ChannelForwardingHandler
+// ---------------------------------------------------------------------------
+
+/// [`WebhookHandler`] for webhook mode.
+///
+/// Forwards validated [`EventEnvelope`]s into an in-process `mpsc` channel so
+/// the shared [`crate::ingress::run_event_processor`] loop can process them
+/// through [`crate::ingress::WebhookIngress`].
+///
+/// The channel capacity provides back-pressure: if the processing loop falls
+/// behind, sends will yield until a slot is available.
+pub(crate) struct ChannelForwardingHandler {
+    sender: mpsc::Sender<crate::ingress::EventEnvelope>,
+}
+
+#[async_trait]
+impl WebhookHandler for ChannelForwardingHandler {
+    async fn handle_event(
+        &self,
+        envelope: &EventEnvelope,
+    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        self.sender
+            .send(envelope.clone())
+            .await
+            .map_err(|e| format!("Failed to forward event to processing channel: {e}").into())
+    }
+}
+
+// ---------------------------------------------------------------------------
 // HTTP route handlers
 // ---------------------------------------------------------------------------
 
-/// `POST /api/merge_warden` — receives a raw GitHub webhook POST, validates the
-/// HMAC-SHA256 signature, and dispatches the validated event asynchronously.
+/// `POST /api/merge_warden` — receives a raw GitHub webhook POST.
+///
+/// The SDK [`WebhookReceiver`] validates the HMAC-SHA256 signature and
+/// dispatches the event asynchronously. Only active in webhook mode;
+/// not registered in queue mode.
 ///
 /// # Responses
 /// - `202 Accepted` — event accepted for processing.
@@ -323,6 +351,13 @@ pub async fn handle_webhook(
 ) -> impl IntoResponse {
     debug!("Received webhook POST");
 
+    // SAFETY: `handle_webhook` is only reachable via `build_router`, which is
+    // only called in webhook mode where `state.receiver` is always `Some`.
+    let receiver = state
+        .receiver
+        .as_ref()
+        .expect("receiver is Some in webhook mode");
+
     let header_map: HashMap<String, String> = headers
         .iter()
         .filter_map(|(k, v)| {
@@ -333,7 +368,7 @@ pub async fn handle_webhook(
         .collect();
 
     let request = WebhookRequest::new(header_map, body);
-    let response = state.receiver.receive_webhook(request).await;
+    let response = receiver.receive_webhook(request).await;
 
     match response.status_code() {
         200 => (StatusCode::ACCEPTED, response.message().to_string()),
@@ -359,7 +394,7 @@ pub async fn health_check() -> impl IntoResponse {
 // Router
 // ---------------------------------------------------------------------------
 
-/// Builds the Axum [`Router`] with all routes and shared state attached.
+/// Builds the Axum [`Router`] for **webhook mode**.
 ///
 /// Routes:
 /// - `GET  /api/merge_warden` → [`health_check`]
@@ -373,25 +408,50 @@ pub fn build_router(state: Arc<AppState>) -> Router {
         .with_state(state)
 }
 
+/// Builds the Axum [`Router`] for **queue mode**.
+///
+/// Only the health-check route is registered — merge-warden in queue mode is
+/// a pure queue consumer and does not receive GitHub webhook POSTs.
+///
+/// Routes:
+/// - `GET /api/merge_warden` → [`health_check`]
+///
+/// See docs/spec/design/containerisation.md — HTTP routes
+pub fn build_queue_router(state: Arc<AppState>) -> Router {
+    Router::new()
+        .route("/api/merge_warden", get(health_check))
+        .with_state(state)
+}
+
 // ---------------------------------------------------------------------------
 // Startup helpers
 // ---------------------------------------------------------------------------
 
-/// Builds a [`WebhookReceiver`] with the [`MergeWardenWebhookHandler`] registered,
-/// ready to be stored in [`AppState`].
+/// Builds the [`WebhookReceiver`] for webhook mode.
+///
+/// Registers a [`ChannelForwardingHandler`] that pushes validated
+/// [`EventEnvelope`]s into an in-process `mpsc` channel (capacity 64).
+/// The returned `Receiver` end is handed to [`crate::ingress::WebhookIngress`]
+/// running inside the shared `run_event_processor` loop.
+///
+/// The SDK [`WebhookReceiver`] performs HMAC-SHA256 signature validation before
+/// calling the handler.
+///
+/// Only called in webhook mode. Queue mode has no webhook receiver.
 pub async fn build_webhook_receiver(
     webhook_secret: &str,
-    github_client: GitHubClient,
-    policies: ApplicationDefaults,
-) -> WebhookReceiver {
+) -> (
+    WebhookReceiver,
+    mpsc::Receiver<crate::ingress::EventEnvelope>,
+) {
     let secret_provider = Arc::new(WebhookSecretProvider {
         webhook_secret: webhook_secret.to_string(),
     });
     let processor = EventProcessor::new(ProcessorConfig::default());
     let mut receiver = WebhookReceiver::new(secret_provider, processor);
 
-    let handler = Arc::new(MergeWardenWebhookHandler::new(github_client, policies));
+    let (tx, rx) = mpsc::channel(64);
+    let handler = Arc::new(ChannelForwardingHandler { sender: tx });
     receiver.add_handler(handler).await;
-
-    receiver
+    (receiver, rx)
 }

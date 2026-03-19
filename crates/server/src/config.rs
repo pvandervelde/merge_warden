@@ -61,7 +61,10 @@ pub struct ServerSecrets {
     /// PEM-encoded private key from `GITHUB_APP_PRIVATE_KEY`.
     pub github_app_private_key: SecretString,
     /// Webhook signing secret from `GITHUB_WEBHOOK_SECRET`.
-    pub github_webhook_secret: SecretString,
+    ///
+    /// Required in webhook mode; `None` in queue mode (the receiving service
+    /// owns signature validation, not merge-warden).
+    pub github_webhook_secret: Option<SecretString>,
 }
 
 // ---------------------------------------------------------------------------
@@ -78,7 +81,11 @@ pub struct ServerSecrets {
 pub enum ReceiverMode {
     /// Axum POST handler processes events via an in-process channel.
     Webhook,
-    /// Axum POST handler enqueues events; a separate Tokio task processes them.
+    /// Pure queue consumer mode: merge-warden reads from an external queue.
+    ///
+    /// A separate receiver service is responsible for webhook reception, HMAC
+    /// validation, and enqueueing. The Axum server exposes a health-check
+    /// endpoint only (`GET /api/merge_warden`); no POST endpoint is registered.
     Queue,
 }
 
@@ -89,7 +96,6 @@ pub enum ReceiverMode {
 /// Queue provider settings, present only when `receiver_mode == ReceiverMode::Queue`.
 ///
 /// See docs/spec/interfaces/server-config.md — `QueueServerConfig`
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct QueueServerConfig {
     /// Queue provider identifier (e.g. `"azure"`). From `MERGE_WARDEN_QUEUE_PROVIDER`.
@@ -101,6 +107,64 @@ pub struct QueueServerConfig {
     /// Provider-specific namespace (e.g. Azure Service Bus namespace). From
     /// `AZURE_SERVICEBUS_NAMESPACE`.
     pub namespace: Option<String>,
+}
+
+impl QueueServerConfig {
+    /// Converts this configuration into a [`queue_runtime::QueueConfig`] suitable
+    /// for passing to [`queue_runtime::QueueClientFactory::create_client`].
+    ///
+    /// # Errors
+    /// Returns [`ServerError::ConfigError`] when `provider` is unrecognised or
+    /// a required provider-specific variable (e.g. `AZURE_SERVICEBUS_NAMESPACE`)
+    /// is absent.
+    pub fn to_queue_config(
+        &self,
+    ) -> Result<queue_runtime::QueueConfig, crate::errors::ServerError> {
+        use queue_runtime::{
+            AwsSqsConfig, AzureAuthMethod, AzureServiceBusConfig, InMemoryConfig, ProviderConfig,
+            QueueConfig,
+        };
+
+        let provider = match self.provider.to_lowercase().as_str() {
+            "azure" => {
+                let namespace = self.namespace.clone().ok_or_else(|| {
+                    crate::errors::ServerError::MissingEnvVar(
+                        "AZURE_SERVICEBUS_NAMESPACE".to_string(),
+                    )
+                })?;
+                ProviderConfig::AzureServiceBus(AzureServiceBusConfig {
+                    connection_string: None,
+                    namespace: Some(namespace),
+                    auth_method: AzureAuthMethod::DefaultCredential,
+                    use_sessions: true,
+                    session_timeout: chrono::Duration::minutes(5),
+                })
+            }
+            "aws" => ProviderConfig::AwsSqs(AwsSqsConfig {
+                region: std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
+                access_key_id: std::env::var("AWS_ACCESS_KEY_ID").ok(),
+                // AWS_SECRET_ACCESS_KEY is stored as a plain String inside
+                // AwsSqsConfig (a type owned by queue-runtime; we cannot change
+                // its field type).  Prefer IAM role / IRSA / ECS task roles
+                // in production so this field remains None and no credential
+                // lives in-process.
+                secret_access_key: std::env::var("AWS_SECRET_ACCESS_KEY").ok(),
+                use_fifo_queues: true,
+            }),
+            "memory" | "" => ProviderConfig::InMemory(InMemoryConfig::default()),
+            other => {
+                return Err(crate::errors::ServerError::ConfigError(format!(
+                    "Unknown queue provider '{}'. Expected 'azure', 'aws', or 'memory'.",
+                    other
+                )))
+            }
+        };
+
+        Ok(QueueConfig {
+            provider,
+            ..QueueConfig::default()
+        })
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -118,12 +182,12 @@ pub struct ServerConfig {
     /// Ingress mode. From `MERGE_WARDEN_RECEIVER_MODE`. Default: `Webhook`.
     pub receiver_mode: ReceiverMode,
     /// Optional path to a TOML policy configuration file. From `MERGE_WARDEN_CONFIG_FILE`.
+    /// Populated at startup and available for hot-reload or diagnostic introspection.
     #[allow(dead_code)]
     pub config_file_path: Option<PathBuf>,
     /// Merge-warden application policy defaults (from TOML file or `ApplicationDefaults::default()`).
     pub application_defaults: ApplicationDefaults,
     /// Queue-mode settings. `Some(...)` only when `receiver_mode == ReceiverMode::Queue`.
-    #[allow(dead_code)]
     pub queue: Option<QueueServerConfig>,
 }
 
@@ -131,7 +195,9 @@ pub struct ServerConfig {
 // Public functions
 // ---------------------------------------------------------------------------
 
-/// Reads the three required GitHub secrets from environment variables.
+/// Reads GitHub App credentials from environment variables.
+/// `GITHUB_WEBHOOK_SECRET` is only required in webhook mode — in queue mode
+/// the separate receiving service owns signature validation.
 ///
 /// See docs/spec/interfaces/server-config.md — `load_secrets()`
 ///
@@ -153,7 +219,7 @@ pub fn load_secrets() -> Result<ServerSecrets, ServerError> {
 
     let github_webhook_secret = std::env::var("GITHUB_WEBHOOK_SECRET")
         .map(SecretString::new)
-        .map_err(|_| ServerError::MissingEnvVar("GITHUB_WEBHOOK_SECRET".to_string()))?;
+        .ok();
 
     Ok(ServerSecrets {
         github_app_id,
@@ -242,6 +308,13 @@ pub fn load_config() -> Result<ServerConfig, ServerError> {
             })?,
             Err(_) => 4,
         };
+
+        if concurrency == 0 {
+            return Err(ServerError::InvalidEnvVar {
+                name: "MERGE_WARDEN_QUEUE_CONCURRENCY".to_string(),
+                message: "Must be at least 1; got 0".to_string(),
+            });
+        }
 
         let namespace = std::env::var("AZURE_SERVICEBUS_NAMESPACE").ok();
 

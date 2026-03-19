@@ -81,6 +81,12 @@ ignore = [
     # rsa crate Marvin Attack timing side-channel — transitive via github-bot-sdk;
     # no fixed version of rsa is available upstream.
     { id = "RUSTSEC-2023-0071", reason = "transitive via github-bot-sdk; no safe upgrade available upstream" },
+    # instant is unmaintained — transitive via queue-runtime -> azure_core -> http-types -> futures-lite -> fastrand;
+    # no safe upgrade is available; tracked upstream.
+    { id = "RUSTSEC-2024-0384", reason = "transitive via queue-runtime -> azure_core; no safe upgrade available upstream" },
+    # paste is unmaintained — transitive via queue-runtime -> azure_core;
+    # no safe upgrade is available; tracked upstream.
+    { id = "RUSTSEC-2024-0436", reason = "transitive via queue-runtime -> azure_core; no safe upgrade available upstream" },
 ]
 
 # If this is true, then cargo deny will use the git executable to fetch advisory database.

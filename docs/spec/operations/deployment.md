@@ -4,27 +4,102 @@ Comprehensive deployment strategies, procedures, and operational guidelines for 
 
 ## Overview
 
-This document defines the deployment architecture, procedures, and operational practices for managing Merge Warden deployments across Azure Functions, CLI installations, and future platforms. It covers deployment automation, environment management, rollback procedures, and operational monitoring.
+This document defines the deployment architecture, procedures, and operational practices for managing Merge Warden deployments. The primary deployment target is the containerised `merge-warden-server` binary, which supports two receiver modes selected at startup via `MERGE_WARDEN_RECEIVER_MODE`.
+
+## Receiver Modes
+
+### Webhook Mode (default)
+
+The server receives GitHub webhook POSTs directly. Validated events are forwarded to an in-process channel and processed by a single worker task. No external queue infrastructure is required.
+
+**Use when:** low-to-moderate load; no external queue available; local development.
+
+**Required environment variables:**
+
+| Variable | Description | Default |
+|----------|-------------|--------|
+| `MERGE_WARDEN_RECEIVER_MODE` | Receiver mode | `webhook` |
+| `GITHUB_WEBHOOK_SECRET` | HMAC-SHA256 webhook signing secret | required |
+| `GITHUB_APP_ID` | GitHub App numeric ID | required |
+| `GITHUB_APP_PRIVATE_KEY` | GitHub App PEM private key | required |
+| `MERGE_WARDEN_PORT` | TCP port to listen on | `3000` |
+
+### Queue Mode
+
+merge-warden operates as a **pure queue consumer**: it reads events from an
+external queue and processes them, but does not receive GitHub webhook POSTs
+directly. A separate receiver service is responsible for webhook reception,
+HMAC-SHA256 signature validation, and enqueueing. A configurable number of
+worker tasks (`MERGE_WARDEN_QUEUE_CONCURRENCY`) consume from the queue using
+session-based ordering, ensuring events for the same PR are processed
+sequentially while different PRs may be processed in parallel.
+
+**Use when:** production deployments where GitHub's 10-second timeout is a concern; high event volume; reliability guarantees are required.
+
+**Additional environment variables (queue mode):**
+
+| Variable | Description | Default |
+|----------|-------------|--------|
+| `MERGE_WARDEN_RECEIVER_MODE` | Must be `queue` | `webhook` |
+| `MERGE_WARDEN_QUEUE_PROVIDER` | Provider: `azure`, `aws`, or `memory` | required |
+| `MERGE_WARDEN_QUEUE_NAME` | Queue name | `merge-warden-events` |
+| `MERGE_WARDEN_QUEUE_CONCURRENCY` | Parallel worker tasks | `4` |
+| `AZURE_SERVICEBUS_NAMESPACE` | Azure Service Bus namespace hostname | required for `azure` |
+| `AWS_REGION` | AWS region for SQS | `us-east-1` |
+| `AWS_ACCESS_KEY_ID` | AWS access key (or use IAM role) | optional |
+| `AWS_SECRET_ACCESS_KEY` | AWS secret key (or use IAM role) | optional |
+
+**Azure Service Bus requirements:**
+
+- Queue must have `RequiresSession=true`
+- `MaxDeliveryCount` recommended: `3`
+- Dead letter queue enabled (default on Service Bus)
+- Session lock timeout (default: 5 minutes) should exceed the worst-case PR
+  processing time (GitHub API round-trips on a large repo). If processing
+  regularly exceeds 5 minutes, raise the lock timeout and consider setting
+  `MERGE_WARDEN_QUEUE_SESSION_TIMEOUT_SECS` once that variable is exposed.
+- Session lock duration: 5 minutes
+- Message retention: 14 days
+- Managed Identity must hold `Azure Service Bus Data Owner` role
 
 ## Deployment Targets
 
-### Azure Functions (Primary Cloud Deployment)
+### Container Server (Primary Deployment)
 
 **Architecture:**
 
-- Consumption plan for cost-effective scaling
-- Event-driven execution via GitHub webhooks
-- Managed identity for secure resource access
-- Integration with Azure services (App Configuration, Key Vault)
+- Single stateless binary container (`merge-warden-server`)
+- Multi-arch image: `linux/amd64` and `linux/arm64` in the same manifest
+- Configuration entirely via environment variables
+- Supports Webhook mode and Queue mode (see [Receiver Modes](#receiver-modes) above)
+- Health check: `GET /api/merge_warden` → `200 OK`
 
 **Deployment Pipeline:**
 
 1. Code compilation and testing
-2. Infrastructure provisioning (Terraform)
-3. Function app deployment
-4. Configuration and secrets management
-5. Integration testing
+2. Multi-arch Docker image build and push (GitHub Actions)
+3. Environment configuration and secrets management
+4. Container deployment (Azure Container Apps, ECS, Kubernetes, etc.)
+5. Integration testing against health check endpoint
 6. Production rollout
+
+**Example: Docker Compose (local/staging)**
+
+```yaml
+services:
+  merge-warden:
+    image: ghcr.io/pvandervelde/merge_warden_server:latest
+    environment:
+      MERGE_WARDEN_RECEIVER_MODE: queue
+      GITHUB_APP_ID: ${GITHUB_APP_ID}
+      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY}
+      MERGE_WARDEN_QUEUE_PROVIDER: azure
+      MERGE_WARDEN_QUEUE_NAME: merge-warden-events
+      MERGE_WARDEN_QUEUE_CONCURRENCY: "4"
+      AZURE_SERVICEBUS_NAMESPACE: ${AZURE_SERVICEBUS_NAMESPACE}
+    ports:
+      - "3000:3000"
+```
 
 ### CLI (Local and CI/CD Deployment)
 
