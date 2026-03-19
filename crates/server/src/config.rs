@@ -113,18 +113,21 @@ impl QueueServerConfig {
     /// Returns [`ServerError::ConfigError`] when `provider` is unrecognised or
     /// a required provider-specific variable (e.g. `AZURE_SERVICEBUS_NAMESPACE`)
     /// is absent.
-    pub fn to_queue_config(&self) -> Result<queue_runtime::QueueConfig, crate::errors::ServerError> {
+    pub fn to_queue_config(
+        &self,
+    ) -> Result<queue_runtime::QueueConfig, crate::errors::ServerError> {
         use queue_runtime::{
-            AzureAuthMethod, AzureServiceBusConfig, AwsSqsConfig, InMemoryConfig, ProviderConfig,
+            AwsSqsConfig, AzureAuthMethod, AzureServiceBusConfig, InMemoryConfig, ProviderConfig,
             QueueConfig,
         };
 
         let provider = match self.provider.to_lowercase().as_str() {
             "azure" => {
-                let namespace =
-                    self.namespace.clone().ok_or_else(|| crate::errors::ServerError::MissingEnvVar(
+                let namespace = self.namespace.clone().ok_or_else(|| {
+                    crate::errors::ServerError::MissingEnvVar(
                         "AZURE_SERVICEBUS_NAMESPACE".to_string(),
-                    ))?;
+                    )
+                })?;
                 ProviderConfig::AzureServiceBus(AzureServiceBusConfig {
                     connection_string: None,
                     namespace: Some(namespace),

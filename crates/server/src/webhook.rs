@@ -361,7 +361,10 @@ pub async fn handle_webhook(
         Some(r) => r,
         None => {
             // Should not happen — POST route is not registered in queue mode.
-            return (StatusCode::NOT_FOUND, "Webhook endpoint not available in queue mode".to_string());
+            return (
+                StatusCode::NOT_FOUND,
+                "Webhook endpoint not available in queue mode".to_string(),
+            );
         }
     };
 
@@ -447,7 +450,10 @@ pub fn build_queue_router(state: Arc<AppState>) -> Router {
 /// Only called in webhook mode. Queue mode has no webhook receiver.
 pub async fn build_webhook_receiver(
     webhook_secret: &str,
-) -> (WebhookReceiver, mpsc::Receiver<crate::ingress::EventEnvelope>) {
+) -> (
+    WebhookReceiver,
+    mpsc::Receiver<crate::ingress::EventEnvelope>,
+) {
     let secret_provider = Arc::new(WebhookSecretProvider {
         webhook_secret: webhook_secret.to_string(),
     });

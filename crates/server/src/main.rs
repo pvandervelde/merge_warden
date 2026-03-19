@@ -143,23 +143,24 @@ async fn main() -> Result<(), ServerError> {
     //    Queue mode: `concurrency` workers each hold an independent session lock,
     //    so different PRs are processed concurrently while per-PR ordering is
     //    preserved within a session.
-    let processor_handles: Vec<tokio::task::JoinHandle<()>> =
-        if server_config.receiver_mode == ReceiverMode::Queue {
-            let client = queue_client_opt
-                .as_ref()
-                .expect("queue client present when mode=queue");
-            let name = queue_name_opt
-                .as_ref()
-                .expect("queue name present when mode=queue");
-            let concurrency = server_config
-                .queue
-                .as_ref()
-                .expect("queue config present when mode=queue")
-                .concurrency;
+    let processor_handles: Vec<tokio::task::JoinHandle<()>> = if server_config.receiver_mode
+        == ReceiverMode::Queue
+    {
+        let client = queue_client_opt
+            .as_ref()
+            .expect("queue client present when mode=queue");
+        let name = queue_name_opt
+            .as_ref()
+            .expect("queue name present when mode=queue");
+        let concurrency = server_config
+            .queue
+            .as_ref()
+            .expect("queue config present when mode=queue")
+            .concurrency;
 
-            info!(workers = concurrency, "Spawning queue processor tasks");
+        info!(workers = concurrency, "Spawning queue processor tasks");
 
-            (0..concurrency)
+        (0..concurrency)
                 .map(|worker_id| {
                     let worker_client = Arc::clone(client);
                     let worker_name = name.clone();
@@ -176,19 +177,19 @@ async fn main() -> Result<(), ServerError> {
                     })
                 })
                 .collect()
-        } else {
-            let rx = webhook_rx.expect("mpsc receiver present in webhook mode");
-            let processor_state = Arc::clone(&state);
+    } else {
+        let rx = webhook_rx.expect("mpsc receiver present in webhook mode");
+        let processor_state = Arc::clone(&state);
 
-            info!("Spawning webhook processor task");
+        info!("Spawning webhook processor task");
 
-            vec![tokio::spawn(async move {
-                let ingress = Box::new(ingress::WebhookIngress::new(rx));
-                if let Err(e) = ingress::run_event_processor(ingress, processor_state).await {
-                    error!(error = %e, "Webhook processor task terminated with error");
-                }
-            })]
-        };
+        vec![tokio::spawn(async move {
+            let ingress = Box::new(ingress::WebhookIngress::new(rx));
+            if let Err(e) = ingress::run_event_processor(ingress, processor_state).await {
+                error!(error = %e, "Webhook processor task terminated with error");
+            }
+        })]
+    };
 
     // 10. Build mode-specific router.
     let router = if server_config.receiver_mode == ReceiverMode::Queue {
