@@ -209,7 +209,10 @@ async fn main() -> Result<(), ServerError> {
     //    connections and waits for in-flight handlers to complete.  Processor
     //    tasks are then aborted:
     //    - Webhook mode: the 202 was already sent to GitHub before processing
-    //      started, so aborting mid-processing is safe.
+    //      started, so aborting mid-processing is safe (at-most-once).  Events
+    //      buffered in the mpsc channel at shutdown are silently dropped — this
+    //      is acceptable because GitHub has already received its acknowledgement
+    //      and will not retry.
     //    - Queue mode: the broker redelivers messages whose session lock was not
     //      explicitly released.  The Drop impl on QueueMessageAck attempts an
     //      early close_session() to shorten that window.

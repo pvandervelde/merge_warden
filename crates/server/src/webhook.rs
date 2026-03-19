@@ -351,16 +351,12 @@ pub async fn handle_webhook(
 ) -> impl IntoResponse {
     debug!("Received webhook POST");
 
-    let receiver = match &state.receiver {
-        Some(r) => r,
-        None => {
-            // Should not happen — POST route is not registered in queue mode.
-            return (
-                StatusCode::NOT_FOUND,
-                "Webhook endpoint not available in queue mode".to_string(),
-            );
-        }
-    };
+    // SAFETY: `handle_webhook` is only reachable via `build_router`, which is
+    // only called in webhook mode where `state.receiver` is always `Some`.
+    let receiver = state
+        .receiver
+        .as_ref()
+        .expect("receiver is Some in webhook mode");
 
     let header_map: HashMap<String, String> = headers
         .iter()

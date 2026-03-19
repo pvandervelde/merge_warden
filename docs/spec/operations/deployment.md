@@ -91,7 +91,6 @@ services:
     image: ghcr.io/pvandervelde/merge_warden_server:latest
     environment:
       MERGE_WARDEN_RECEIVER_MODE: queue
-      GITHUB_WEBHOOK_SECRET: ${GITHUB_WEBHOOK_SECRET}
       GITHUB_APP_ID: ${GITHUB_APP_ID}
       GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY}
       MERGE_WARDEN_QUEUE_PROVIDER: azure

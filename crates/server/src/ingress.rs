@@ -308,8 +308,10 @@ pub struct QueueIngress {
 impl QueueIngress {
     /// Creates a new `QueueIngress`.
     ///
-    /// The `queue_client` must be the same instance used for enqueuing so both
-    /// sides share the same in-memory (or remote) queue state.
+    /// In production (Azure Service Bus, AWS SQS) pass any client configured
+    /// for the target queue — the queue client is independent of any enqueue
+    /// side. For the in-memory provider (dev/test) pass the **same** client
+    /// instance used to enqueue so both sides share the same in-memory state.
     ///
     /// # Arguments
     /// - `queue_client`: Shared queue client.
