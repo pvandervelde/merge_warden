@@ -61,7 +61,10 @@ pub struct ServerSecrets {
     /// PEM-encoded private key from `GITHUB_APP_PRIVATE_KEY`.
     pub github_app_private_key: SecretString,
     /// Webhook signing secret from `GITHUB_WEBHOOK_SECRET`.
-    pub github_webhook_secret: SecretString,
+    ///
+    /// Required in webhook mode; `None` in queue mode (the receiving service
+    /// owns signature validation, not merge-warden).
+    pub github_webhook_secret: Option<SecretString>,
 }
 
 // ---------------------------------------------------------------------------
@@ -180,7 +183,9 @@ pub struct ServerConfig {
 // Public functions
 // ---------------------------------------------------------------------------
 
-/// Reads the three required GitHub secrets from environment variables.
+/// Reads GitHub App credentials from environment variables.
+/// `GITHUB_WEBHOOK_SECRET` is only required in webhook mode — in queue mode
+/// the separate receiving service owns signature validation.
 ///
 /// See docs/spec/interfaces/server-config.md — `load_secrets()`
 ///
@@ -202,7 +207,7 @@ pub fn load_secrets() -> Result<ServerSecrets, ServerError> {
 
     let github_webhook_secret = std::env::var("GITHUB_WEBHOOK_SECRET")
         .map(SecretString::new)
-        .map_err(|_| ServerError::MissingEnvVar("GITHUB_WEBHOOK_SECRET".to_string()))?;
+        .ok();
 
     Ok(ServerSecrets {
         github_app_id,

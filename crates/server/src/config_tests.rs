@@ -87,7 +87,10 @@ fn load_secrets_succeeds_when_all_vars_present() {
     let s = result.unwrap();
     assert_eq!(s.github_app_id, 42);
     assert_eq!(s.github_app_private_key.expose(), "pem-content");
-    assert_eq!(s.github_webhook_secret.expose(), "hook-secret");
+    assert_eq!(
+        s.github_webhook_secret.as_ref().unwrap().expose(),
+        "hook-secret"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -162,7 +165,7 @@ fn load_secrets_errors_when_private_key_missing() {
 }
 
 #[test]
-fn load_secrets_errors_when_webhook_secret_missing() {
+fn load_secrets_returns_none_webhook_secret_when_var_absent() {
     let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     let _env = EnvGuard::prepare(
         &[("GITHUB_APP_ID", "1"), ("GITHUB_APP_PRIVATE_KEY", "k")],
@@ -174,10 +177,11 @@ fn load_secrets_errors_when_webhook_secret_missing() {
     );
 
     let r = load_secrets();
+    assert!(r.is_ok(), "Expected Ok, got: {:?}", r);
+    let s = r.unwrap();
     assert!(
-        matches!(&r, Err(ServerError::MissingEnvVar(n)) if n == "GITHUB_WEBHOOK_SECRET"),
-        "Expected MissingEnvVar(GITHUB_WEBHOOK_SECRET), got: {:?}",
-        r
+        s.github_webhook_secret.is_none(),
+        "Expected github_webhook_secret to be None when GITHUB_WEBHOOK_SECRET is absent"
     );
 }
 

@@ -42,7 +42,16 @@ async fn main() -> Result<(), ServerError> {
         "Configuration loaded"
     );
 
-    // 4. Initialise GitHub App client.
+    // 4. Fail fast: webhook mode requires GITHUB_WEBHOOK_SECRET.
+    if server_config.receiver_mode == ReceiverMode::Webhook
+        && secrets.github_webhook_secret.is_none()
+    {
+        return Err(ServerError::MissingEnvVar(
+            "GITHUB_WEBHOOK_SECRET".to_string(),
+        ));
+    }
+
+    // 5. Initialise GitHub App client.
     debug!(
         app_id = secrets.github_app_id,
         "Initialising GitHub App client"
@@ -63,7 +72,7 @@ async fn main() -> Result<(), ServerError> {
 
     debug!("GitHub App client initialised");
 
-    // 5. Optionally create the queue client (queue mode only).
+    // 6. Optionally create the queue client (queue mode only).
     let queue_pair: Option<(Arc<dyn queue_runtime::QueueClient>, QueueName)> =
         if server_config.receiver_mode == ReceiverMode::Queue {
             let queue_cfg = server_config
@@ -96,26 +105,36 @@ async fn main() -> Result<(), ServerError> {
             None
         };
 
-    // 6. Build the WebhookReceiver with the appropriate handler.
-    let (receiver, webhook_rx) = webhook::build_webhook_receiver(
-        secrets.github_webhook_secret.expose(),
-        queue_pair.clone(),
-    )
-    .await;
+    // 7. Build the WebhookReceiver (webhook mode only) or skip (queue mode).
+    //
+    //    In queue mode, merge-warden is a pure queue consumer. A separate service
+    //    receives GitHub webhooks, validates signatures, and enqueues messages.
+    //    merge-warden does not expose a POST endpoint in queue mode.
+    let (receiver_opt, webhook_rx) = if server_config.receiver_mode == ReceiverMode::Webhook {
+        let secret = secrets
+            .github_webhook_secret
+            .as_ref()
+            .expect("webhook secret checked above")
+            .expose();
+        let (receiver, rx) = webhook::build_webhook_receiver(secret).await;
+        (Some(receiver), Some(rx))
+    } else {
+        (None, None)
+    };
 
-    // 7. Build AppState and Axum router.
+    // 8. Build AppState.
     let (queue_client_opt, queue_name_opt) = match queue_pair {
         Some((c, n)) => (Some(c), Some(n)),
         None => (None, None),
     };
 
     let state = Arc::new(webhook::AppState {
-        receiver,
+        receiver: receiver_opt,
         github_client: github_client.clone(),
         policies: server_config.application_defaults.clone(),
     });
 
-    // 8. Spawn processor tasks.
+    // 9. Spawn processor tasks.
     //
     //    Webhook mode: one worker reads from the in-process mpsc channel via
     //    `WebhookIngress`. All events flow through the same `run_event_processor`
@@ -171,9 +190,14 @@ async fn main() -> Result<(), ServerError> {
             })]
         };
 
-    let router = webhook::build_router(Arc::clone(&state));
+    // 10. Build mode-specific router.
+    let router = if server_config.receiver_mode == ReceiverMode::Queue {
+        webhook::build_queue_router(Arc::clone(&state))
+    } else {
+        webhook::build_router(Arc::clone(&state))
+    };
 
-    // 9. Bind the TCP listener.
+    // 11. Bind the TCP listener.
     let addr = format!("0.0.0.0:{}", server_config.port);
     let listener = tokio::net::TcpListener::bind(&addr)
         .await
@@ -181,7 +205,7 @@ async fn main() -> Result<(), ServerError> {
 
     info!(address = addr.as_str(), "Listening for requests");
 
-    // 10. Serve.  On shutdown abort all processor tasks.
+    // 12. Serve.  On shutdown abort all processor tasks.
     axum::serve(listener, router)
         .await
         .map_err(|e| ServerError::StartupError(format!("Server error: {}", e)))?;

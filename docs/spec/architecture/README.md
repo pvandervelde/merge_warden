@@ -31,7 +31,11 @@ Developer platform abstraction layer design, including GitHub integration patter
 
 ### [Deployment Architectures](./deployment-architectures.md)
 
-Specific deployment target architectures including Azure Functions, CLI interface, and patterns for future platform support.
+Specific deployment target architectures including the containerised server, CLI interface, and patterns for future platform support.
+
+### [Event Processing](./event-processing.md)
+
+End-to-end description of how GitHub webhook events flow through the system — from reception through the two ingress modes (webhook and queue), the shared processing pipeline, and the actions taken on pull requests.
 
 ## Key Architectural Decisions
 
