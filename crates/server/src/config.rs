@@ -81,7 +81,11 @@ pub struct ServerSecrets {
 pub enum ReceiverMode {
     /// Axum POST handler processes events via an in-process channel.
     Webhook,
-    /// Axum POST handler enqueues events; a separate Tokio task processes them.
+    /// Pure queue consumer mode: merge-warden reads from an external queue.
+    ///
+    /// A separate receiver service is responsible for webhook reception, HMAC
+    /// validation, and enqueueing. The Axum server exposes a health-check
+    /// endpoint only (`GET /api/merge_warden`); no POST endpoint is registered.
     Queue,
 }
 
@@ -139,6 +143,11 @@ impl QueueServerConfig {
             "aws" => ProviderConfig::AwsSqs(AwsSqsConfig {
                 region: std::env::var("AWS_REGION").unwrap_or_else(|_| "us-east-1".to_string()),
                 access_key_id: std::env::var("AWS_ACCESS_KEY_ID").ok(),
+                // AWS_SECRET_ACCESS_KEY is stored as a plain String inside
+                // AwsSqsConfig (a type owned by queue-runtime; we cannot change
+                // its field type).  Prefer IAM role / IRSA / ECS task roles
+                // in production so this field remains None and no credential
+                // lives in-process.
                 secret_access_key: std::env::var("AWS_SECRET_ACCESS_KEY").ok(),
                 use_fifo_queues: true,
             }),
@@ -299,6 +308,13 @@ pub fn load_config() -> Result<ServerConfig, ServerError> {
             })?,
             Err(_) => 4,
         };
+
+        if concurrency == 0 {
+            return Err(ServerError::InvalidEnvVar {
+                name: "MERGE_WARDEN_QUEUE_CONCURRENCY".to_string(),
+                message: "Must be at least 1; got 0".to_string(),
+            });
+        }
 
         let namespace = std::env::var("AZURE_SERVICEBUS_NAMESPACE").ok();
 

@@ -123,10 +123,7 @@ async fn main() -> Result<(), ServerError> {
     };
 
     // 8. Build AppState.
-    let (queue_client_opt, queue_name_opt) = match queue_pair {
-        Some((c, n)) => (Some(c), Some(n)),
-        None => (None, None),
-    };
+    let (queue_client_opt, queue_name_opt) = queue_pair.unzip();
 
     let state = Arc::new(webhook::AppState {
         receiver: receiver_opt,
@@ -206,14 +203,51 @@ async fn main() -> Result<(), ServerError> {
 
     info!(address = addr.as_str(), "Listening for requests");
 
-    // 12. Serve.  On shutdown abort all processor tasks.
+    // 12. Serve — run until SIGTERM / Ctrl-C, then drain in-flight HTTP requests.
+    //
+    //    After `with_graceful_shutdown` resolves, Axum stops accepting new
+    //    connections and waits for in-flight handlers to complete.  Processor
+    //    tasks are then aborted:
+    //    - Webhook mode: the 202 was already sent to GitHub before processing
+    //      started, so aborting mid-processing is safe.
+    //    - Queue mode: the broker redelivers messages whose session lock was not
+    //      explicitly released.  The Drop impl on QueueMessageAck attempts an
+    //      early close_session() to shorten that window.
     axum::serve(listener, router)
+        .with_graceful_shutdown(shutdown_signal())
         .await
         .map_err(|e| ServerError::StartupError(format!("Server error: {}", e)))?;
 
+    info!("HTTP server shutdown complete; aborting processor tasks");
     for handle in processor_handles {
         handle.abort();
     }
 
     Ok(())
+}
+
+/// Resolves on SIGTERM (Unix) or Ctrl-C (all platforms), signalling
+/// `axum::serve` to drain in-flight requests before returning.
+async fn shutdown_signal() {
+    let ctrl_c = async {
+        tokio::signal::ctrl_c()
+            .await
+            .expect("failed to install Ctrl+C handler");
+    };
+
+    #[cfg(unix)]
+    let terminate = async {
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+            .expect("failed to install SIGTERM handler")
+            .recv()
+            .await;
+    };
+
+    #[cfg(not(unix))]
+    let terminate = std::future::pending::<()>();
+
+    tokio::select! {
+        _ = ctrl_c => {},
+        _ = terminate => {},
+    }
 }

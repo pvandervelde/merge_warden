@@ -171,42 +171,67 @@ impl EventAcknowledger for NoOpAck {
 /// the queue message, then closes the session lock so the next event in the
 /// same session can be processed.
 ///
+/// `session_client` is wrapped in `Option` so that the `Drop` impl can
+/// take it; after `complete()` or `reject()` drains it the field is `None`
+/// and the `Drop` impl becomes a no-op.
+///
 /// See docs/spec/interfaces/server-ingress.md — `QueueMessageAck`
 pub(crate) struct QueueMessageAck {
-    session_client: Box<dyn SessionClient>,
+    session_client: Option<Box<dyn SessionClient>>,
     receipt: queue_runtime::ReceiptHandle,
+}
+
+impl Drop for QueueMessageAck {
+    /// Closes the session lock if the ack was dropped without being consumed.
+    ///
+    /// Limits the stuck-session window (e.g. Azure Service Bus 5-minute lock)
+    /// when a processor task is aborted mid-flight: rather than waiting for the
+    /// broker timeout to release the lock, a best-effort `close_session()` is
+    /// spawned immediately.
+    fn drop(&mut self) {
+        if let Some(session) = self.session_client.take() {
+            // Use try_current so a non-runtime context (e.g. test teardown)
+            // does not panic.  If no runtime is available the session lock
+            // expires naturally.
+            if let Ok(handle) = tokio::runtime::Handle::try_current() {
+                handle.spawn(async move {
+                    let _ = session.close_session().await;
+                });
+            }
+        }
+    }
 }
 
 #[async_trait::async_trait]
 impl EventAcknowledger for QueueMessageAck {
-    async fn complete(self: Box<Self>) -> Result<(), IngressError> {
-        let QueueMessageAck {
-            session_client,
-            receipt,
-        } = *self;
-        session_client
-            .complete_message(receipt)
+    async fn complete(mut self: Box<Self>) -> Result<(), IngressError> {
+        let session = self
+            .session_client
+            .take()
+            .expect("session_client already consumed — Drop ran before complete()");
+        session
+            .complete_message(self.receipt.clone())
             .await
             .map_err(|e| IngressError::QueueError {
                 message: e.to_string(),
             })?;
         // Ignore close error — the message was already successfully completed.
-        let _ = session_client.close_session().await;
+        let _ = session.close_session().await;
         Ok(())
     }
 
-    async fn reject(self: Box<Self>, reason: &str) -> Result<(), IngressError> {
-        let QueueMessageAck {
-            session_client,
-            receipt,
-        } = *self;
-        session_client
-            .dead_letter_message(receipt, reason.to_string())
+    async fn reject(mut self: Box<Self>, reason: &str) -> Result<(), IngressError> {
+        let session = self
+            .session_client
+            .take()
+            .expect("session_client already consumed — Drop ran before reject()");
+        session
+            .dead_letter_message(self.receipt.clone(), reason.to_string())
             .await
             .map_err(|e| IngressError::QueueError {
                 message: e.to_string(),
             })?;
-        let _ = session_client.close_session().await;
+        let _ = session.close_session().await;
         Ok(())
     }
 }
@@ -387,7 +412,7 @@ impl EventIngress for QueueIngress {
             return Ok(Some(ProcessableEvent {
                 envelope,
                 ack: Box::new(QueueMessageAck {
-                    session_client: session,
+                    session_client: Some(session),
                     receipt,
                 }),
             }));

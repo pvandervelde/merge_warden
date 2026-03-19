@@ -136,12 +136,6 @@ impl MergeWardenWebhookHandler {
         }
     }
 
-    /// Creates a new handler sharing the state already constructed for [`AppState`].
-    #[allow(dead_code)]
-    pub fn new_from_state(state: &AppState) -> Self {
-        Self::new(state.github_client.clone(), state.policies.clone())
-    }
-
     /// Processes a `pull_request` webhook event.
     ///
     /// Validates the action, extracts PR metadata, builds a per-installation

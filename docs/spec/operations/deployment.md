@@ -26,7 +26,13 @@ The server receives GitHub webhook POSTs directly. Validated events are forwarde
 
 ### Queue Mode
 
-The server validates incoming webhook POSTs and enqueues them for asynchronous processing. A configurable number of worker tasks (`MERGE_WARDEN_QUEUE_CONCURRENCY`) consume from the queue using session-based ordering, ensuring events for the same PR are processed sequentially while different PRs may be processed in parallel.
+merge-warden operates as a **pure queue consumer**: it reads events from an
+external queue and processes them, but does not receive GitHub webhook POSTs
+directly. A separate receiver service is responsible for webhook reception,
+HMAC-SHA256 signature validation, and enqueueing. A configurable number of
+worker tasks (`MERGE_WARDEN_QUEUE_CONCURRENCY`) consume from the queue using
+session-based ordering, ensuring events for the same PR are processed
+sequentially while different PRs may be processed in parallel.
 
 **Use when:** production deployments where GitHub's 10-second timeout is a concern; high event volume; reliability guarantees are required.
 
@@ -48,6 +54,10 @@ The server validates incoming webhook POSTs and enqueues them for asynchronous p
 - Queue must have `RequiresSession=true`
 - `MaxDeliveryCount` recommended: `3`
 - Dead letter queue enabled (default on Service Bus)
+- Session lock timeout (default: 5 minutes) should exceed the worst-case PR
+  processing time (GitHub API round-trips on a large repo). If processing
+  regularly exceeds 5 minutes, raise the lock timeout and consider setting
+  `MERGE_WARDEN_QUEUE_SESSION_TIMEOUT_SECS` once that variable is exposed.
 - Session lock duration: 5 minutes
 - Message retention: 14 days
 - Managed Identity must hold `Azure Service Bus Data Owner` role

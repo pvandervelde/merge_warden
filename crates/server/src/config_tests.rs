@@ -350,6 +350,35 @@ fn load_config_queue_mode_populates_queue_config() {
     assert_eq!(q.namespace.as_deref(), Some("myns"));
 }
 
+#[test]
+fn load_config_queue_mode_errors_when_concurrency_is_zero() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    let _env = EnvGuard::prepare(
+        &[
+            ("MERGE_WARDEN_RECEIVER_MODE", "queue"),
+            ("MERGE_WARDEN_QUEUE_PROVIDER", "memory"),
+            ("MERGE_WARDEN_QUEUE_CONCURRENCY", "0"),
+        ],
+        &[
+            "MERGE_WARDEN_PORT",
+            "MERGE_WARDEN_RECEIVER_MODE",
+            "MERGE_WARDEN_CONFIG_FILE",
+            "MERGE_WARDEN_QUEUE_PROVIDER",
+            "MERGE_WARDEN_QUEUE_CONCURRENCY",
+        ],
+    );
+
+    let r = load_config();
+    assert!(
+        matches!(
+            &r,
+            Err(ServerError::InvalidEnvVar { name, .. }) if name == "MERGE_WARDEN_QUEUE_CONCURRENCY"
+        ),
+        "Expected InvalidEnvVar(MERGE_WARDEN_QUEUE_CONCURRENCY), got: {:?}",
+        r
+    );
+}
+
 // ---------------------------------------------------------------------------
 // load_config — TOML config file
 // ---------------------------------------------------------------------------

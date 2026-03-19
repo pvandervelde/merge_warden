@@ -113,7 +113,7 @@ run_event_processor loop
   (see Processing Pipeline below)
 ```
 
-In queue mode the Axum server only exposes a health-check endpoint (`GET /health`).
+In queue mode the Axum server only exposes a health-check endpoint (`GET /api/merge_warden`).
 `GITHUB_WEBHOOK_SECRET` is not required and is ignored if set.
 
 **Key properties:**
