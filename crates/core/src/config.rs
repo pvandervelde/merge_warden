@@ -944,6 +944,15 @@ impl Default for PrSizeCheckConfig {
 /// match any of the configured patterns are blocked from merging. WIP blocking
 /// cannot be bypassed by any user.
 ///
+/// # Merge heuristic
+///
+/// `load_merge_warden_config` detects whether a repository is "still using
+/// built-in defaults" by comparing the repo's patterns to `WipCheckConfig::default()`.
+/// A repository that explicitly sets its patterns to values identical to the
+/// defaults will have those values overwritten by app-level defaults. This is
+/// intentional (operator can supply a richer default set), but may be surprising
+/// in edge cases. Document any repo-level override explicitly to avoid ambiguity.
+///
 /// # Examples
 ///
 /// ```
@@ -959,7 +968,9 @@ pub struct WipCheckConfig {
     #[serde(default = "WipCheckConfig::default_enforce")]
     pub enforce_wip_blocking: bool,
 
-    /// The label to apply to WIP pull requests. Set to `None` to disable WIP labeling.
+    /// The label to apply to WIP pull requests. Set to `None` (or omit the key
+    /// in TOML) to disable WIP labeling. An empty string is treated the same as
+    /// `None` — no label will be applied.
     #[serde(default = "WipCheckConfig::default_wip_label")]
     pub wip_label: Option<String>,
 
@@ -983,13 +994,17 @@ impl WipCheckConfig {
         Some("WIP".to_string())
     }
 
-    /// Default WIP title patterns covering common conventions
+    /// Default WIP title patterns covering common conventions.
+    ///
+    /// Pattern matching uses `str::contains` (case-sensitive), so a pattern that
+    /// is a substring of another pattern in the list will always match first,
+    /// making the longer pattern redundant. For example, `"WIP"` already matches
+    /// titles containing `"[WIP]"` or `"WIP:"`. The defaults below list only
+    /// patterns that are _not_ subsumed by another entry.
     fn default_title_patterns() -> Vec<String> {
         vec![
             "WIP".to_string(),
-            "[WIP]".to_string(),
             "wip:".to_string(),
-            "WIP:".to_string(),
             "[wip]".to_string(),
             "draft:".to_string(),
             "Draft:".to_string(),

@@ -57,12 +57,15 @@ add_comment = true
 # WIP blocking cannot be bypassed by any user — it is always enforced.
 enforce_wip_blocking = false
 
-# Label applied to WIP pull requests. Set to an empty string to disable labeling.
+# Label applied to WIP pull requests. Omit the key (or remove the value) to disable labeling.
+# Empty string is treated the same as omitting the key.
 wip_label = "WIP"
 
 # Substrings to search for in the PR TITLE to detect WIP status (case-sensitive).
 # The PR is flagged as WIP if the title contains any of these strings.
-wip_title_patterns = ["WIP", "[WIP]", "wip:", "WIP:", "[wip]", "draft:", "Draft:"]
+# Note: matching uses str::contains (case-sensitive). Patterns that are substrings of
+# other patterns are redundant — "WIP" already matches titles containing "[WIP]" or "WIP:".
+wip_title_patterns = ["WIP", "wip:", "[wip]", "draft:", "Draft:"]
 
 # Substrings to search for in the PR DESCRIPTION to detect WIP status.
 # Empty by default — WIP detection in the description is opt-in.

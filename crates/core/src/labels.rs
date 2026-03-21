@@ -465,12 +465,25 @@ pub async fn manage_wip_labels<P: PullRequestProvider>(
     // Discover the canonical WIP label name in the repository
     let discovered_label = discover_wip_labels(provider, owner, repo, label_hint).await?;
 
-    // Resolve the effective label name: discovered → hint → default
+    // Resolve the effective label name: discovered → hint → default.
+    // An empty hint is treated the same as None — labeling is disabled.
+    let hint_normalized = label_hint.as_deref().filter(|s| !s.is_empty());
     let effective_label = discovered_label
         .as_deref()
-        .or(label_hint.as_deref())
+        .or(hint_normalized)
         .unwrap_or("WIP")
         .to_string();
+
+    // If the effective label is empty (e.g., wip_label was set to ""), skip label management.
+    if effective_label.is_empty() {
+        debug!(
+            repository_owner = owner,
+            repository = repo,
+            pr_number = pr_number,
+            "WIP label is empty — skipping label management"
+        );
+        return Ok(());
+    }
 
     // Get current labels on the PR
     let current_pr_labels = provider

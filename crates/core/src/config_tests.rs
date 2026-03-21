@@ -960,16 +960,25 @@ fn test_wip_check_config_default_title_patterns_non_empty() {
         !config.wip_title_patterns.is_empty(),
         "Default title patterns should not be empty"
     );
-    // Check that common WIP prefixes are present
+    // Check that core WIP patterns are present
     let titles = &config.wip_title_patterns;
     assert!(titles.contains(&"WIP".to_string()), "Should contain 'WIP'");
     assert!(
-        titles.contains(&"[WIP]".to_string()),
-        "Should contain '[WIP]'"
+        titles.contains(&"wip:".to_string()),
+        "Should contain 'wip:'"
     );
     assert!(
-        titles.contains(&"WIP:".to_string()),
-        "Should contain 'WIP:'"
+        titles.contains(&"[wip]".to_string()),
+        "Should contain '[wip]'"
+    );
+    // "[WIP]" and "WIP:" are subsumed by "WIP" via str::contains — not in defaults
+    assert!(
+        !titles.contains(&"[WIP]".to_string()),
+        "'[WIP]' is subsumed by 'WIP' and should not be a separate default"
+    );
+    assert!(
+        !titles.contains(&"WIP:".to_string()),
+        "'WIP:' is subsumed by 'WIP' and should not be a separate default"
     );
 }
 

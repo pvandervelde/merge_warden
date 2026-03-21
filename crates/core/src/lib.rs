@@ -1503,11 +1503,12 @@ Please update the PR body to include a valid work item reference."#;
         // Check if PR is marked as WIP — runs before all other validations and cannot be bypassed
         if self.config.wip_check.enforce_wip_blocking {
             let is_wip = self.check_wip_status(&pr);
-            let wip_message = self
-                .communicate_wip_status(repo_owner, repo_name, &pr, is_wip)
-                .await;
 
             if is_wip {
+                let wip_message = self
+                    .communicate_wip_status(repo_owner, repo_name, &pr, true)
+                    .await;
+
                 info!(
                     repository_owner = repo_owner,
                     repository = repo_name,
@@ -1547,6 +1548,43 @@ Please update the PR body to include a valid work item reference."#;
                     labels: Vec::new(),
                     bypasses_used: Vec::new(),
                 });
+            } else {
+                // PR is not WIP. Only run cleanup if there is stale WIP state to remove
+                // (a WIP label or WIP comment). This avoids unnecessary API calls on
+                // every clean PR event when WIP blocking is enabled.
+                let has_stale_wip = self
+                    .provider
+                    .list_applied_labels(repo_owner, repo_name, pr_number)
+                    .await
+                    .unwrap_or_default()
+                    .iter()
+                    .any(|l| {
+                        let common = ["WIP", "wip", "work-in-progress", "work in progress"];
+                        common.iter().any(|n| l.name.eq_ignore_ascii_case(n))
+                            || self
+                                .config
+                                .wip_check
+                                .wip_label
+                                .as_deref()
+                                .filter(|s| !s.is_empty())
+                                .is_some_and(|hint| l.name == hint)
+                    });
+
+                let has_stale_comment = if has_stale_wip {
+                    true // skip the second API call when we already know cleanup is needed
+                } else {
+                    self.provider
+                        .list_comments(repo_owner, repo_name, pr_number)
+                        .await
+                        .unwrap_or_default()
+                        .iter()
+                        .any(|c| c.body.contains(WIP_COMMENT_MARKER))
+                };
+
+                if has_stale_wip || has_stale_comment {
+                    self.communicate_wip_status(repo_owner, repo_name, &pr, false)
+                        .await;
+                }
             }
         }
 
