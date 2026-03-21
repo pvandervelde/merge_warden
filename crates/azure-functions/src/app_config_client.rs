@@ -11,6 +11,7 @@ use azure_identity::{ManagedIdentityCredential, ManagedIdentityCredentialOptions
 use merge_warden_core::config::{
     ApplicationDefaults, BypassRule, BypassRules, ChangeTypeLabelConfig,
     ConventionalCommitMappings, FallbackLabelSettings, LabelDetectionStrategy, PrSizeCheckConfig,
+    WipCheckConfig,
 };
 use merge_warden_core::size::SizeThresholds;
 use reqwest::{Client, StatusCode};
@@ -340,6 +341,7 @@ impl AppConfigClient {
             bypass_rules,
             pr_size_check: pr_size_check.clone(),
             change_type_labels,
+            wip_check: WipCheckConfig::default(),
         };
 
         Ok(result)
