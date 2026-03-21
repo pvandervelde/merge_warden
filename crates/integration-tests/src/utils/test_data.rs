@@ -28,6 +28,12 @@ pub struct TestDataManager {
     defaults: TestDataDefaults,
 }
 
+impl Default for TestDataManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl TestDataManager {
     /// Creates a new test data manager with default templates.
     ///

@@ -788,7 +788,7 @@ impl CiTestExecutor {
         let mut results = TestExecutionResults::with_config(self.config.clone());
 
         // Simulate filtering and running tests based on the filter
-        let test_names = vec![
+        let test_names = [
             "environment_setup_test",
             "github_api_test",
             "webhook_test",
@@ -887,6 +887,12 @@ pub struct TestExecutionResults {
     pub resource_usage: ResourceUsageTracker,
     /// Configuration used for execution
     pub execution_config: CiTestConfig,
+}
+
+impl Default for TestExecutionResults {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TestExecutionResults {
@@ -1090,6 +1096,12 @@ pub enum TestStatus {
     TimedOut,
 }
 
+impl Default for ResourceUsageTracker {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ResourceUsageTracker {
     /// Creates a new resource usage tracker with zero counters.
     pub fn new() -> Self {
@@ -1099,6 +1111,12 @@ impl ResourceUsageTracker {
             webhooks_created: 0,
             peak_memory_usage: 0,
         }
+    }
+}
+
+impl Default for TestExecutionState {
+    fn default() -> Self {
+        Self::new()
     }
 }
 

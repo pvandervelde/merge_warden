@@ -39,6 +39,12 @@ pub struct MockAppConfigService {
     is_healthy: bool,
 }
 
+impl Default for MockAppConfigService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockAppConfigService {
     /// Creates a new mock App Config service with default test configuration.
     ///
@@ -63,6 +69,7 @@ impl MockAppConfigService {
             is_healthy: true,
         }
     }
+
     /// Returns whether the service is healthy.
     pub fn is_healthy(&self) -> bool {
         // TODO: implement - Simulate health status
