@@ -483,9 +483,7 @@ pub async fn manage_wip_labels<P: PullRequestProvider>(
         })?;
 
     if is_wip {
-        let already_present = current_pr_labels
-            .iter()
-            .any(|l| l.name == effective_label);
+        let already_present = current_pr_labels.iter().any(|l| l.name == effective_label);
 
         if !already_present {
             provider

@@ -1346,7 +1346,11 @@ pub async fn load_merge_warden_config(
         // - If the app enables WIP blocking, it overrides the repo setting (operator mandate)
         // - If the repo does not configure WIP at all (default), use app defaults wholesale
         if app_defaults.wip_check.enforce_wip_blocking {
-            config.policies.pull_requests.wip_policies.enforce_wip_blocking = true;
+            config
+                .policies
+                .pull_requests
+                .wip_policies
+                .enforce_wip_blocking = true;
         }
 
         // Where the repo uses the hard defaults for labels/patterns, prefer the app-level settings
@@ -1358,13 +1362,20 @@ pub async fn load_merge_warden_config(
                 app_defaults.wip_check.wip_label.clone();
         }
 
-        if config.policies.pull_requests.wip_policies.wip_title_patterns
+        if config
+            .policies
+            .pull_requests
+            .wip_policies
+            .wip_title_patterns
             == WipCheckConfig::default().wip_title_patterns
             && app_defaults.wip_check.wip_title_patterns
                 != WipCheckConfig::default().wip_title_patterns
         {
-            config.policies.pull_requests.wip_policies.wip_title_patterns =
-                app_defaults.wip_check.wip_title_patterns.clone();
+            config
+                .policies
+                .pull_requests
+                .wip_policies
+                .wip_title_patterns = app_defaults.wip_check.wip_title_patterns.clone();
         }
 
         if config
