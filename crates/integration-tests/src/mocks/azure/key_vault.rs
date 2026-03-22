@@ -39,6 +39,12 @@ pub struct MockKeyVaultService {
     is_healthy: bool,
 }
 
+impl Default for MockKeyVaultService {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MockKeyVaultService {
     /// Creates a new mock Key Vault service with default test secrets.
     ///

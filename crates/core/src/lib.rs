@@ -53,6 +53,7 @@
 //!         bypass_rules: BypassRules::default(),
 //!         pr_size_check: Default::default(),
 //!         change_type_labels: None,
+//!         ..Default::default()
 //!     };
 //!
 //!     // Create a MergeWarden instance with custom configuration
@@ -73,6 +74,7 @@ pub mod checks;
 pub mod config;
 use config::CurrentPullRequestValidationConfiguration;
 use config::TITLE_COMMENT_MARKER;
+use config::WIP_COMMENT_MARKER;
 use config::WORK_ITEM_COMMENT_MARKER;
 
 /// Error types and utilities for Merge Warden operations.
@@ -106,6 +108,9 @@ pub struct CheckResult {
 
     /// Whether the PR size validation passed
     pub size_valid: bool,
+
+    /// Whether the PR was detected as a WIP (Work In Progress)
+    pub wip_detected: bool,
 
     /// Labels that were added to the PR based on its content
     pub labels: Vec<String>,
@@ -264,6 +269,194 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
             self.config.bypass_rules.size(),
             &self.config,
         )
+    }
+
+    /// Checks whether a pull request is marked as WIP (Work In Progress).
+    ///
+    /// Inspects the PR title and body against the configured WIP patterns.
+    /// Returns `true` if any pattern matches. This check ignores bypass rules —
+    /// WIP status can never be bypassed.
+    ///
+    /// # Arguments
+    ///
+    /// * `pr` - The pull request to inspect
+    ///
+    /// # Returns
+    ///
+    /// `true` if the PR is detected as WIP, `false` otherwise
+    fn check_wip_status(&self, pr: &PullRequest) -> bool {
+        for pattern in &self.config.wip_check.wip_title_patterns {
+            if pr.title.contains(pattern.as_str()) {
+                debug!(
+                    pull_request = pr.number,
+                    pattern = pattern.as_str(),
+                    "WIP pattern matched in PR title"
+                );
+                return true;
+            }
+        }
+
+        if let Some(body) = &pr.body {
+            for pattern in &self.config.wip_check.wip_description_patterns {
+                if body.contains(pattern.as_str()) {
+                    debug!(
+                        pull_request = pr.number,
+                        pattern = pattern.as_str(),
+                        "WIP pattern matched in PR description"
+                    );
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
+    /// Handles side effects for WIP status changes on a pull request.
+    ///
+    /// When `is_wip` is `true`:
+    /// - Adds the configured WIP label (if not already present)
+    /// - Posts a blocking comment with the unique `WIP_COMMENT_MARKER` (if not already present)
+    ///
+    /// When `is_wip` is `false`:
+    /// - Removes the WIP label (if present)
+    /// - Deletes any existing WIP comment identified by `WIP_COMMENT_MARKER`
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner` - The owner of the repository
+    /// * `repo_name` - The name of the repository
+    /// * `pr` - The pull request being processed
+    /// * `is_wip` - Whether the PR is currently in WIP state
+    ///
+    /// # Returns
+    ///
+    /// A status message string for inclusion in the check status output
+    #[instrument]
+    async fn communicate_wip_status(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr: &PullRequest,
+        is_wip: bool,
+    ) -> String {
+        info!(
+            repository_owner = repo_owner,
+            repository = repo_name,
+            pull_request = pr.number,
+            is_wip = is_wip,
+            "Updating pull request WIP status",
+        );
+
+        // Manage WIP label
+        let label_result = labels::manage_wip_labels(
+            &self.provider,
+            repo_owner,
+            repo_name,
+            pr.number,
+            is_wip,
+            &self.config.wip_check.wip_label,
+        )
+        .await;
+
+        if let Err(e) = label_result {
+            warn!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                pull_request = pr.number,
+                error = %e,
+                "Failed to manage WIP label"
+            );
+        }
+
+        if is_wip {
+            // Check if WIP comment already exists
+            let comments = self
+                .provider
+                .list_comments(repo_owner, repo_name, pr.number)
+                .await
+                .unwrap_or_default();
+
+            let has_comment = comments.iter().any(|c| c.body.contains(WIP_COMMENT_MARKER));
+
+            if !has_comment {
+                let mut pattern_lines = String::new();
+                for pattern in &self.config.wip_check.wip_title_patterns {
+                    pattern_lines.push_str(&format!("\n- `{pattern}` in the title"));
+                }
+                for pattern in &self.config.wip_check.wip_description_patterns {
+                    pattern_lines.push_str(&format!("\n- `{pattern}` in the description"));
+                }
+
+                let comment_text = format!(
+                    "\nThis pull request is marked as **Work In Progress (WIP)** and cannot be merged until the WIP status is removed.\n\nTo remove WIP status, update the PR title and/or description to remove the WIP markers.\n\nThe following patterns are configured as WIP markers:{pattern_lines}\n\nOnce all WIP markers are removed, the checks will automatically re-evaluate."
+                );
+
+                let comment = format!("{}{}", WIP_COMMENT_MARKER, comment_text);
+
+                let result = self
+                    .provider
+                    .add_comment(repo_owner, repo_name, pr.number, &comment)
+                    .await;
+
+                if result.is_ok() {
+                    info!(
+                        repository_owner = repo_owner,
+                        repository = repo_name,
+                        pull_request = pr.number,
+                        "Added WIP blocking comment to pull request"
+                    );
+                } else {
+                    let e = result.unwrap_err();
+                    warn!(
+                        repository_owner = repo_owner,
+                        repository = repo_name,
+                        pull_request = pr.number,
+                        error = e.to_string(),
+                        "Failed to add WIP blocking comment to pull request"
+                    );
+                }
+            }
+
+            "⛔ **WIP Detected**: This pull request is marked as Work In Progress and cannot be merged. Remove all WIP markers from the title or description to proceed.".to_string()
+        } else {
+            // Remove WIP comment if present
+            let comments = self
+                .provider
+                .list_comments(repo_owner, repo_name, pr.number)
+                .await
+                .unwrap_or_default();
+
+            for comment in comments {
+                if comment.body.contains(WIP_COMMENT_MARKER) {
+                    let result = self
+                        .provider
+                        .delete_comment(repo_owner, repo_name, comment.id)
+                        .await;
+
+                    if result.is_ok() {
+                        info!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr.number,
+                            "Removed WIP blocking comment from pull request"
+                        );
+                    } else {
+                        let e = result.unwrap_err();
+                        warn!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr.number,
+                            error = e.to_string(),
+                            "Failed to remove WIP blocking comment from pull request"
+                        );
+                    }
+                    break;
+                }
+            }
+
+            String::new()
+        }
     }
 
     /// Handles side effects for PR title validation.
@@ -1301,9 +1494,118 @@ Please update the PR body to include a valid work item reference."#;
                 title_valid: true,
                 work_item_referenced: true,
                 size_valid: true,
+                wip_detected: false,
                 labels: Vec::<String>::new(),
                 bypasses_used: Vec::new(),
             });
+        }
+
+        // Check if PR is marked as WIP — runs before all other validations and cannot be bypassed
+        if self.config.wip_check.enforce_wip_blocking {
+            let is_wip = self.check_wip_status(&pr);
+
+            if is_wip {
+                let wip_message = self
+                    .communicate_wip_status(repo_owner, repo_name, &pr, true)
+                    .await;
+
+                info!(
+                    repository_owner = repo_owner,
+                    repository = repo_name,
+                    pull_request = pr_number,
+                    "Pull request is marked as WIP. Blocking merge."
+                );
+
+                self.provider
+                    .update_pr_check_status(
+                        repo_owner,
+                        repo_name,
+                        pr_number,
+                        "failure",
+                        check_title,
+                        "Pull request is marked as WIP (Work In Progress). Remove WIP markers to allow merging.",
+                        &wip_message,
+                    )
+                    .await
+                    .map_err(|e| {
+                        error!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr_number,
+                            error = e.to_string(),
+                            "Failed to add or update GitHub check run"
+                        );
+                        MergeWardenError::FailedToUpdatePullRequest(
+                            "Failed to add or update GitHub check run".to_string(),
+                        )
+                    })?;
+
+                return Ok(CheckResult {
+                    title_valid: true,
+                    work_item_referenced: true,
+                    size_valid: true,
+                    wip_detected: true,
+                    labels: Vec::new(),
+                    bypasses_used: Vec::new(),
+                });
+            } else {
+                // PR is not WIP. Only run cleanup if there is stale WIP state to remove
+                // (a WIP label or WIP comment). This avoids unnecessary API calls on
+                // every clean PR event when WIP blocking is enabled.
+                //
+                // The label scan checks COMMON_WIP_LABEL_NAMES (common repo label names
+                // that manage_wip_labels may have applied via auto-discovery) AND the
+                // configured wip_label hint (applied when the exact hint matched the repo
+                // label or was used as direct fallback). Both are needed because either
+                // path may have been used on a previous event.
+                //
+                // If wip_label is None (labeling disabled), no label was ever applied by
+                // this code, so the label scan is skipped entirely.
+                let labeling_enabled = self
+                    .config
+                    .wip_check
+                    .wip_label
+                    .as_deref()
+                    .is_some_and(|s| !s.is_empty());
+
+                let has_stale_wip = if labeling_enabled {
+                    self.provider
+                        .list_applied_labels(repo_owner, repo_name, pr_number)
+                        .await
+                        .unwrap_or_default()
+                        .iter()
+                        .any(|l| {
+                            labels::COMMON_WIP_LABEL_NAMES
+                                .iter()
+                                .any(|n| l.name.eq_ignore_ascii_case(n))
+                                || self
+                                    .config
+                                    .wip_check
+                                    .wip_label
+                                    .as_deref()
+                                    .filter(|s| !s.is_empty())
+                                    .is_some_and(|hint| l.name == hint)
+                        })
+                } else {
+                    false
+                };
+
+                let has_stale_comment = if has_stale_wip {
+                    true // skip the second API call when we already know cleanup is needed
+                } else {
+                    self.provider
+                        .list_comments(repo_owner, repo_name, pr_number)
+                        .await
+                        .unwrap_or_default()
+                        .iter()
+                        .any(|c| c.body.contains(WIP_COMMENT_MARKER))
+                };
+
+                if has_stale_wip || has_stale_comment {
+                    self.communicate_wip_status(repo_owner, repo_name, &pr, false)
+                        .await;
+                }
+            }
         }
 
         // Check PR title follows the conventional commit structure if enabled
@@ -1525,6 +1827,7 @@ Please update the PR body to include a valid work item reference."#;
             title_valid: is_title_valid,
             work_item_referenced: is_work_item_referenced,
             size_valid: is_size_valid,
+            wip_detected: false,
             labels,
             bypasses_used,
         })
@@ -1597,6 +1900,7 @@ Please update the PR body to include a valid work item reference."#;
     ///         bypass_rules: BypassRules::default(),
     ///         pr_size_check: Default::default(),
     ///         change_type_labels: None,
+    ///         ..Default::default()
     ///     };
     ///
     ///     let warden = MergeWarden::with_config(provider, config);

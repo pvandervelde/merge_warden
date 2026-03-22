@@ -19,6 +19,16 @@ use merge_warden_developer_platforms::PullRequestProvider;
 use regex::Regex;
 use tracing::{debug, info, warn};
 
+/// Common WIP label names used for discovery and cleanup.
+///
+/// This list is consulted in two places:
+/// 1. [`discover_wip_labels`] — Priority-2 search when no exact hint match is found.
+/// 2. [`manage_wip_labels`] — Stale-label cleanup on the non-WIP path.
+///
+/// Any additions here automatically apply to both call sites.
+pub(crate) const COMMON_WIP_LABEL_NAMES: [&str; 4] =
+    ["WIP", "wip", "work-in-progress", "work in progress"];
+
 #[cfg(test)]
 #[path = "labels_tests.rs"]
 mod tests;
@@ -344,6 +354,240 @@ fn add_hardcoded_type_label(labels: &mut Vec<String>, pr_type: &str) {
         "revert" => labels.push("revert".to_string()),
         _ => {}
     }
+}
+
+/// Discovers the WIP label name in use in a repository.
+///
+/// Uses a priority-based search:
+/// 1. Exact match against the configured `label_hint` (if supplied)
+/// 2. Case-insensitive match against common WIP label names
+///    (`"WIP"`, `"wip"`, `"work-in-progress"`, `"work in progress"`)
+///
+/// Returns `None` when no matching label exists in the repository — the caller
+/// should fall back to the raw configured name or `"WIP"`.
+///
+/// # Arguments
+///
+/// * `provider` - The Git provider implementation
+/// * `owner` - The owner of the repository
+/// * `repo` - The name of the repository
+/// * `label_hint` - Optional configured WIP label name to prefer
+///
+/// # Returns
+///
+/// `Ok(Some(name))` when a matching repo label is found, `Ok(None)` otherwise
+pub async fn discover_wip_labels<P: PullRequestProvider>(
+    provider: &P,
+    owner: &str,
+    repo: &str,
+    label_hint: &Option<String>,
+) -> Result<Option<String>, MergeWardenError> {
+    debug!(
+        repository_owner = owner,
+        repository = repo,
+        "Discovering WIP labels in repository"
+    );
+
+    let all_labels = provider
+        .list_available_labels(owner, repo)
+        .await
+        .map_err(|_| {
+            MergeWardenError::FailedToUpdatePullRequest(
+                "Failed to fetch repository labels".to_string(),
+            )
+        })?;
+
+    // Priority 1: exact match to configured hint
+    if let Some(hint) = label_hint {
+        if let Some(label) = all_labels.iter().find(|l| &l.name == hint) {
+            debug!(
+                repository_owner = owner,
+                repository = repo,
+                label = %label.name,
+                "Found WIP label matching configured hint"
+            );
+            return Ok(Some(label.name.clone()));
+        }
+    }
+
+    // Priority 2: case-insensitive match against common WIP label names
+    for name in &COMMON_WIP_LABEL_NAMES {
+        if let Some(label) = all_labels
+            .iter()
+            .find(|l| l.name.eq_ignore_ascii_case(name))
+        {
+            debug!(
+                repository_owner = owner,
+                repository = repo,
+                label = %label.name,
+                "Found WIP label via common name match"
+            );
+            return Ok(Some(label.name.clone()));
+        }
+    }
+
+    debug!(
+        repository_owner = owner,
+        repository = repo,
+        "No WIP label found in repository"
+    );
+    Ok(None)
+}
+
+/// Adds or removes the WIP label on a pull request.
+///
+/// When `is_wip` is `true`, the WIP label is added if not already present.
+/// When `is_wip` is `false`, any matching WIP label is removed.
+///
+/// The label name is resolved by first calling [`discover_wip_labels`]; if no
+/// repository label is found the raw `label_hint` (or `"WIP"` as ultimate
+/// fallback) is used.
+///
+/// # Arguments
+///
+/// * `provider` - The Git provider implementation
+/// * `owner` - The owner of the repository
+/// * `repo` - The name of the repository
+/// * `pr_number` - The pull request number
+/// * `is_wip` - Whether the PR is currently in WIP state
+/// * `label_hint` - Optional configured WIP label name
+///
+/// # Returns
+///
+/// `Ok(())` on success; errors from the provider are propagated
+pub async fn manage_wip_labels<P: PullRequestProvider>(
+    provider: &P,
+    owner: &str,
+    repo: &str,
+    pr_number: u64,
+    is_wip: bool,
+    label_hint: &Option<String>,
+) -> Result<(), MergeWardenError> {
+    // None means "labeling explicitly disabled" — skip all label operations.
+    if label_hint.is_none() {
+        debug!(
+            repository_owner = owner,
+            repository = repo,
+            pr_number = pr_number,
+            "wip_label is None — label management disabled"
+        );
+        return Ok(());
+    }
+
+    info!(
+        repository_owner = owner,
+        repository = repo,
+        pr_number = pr_number,
+        is_wip = is_wip,
+        "Managing WIP labels for pull request"
+    );
+
+    // Discover the canonical WIP label name in the repository
+    let discovered_label = discover_wip_labels(provider, owner, repo, label_hint).await?;
+
+    // Resolve the effective label name: discovered → hint → default.
+    // An empty hint is treated the same as None — labeling is disabled.
+    let hint_normalized = label_hint.as_deref().filter(|s| !s.is_empty());
+    let effective_label = discovered_label
+        .as_deref()
+        .or(hint_normalized)
+        .unwrap_or("WIP")
+        .to_string();
+
+    // If the effective label is empty (e.g., wip_label was set to ""), skip label management.
+    if effective_label.is_empty() {
+        debug!(
+            repository_owner = owner,
+            repository = repo,
+            pr_number = pr_number,
+            "WIP label is empty — skipping label management"
+        );
+        return Ok(());
+    }
+
+    // Get current labels on the PR
+    let current_pr_labels = provider
+        .list_applied_labels(owner, repo, pr_number)
+        .await
+        .map_err(|_| {
+            MergeWardenError::FailedToUpdatePullRequest(
+                "Failed to list current PR labels".to_string(),
+            )
+        })?;
+
+    if is_wip {
+        let already_present = current_pr_labels.iter().any(|l| l.name == effective_label);
+
+        if !already_present {
+            provider
+                .add_labels(
+                    owner,
+                    repo,
+                    pr_number,
+                    std::slice::from_ref(&effective_label),
+                )
+                .await
+                .map_err(|e| {
+                    warn!(
+                        repository_owner = owner,
+                        repository = repo,
+                        pr_number = pr_number,
+                        label = %effective_label,
+                        error = %e,
+                        "Failed to add WIP label to pull request"
+                    );
+                    MergeWardenError::FailedToUpdatePullRequest(
+                        "Failed to add WIP label".to_string(),
+                    )
+                })?;
+
+            info!(
+                repository_owner = owner,
+                repository = repo,
+                pr_number = pr_number,
+                label = %effective_label,
+                "Added WIP label to pull request"
+            );
+        }
+    } else {
+        // Remove labels that match the effective label name or any common WIP name
+        let labels_to_remove: Vec<String> = current_pr_labels
+            .iter()
+            .filter(|l| {
+                l.name == effective_label
+                    || COMMON_WIP_LABEL_NAMES
+                        .iter()
+                        .any(|n| l.name.eq_ignore_ascii_case(n))
+            })
+            .map(|l| l.name.clone())
+            .collect();
+
+        for label_name in labels_to_remove {
+            if let Err(e) = provider
+                .remove_label(owner, repo, pr_number, &label_name)
+                .await
+            {
+                warn!(
+                    repository_owner = owner,
+                    repository = repo,
+                    pr_number = pr_number,
+                    label = %label_name,
+                    error = %e,
+                    "Failed to remove WIP label from pull request"
+                );
+            } else {
+                info!(
+                    repository_owner = owner,
+                    repository = repo,
+                    pr_number = pr_number,
+                    label = %label_name,
+                    "Removed WIP label from pull request"
+                );
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Manages size labels for a pull request based on file changes using smart label discovery.

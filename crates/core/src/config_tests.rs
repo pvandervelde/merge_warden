@@ -1,6 +1,6 @@
 use crate::config::{
     BypassRule, BypassRules, ChangeTypeLabelConfig, CurrentPullRequestValidationConfiguration,
-    PrSizeCheckConfig, CONVENTIONAL_COMMIT_REGEX, WORK_ITEM_REGEX,
+    PrSizeCheckConfig, WipCheckConfig, CONVENTIONAL_COMMIT_REGEX, WORK_ITEM_REGEX,
 };
 use crate::size::SizeThresholds;
 use async_trait::async_trait;
@@ -178,6 +178,7 @@ fn test_custom_regex_patterns_are_used() {
                     label_if_missing: Some("custom-missing".to_string()),
                 },
                 size_policies: PrSizeCheckConfig::default(),
+                ..Default::default()
             },
         },
         change_type_labels: None,
@@ -433,6 +434,7 @@ fn test_merge_warden_config_to_validation_config_conventional_commits_and_work_i
                     label_if_missing: Some(MISSING_WORK_ITEM_LABEL.to_string()),
                 },
                 size_policies: PrSizeCheckConfig::default(),
+                ..Default::default()
             },
         },
         change_type_labels: None,
@@ -467,6 +469,7 @@ fn test_merge_warden_config_to_validation_config_non_conventional_commits() {
                     label_if_missing: None,
                 },
                 size_policies: PrSizeCheckConfig::default(),
+                ..Default::default()
             },
         },
         change_type_labels: None,
@@ -716,6 +719,7 @@ fn test_application_defaults_bypass_rules_serialization() {
             size: BypassRule::default(),
         },
         change_type_labels: ChangeTypeLabelConfig::default(),
+        wip_check: WipCheckConfig::default(),
     };
 
     let serialized =
@@ -910,6 +914,7 @@ fn test_validation_config_includes_pr_size() {
                     label_prefix: "custom/".to_string(),
                     add_comment: false,
                 },
+                ..Default::default()
             },
         },
         change_type_labels: None,
@@ -925,4 +930,242 @@ fn test_validation_config_includes_pr_size() {
     );
     assert_eq!(validation.pr_size_check.label_prefix, "custom/");
     assert!(!validation.pr_size_check.add_comment);
+}
+
+// ── WipCheckConfig tests ─────────────────────────────────────────────────────
+
+#[test]
+fn test_wip_check_config_default_enforce_is_false() {
+    let config = WipCheckConfig::default();
+    assert!(
+        !config.enforce_wip_blocking,
+        "WIP blocking should be opt-in (disabled by default)"
+    );
+}
+
+#[test]
+fn test_wip_check_config_default_label_is_wip() {
+    let config = WipCheckConfig::default();
+    assert_eq!(
+        config.wip_label,
+        Some("WIP".to_string()),
+        "Default WIP label should be 'WIP'"
+    );
+}
+
+#[test]
+fn test_wip_check_config_default_title_patterns_non_empty() {
+    let config = WipCheckConfig::default();
+    assert!(
+        !config.wip_title_patterns.is_empty(),
+        "Default title patterns should not be empty"
+    );
+    // Check that core WIP patterns are present
+    let titles = &config.wip_title_patterns;
+    assert!(titles.contains(&"WIP".to_string()), "Should contain 'WIP'");
+    assert!(
+        titles.contains(&"wip:".to_string()),
+        "Should contain 'wip:'"
+    );
+    assert!(
+        titles.contains(&"[wip]".to_string()),
+        "Should contain '[wip]'"
+    );
+    // "[WIP]" and "WIP:" are subsumed by "WIP" via str::contains — not in defaults
+    assert!(
+        !titles.contains(&"[WIP]".to_string()),
+        "'[WIP]' is subsumed by 'WIP' and should not be a separate default"
+    );
+    assert!(
+        !titles.contains(&"WIP:".to_string()),
+        "'WIP:' is subsumed by 'WIP' and should not be a separate default"
+    );
+}
+
+#[test]
+fn test_wip_check_config_default_description_patterns_empty() {
+    let config = WipCheckConfig::default();
+    assert!(
+        config.wip_description_patterns.is_empty(),
+        "Default description patterns should be empty — WIP in body is opt-in"
+    );
+}
+
+#[test]
+fn test_wip_check_config_serialization_roundtrip() {
+    let config = WipCheckConfig {
+        enforce_wip_blocking: true,
+        wip_label: Some("work-in-progress".to_string()),
+        wip_title_patterns: vec!["WIP".to_string(), "DO NOT MERGE".to_string()],
+        wip_description_patterns: vec!["🚧".to_string()],
+    };
+
+    let toml = toml::to_string(&config).expect("Failed to serialize WipCheckConfig");
+    let roundtripped: WipCheckConfig =
+        toml::from_str(&toml).expect("Failed to deserialize WipCheckConfig");
+
+    assert_eq!(config, roundtripped);
+}
+
+#[test]
+fn test_wip_check_config_deserialization_defaults_on_missing_fields() {
+    let toml = r#"enforce_wip_blocking = true"#;
+    let config: WipCheckConfig = toml::from_str(toml).expect("Failed to deserialize");
+    assert!(config.enforce_wip_blocking);
+    // Other fields should fall back to defaults
+    assert_eq!(config.wip_label, Some("WIP".to_string()));
+    assert!(!config.wip_title_patterns.is_empty());
+    assert!(config.wip_description_patterns.is_empty());
+}
+
+#[test]
+fn test_current_pr_validation_config_has_wip_check_field() {
+    let config = CurrentPullRequestValidationConfiguration::default();
+    // Access wip_check to verify the field exists and has correct defaults
+    assert!(!config.wip_check.enforce_wip_blocking);
+    assert_eq!(config.wip_check.wip_label, Some("WIP".to_string()));
+}
+
+#[test]
+fn test_to_validation_config_preserves_wip_policies() {
+    use crate::config::{PoliciesConfig, PullRequestsPoliciesConfig, RepositoryProvidedConfig};
+
+    let repo_config = RepositoryProvidedConfig {
+        schema_version: 1,
+        policies: PoliciesConfig {
+            pull_requests: PullRequestsPoliciesConfig {
+                wip_policies: WipCheckConfig {
+                    enforce_wip_blocking: true,
+                    wip_label: Some("🚧 WIP".to_string()),
+                    wip_title_patterns: vec!["WIP".to_string(), "DO NOT MERGE".to_string()],
+                    wip_description_patterns: vec!["draft".to_string()],
+                },
+                ..Default::default()
+            },
+        },
+        change_type_labels: None,
+    };
+
+    let validation = repo_config.to_validation_config(&BypassRules::default());
+
+    assert!(validation.wip_check.enforce_wip_blocking);
+    assert_eq!(validation.wip_check.wip_label, Some("🚧 WIP".to_string()));
+    assert_eq!(
+        validation.wip_check.wip_title_patterns,
+        vec!["WIP", "DO NOT MERGE"]
+    );
+    assert_eq!(validation.wip_check.wip_description_patterns, vec!["draft"]);
+}
+
+// ── ApplicationDefaults WIP field tests ──────────────────────────────────────
+
+#[test]
+fn test_application_defaults_has_wip_check_field() {
+    let defaults = ApplicationDefaults::default();
+    assert!(!defaults.wip_check.enforce_wip_blocking);
+    assert_eq!(defaults.wip_check.wip_label, Some("WIP".to_string()));
+}
+
+#[tokio::test]
+async fn test_load_merge_warden_config_app_defaults_enforce_wip_blocks_merge() {
+    // When app defaults enable WIP blocking, that takes precedence even if the
+    // repo config doesn't set it.
+    let toml = r#"schemaVersion = 1"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let mut app_defaults = ApplicationDefaults::default();
+    app_defaults.wip_check.enforce_wip_blocking = true;
+
+    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
+        .await
+        .unwrap();
+
+    assert!(
+        config
+            .policies
+            .pull_requests
+            .wip_policies
+            .enforce_wip_blocking,
+        "App-level enforce_wip_blocking should propagate into repo config"
+    );
+}
+
+#[tokio::test]
+async fn test_load_merge_warden_config_repo_wip_config_preserved() {
+    // Repo explicitly opts into WIP blocking and sets a custom label.
+    let toml = r#"
+schemaVersion = 1
+[policies.pullRequests.wip]
+enforce_wip_blocking = true
+wip_label = "🚧 WIP"
+wip_title_patterns = ["WIP", "DO NOT MERGE"]
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let app_defaults = ApplicationDefaults::default();
+
+    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
+        .await
+        .unwrap();
+
+    assert!(
+        config
+            .policies
+            .pull_requests
+            .wip_policies
+            .enforce_wip_blocking
+    );
+    assert_eq!(
+        config.policies.pull_requests.wip_policies.wip_label,
+        Some("🚧 WIP".to_string())
+    );
+    assert_eq!(
+        config
+            .policies
+            .pull_requests
+            .wip_policies
+            .wip_title_patterns,
+        vec!["WIP", "DO NOT MERGE"]
+    );
+}
+
+#[tokio::test]
+async fn test_load_merge_warden_config_app_wip_label_overrides_when_repo_uses_default() {
+    // If the app sets a non-default label and the repo doesn't specify one,
+    // the app label should be used.
+    let toml = r#"schemaVersion = 1"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let mut app_defaults = ApplicationDefaults::default();
+    app_defaults.wip_check.wip_label = Some("work-in-progress".to_string());
+
+    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        config.policies.pull_requests.wip_policies.wip_label,
+        Some("work-in-progress".to_string()),
+        "App-level wip_label should be applied when repo uses the default"
+    );
+}
+
+#[tokio::test]
+async fn test_load_merge_warden_config_app_description_patterns_propagate() {
+    // App defaults can add description-based WIP patterns (empty by default).
+    let toml = r#"schemaVersion = 1"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let mut app_defaults = ApplicationDefaults::default();
+    app_defaults.wip_check.wip_description_patterns = vec!["🚧".to_string()];
+
+    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        config
+            .policies
+            .pull_requests
+            .wip_policies
+            .wip_description_patterns,
+        vec!["🚧"],
+        "App-level description patterns should propagate when repo has none"
+    );
 }

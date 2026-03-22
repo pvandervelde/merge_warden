@@ -2,8 +2,8 @@ use crate::{
     config::{
         BypassRule, BypassRules, ChangeTypeLabelConfig, ConventionalCommitMappings,
         CurrentPullRequestValidationConfiguration, FallbackLabelSettings, LabelDetectionStrategy,
-        CONVENTIONAL_COMMIT_REGEX, MISSING_WORK_ITEM_LABEL, TITLE_COMMENT_MARKER,
-        TITLE_INVALID_LABEL, WORK_ITEM_COMMENT_MARKER, WORK_ITEM_REGEX,
+        WipCheckConfig, CONVENTIONAL_COMMIT_REGEX, MISSING_WORK_ITEM_LABEL, TITLE_COMMENT_MARKER,
+        TITLE_INVALID_LABEL, WIP_COMMENT_MARKER, WORK_ITEM_COMMENT_MARKER, WORK_ITEM_REGEX,
     },
     validation_result::{BypassRuleType, ValidationResult},
     MergeWarden,
@@ -562,7 +562,7 @@ impl PullRequestProvider for MockGitProvider {
     }
 }
 
-#[test]
+#[tokio::test]
 async fn test_constructor_new() {
     // Create a mock provider
     let provider = MockGitProvider::new();
@@ -581,7 +581,7 @@ async fn test_constructor_new() {
     );
 }
 
-#[test]
+#[tokio::test]
 async fn test_constructor_with_config() {
     // Create a mock provider
     let provider = MockGitProvider::new(); // Create a custom configuration
@@ -595,6 +595,7 @@ async fn test_constructor_with_config() {
         pr_size_check: crate::config::PrSizeCheckConfig::default(),
         change_type_labels: None, // Use default behavior for tests
         bypass_rules: BypassRules::default(),
+        ..Default::default()
     };
 
     // Create a MergeWarden instance with custom config
@@ -611,7 +612,7 @@ async fn test_constructor_with_config() {
     );
 }
 
-#[test]
+#[tokio::test]
 async fn test_process_pull_request_valid() {
     // Create a mock provider
     let provider = MockGitProvider::new();
@@ -672,7 +673,7 @@ async fn test_process_pull_request_valid() {
     );
 }
 
-#[test]
+#[tokio::test]
 async fn test_process_pull_request_invalid_title() {
     // Create a mock provider
     let provider = MockGitProvider::new();
@@ -723,7 +724,7 @@ async fn test_process_pull_request_invalid_title() {
     );
 }
 
-#[test]
+#[tokio::test]
 async fn test_process_pull_request_missing_work_item() {
     // Create a mock provider
     let provider = MockGitProvider::new();
@@ -774,7 +775,7 @@ async fn test_process_pull_request_missing_work_item() {
     );
 }
 
-#[test]
+#[tokio::test]
 async fn test_process_pull_request_both_invalid() {
     // Create a mock provider
     let provider = MockGitProvider::new();
@@ -835,7 +836,7 @@ async fn test_process_pull_request_both_invalid() {
     );
 }
 
-#[test]
+#[tokio::test]
 async fn test_handle_title_validation_invalid_to_valid() {
     // Create a mock provider
     let provider = MockGitProvider::new();
@@ -894,7 +895,7 @@ async fn test_handle_title_validation_invalid_to_valid() {
     );
 }
 
-#[test]
+#[tokio::test]
 async fn test_process_pull_request_custom_config_disabled_checks() {
     // Create a mock provider
     let provider = MockGitProvider::new();
@@ -921,6 +922,7 @@ async fn test_process_pull_request_custom_config_disabled_checks() {
         pr_size_check: crate::config::PrSizeCheckConfig::default(),
         change_type_labels: None, // Use default behavior for tests
         bypass_rules: BypassRules::default(),
+        ..Default::default()
     };
 
     // Create a MergeWarden instance with custom config
@@ -969,7 +971,7 @@ async fn test_process_pull_request_custom_config_disabled_checks() {
     );
 }
 
-#[test]
+#[tokio::test]
 async fn test_process_pull_request_existing_labels_comments() {
     // Create a mock provider
     let provider = MockGitProvider::new();
@@ -1069,7 +1071,7 @@ async fn test_process_pull_request_existing_labels_comments() {
     );
 }
 
-#[test]
+#[tokio::test]
 async fn test_process_pull_request_dynamic_provider() {
     // Create a dynamic mock provider
     let mut provider = DynamicMockGitProvider::new();
@@ -1141,7 +1143,7 @@ async fn test_process_pull_request_dynamic_provider() {
     );
 }
 
-#[test]
+#[tokio::test]
 async fn test_process_pull_request_error_add_comment() {
     // Create a mock provider that returns an error when adding a comment
     let mut provider = ErrorMockGitProvider::new();
@@ -1164,7 +1166,7 @@ async fn test_process_pull_request_error_add_comment() {
     assert!(!output.title_valid, "The title should not be valid");
 }
 
-#[test]
+#[tokio::test]
 async fn test_process_pull_request_error_add_labels() {
     // Create a mock provider that returns an error when adding labels
     let mut provider = ErrorMockGitProvider::new();
@@ -1199,7 +1201,7 @@ async fn test_process_pull_request_error_add_labels() {
     );
 }
 
-#[test]
+#[tokio::test]
 async fn test_process_pull_request_error_get_pr() {
     // Create a mock provider that returns an error when getting a PR
     let mut provider = ErrorMockGitProvider::new();
@@ -1223,7 +1225,7 @@ async fn test_process_pull_request_error_get_pr() {
     );
 }
 
-#[test]
+#[tokio::test]
 async fn test_handle_work_item_validation_missing_to_present() {
     // Create a mock provider
     let provider = MockGitProvider::new();
@@ -1282,7 +1284,7 @@ async fn test_handle_work_item_validation_missing_to_present() {
     );
 }
 
-#[test]
+#[tokio::test]
 async fn test_bypass_functionality_with_title_bypass() {
     // Test the complete bypass flow: validation, logging, and comment generation
     let provider = DynamicMockGitProvider::new();
@@ -1338,7 +1340,7 @@ async fn test_bypass_functionality_with_title_bypass() {
     assert_eq!(bypass_info.rule_type, BypassRuleType::TitleConvention);
 }
 
-#[test]
+#[tokio::test]
 async fn test_bypass_functionality_with_work_item_bypass() {
     // Test bypass for work item validation
     let provider = DynamicMockGitProvider::new();
@@ -1394,7 +1396,7 @@ async fn test_bypass_functionality_with_work_item_bypass() {
     assert_eq!(bypass_info.rule_type, BypassRuleType::WorkItemReference);
 }
 
-#[test]
+#[tokio::test]
 async fn test_bypass_functionality_with_multiple_bypasses() {
     // Test multiple bypasses in the same PR
     let provider = DynamicMockGitProvider::new();
@@ -1461,7 +1463,7 @@ async fn test_bypass_functionality_with_multiple_bypasses() {
     }
 }
 
-#[test]
+#[tokio::test]
 async fn test_no_bypass_when_user_not_authorized() {
     // Test that bypasses are not applied when user is not in the allowed list
     let provider = DynamicMockGitProvider::new();
@@ -1514,7 +1516,7 @@ async fn test_no_bypass_when_user_not_authorized() {
     );
 }
 
-#[test]
+#[tokio::test]
 async fn test_check_status_with_bypass_information() {
     // Test that check status includes bypass information in the summary
     let provider = DynamicMockGitProvider::new();
@@ -1571,7 +1573,7 @@ async fn test_check_status_with_bypass_information() {
     // in the summary based on our implementation.
 }
 
-#[test]
+#[tokio::test]
 async fn test_check_status_text_formatting() {
     // Test the smart text formatting for check status
     let provider = DynamicMockGitProvider::new();
@@ -1809,6 +1811,7 @@ async fn test_process_pull_request_smart_label_detection() {
         pr_size_check: Default::default(),
         change_type_labels: Some(change_type_config),
         bypass_rules: BypassRules::default(),
+        ..Default::default()
     };
 
     // Create a MergeWarden instance with smart label configuration
@@ -1917,6 +1920,7 @@ async fn test_process_pull_request_smart_label_detection_with_audit_logging() {
         pr_size_check: Default::default(),
         change_type_labels: Some(change_type_config),
         bypass_rules: BypassRules::default(),
+        ..Default::default()
     };
 
     // Create a MergeWarden instance with enhanced smart label configuration
@@ -1956,4 +1960,442 @@ async fn test_process_pull_request_smart_label_detection_with_audit_logging() {
     // In a real scenario with actual repository labels, we would see smart detection working
 
     info!("Smart label detection integration test completed successfully");
+}
+
+//  check_wip_status tests
+
+#[tokio::test]
+async fn test_check_wip_status_detects_wip_prefix_in_title() {
+    use crate::config::WipCheckConfig;
+
+    let provider = ErrorMockGitProvider::new();
+    let config = CurrentPullRequestValidationConfiguration {
+        wip_check: WipCheckConfig {
+            enforce_wip_blocking: true,
+            ..WipCheckConfig::default()
+        },
+        ..CurrentPullRequestValidationConfiguration::default()
+    };
+    let warden = MergeWarden::with_config(provider, config);
+
+    let pr = PullRequest {
+        number: 1,
+        title: "WIP: add login feature".to_string(),
+        draft: false,
+        body: Some("Fixes #123".to_string()),
+        author: None,
+    };
+
+    assert!(warden.check_wip_status(&pr), "Should detect 'WIP:' prefix");
+}
+
+#[tokio::test]
+async fn test_check_wip_status_detects_bracketed_wip_in_title() {
+    use crate::config::WipCheckConfig;
+
+    let provider = ErrorMockGitProvider::new();
+    let config = CurrentPullRequestValidationConfiguration {
+        wip_check: WipCheckConfig {
+            enforce_wip_blocking: true,
+            ..WipCheckConfig::default()
+        },
+        ..CurrentPullRequestValidationConfiguration::default()
+    };
+    let warden = MergeWarden::with_config(provider, config);
+
+    let pr = PullRequest {
+        number: 2,
+        title: "[WIP] implement user auth".to_string(),
+        draft: false,
+        body: Some("Fixes #456".to_string()),
+        author: None,
+    };
+
+    assert!(
+        warden.check_wip_status(&pr),
+        "Should detect '[WIP]' in title"
+    );
+}
+
+#[tokio::test]
+async fn test_check_wip_status_returns_false_for_clean_title() {
+    use crate::config::WipCheckConfig;
+
+    let provider = ErrorMockGitProvider::new();
+    let config = CurrentPullRequestValidationConfiguration {
+        wip_check: WipCheckConfig {
+            enforce_wip_blocking: true,
+            ..WipCheckConfig::default()
+        },
+        ..CurrentPullRequestValidationConfiguration::default()
+    };
+    let warden = MergeWarden::with_config(provider, config);
+
+    let pr = PullRequest {
+        number: 3,
+        title: "feat(auth): add login functionality".to_string(),
+        draft: false,
+        body: Some("Fixes #789".to_string()),
+        author: None,
+    };
+
+    assert!(
+        !warden.check_wip_status(&pr),
+        "Should not flag a clean conventional-commit title"
+    );
+}
+
+#[tokio::test]
+async fn test_check_wip_status_detects_custom_description_pattern() {
+    use crate::config::WipCheckConfig;
+
+    let provider = ErrorMockGitProvider::new();
+    let config = CurrentPullRequestValidationConfiguration {
+        wip_check: WipCheckConfig {
+            enforce_wip_blocking: true,
+            wip_description_patterns: vec!["DO NOT MERGE".to_string()],
+            ..WipCheckConfig::default()
+        },
+        ..CurrentPullRequestValidationConfiguration::default()
+    };
+    let warden = MergeWarden::with_config(provider, config);
+
+    let pr = PullRequest {
+        number: 4,
+        title: "feat: some feature".to_string(),
+        draft: false,
+        body: Some("DO NOT MERGE: waiting for design approval\nFixes #100".to_string()),
+        author: None,
+    };
+
+    assert!(
+        warden.check_wip_status(&pr),
+        "Should detect custom description pattern"
+    );
+}
+
+#[tokio::test]
+async fn test_check_wip_status_no_body_with_description_pattern_returns_false() {
+    use crate::config::WipCheckConfig;
+
+    let provider = ErrorMockGitProvider::new();
+    let config = CurrentPullRequestValidationConfiguration {
+        wip_check: WipCheckConfig {
+            enforce_wip_blocking: true,
+            wip_description_patterns: vec!["DO NOT MERGE".to_string()],
+            ..WipCheckConfig::default()
+        },
+        ..CurrentPullRequestValidationConfiguration::default()
+    };
+    let warden = MergeWarden::with_config(provider, config);
+
+    let pr = PullRequest {
+        number: 5,
+        title: "feat: some feature".to_string(),
+        draft: false,
+        body: None, // No body
+        author: None,
+    };
+
+    assert!(
+        !warden.check_wip_status(&pr),
+        "No body means description patterns cannot match"
+    );
+}
+
+//  process_pull_request WIP integration tests
+
+#[tokio::test]
+async fn test_process_pull_request_wip_title_returns_wip_detected_true() {
+    use crate::config::WipCheckConfig;
+
+    let mut provider = DynamicMockGitProvider::new();
+    provider.add_pull_request(PullRequest {
+        number: 500,
+        title: "WIP: add new feature".to_string(),
+        draft: false,
+        body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+    });
+
+    let config = CurrentPullRequestValidationConfiguration {
+        wip_check: WipCheckConfig {
+            enforce_wip_blocking: true,
+            ..WipCheckConfig::default()
+        },
+        ..CurrentPullRequestValidationConfiguration::default()
+    };
+
+    let warden = MergeWarden::with_config(provider, config);
+    let result = warden
+        .process_pull_request("owner", "repo", 500)
+        .await
+        .unwrap();
+
+    assert!(
+        result.wip_detected,
+        "WIP PR should have wip_detected = true"
+    );
+}
+
+#[tokio::test]
+async fn test_process_pull_request_wip_sets_failure_check_status() {
+    use crate::config::WipCheckConfig;
+
+    let mut provider = DynamicMockGitProvider::new();
+    provider.add_pull_request(PullRequest {
+        number: 501,
+        title: "[WIP] implement payment flow".to_string(),
+        draft: false,
+        body: Some("Fixes #200".to_string()),
+        author: Some(User {
+            id: 2,
+            login: "dev2".to_string(),
+        }),
+    });
+
+    let config = CurrentPullRequestValidationConfiguration {
+        wip_check: WipCheckConfig {
+            enforce_wip_blocking: true,
+            ..WipCheckConfig::default()
+        },
+        ..CurrentPullRequestValidationConfiguration::default()
+    };
+
+    let warden = MergeWarden::with_config(provider, config);
+    let result = warden
+        .process_pull_request("owner", "repo", 501)
+        .await
+        .unwrap();
+
+    assert!(result.wip_detected);
+    // Verify the check was set to failure
+    let updates = warden.provider.get_check_status_updates();
+    assert_eq!(updates.len(), 1);
+    assert_eq!(
+        updates[0].conclusion, "failure",
+        "WIP PR should result in a failure check status"
+    );
+}
+
+#[tokio::test]
+async fn test_process_pull_request_clean_pr_has_wip_detected_false() {
+    use crate::config::WipCheckConfig;
+
+    let mut provider = DynamicMockGitProvider::new();
+    provider.add_pull_request(PullRequest {
+        number: 502,
+        title: "feat(auth): implement OAuth login".to_string(),
+        draft: false,
+        body: Some("Fixes #300".to_string()),
+        author: Some(User {
+            id: 3,
+            login: "dev3".to_string(),
+        }),
+    });
+
+    let config = CurrentPullRequestValidationConfiguration {
+        enforce_title_convention: true,
+        enforce_work_item_references: true,
+        wip_check: WipCheckConfig {
+            enforce_wip_blocking: true,
+            ..WipCheckConfig::default()
+        },
+        ..CurrentPullRequestValidationConfiguration::default()
+    };
+
+    let warden = MergeWarden::with_config(provider, config);
+    let result = warden
+        .process_pull_request("owner", "repo", 502)
+        .await
+        .unwrap();
+
+    assert!(
+        !result.wip_detected,
+        "Clean PR should have wip_detected = false"
+    );
+}
+
+#[tokio::test]
+async fn test_process_pull_request_wip_blocking_disabled_does_not_flag_wip() {
+    // WIP blocking is disabled  even a WIP-titled PR should not be blocked
+    let mut provider = DynamicMockGitProvider::new();
+    provider.add_pull_request(PullRequest {
+        number: 503,
+        title: "WIP: work in progress feature".to_string(),
+        draft: false,
+        body: Some("Fixes #400".to_string()),
+        author: Some(User {
+            id: 4,
+            login: "dev4".to_string(),
+        }),
+    });
+
+    let config = CurrentPullRequestValidationConfiguration {
+        enforce_title_convention: true,
+        enforce_work_item_references: true,
+        // wip_check is disabled by default
+        ..CurrentPullRequestValidationConfiguration::default()
+    };
+
+    let warden = MergeWarden::with_config(provider, config);
+    let result = warden
+        .process_pull_request("owner", "repo", 503)
+        .await
+        .unwrap();
+
+    assert!(
+        !result.wip_detected,
+        "WIP checking disabled means wip_detected stays false"
+    );
+    // The title "WIP: work in progress feature" does not match Conventional Commits,
+    // but that is a separate validation result  wip_detected itself must be false
+}
+
+#[tokio::test]
+async fn test_process_pull_request_wip_bypasses_are_not_applied() {
+    use crate::config::WipCheckConfig;
+
+    // Even a user with full bypass permissions cannot bypass WIP blocking
+    let mut provider = DynamicMockGitProvider::new();
+    provider.add_pull_request(PullRequest {
+        number: 504,
+        title: "WIP: add something".to_string(),
+        draft: false,
+        body: Some("Fixes #500".to_string()),
+        author: Some(User {
+            id: 5,
+            login: "release-bot".to_string(),
+        }),
+    });
+
+    let bypass_rule = BypassRule::new(true, vec!["release-bot".to_string()]);
+    let config = CurrentPullRequestValidationConfiguration {
+        bypass_rules: BypassRules::new(bypass_rule.clone(), bypass_rule.clone()),
+        wip_check: WipCheckConfig {
+            enforce_wip_blocking: true,
+            ..WipCheckConfig::default()
+        },
+        ..CurrentPullRequestValidationConfiguration::default()
+    };
+
+    let warden = MergeWarden::with_config(provider, config);
+    let result = warden
+        .process_pull_request("owner", "repo", 504)
+        .await
+        .unwrap();
+
+    assert!(
+        result.wip_detected,
+        "Bypass rules must not override WIP blocking"
+    );
+}
+
+#[tokio::test]
+async fn test_communicate_wip_status_adds_comment_when_wip() {
+    use crate::config::WipCheckConfig;
+
+    let mut provider = DynamicMockGitProvider::new();
+    provider.add_pull_request(PullRequest {
+        number: 600,
+        title: "WIP: test".to_string(),
+        draft: false,
+        body: Some("Fixes #1".to_string()),
+        author: Some(User {
+            id: 10,
+            login: "tester".to_string(),
+        }),
+    });
+
+    let config = CurrentPullRequestValidationConfiguration {
+        wip_check: WipCheckConfig {
+            enforce_wip_blocking: true,
+            ..WipCheckConfig::default()
+        },
+        ..CurrentPullRequestValidationConfiguration::default()
+    };
+
+    let warden = MergeWarden::with_config(provider, config);
+    let pr = PullRequest {
+        number: 600,
+        title: "WIP: test".to_string(),
+        draft: false,
+        body: Some("Fixes #1".to_string()),
+        author: None,
+    };
+
+    warden
+        .communicate_wip_status("owner", "repo", &pr, true)
+        .await;
+
+    let comments = warden.provider.get_comments();
+    assert!(
+        !comments.is_empty(),
+        "A WIP blocking comment should be added"
+    );
+    assert!(
+        comments.iter().any(|c| c.body.contains(WIP_COMMENT_MARKER)),
+        "WIP comment must contain the WIP_COMMENT_MARKER"
+    );
+}
+
+#[tokio::test]
+async fn test_communicate_wip_status_removes_comment_when_not_wip() {
+    use crate::config::WipCheckConfig;
+
+    let mut provider = DynamicMockGitProvider::new();
+    provider.add_pull_request(PullRequest {
+        number: 601,
+        title: "feat: done now".to_string(),
+        draft: false,
+        body: Some("Fixes #2".to_string()),
+        author: Some(User {
+            id: 11,
+            login: "tester2".to_string(),
+        }),
+    });
+
+    // Pre-populate with a WIP comment
+    {
+        let wip_comment_body = format!("{}some wip text", WIP_COMMENT_MARKER);
+        let mut comments = provider.comments.lock().unwrap();
+        comments.push(Comment {
+            id: 99,
+            body: wip_comment_body,
+            user: User {
+                id: 11,
+                login: "bot".to_string(),
+            },
+        });
+    }
+
+    let config = CurrentPullRequestValidationConfiguration {
+        wip_check: WipCheckConfig {
+            enforce_wip_blocking: true,
+            ..WipCheckConfig::default()
+        },
+        ..CurrentPullRequestValidationConfiguration::default()
+    };
+
+    let warden = MergeWarden::with_config(provider, config);
+    let pr = PullRequest {
+        number: 601,
+        title: "feat: done now".to_string(),
+        draft: false,
+        body: Some("Fixes #2".to_string()),
+        author: None,
+    };
+
+    warden
+        .communicate_wip_status("owner", "repo", &pr, false)
+        .await;
+
+    let comments = warden.provider.get_comments();
+    assert!(
+        !comments.iter().any(|c| c.body.contains(WIP_COMMENT_MARKER)),
+        "WIP comment should be removed when PR is no longer WIP"
+    );
 }

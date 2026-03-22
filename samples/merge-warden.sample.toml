@@ -50,6 +50,27 @@ add_comment = true
 # xl = 500   # 251-500 lines
 # xxl = 501+ lines (anything above xl)
 
+[policies.pullRequests.wip]
+# Enable WIP (Work In Progress) detection and blocking.
+# When enabled, PRs whose title or description match any WIP pattern will have
+# their merge check set to "failure" until the WIP markers are removed.
+# WIP blocking cannot be bypassed by any user — it is always enforced.
+enforce_wip_blocking = false
+
+# Label applied to WIP pull requests. Omit the key (or remove the value) to disable labeling.
+# Empty string is treated the same as omitting the key.
+wip_label = "WIP"
+
+# Substrings to search for in the PR TITLE to detect WIP status (case-sensitive).
+# The PR is flagged as WIP if the title contains any of these strings.
+# Note: matching uses str::contains (case-sensitive). Patterns that are substrings of
+# other patterns are redundant — "WIP" already matches titles containing "[WIP]" or "WIP:".
+wip_title_patterns = ["WIP", "wip:", "[wip]", "draft:", "Draft:"]
+
+# Substrings to search for in the PR DESCRIPTION to detect WIP status.
+# Empty by default — WIP detection in the description is opt-in.
+wip_description_patterns = []
+
 # Configuration for smart change type label detection
 [change_type_labels]
 # Enable intelligent change type label detection

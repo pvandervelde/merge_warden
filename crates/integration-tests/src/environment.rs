@@ -1114,7 +1114,7 @@ impl TestConfig {
     /// ```
     pub fn validate(&self) -> TestResult<()> {
         // Validate test helper app ID
-        if let Err(_) = self.repo_creation_app_id.parse::<u64>() {
+        if self.repo_creation_app_id.parse::<u64>().is_err() {
             return Err(TestError::InvalidConfiguration(
                 "REPO_CREATION_APP_ID must be a valid positive integer".to_string(),
             ));
@@ -1142,7 +1142,7 @@ impl TestConfig {
         }
 
         // Validate Merge Warden app ID
-        if let Err(_) = self.merge_warden_app_id.parse::<u64>() {
+        if self.merge_warden_app_id.parse::<u64>().is_err() {
             return Err(TestError::InvalidConfiguration(
                 "MERGE_WARDEN_APP_ID must be a valid positive integer".to_string(),
             ));

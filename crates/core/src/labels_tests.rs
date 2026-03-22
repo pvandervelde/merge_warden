@@ -7,6 +7,136 @@ use tokio::test;
 use merge_warden_developer_platforms::models::{Comment, Label, PullRequest, User};
 use merge_warden_developer_platforms::PullRequestProvider;
 
+// ── WIP label test helpers ───────────────────────────────────────────────────
+
+/// Full-featured mock for WIP label tests — tracks applied labels and exposes
+/// a pre-populated repository label list.
+struct WipMockProvider {
+    /// Labels that exist in the repository (returned by list_available_labels)
+    available_labels: Vec<Label>,
+    /// Labels currently applied to the PR
+    applied_labels: Arc<Mutex<Vec<Label>>>,
+}
+
+impl WipMockProvider {
+    fn new(available: Vec<Label>) -> Self {
+        Self {
+            available_labels: available,
+            applied_labels: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    fn with_applied(available: Vec<Label>, applied: Vec<Label>) -> Self {
+        Self {
+            available_labels: available,
+            applied_labels: Arc::new(Mutex::new(applied)),
+        }
+    }
+
+    fn get_applied(&self) -> Vec<Label> {
+        self.applied_labels.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl PullRequestProvider for WipMockProvider {
+    async fn get_pull_request(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<PullRequest, Error> {
+        unimplemented!()
+    }
+
+    async fn add_comment(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        _comment: &str,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn delete_comment(&self, _owner: &str, _repo: &str, _id: u64) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn list_comments(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<Vec<Comment>, Error> {
+        Ok(vec![])
+    }
+
+    async fn list_available_labels(&self, _owner: &str, _repo: &str) -> Result<Vec<Label>, Error> {
+        Ok(self.available_labels.clone())
+    }
+
+    async fn add_labels(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        labels: &[String],
+    ) -> Result<(), Error> {
+        let mut applied = self.applied_labels.lock().unwrap();
+        for l in labels {
+            applied.push(Label {
+                name: l.clone(),
+                description: None,
+            });
+        }
+        Ok(())
+    }
+
+    async fn remove_label(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        label: &str,
+    ) -> Result<(), Error> {
+        let mut applied = self.applied_labels.lock().unwrap();
+        applied.retain(|l| l.name != label);
+        Ok(())
+    }
+
+    async fn list_applied_labels(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<Vec<Label>, Error> {
+        Ok(self.applied_labels.lock().unwrap().clone())
+    }
+
+    async fn update_pr_check_status(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        _conclusion: &str,
+        _title: &str,
+        _summary: &str,
+        _text: &str,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn get_pull_request_files(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> {
+        Ok(vec![])
+    }
+}
+
 // Mock implementation of PullRequestProvider for testing
 struct MockGitProvider {
     labels: Arc<Mutex<Vec<Label>>>,
@@ -1808,5 +1938,297 @@ async fn test_configuration_merge_behavior() {
     assert_ne!(
         app_config.detection_strategy.exact_match,
         repo_config.detection_strategy.exact_match
+    );
+}
+
+//  discover_wip_labels tests
+
+#[tokio::test]
+async fn test_discover_wip_labels_returns_none_when_no_wip_labels() {
+    use crate::labels::discover_wip_labels;
+
+    let provider = WipMockProvider::new(vec![
+        Label {
+            name: "bug".to_string(),
+            description: None,
+        },
+        Label {
+            name: "feature".to_string(),
+            description: None,
+        },
+    ]);
+
+    let result = discover_wip_labels(&provider, "owner", "repo", &None)
+        .await
+        .unwrap();
+
+    assert!(result.is_none());
+}
+
+#[tokio::test]
+async fn test_discover_wip_labels_exact_hint_match() {
+    use crate::labels::discover_wip_labels;
+
+    let provider = WipMockProvider::new(vec![
+        Label {
+            name: " WIP".to_string(),
+            description: None,
+        },
+        Label {
+            name: "bug".to_string(),
+            description: None,
+        },
+    ]);
+
+    let result = discover_wip_labels(&provider, "owner", "repo", &Some(" WIP".to_string()))
+        .await
+        .unwrap();
+
+    assert_eq!(result, Some(" WIP".to_string()));
+}
+
+#[tokio::test]
+async fn test_discover_wip_labels_common_name_match_wip_lowercase() {
+    use crate::labels::discover_wip_labels;
+
+    let provider = WipMockProvider::new(vec![
+        Label {
+            name: "wip".to_string(),
+            description: None,
+        },
+        Label {
+            name: "bug".to_string(),
+            description: None,
+        },
+    ]);
+
+    let result = discover_wip_labels(&provider, "owner", "repo", &None)
+        .await
+        .unwrap();
+
+    assert_eq!(result, Some("wip".to_string()));
+}
+
+#[tokio::test]
+async fn test_discover_wip_labels_common_name_match_work_in_progress() {
+    use crate::labels::discover_wip_labels;
+
+    let provider = WipMockProvider::new(vec![Label {
+        name: "work-in-progress".to_string(),
+        description: None,
+    }]);
+
+    let result = discover_wip_labels(&provider, "owner", "repo", &None)
+        .await
+        .unwrap();
+
+    assert_eq!(result, Some("work-in-progress".to_string()));
+}
+
+#[tokio::test]
+async fn test_discover_wip_labels_hint_takes_priority_over_common() {
+    use crate::labels::discover_wip_labels;
+
+    // Both the hint and a common WIP name exist  hint wins
+    let provider = WipMockProvider::new(vec![
+        Label {
+            name: "wip".to_string(),
+            description: None,
+        },
+        Label {
+            name: "my-custom-wip".to_string(),
+            description: None,
+        },
+    ]);
+
+    let result = discover_wip_labels(
+        &provider,
+        "owner",
+        "repo",
+        &Some("my-custom-wip".to_string()),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(result, Some("my-custom-wip".to_string()));
+}
+
+//  manage_wip_labels tests
+
+#[tokio::test]
+async fn test_manage_wip_labels_adds_label_when_wip_and_no_existing_label() {
+    use crate::labels::manage_wip_labels;
+
+    let provider = WipMockProvider::new(vec![Label {
+        name: "WIP".to_string(),
+        description: None,
+    }]);
+
+    manage_wip_labels(
+        &provider,
+        "owner",
+        "repo",
+        1,
+        true,
+        &Some("WIP".to_string()),
+    )
+    .await
+    .unwrap();
+
+    let applied = provider.get_applied();
+    assert_eq!(applied.len(), 1);
+    assert_eq!(applied[0].name, "WIP");
+}
+
+#[tokio::test]
+async fn test_manage_wip_labels_does_not_double_add_label() {
+    use crate::labels::manage_wip_labels;
+
+    // PR already has "WIP" applied
+    let provider = WipMockProvider::with_applied(
+        vec![Label {
+            name: "WIP".to_string(),
+            description: None,
+        }],
+        vec![Label {
+            name: "WIP".to_string(),
+            description: None,
+        }],
+    );
+
+    manage_wip_labels(
+        &provider,
+        "owner",
+        "repo",
+        1,
+        true,
+        &Some("WIP".to_string()),
+    )
+    .await
+    .unwrap();
+
+    let applied = provider.get_applied();
+    assert_eq!(applied.len(), 1, "Should not duplicate WIP label");
+}
+
+#[tokio::test]
+async fn test_manage_wip_labels_removes_label_when_not_wip() {
+    use crate::labels::manage_wip_labels;
+
+    // PR has "WIP" applied; it is no longer WIP
+    let provider = WipMockProvider::with_applied(
+        vec![Label {
+            name: "WIP".to_string(),
+            description: None,
+        }],
+        vec![Label {
+            name: "WIP".to_string(),
+            description: None,
+        }],
+    );
+
+    manage_wip_labels(
+        &provider,
+        "owner",
+        "repo",
+        1,
+        false,
+        &Some("WIP".to_string()),
+    )
+    .await
+    .unwrap();
+
+    let applied = provider.get_applied();
+    assert!(
+        applied.is_empty(),
+        "WIP label should be removed when not WIP"
+    );
+}
+
+#[tokio::test]
+async fn test_manage_wip_labels_remove_is_noop_when_no_wip_label_present() {
+    use crate::labels::manage_wip_labels;
+
+    let provider = WipMockProvider::with_applied(
+        vec![],
+        vec![Label {
+            name: "bug".to_string(),
+            description: None,
+        }],
+    );
+
+    manage_wip_labels(&provider, "owner", "repo", 1, false, &None)
+        .await
+        .unwrap();
+
+    let applied = provider.get_applied();
+    assert_eq!(applied.len(), 1, "Non-WIP label should not be removed");
+    assert_eq!(applied[0].name, "bug");
+}
+
+#[tokio::test]
+async fn test_manage_wip_labels_uses_hint_when_no_repo_label_discovered() {
+    use crate::labels::manage_wip_labels;
+
+    // No labels in the repository, but hint provided  should use hint
+    let provider = WipMockProvider::new(vec![]);
+
+    manage_wip_labels(
+        &provider,
+        "owner",
+        "repo",
+        1,
+        true,
+        &Some("WIP".to_string()),
+    )
+    .await
+    .unwrap();
+
+    let applied = provider.get_applied();
+    assert_eq!(applied.len(), 1);
+    assert_eq!(applied[0].name, "WIP");
+}
+
+#[tokio::test]
+async fn test_manage_wip_labels_none_hint_disables_labeling() {
+    // wip_label = None means "labeling explicitly disabled" — no labels must be touched
+    use crate::labels::manage_wip_labels;
+
+    let provider = WipMockProvider::new(vec![]);
+
+    manage_wip_labels(&provider, "owner", "repo", 1, true, &None)
+        .await
+        .unwrap();
+
+    let applied = provider.get_applied();
+    assert!(
+        applied.is_empty(),
+        "None hint should disable label management entirely (no label added)"
+    );
+}
+
+#[tokio::test]
+async fn test_manage_wip_labels_uses_default_wip_when_some_hint_and_no_repo_label() {
+    // Some("WIP") with no matching repo label falls through to the hint as effective label
+    use crate::labels::manage_wip_labels;
+
+    let provider = WipMockProvider::new(vec![]);
+
+    manage_wip_labels(
+        &provider,
+        "owner",
+        "repo",
+        1,
+        true,
+        &Some("WIP".to_string()),
+    )
+    .await
+    .unwrap();
+
+    let applied = provider.get_applied();
+    assert_eq!(applied.len(), 1);
+    assert_eq!(
+        applied[0].name, "WIP",
+        "Should use the hint 'WIP' as the label when no repo label is found"
     );
 }

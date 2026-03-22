@@ -31,6 +31,9 @@ pub const VALID_PR_TYPES: [&str; 11] = [
 /// HTML comment marker for work item validation comments
 pub const WORK_ITEM_COMMENT_MARKER: &str = "<!-- PR_WORK_ITEM_CHECK -->";
 
+/// HTML comment marker for WIP (Work In Progress) validation comments
+pub const WIP_COMMENT_MARKER: &str = "<!-- PR_WIP_CHECK -->";
+
 /// Pre-compiled regex for conventional commit format validation
 ///
 /// This regex enforces the Conventional Commits specification (https://conventionalcommits.org/)
@@ -288,6 +291,10 @@ pub struct ApplicationDefaults {
     /// Configuration for change type label detection
     #[serde(default)]
     pub change_type_labels: ChangeTypeLabelConfig,
+
+    /// Application-level defaults for WIP detection and blocking
+    #[serde(rename = "wip", default)]
+    pub wip_check: WipCheckConfig,
 }
 
 impl ApplicationDefaults {
@@ -334,6 +341,7 @@ impl Default for ApplicationDefaults {
             bypass_rules: BypassRules::default(),
             pr_size_check: PrSizeCheckConfig::default(),
             change_type_labels: ChangeTypeLabelConfig::default(),
+            wip_check: WipCheckConfig::default(),
         }
     }
 }
@@ -572,6 +580,9 @@ pub struct CurrentPullRequestValidationConfiguration {
     /// Configuration for intelligent change type label detection
     pub change_type_labels: Option<ChangeTypeLabelConfig>,
 
+    /// Configuration for WIP (Work In Progress) detection and blocking
+    pub wip_check: WipCheckConfig,
+
     /// Rules for bypassing validation checks
     pub bypass_rules: BypassRules,
 }
@@ -606,6 +617,7 @@ impl CurrentPullRequestValidationConfiguration {
             missing_work_item_label,
             pr_size_check: pr_size_check.unwrap_or_default(),
             change_type_labels: None, // Use default behavior for tests
+            wip_check: WipCheckConfig::default(),
             bypass_rules: bypass_rules.unwrap_or_default(),
         }
     }
@@ -622,6 +634,7 @@ impl Default for CurrentPullRequestValidationConfiguration {
             missing_work_item_label: Some(MISSING_WORK_ITEM_LABEL.to_string()),
             pr_size_check: PrSizeCheckConfig::default(),
             change_type_labels: None, // Default to None, will be populated from app defaults
+            wip_check: WipCheckConfig::default(),
             bypass_rules: BypassRules::default(),
         }
     }
@@ -649,6 +662,10 @@ pub struct PullRequestsPoliciesConfig {
     /// Configuration for pull request size validation policies
     #[serde(default, rename = "prSize")]
     pub size_policies: PrSizeCheckConfig,
+
+    /// Configuration for WIP detection and blocking policies
+    #[serde(default, rename = "wip")]
+    pub wip_policies: WipCheckConfig,
 }
 
 /// Configuration for PR title policy
@@ -768,6 +785,7 @@ impl RepositoryProvidedConfig {
         let missing_work_item_label = pr_policies.work_item_policies.label_if_missing.clone();
 
         let pr_size_check = pr_policies.size_policies.clone();
+        let wip_check = pr_policies.wip_policies.clone();
 
         CurrentPullRequestValidationConfiguration {
             enforce_title_convention,
@@ -778,6 +796,7 @@ impl RepositoryProvidedConfig {
             missing_work_item_label,
             pr_size_check,
             change_type_labels: self.change_type_labels.clone(),
+            wip_check,
             bypass_rules: bypass_rules.clone(),
         }
     }
@@ -915,6 +934,91 @@ impl Default for PrSizeCheckConfig {
             excluded_file_patterns: Vec::new(),
             label_prefix: Self::default_label_prefix(),
             add_comment: Self::default_add_comment(),
+        }
+    }
+}
+
+/// Configuration for WIP (Work In Progress) detection and blocking.
+///
+/// When WIP blocking is enabled, pull requests whose title or description
+/// match any of the configured patterns are blocked from merging. WIP blocking
+/// cannot be bypassed by any user.
+///
+/// # Merge heuristic
+///
+/// `load_merge_warden_config` detects whether a repository is "still using
+/// built-in defaults" by comparing the repo's patterns to `WipCheckConfig::default()`.
+/// A repository that explicitly sets its patterns to values identical to the
+/// defaults will have those values overwritten by app-level defaults. This is
+/// intentional (operator can supply a richer default set), but may be surprising
+/// in edge cases. Document any repo-level override explicitly to avoid ambiguity.
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_core::config::WipCheckConfig;
+///
+/// let config = WipCheckConfig::default();
+/// assert!(!config.enforce_wip_blocking);
+/// assert_eq!(config.wip_label, Some("WIP".to_string()));
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct WipCheckConfig {
+    /// Whether WIP detection and blocking is enabled
+    #[serde(default = "WipCheckConfig::default_enforce")]
+    pub enforce_wip_blocking: bool,
+
+    /// The label to apply to WIP pull requests. Set to `None` (or omit the key
+    /// in TOML) to disable WIP labeling. An empty string is treated the same as
+    /// `None` — no label will be applied.
+    #[serde(default = "WipCheckConfig::default_wip_label")]
+    pub wip_label: Option<String>,
+
+    /// Substrings to search for in the PR title to detect WIP status (case-sensitive)
+    #[serde(default = "WipCheckConfig::default_title_patterns")]
+    pub wip_title_patterns: Vec<String>,
+
+    /// Substrings to search for in the PR description to detect WIP status (case-sensitive)
+    #[serde(default)]
+    pub wip_description_patterns: Vec<String>,
+}
+
+impl WipCheckConfig {
+    /// Default value for `enforce_wip_blocking` (false — opt-in)
+    fn default_enforce() -> bool {
+        false
+    }
+
+    /// Default WIP label applied to WIP pull requests
+    fn default_wip_label() -> Option<String> {
+        Some("WIP".to_string())
+    }
+
+    /// Default WIP title patterns covering common conventions.
+    ///
+    /// Pattern matching uses `str::contains` (case-sensitive), so a pattern that
+    /// is a substring of another pattern in the list will always match first,
+    /// making the longer pattern redundant. For example, `"WIP"` already matches
+    /// titles containing `"[WIP]"` or `"WIP:"`. The defaults below list only
+    /// patterns that are _not_ subsumed by another entry.
+    fn default_title_patterns() -> Vec<String> {
+        vec![
+            "WIP".to_string(),
+            "wip:".to_string(),
+            "[wip]".to_string(),
+            "draft:".to_string(),
+            "Draft:".to_string(),
+        ]
+    }
+}
+
+impl Default for WipCheckConfig {
+    fn default() -> Self {
+        Self {
+            enforce_wip_blocking: Self::default_enforce(),
+            wip_label: Self::default_wip_label(),
+            wip_title_patterns: Self::default_title_patterns(),
+            wip_description_patterns: Vec::new(),
         }
     }
 }
@@ -1251,6 +1355,57 @@ pub async fn load_merge_warden_config(
             }
 
             config.change_type_labels = Some(merged_change_type_labels);
+        }
+
+        // Merge WIP configuration from app defaults:
+        // - If the app enables WIP blocking, it overrides the repo setting (operator mandate)
+        // - If the repo does not configure WIP at all (default), use app defaults wholesale
+        if app_defaults.wip_check.enforce_wip_blocking {
+            config
+                .policies
+                .pull_requests
+                .wip_policies
+                .enforce_wip_blocking = true;
+        }
+
+        // Where the repo uses the hard defaults for labels/patterns, prefer the app-level settings
+        if config.policies.pull_requests.wip_policies.wip_label
+            == WipCheckConfig::default().wip_label
+            && app_defaults.wip_check.wip_label != WipCheckConfig::default().wip_label
+        {
+            config.policies.pull_requests.wip_policies.wip_label =
+                app_defaults.wip_check.wip_label.clone();
+        }
+
+        if config
+            .policies
+            .pull_requests
+            .wip_policies
+            .wip_title_patterns
+            == WipCheckConfig::default().wip_title_patterns
+            && app_defaults.wip_check.wip_title_patterns
+                != WipCheckConfig::default().wip_title_patterns
+        {
+            config
+                .policies
+                .pull_requests
+                .wip_policies
+                .wip_title_patterns = app_defaults.wip_check.wip_title_patterns.clone();
+        }
+
+        if config
+            .policies
+            .pull_requests
+            .wip_policies
+            .wip_description_patterns
+            .is_empty()
+            && !app_defaults.wip_check.wip_description_patterns.is_empty()
+        {
+            config
+                .policies
+                .pull_requests
+                .wip_policies
+                .wip_description_patterns = app_defaults.wip_check.wip_description_patterns.clone();
         }
 
         // End of valid config processing

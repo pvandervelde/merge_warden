@@ -249,6 +249,7 @@ impl MergeWardenWebhookHandler {
                     pr_size_check: self.policies.pr_size_check.clone(),
                     change_type_labels: Some(self.policies.change_type_labels.clone()),
                     bypass_rules: self.policies.bypass_rules.clone(),
+                    wip_check: self.policies.wip_check.clone(),
                 }
             }
         };

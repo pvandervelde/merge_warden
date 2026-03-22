@@ -213,6 +213,7 @@ impl WebhookHandler for MergeWardenWebhookHandler {
                         merge_warden_core::config::ChangeTypeLabelConfig::default(),
                     ),
                     bypass_rules: self.config.policies.bypass_rules.clone(),
+                    wip_check: self.config.policies.wip_check.clone(),
                 }
             }
         };

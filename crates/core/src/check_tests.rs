@@ -57,6 +57,7 @@ fn create_default_config() -> CurrentPullRequestValidationConfiguration {
         pr_size_check: crate::config::PrSizeCheckConfig::default(),
         change_type_labels: None, // Use default behavior for tests
         bypass_rules: Default::default(),
+        ..Default::default()
     }
 }
 
