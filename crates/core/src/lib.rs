@@ -1552,23 +1552,43 @@ Please update the PR body to include a valid work item reference."#;
                 // PR is not WIP. Only run cleanup if there is stale WIP state to remove
                 // (a WIP label or WIP comment). This avoids unnecessary API calls on
                 // every clean PR event when WIP blocking is enabled.
-                let has_stale_wip = self
-                    .provider
-                    .list_applied_labels(repo_owner, repo_name, pr_number)
-                    .await
-                    .unwrap_or_default()
-                    .iter()
-                    .any(|l| {
-                        let common = ["WIP", "wip", "work-in-progress", "work in progress"];
-                        common.iter().any(|n| l.name.eq_ignore_ascii_case(n))
-                            || self
-                                .config
-                                .wip_check
-                                .wip_label
-                                .as_deref()
-                                .filter(|s| !s.is_empty())
-                                .is_some_and(|hint| l.name == hint)
-                    });
+                //
+                // The label scan checks COMMON_WIP_LABEL_NAMES (common repo label names
+                // that manage_wip_labels may have applied via auto-discovery) AND the
+                // configured wip_label hint (applied when the exact hint matched the repo
+                // label or was used as direct fallback). Both are needed because either
+                // path may have been used on a previous event.
+                //
+                // If wip_label is None (labeling disabled), no label was ever applied by
+                // this code, so the label scan is skipped entirely.
+                let labeling_enabled = self
+                    .config
+                    .wip_check
+                    .wip_label
+                    .as_deref()
+                    .is_some_and(|s| !s.is_empty());
+
+                let has_stale_wip = if labeling_enabled {
+                    self.provider
+                        .list_applied_labels(repo_owner, repo_name, pr_number)
+                        .await
+                        .unwrap_or_default()
+                        .iter()
+                        .any(|l| {
+                            labels::COMMON_WIP_LABEL_NAMES
+                                .iter()
+                                .any(|n| l.name.eq_ignore_ascii_case(n))
+                                || self
+                                    .config
+                                    .wip_check
+                                    .wip_label
+                                    .as_deref()
+                                    .filter(|s| !s.is_empty())
+                                    .is_some_and(|hint| l.name == hint)
+                        })
+                } else {
+                    false
+                };
 
                 let has_stale_comment = if has_stale_wip {
                     true // skip the second API call when we already know cleanup is needed

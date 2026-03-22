@@ -2190,7 +2190,8 @@ async fn test_manage_wip_labels_uses_hint_when_no_repo_label_discovered() {
 }
 
 #[tokio::test]
-async fn test_manage_wip_labels_uses_default_wip_when_no_hint_and_no_repo_label() {
+async fn test_manage_wip_labels_none_hint_disables_labeling() {
+    // wip_label = None means "labeling explicitly disabled" — no labels must be touched
     use crate::labels::manage_wip_labels;
 
     let provider = WipMockProvider::new(vec![]);
@@ -2200,9 +2201,34 @@ async fn test_manage_wip_labels_uses_default_wip_when_no_hint_and_no_repo_label(
         .unwrap();
 
     let applied = provider.get_applied();
+    assert!(
+        applied.is_empty(),
+        "None hint should disable label management entirely (no label added)"
+    );
+}
+
+#[tokio::test]
+async fn test_manage_wip_labels_uses_default_wip_when_some_hint_and_no_repo_label() {
+    // Some("WIP") with no matching repo label falls through to the hint as effective label
+    use crate::labels::manage_wip_labels;
+
+    let provider = WipMockProvider::new(vec![]);
+
+    manage_wip_labels(
+        &provider,
+        "owner",
+        "repo",
+        1,
+        true,
+        &Some("WIP".to_string()),
+    )
+    .await
+    .unwrap();
+
+    let applied = provider.get_applied();
     assert_eq!(applied.len(), 1);
     assert_eq!(
         applied[0].name, "WIP",
-        "Should fall back to 'WIP' as default label"
+        "Should use the hint 'WIP' as the label when no repo label is found"
     );
 }

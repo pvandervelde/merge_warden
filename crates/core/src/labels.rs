@@ -19,6 +19,16 @@ use merge_warden_developer_platforms::PullRequestProvider;
 use regex::Regex;
 use tracing::{debug, info, warn};
 
+/// Common WIP label names used for discovery and cleanup.
+///
+/// This list is consulted in two places:
+/// 1. [`discover_wip_labels`] — Priority-2 search when no exact hint match is found.
+/// 2. [`manage_wip_labels`] — Stale-label cleanup on the non-WIP path.
+///
+/// Any additions here automatically apply to both call sites.
+pub(crate) const COMMON_WIP_LABEL_NAMES: [&str; 4] =
+    ["WIP", "wip", "work-in-progress", "work in progress"];
+
 #[cfg(test)]
 #[path = "labels_tests.rs"]
 mod tests;
@@ -401,8 +411,7 @@ pub async fn discover_wip_labels<P: PullRequestProvider>(
     }
 
     // Priority 2: case-insensitive match against common WIP label names
-    let common_wip_names = ["WIP", "wip", "work-in-progress", "work in progress"];
-    for name in &common_wip_names {
+    for name in &COMMON_WIP_LABEL_NAMES {
         if let Some(label) = all_labels
             .iter()
             .find(|l| l.name.eq_ignore_ascii_case(name))
@@ -454,6 +463,17 @@ pub async fn manage_wip_labels<P: PullRequestProvider>(
     is_wip: bool,
     label_hint: &Option<String>,
 ) -> Result<(), MergeWardenError> {
+    // None means "labeling explicitly disabled" — skip all label operations.
+    if label_hint.is_none() {
+        debug!(
+            repository_owner = owner,
+            repository = repo,
+            pr_number = pr_number,
+            "wip_label is None — label management disabled"
+        );
+        return Ok(());
+    }
+
     info!(
         repository_owner = owner,
         repository = repo,
@@ -531,12 +551,11 @@ pub async fn manage_wip_labels<P: PullRequestProvider>(
         }
     } else {
         // Remove labels that match the effective label name or any common WIP name
-        let common_wip_names = ["WIP", "wip", "work-in-progress", "work in progress"];
         let labels_to_remove: Vec<String> = current_pr_labels
             .iter()
             .filter(|l| {
                 l.name == effective_label
-                    || common_wip_names
+                    || COMMON_WIP_LABEL_NAMES
                         .iter()
                         .any(|n| l.name.eq_ignore_ascii_case(n))
             })
@@ -573,7 +592,8 @@ pub async fn manage_wip_labels<P: PullRequestProvider>(
 
 /// Manages size labels for a pull request based on file changes using smart label discovery.
 ///
-/// This function implements the smart label discovery strategy from the spec:/// 1. Discovers existing size labels in the repository using multiple detection patterns
+/// This function implements the smart label discovery strategy from the spec:
+/// 1. Discovers existing size labels in the repository using multiple detection patterns
 /// 2. Removes any existing size labels (exclusive labeling)
 /// 3. Applies the appropriate size label based on the PR's categorization
 /// 4. Falls back to creating new labels if none are found
