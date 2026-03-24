@@ -9,7 +9,7 @@ use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
     errors::Error,
-    models::{Comment, Label, PullRequest, PullRequestFile, User},
+    models::{Comment, Label, PullRequest, PullRequestFile, Review, User},
     ConfigFetcher, PullRequestProvider,
 };
 
@@ -798,5 +798,90 @@ impl PullRequestProvider for GitHubProvider {
         );
 
         Ok(())
+    }
+
+    /// Lists all reviews submitted on a pull request.
+    ///
+    /// Uses `GET /repos/{owner}/{repo}/pulls/{number}/reviews` and maps each
+    /// entry to a [`Review`] struct.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner` - The owner of the repository
+    /// * `repo_name` - The name of the repository
+    /// * `pr_number` - The pull request number
+    ///
+    /// # Returns
+    ///
+    /// Returns a vector of [`Review`]s, ordered oldest-first.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error (via [`map_api_error`]) if the API call fails or the
+    /// response cannot be parsed.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number))]
+    async fn list_pr_reviews(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr_number: u64,
+    ) -> Result<Vec<Review>, Error> {
+        let path = format!(
+            "/repos/{}/{}/pulls/{}/reviews",
+            repo_owner, repo_name, pr_number
+        );
+
+        let response = self.client.get(&path).await.map_err(|e| {
+            error!(
+                owner = repo_owner,
+                repo = repo_name,
+                pr = pr_number,
+                error = %e,
+                "Failed to list pull request reviews"
+            );
+            map_api_error(e)
+        })?;
+
+        if !response.status().is_success() {
+            error!(
+                owner = repo_owner,
+                repo = repo_name,
+                pr = pr_number,
+                status = response.status().as_u16(),
+                "Non-success status listing pull request reviews"
+            );
+            return Err(Error::InvalidResponse);
+        }
+
+        let items: Vec<serde_json::Value> =
+            response.json().await.map_err(|_| Error::InvalidResponse)?;
+
+        let reviews: Vec<Review> = items
+            .into_iter()
+            .filter_map(|v| {
+                let id = v["id"].as_u64()?;
+                let state = v["state"].as_str()?.to_lowercase();
+                let user_id = v["user"]["id"].as_u64().unwrap_or_default();
+                let user_login = v["user"]["login"].as_str().unwrap_or_default().to_string();
+                Some(Review {
+                    id,
+                    state,
+                    user: crate::models::User {
+                        id: user_id,
+                        login: user_login,
+                    },
+                })
+            })
+            .collect();
+
+        debug!(
+            owner = repo_owner,
+            repo = repo_name,
+            pr = pr_number,
+            count = reviews.len(),
+            "Listed pull request reviews"
+        );
+
+        Ok(reviews)
     }
 }

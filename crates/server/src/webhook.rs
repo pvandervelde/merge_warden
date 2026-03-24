@@ -143,11 +143,23 @@ impl MergeWardenWebhookHandler {
     /// [`MergeWarden::process_pull_request`].
     pub async fn handle_pull_request(&self, envelope: &EventEnvelope) -> Result<(), ServerError> {
         let action = envelope.payload.raw()["action"].as_str().unwrap_or("");
-        match action {
-            "opened" | "edited" | "ready_for_review" | "reopened" | "unlocked" | "synchronize" => {}
-            _ => {
-                info!(action, "Pull request action does not require processing");
-                return Ok(());
+        // For pull_request_review events (action = "submitted"/"dismissed") the
+        // review approval state may have changed, so we always re-evaluate.
+        // For pull_request events we only process the subset of actions that
+        // indicate a meaningful state change.
+        if envelope.event_type == "pull_request" {
+            match action {
+                "opened"
+                | "edited"
+                | "ready_for_review"
+                | "converted_to_draft"
+                | "reopened"
+                | "unlocked"
+                | "synchronize" => {}
+                _ => {
+                    info!(action, "Pull request action does not require processing");
+                    return Ok(());
+                }
             }
         }
 
@@ -250,6 +262,7 @@ impl MergeWardenWebhookHandler {
                     change_type_labels: Some(self.policies.change_type_labels.clone()),
                     bypass_rules: self.policies.bypass_rules.clone(),
                     wip_check: self.policies.wip_check.clone(),
+                    pr_state_labels: self.policies.pr_state_labels.clone(),
                 }
             }
         };
@@ -287,7 +300,7 @@ impl WebhookHandler for MergeWardenWebhookHandler {
         &self,
         envelope: &EventEnvelope,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        if envelope.event_type != "pull_request" {
+        if envelope.event_type != "pull_request" && envelope.event_type != "pull_request_review" {
             debug!(event_type = %envelope.event_type, "Ignoring non-pull-request event");
             return Ok(());
         }

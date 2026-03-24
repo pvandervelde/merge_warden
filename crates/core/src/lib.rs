@@ -312,6 +312,60 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
         false
     }
 
+    /// Manages state-lifecycle labels for a pull request.
+    ///
+    /// Determines the current PR state (`draft`, `in-review`, or `approved`) and
+    /// calls [`labels::manage_pr_state_labels`] to apply the matching label while
+    /// removing the other two.
+    ///
+    /// Does nothing when `config.pr_state_labels.enabled` is `false`.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner` - The owner of the repository
+    /// * `repo_name` - The name of the repository
+    /// * `pr` - The pull request being processed
+    #[instrument]
+    async fn communicate_pr_state_labels(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr: &PullRequest,
+    ) {
+        if !self.config.pr_state_labels.enabled {
+            return;
+        }
+
+        // Determine approval status from reviews.
+        let is_approved = self
+            .provider
+            .list_pr_reviews(repo_owner, repo_name, pr.number)
+            .await
+            .unwrap_or_default()
+            .iter()
+            .any(|r| r.state == "approved");
+
+        if let Err(e) = labels::manage_pr_state_labels(
+            &self.provider,
+            repo_owner,
+            repo_name,
+            pr.number,
+            pr.draft,
+            is_approved,
+            &self.config.pr_state_labels,
+        )
+        .await
+        {
+            warn!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                pull_request = pr.number,
+                error = %e,
+                "Failed to manage PR state labels"
+            );
+        }
+    }
+
     /// Handles side effects for WIP status changes on a pull request.
     ///
     /// When `is_wip` is `true`:
@@ -1331,6 +1385,7 @@ Please update the PR body to include a valid work item reference."#;
     ///     # async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
     ///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
+    ///     # async fn list_pr_reviews(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> { unimplemented!() }
     /// }
     ///
     /// fn example() {
@@ -1402,6 +1457,7 @@ Please update the PR body to include a valid work item reference."#;
     ///     # async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
     ///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
+    ///     # async fn list_pr_reviews(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> { unimplemented!() }
     /// }
     ///
     /// async fn example() -> Result<()> {
@@ -1461,6 +1517,12 @@ Please update the PR body to include a valid work item reference."#;
             pull_request = pr_number,
             "Got pull request",
         );
+
+        // Manage state-lifecycle labels on every event (idempotent).
+        // Runs before the draft early-return so the draft label is applied even
+        // when we skip the full validation.
+        self.communicate_pr_state_labels(repo_owner, repo_name, &pr)
+            .await;
 
         // If the pull request is a draft then we don't review it initially. We wait until it is ready for review
         let check_title = "Merge Warden";
@@ -1886,6 +1948,7 @@ Please update the PR body to include a valid work item reference."#;
     ///     # async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
     ///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
+    ///     # async fn list_pr_reviews(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> { unimplemented!() }
     /// }
     ///
     /// fn example() {

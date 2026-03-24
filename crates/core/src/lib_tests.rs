@@ -197,6 +197,15 @@ impl PullRequestProvider for ErrorMockGitProvider {
     ) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> {
         Ok(vec![])
     }
+
+    async fn list_pr_reviews(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _pr_number: u64,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> {
+        Ok(vec![])
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -384,6 +393,15 @@ impl PullRequestProvider for DynamicMockGitProvider {
     ) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> {
         Ok(vec![])
     }
+
+    async fn list_pr_reviews(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _pr_number: u64,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> {
+        Ok(vec![])
+    }
 }
 
 // Mock implementation of PullRequestProvider for testing
@@ -558,6 +576,15 @@ impl PullRequestProvider for MockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
     ) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> {
+        Ok(vec![])
+    }
+
+    async fn list_pr_reviews(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _pr_number: u64,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> {
         Ok(vec![])
     }
 }
