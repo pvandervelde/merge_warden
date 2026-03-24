@@ -2354,33 +2354,29 @@ pub async fn manage_pr_state_labels<P: PullRequestProvider>(
     ];
 
     // Remove every state label that is NOT the target and IS currently applied.
-    for label_opt in &all_state_labels {
-        if let Some(label_name) = label_opt {
-            let is_target = target_label
-                .as_deref()
-                .map_or(false, |t| t == label_name.as_str());
-            if !is_target && current_pr_labels.iter().any(|l| &l.name == label_name) {
-                if let Err(e) = provider
-                    .remove_label(owner, repo, pr_number, label_name)
-                    .await
-                {
-                    warn!(
-                        repository_owner = owner,
-                        repository = repo,
-                        pr_number = pr_number,
-                        label = %label_name,
-                        error = %e,
-                        "Failed to remove stale state label"
-                    );
-                } else {
-                    info!(
-                        repository_owner = owner,
-                        repository = repo,
-                        pr_number = pr_number,
-                        label = %label_name,
-                        "Removed stale state label"
-                    );
-                }
+    for label_name in all_state_labels.iter().filter_map(|opt| opt.as_deref()) {
+        let is_target = target_label.as_deref() == Some(label_name);
+        if !is_target && current_pr_labels.iter().any(|l| l.name == label_name) {
+            if let Err(e) = provider
+                .remove_label(owner, repo, pr_number, label_name)
+                .await
+            {
+                warn!(
+                    repository_owner = owner,
+                    repository = repo,
+                    pr_number = pr_number,
+                    label = %label_name,
+                    error = %e,
+                    "Failed to remove stale state label"
+                );
+            } else {
+                info!(
+                    repository_owner = owner,
+                    repository = repo,
+                    pr_number = pr_number,
+                    label = %label_name,
+                    "Removed stale state label"
+                );
             }
         }
     }
