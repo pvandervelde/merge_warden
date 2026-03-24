@@ -55,7 +55,7 @@ pub mod models;
 mod lib_tests;
 
 use errors::Error;
-use models::{Comment, Label, PullRequest, PullRequestFile};
+use models::{Comment, Label, PullRequest, PullRequestFile, Review};
 
 /// Trait to fetch configuration files from remote repositories.
 #[async_trait]
@@ -605,4 +605,33 @@ pub trait PullRequestProvider {
         output_summary: &str,
         output_text: &str,
     ) -> Result<(), Error>;
+
+    /// Lists all reviews submitted on a pull request.
+    ///
+    /// Returns the reviews in the order they were submitted. Each review contains
+    /// the reviewer, the review state (e.g., `"approved"`, `"changes_requested"`,
+    /// `"commented"`), and a unique review ID.
+    ///
+    /// This is used to determine whether the PR has at least one approved review
+    /// for state-based lifecycle labeling.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner` - The owner of the repository
+    /// * `repo_name` - The name of the repository
+    /// * `pr_number` - The pull request number
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a vector of [`Review`]s, ordered oldest-first
+    ///
+    /// # Errors
+    ///
+    /// Returns an [`Error`] if the API call fails
+    async fn list_pr_reviews(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr_number: u64,
+    ) -> Result<Vec<Review>, Error>;
 }

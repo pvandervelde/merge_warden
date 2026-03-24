@@ -537,6 +537,7 @@ impl LabelApplicator {
         if let Some(change_type) = change_type {
             match self.apply_change_type_labels(pr, change_type, &config.change_type).await {
                 Ok(_) => results.change_type_labels_applied = true,
+
                 Err(e) => {
                     log::warn!("Failed to apply change type labels: {}", e);
                     results.errors.push(e.to_string());
@@ -651,6 +652,159 @@ mod tests {
 - Ensure minimal required permissions for label management
 - Audit label creation and modification operations
 - Protect against label spam or abuse
+
+## State-Based PR Lifecycle Labels
+
+### Overview
+
+Pull requests move through a well-defined lifecycle: they start as drafts (or open),
+progress to ready for review, and finally reach the approved state. State-based lifecycle
+labels give reviewers an at-a-glance view of exactly where a PR stands in that journey.
+
+Labels are applied and removed automatically as state transitions happen. Only one state
+label is active at a time. State labels are independent of size and WIP labels — they
+co-exist without interference.
+
+### PR States and Transitions
+
+```mermaid
+graph TD
+    A["Draft"] -->|"ready_for_review action"| B["In Review"]
+    B -->|"approved review submitted"| C["Approved"]
+    B -->|"converted_to_draft action"| A
+    C -->|"changes_requested or re-open"| B
+    C -->|"converted_to_draft action"| A
+```
+
+| Transition event | Action / review state | Label applied |
+| :--- | :--- | :--- |
+| PR opened as draft or converted back | `converted_to_draft` | `draft_label` |
+| PR opened as ready, reopened, or marked ready | `ready_for_review`, `opened`, `reopened`, `synchronize` | `review_label` |
+| Approved review submitted | `pull_request_review` with `state: "approved"` | `approved_label` |
+
+### Re-evaluation Strategy
+
+State labels are re-evaluated on **every** `pull_request` event (all actions) and on every
+`pull_request_review` event. This ensures labels are always accurate regardless of the
+order events arrive, providing idempotent, eventually-consistent behaviour.
+
+The evaluation logic on each event:
+
+1. Check `pr.draft` — if `true`, the PR is in draft state regardless of reviews.
+2. Otherwise call `list_pr_reviews` to check whether any current review has `state: "approved"`.
+3. Apply/replace the label that matches the current state; remove the labels for the other
+   two states.
+
+### Configuration Model
+
+```rust
+/// Configuration for state-based PR lifecycle labels.
+///
+/// When enabled, exactly one label from `{draft_label, review_label, approved_label}`
+/// is active on the PR at any time. Labels are automatically applied and removed as the
+/// PR moves through its lifecycle. Setting any label to `None` disables labeling for
+/// that state.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PrStateLabelsConfig {
+    /// Whether lifecycle label management is enabled for this repository.
+    #[serde(default = "PrStateLabelsConfig::default_enabled")]
+    pub enabled: bool,
+
+    /// Label applied when the PR is in draft state.
+    /// Set to `None` (or omit the key) to disable labeling for this state.
+    #[serde(default)]
+    pub draft_label: Option<String>,
+
+    /// Label applied when the PR is open and awaiting review (not draft, not approved).
+    /// Set to `None` (or omit the key) to disable labeling for this state.
+    #[serde(default)]
+    pub review_label: Option<String>,
+
+    /// Label applied when the PR has at least one approved review and is not a draft.
+    /// Set to `None` (or omit the key) to disable labeling for this state.
+    #[serde(default)]
+    pub approved_label: Option<String>,
+}
+```
+
+TOML configuration:
+
+```toml
+[policies.pullRequests.prState]
+# Enable state-based lifecycle label management
+enabled = true
+
+# Label applied while the PR is in draft state
+draft_label = "status: draft"
+
+# Label applied while the PR is open and awaiting review
+review_label = "status: in-review"
+
+# Label applied once the PR has an approved review
+approved_label = "status: approved"
+```
+
+### Implementation Contract
+
+`manage_pr_state_labels` in `crates/core/src/labels.rs`:
+
+```rust
+/// Applies the correct lifecycle label to a pull request and removes stale ones.
+///
+/// Exactly one of `{draft_label, review_label, approved_label}` is applied.
+/// The other two are removed if present. This function is idempotent — calling
+/// it multiple times with the same inputs is safe.
+///
+/// Label operations are skipped when `config.enabled` is `false` or when the
+/// label for the target state is `None`.
+///
+/// # Arguments
+///
+/// * `provider` - The Git provider implementation
+/// * `owner` - Repository owner
+/// * `repo` - Repository name
+/// * `pr_number` - Pull request number
+/// * `is_draft` - Whether the PR is currently a draft
+/// * `is_approved` - Whether the PR currently has at least one approved review
+/// * `config` - Lifecycle label configuration
+pub async fn manage_pr_state_labels<P: PullRequestProvider>(
+    provider: &P,
+    owner: &str,
+    repo: &str,
+    pr_number: u64,
+    is_draft: bool,
+    is_approved: bool,
+    config: &PrStateLabelsConfig,
+) -> Result<(), MergeWardenError>;
+```
+
+### Label Conflict Rules
+
+State labels are orthogonal to all other label categories:
+
+| Label category | Interaction |
+| :--- | :--- |
+| Size labels (`size/XS` … `size/XXL`) | No interaction. Both can exist simultaneously. |
+| WIP label | No interaction. The WIP check blocks merging independently of state. |
+| Change-type labels | No interaction. Both can exist simultaneously. |
+| Invalid-title / missing-work-item | No interaction. Validation labels are independent. |
+
+### Behavioural Assertions
+
+1. A PR opened as draft receives `draft_label` immediately.
+2. When a draft PR is marked ready, `draft_label` is removed and `review_label` is applied.
+3. When a PR receives an approved review, `review_label` is removed and `approved_label` is
+   applied.
+4. When a PR is converted back to draft, `review_label` and `approved_label` are removed and
+   `draft_label` is applied.
+5. When a PR previously approved receives a `changes_requested` review, it is no longer
+   considered approved and reverts to `review_label`.
+6. If `enabled = false`, no lifecycle labels are ever applied or removed.
+7. If a specific state label is `None`, no label is applied for that state; labels for the
+   other states are still removed normally.
+8. All label operations are idempotent — re-processing the same event produces no duplicate
+   labels and no spurious removals.
+9. State labels coexist with size labels, WIP labels, and change-type labels without conflict.
 
 ## Related Specifications
 

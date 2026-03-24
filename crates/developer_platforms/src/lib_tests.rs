@@ -170,6 +170,16 @@ impl PullRequestProvider for MockApiProvider {
         // Mock implementation - always succeeds
         Ok(())
     }
+
+    async fn list_pr_reviews(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _pr_number: u64,
+    ) -> Result<Vec<crate::models::Review>, Error> {
+        // Mock implementation - returns empty list
+        Ok(vec![])
+    }
 }
 
 #[cfg(test)]

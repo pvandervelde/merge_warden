@@ -720,6 +720,7 @@ fn test_application_defaults_bypass_rules_serialization() {
         },
         change_type_labels: ChangeTypeLabelConfig::default(),
         wip_check: WipCheckConfig::default(),
+        pr_state_labels: crate::config::PrStateLabelsConfig::default(),
     };
 
     let serialized =
