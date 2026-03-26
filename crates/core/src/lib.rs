@@ -67,7 +67,7 @@
 //! ```
 
 use indoc::formatdoc;
-use merge_warden_developer_platforms::models::{Installation, PullRequest, Repository};
+use merge_warden_developer_platforms::models::{Installation, PullRequest, Repository, Review};
 use merge_warden_developer_platforms::PullRequestProvider;
 
 pub mod checks;
@@ -337,13 +337,27 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
         }
 
         // Determine approval status from reviews.
-        let is_approved = self
-            .provider
-            .list_pr_reviews(repo_owner, repo_name, pr.number)
-            .await
-            .unwrap_or_default()
-            .iter()
-            .any(|r| r.state == "approved");
+        // Draft PRs cannot be approved (approval is irrelevant), so skip the API
+        // call to avoid burning a GitHub rate-limit unit per draft event.
+        let is_approved = if pr.draft {
+            false
+        } else {
+            let reviews = self
+                .provider
+                .list_pr_reviews(repo_owner, repo_name, pr.number)
+                .await
+                .unwrap_or_default();
+
+            // Take the most recent review per reviewer; the API returns reviews
+            // oldest-first. A subsequent changes_requested review supersedes an
+            // earlier approval from the same reviewer.
+            let mut latest_by_user: std::collections::HashMap<u64, &Review> =
+                std::collections::HashMap::new();
+            for r in &reviews {
+                latest_by_user.insert(r.user.id, r);
+            }
+            latest_by_user.values().any(|r| r.state == "approved")
+        };
 
         if let Err(e) = labels::manage_pr_state_labels(
             &self.provider,

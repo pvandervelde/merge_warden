@@ -10,8 +10,8 @@ use azure_core::credentials::TokenCredential;
 use azure_identity::{ManagedIdentityCredential, ManagedIdentityCredentialOptions};
 use merge_warden_core::config::{
     ApplicationDefaults, BypassRule, BypassRules, ChangeTypeLabelConfig,
-    ConventionalCommitMappings, FallbackLabelSettings, LabelDetectionStrategy, PrStateLabelsConfig,
-    PrSizeCheckConfig, WipCheckConfig,
+    ConventionalCommitMappings, FallbackLabelSettings, LabelDetectionStrategy, PrSizeCheckConfig,
+    PrStateLabelsConfig, WipCheckConfig,
 };
 use merge_warden_core::size::SizeThresholds;
 use reqwest::{Client, StatusCode};

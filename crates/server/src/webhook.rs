@@ -149,13 +149,8 @@ impl MergeWardenWebhookHandler {
         // indicate a meaningful state change.
         if envelope.event_type == "pull_request" {
             match action {
-                "opened"
-                | "edited"
-                | "ready_for_review"
-                | "converted_to_draft"
-                | "reopened"
-                | "unlocked"
-                | "synchronize" => {}
+                "opened" | "edited" | "ready_for_review" | "converted_to_draft" | "reopened"
+                | "unlocked" | "synchronize" => {}
                 _ => {
                     info!(action, "Pull request action does not require processing");
                     return Ok(());

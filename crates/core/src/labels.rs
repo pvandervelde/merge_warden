@@ -2382,6 +2382,10 @@ pub async fn manage_pr_state_labels<P: PullRequestProvider>(
     }
 
     // Add the target label if it is configured and not already present.
+    // Note: removal failures above are treated as best-effort (warn + continue).
+    // Addition failures are propagated so callers can detect and surface them.
+    // An empty target string (e.g. draft_label = "") is treated the same as None:
+    // no label is applied, but the other state labels have already been removed.
     if let Some(target) = target_label {
         if !target.is_empty() && !current_pr_labels.iter().any(|l| &l.name == target) {
             provider
@@ -2396,9 +2400,9 @@ pub async fn manage_pr_state_labels<P: PullRequestProvider>(
                         error = %e,
                         "Failed to add state label"
                     );
-                    MergeWardenError::FailedToUpdatePullRequest(
-                        "Failed to add PR state label".to_string(),
-                    )
+                    MergeWardenError::FailedToUpdatePullRequest(format!(
+                        "Failed to add PR state label '{target}'"
+                    ))
                 })?;
 
             info!(

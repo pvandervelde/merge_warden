@@ -111,6 +111,7 @@ pub trait ConfigFetcher: Sync + Send {
 ///     # async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> { unimplemented!() }
 ///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
 ///     # async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
+///     # async fn list_pr_reviews(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> { unimplemented!() }
 /// }
 /// ```
 #[async_trait]
@@ -146,6 +147,7 @@ pub trait PullRequestProvider {
     /// #     async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
     /// #     async fn list_available_labels(&self, _: &str, _: &str) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
     /// #     async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn list_pr_reviews(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> { unimplemented!() }
     ///
     /// async fn add_comment(
     ///     &self,
@@ -198,6 +200,7 @@ pub trait PullRequestProvider {
     /// #     async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
     /// #     async fn list_available_labels(&self, _: &str, _: &str) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
     /// #     async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn list_pr_reviews(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> { unimplemented!() }
     ///
     /// async fn add_labels(
     ///     &self,
@@ -249,6 +252,7 @@ pub trait PullRequestProvider {
     /// #     async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
     /// #     async fn list_available_labels(&self, _: &str, _: &str) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
     /// #     async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn list_pr_reviews(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> { unimplemented!() }
     ///
     /// async fn delete_comment(
     ///     &self,
@@ -320,6 +324,7 @@ pub trait PullRequestProvider {
     /// #     async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
     /// #     async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
     /// #     async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn list_pr_reviews(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> { unimplemented!() }
     ///
     /// async fn get_pull_request_files(
     ///     &self,
@@ -373,6 +378,7 @@ pub trait PullRequestProvider {
     /// #     async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
     /// #     async fn list_available_labels(&self, _: &str, _: &str) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
     /// #     async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn list_pr_reviews(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> { unimplemented!() }
     ///
     /// async fn list_applied_labels(
     ///     &self,
@@ -425,6 +431,7 @@ pub trait PullRequestProvider {
     /// #     async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
     /// #     async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
     /// #     async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn list_pr_reviews(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> { unimplemented!() }
     ///
     /// async fn list_available_labels(
     ///     &self,
@@ -472,6 +479,7 @@ pub trait PullRequestProvider {
     /// #     async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
     /// #     async fn list_available_labels(&self, _: &str, _: &str) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
     /// #     async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn list_pr_reviews(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> { unimplemented!() }
     ///
     /// async fn list_comments(
     ///     &self,
@@ -522,6 +530,7 @@ pub trait PullRequestProvider {
     /// #     async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
     /// #     async fn list_available_labels(&self, _: &str, _: &str) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
     /// #     async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn list_pr_reviews(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> { unimplemented!() }
     ///
     /// async fn remove_label(
     ///     &self,
@@ -578,6 +587,7 @@ pub trait PullRequestProvider {
     /// #     async fn list_available_labels(&self, _: &str, _: &str) -> Result<Vec<merge_warden_developer_platforms::models::Label>, Error> { unimplemented!() }
     /// #     async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Comment>, Error> { unimplemented!() }
     /// #     async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> { unimplemented!() }
+    /// #     async fn list_pr_reviews(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> { unimplemented!() }
     ///
     /// async fn update_pr_check_status(
     ///     &self,

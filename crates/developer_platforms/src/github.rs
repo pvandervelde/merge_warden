@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use base64::Engine;
 use github_bot_sdk::{
-    client::{CreateCommentRequest, InstallationClient},
+    client::{parse_link_header, CreateCommentRequest, InstallationClient},
     error::ApiError,
 };
 use serde_json::json;
@@ -826,62 +826,87 @@ impl PullRequestProvider for GitHubProvider {
         repo_name: &str,
         pr_number: u64,
     ) -> Result<Vec<Review>, Error> {
-        let path = format!(
-            "/repos/{}/{}/pulls/{}/reviews",
-            repo_owner, repo_name, pr_number
-        );
+        let mut all_reviews: Vec<Review> = Vec::new();
+        // Increment page number until the Link header no longer has a "next" page.
+        // per_page=100 is the GitHub API maximum.
+        let mut page: u32 = 1;
 
-        let response = self.client.get(&path).await.map_err(|e| {
-            error!(
-                owner = repo_owner,
-                repo = repo_name,
-                pr = pr_number,
-                error = %e,
-                "Failed to list pull request reviews"
+        loop {
+            let path = format!(
+                "/repos/{}/{}/pulls/{}/reviews?per_page=100&page={}",
+                repo_owner, repo_name, pr_number, page
             );
-            map_api_error(e)
-        })?;
 
-        if !response.status().is_success() {
-            error!(
-                owner = repo_owner,
-                repo = repo_name,
-                pr = pr_number,
-                status = response.status().as_u16(),
-                "Non-success status listing pull request reviews"
-            );
-            return Err(Error::InvalidResponse);
-        }
+            let response = self.client.get(&path).await.map_err(|e| {
+                error!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr_number,
+                    error = %e,
+                    "Failed to list pull request reviews"
+                );
+                map_api_error(e)
+            })?;
 
-        let items: Vec<serde_json::Value> =
-            response.json().await.map_err(|_| Error::InvalidResponse)?;
+            if !response.status().is_success() {
+                error!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr_number,
+                    status = response.status().as_u16(),
+                    "Non-success status listing pull request reviews"
+                );
+                return Err(Error::InvalidResponse);
+            }
 
-        let reviews: Vec<Review> = items
-            .into_iter()
-            .filter_map(|v| {
-                let id = v["id"].as_u64()?;
-                let state = v["state"].as_str()?.to_lowercase();
-                let user_id = v["user"]["id"].as_u64().unwrap_or_default();
-                let user_login = v["user"]["login"].as_str().unwrap_or_default().to_string();
-                Some(Review {
-                    id,
-                    state,
-                    user: crate::models::User {
-                        id: user_id,
-                        login: user_login,
-                    },
+            // Extract the Link header before consuming the response body.
+            // parse_link_header returns absolute URLs in `next`; rather than
+            // reconstructing a relative path from them, we just use has_next()
+            // to decide whether to continue and compute the path ourselves.
+            let has_next = response
+                .headers()
+                .get("Link")
+                .and_then(|h| h.to_str().ok())
+                .map(|h| parse_link_header(Some(h)).has_next())
+                .unwrap_or(false);
+
+            let items: Vec<serde_json::Value> =
+                response.json().await.map_err(|_| Error::InvalidResponse)?;
+
+            let page_reviews: Vec<Review> = items
+                .into_iter()
+                .filter_map(|v| {
+                    let id = v["id"].as_u64()?;
+                    let state = v["state"].as_str()?.to_lowercase();
+                    let user_id = v["user"]["id"].as_u64().unwrap_or_default();
+                    let user_login = v["user"]["login"].as_str().unwrap_or_default().to_string();
+                    Some(Review {
+                        id,
+                        state,
+                        user: crate::models::User {
+                            id: user_id,
+                            login: user_login,
+                        },
+                    })
                 })
-            })
-            .collect();
+                .collect();
+
+            all_reviews.extend(page_reviews);
+
+            if !has_next {
+                break;
+            }
+            page += 1;
+        }
 
         debug!(
             owner = repo_owner,
             repo = repo_name,
             pr = pr_number,
-            count = reviews.len(),
+            count = all_reviews.len(),
             "Listed pull request reviews"
         );
 
-        Ok(reviews)
+        Ok(all_reviews)
     }
 }
