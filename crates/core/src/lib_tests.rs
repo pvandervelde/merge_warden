@@ -16,7 +16,7 @@ use std::{
 use tokio::test;
 use tracing::info;
 
-use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
+use merge_warden_developer_platforms::models::{Comment, Label, PullRequest, Review};
 use merge_warden_developer_platforms::PullRequestProvider;
 use merge_warden_developer_platforms::{errors::Error, models::User};
 
@@ -197,6 +197,15 @@ impl PullRequestProvider for ErrorMockGitProvider {
     ) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> {
         Ok(vec![])
     }
+
+    async fn list_pr_reviews(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _pr_number: u64,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> {
+        Ok(vec![])
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -218,6 +227,7 @@ struct DynamicMockGitProvider {
     labels: Arc<Mutex<Vec<Label>>>,
     comments: Arc<Mutex<Vec<Comment>>>,
     check_status_updates: Arc<Mutex<Vec<CheckStatusUpdate>>>,
+    reviews: Vec<Review>,
 }
 
 impl DynamicMockGitProvider {
@@ -227,7 +237,13 @@ impl DynamicMockGitProvider {
             labels: Arc::new(Mutex::new(Vec::new())),
             comments: Arc::new(Mutex::new(Vec::new())),
             check_status_updates: Arc::new(Mutex::new(Vec::new())),
+            reviews: vec![],
         }
+    }
+
+    fn with_reviews(mut self, reviews: Vec<Review>) -> Self {
+        self.reviews = reviews;
+        self
     }
 
     fn add_pull_request(&mut self, pr: PullRequest) {
@@ -383,6 +399,15 @@ impl PullRequestProvider for DynamicMockGitProvider {
         _pr_number: u64,
     ) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> {
         Ok(vec![])
+    }
+
+    async fn list_pr_reviews(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _pr_number: u64,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> {
+        Ok(self.reviews.clone())
     }
 }
 
@@ -558,6 +583,15 @@ impl PullRequestProvider for MockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
     ) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> {
+        Ok(vec![])
+    }
+
+    async fn list_pr_reviews(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _pr_number: u64,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> {
         Ok(vec![])
     }
 }
@@ -2397,5 +2431,74 @@ async fn test_communicate_wip_status_removes_comment_when_not_wip() {
     assert!(
         !comments.iter().any(|c| c.body.contains(WIP_COMMENT_MARKER)),
         "WIP comment should be removed when PR is no longer WIP"
+    );
+}
+
+/// Regression test: a reviewer who first approves and then supersedes that review
+/// with `changes_requested` must result in the review label being applied, not the
+/// approved label.  The fix groups reviews by reviewer and takes the latest.
+#[tokio::test]
+async fn test_communicate_pr_state_labels_superseded_approval_shows_review_state() {
+    use crate::config::PrStateLabelsConfig;
+
+    let reviewer = User {
+        id: 42,
+        login: "reviewer1".to_string(),
+    };
+
+    // API returns reviews oldest-first: an approval followed by a changes_requested
+    // from the same reviewer.  The changes_requested supersedes the approval.
+    let reviews = vec![
+        Review {
+            id: 1,
+            state: "approved".to_string(),
+            user: reviewer.clone(),
+        },
+        Review {
+            id: 2,
+            state: "changes_requested".to_string(),
+            user: reviewer.clone(),
+        },
+    ];
+
+    let pr = PullRequest {
+        number: 700,
+        title: "feat: some feature".to_string(),
+        draft: false,
+        body: Some("Fixes #1".to_string()),
+        author: Some(User {
+            id: 10,
+            login: "author".to_string(),
+        }),
+    };
+
+    let mut provider = DynamicMockGitProvider::new().with_reviews(reviews);
+    provider.add_pull_request(pr.clone());
+
+    let config = CurrentPullRequestValidationConfiguration {
+        pr_state_labels: PrStateLabelsConfig {
+            enabled: true,
+            draft_label: Some("state: draft".to_string()),
+            review_label: Some("state: in-review".to_string()),
+            approved_label: Some("state: approved".to_string()),
+        },
+        ..CurrentPullRequestValidationConfiguration::default()
+    };
+
+    let warden = MergeWarden::with_config(provider, config);
+    warden
+        .communicate_pr_state_labels("owner", "repo", &pr)
+        .await;
+
+    let labels = warden.provider.get_labels();
+    assert!(
+        labels.iter().any(|l| l.name == "state: in-review"),
+        "The review label must be applied when the latest review is changes_requested, got: {:?}",
+        labels
+    );
+    assert!(
+        !labels.iter().any(|l| l.name == "state: approved"),
+        "The approved label must NOT be applied when the latest review supersedes the approval, got: {:?}",
+        labels
     );
 }

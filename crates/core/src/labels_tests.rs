@@ -4,7 +4,7 @@ use merge_warden_developer_platforms::errors::Error;
 use std::sync::{Arc, Mutex};
 use tokio::test;
 
-use merge_warden_developer_platforms::models::{Comment, Label, PullRequest, User};
+use merge_warden_developer_platforms::models::{Comment, Label, PullRequest, Review, User};
 use merge_warden_developer_platforms::PullRequestProvider;
 
 // ── WIP label test helpers ───────────────────────────────────────────────────
@@ -125,6 +125,15 @@ impl PullRequestProvider for WipMockProvider {
         _text: &str,
     ) -> Result<(), Error> {
         Ok(())
+    }
+
+    async fn list_pr_reviews(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> {
+        Ok(vec![])
     }
 
     async fn get_pull_request_files(
@@ -262,6 +271,15 @@ impl PullRequestProvider for MockGitProvider {
         unimplemented!("Not needed for this test")
     }
 
+    async fn list_pr_reviews(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _pr_number: u64,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> {
+        unimplemented!("Not needed for this test")
+    }
+
     async fn get_pull_request_files(
         &self,
         _repo_owner: &str,
@@ -350,6 +368,15 @@ impl PullRequestProvider for ErrorMockGitProvider {
         _output_summary: &str,
         _output_text: &str,
     ) -> Result<(), Error> {
+        unimplemented!("Not needed for this test")
+    }
+
+    async fn list_pr_reviews(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _pr_number: u64,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> {
         unimplemented!("Not needed for this test")
     }
 
@@ -941,6 +968,15 @@ impl PullRequestProvider for SmartMockGitProvider {
         _output_summary: &str,
         _output_text: &str,
     ) -> Result<(), Error> {
+        unimplemented!("Not needed for this test")
+    }
+
+    async fn list_pr_reviews(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _pr_number: u64,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> {
         unimplemented!("Not needed for this test")
     }
 
@@ -2230,5 +2266,375 @@ async fn test_manage_wip_labels_uses_default_wip_when_some_hint_and_no_repo_labe
     assert_eq!(
         applied[0].name, "WIP",
         "Should use the hint 'WIP' as the label when no repo label is found"
+    );
+}
+
+// ── PR state label test helpers ──────────────────────────────────────────────
+
+/// Mock provider for PR state label tests.
+///
+/// Tracks applied labels and exposes configurable repository labels and reviews.
+struct PrStateMockProvider {
+    available_labels: Vec<Label>,
+    applied_labels: Arc<Mutex<Vec<Label>>>,
+    reviews: Vec<Review>,
+}
+
+impl PrStateMockProvider {
+    fn new(available: Vec<Label>, reviews: Vec<Review>) -> Self {
+        Self {
+            available_labels: available,
+            applied_labels: Arc::new(Mutex::new(Vec::new())),
+            reviews,
+        }
+    }
+
+    fn with_applied(available: Vec<Label>, applied: Vec<Label>, reviews: Vec<Review>) -> Self {
+        Self {
+            available_labels: available,
+            applied_labels: Arc::new(Mutex::new(applied)),
+            reviews,
+        }
+    }
+
+    fn get_applied(&self) -> Vec<Label> {
+        self.applied_labels.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl PullRequestProvider for PrStateMockProvider {
+    async fn get_pull_request(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<PullRequest, Error> {
+        unimplemented!()
+    }
+
+    async fn add_comment(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        _comment: &str,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn delete_comment(&self, _owner: &str, _repo: &str, _id: u64) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn list_comments(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<Vec<Comment>, Error> {
+        Ok(vec![])
+    }
+
+    async fn list_available_labels(&self, _owner: &str, _repo: &str) -> Result<Vec<Label>, Error> {
+        Ok(self.available_labels.clone())
+    }
+
+    async fn add_labels(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        labels: &[String],
+    ) -> Result<(), Error> {
+        let mut applied = self.applied_labels.lock().unwrap();
+        for l in labels {
+            applied.push(Label {
+                name: l.clone(),
+                description: None,
+            });
+        }
+        Ok(())
+    }
+
+    async fn remove_label(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        label: &str,
+    ) -> Result<(), Error> {
+        let mut applied = self.applied_labels.lock().unwrap();
+        applied.retain(|l| l.name != label);
+        Ok(())
+    }
+
+    async fn list_applied_labels(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<Vec<Label>, Error> {
+        Ok(self.applied_labels.lock().unwrap().clone())
+    }
+
+    async fn update_pr_check_status(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        _conclusion: &str,
+        _title: &str,
+        _summary: &str,
+        _text: &str,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn list_pr_reviews(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<Vec<Review>, Error> {
+        Ok(self.reviews.clone())
+    }
+
+    async fn get_pull_request_files(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> {
+        Ok(vec![])
+    }
+}
+
+// ── manage_pr_state_labels tests ─────────────────────────────────────────────
+
+fn make_config(
+    enabled: bool,
+    draft_label: Option<&str>,
+    review_label: Option<&str>,
+    approved_label: Option<&str>,
+) -> crate::config::PrStateLabelsConfig {
+    crate::config::PrStateLabelsConfig {
+        enabled,
+        draft_label: draft_label.map(String::from),
+        review_label: review_label.map(String::from),
+        approved_label: approved_label.map(String::from),
+    }
+}
+
+fn make_label(name: &str) -> Label {
+    Label {
+        name: name.to_string(),
+        description: None,
+    }
+}
+
+#[test]
+async fn test_manage_pr_state_labels_disabled_skips_all_ops() {
+    use crate::labels::manage_pr_state_labels;
+
+    let provider = PrStateMockProvider::new(vec![], vec![]);
+    let config = make_config(false, Some("draft"), Some("review"), Some("approved"));
+
+    manage_pr_state_labels(&provider, "owner", "repo", 1, false, false, &config)
+        .await
+        .unwrap();
+
+    assert!(
+        provider.get_applied().is_empty(),
+        "No labels should be applied when disabled"
+    );
+}
+
+#[test]
+async fn test_manage_pr_state_labels_draft_applies_draft_label() {
+    use crate::labels::manage_pr_state_labels;
+
+    let provider = PrStateMockProvider::new(vec![], vec![]);
+    let config = make_config(true, Some("draft"), Some("review"), Some("approved"));
+
+    manage_pr_state_labels(&provider, "owner", "repo", 1, true, false, &config)
+        .await
+        .unwrap();
+
+    let applied = provider.get_applied();
+    assert_eq!(applied.len(), 1);
+    assert_eq!(applied[0].name, "draft", "Draft label should be applied");
+}
+
+#[test]
+async fn test_manage_pr_state_labels_review_state_applies_review_label() {
+    use crate::labels::manage_pr_state_labels;
+
+    let provider = PrStateMockProvider::new(vec![], vec![]);
+    let config = make_config(true, Some("draft"), Some("review"), Some("approved"));
+
+    manage_pr_state_labels(&provider, "owner", "repo", 1, false, false, &config)
+        .await
+        .unwrap();
+
+    let applied = provider.get_applied();
+    assert_eq!(applied.len(), 1);
+    assert_eq!(applied[0].name, "review", "Review label should be applied");
+}
+
+#[test]
+async fn test_manage_pr_state_labels_approved_applies_approved_label() {
+    use crate::labels::manage_pr_state_labels;
+
+    let provider = PrStateMockProvider::new(vec![], vec![]);
+    let config = make_config(true, Some("draft"), Some("review"), Some("approved"));
+
+    manage_pr_state_labels(&provider, "owner", "repo", 1, false, true, &config)
+        .await
+        .unwrap();
+
+    let applied = provider.get_applied();
+    assert_eq!(applied.len(), 1);
+    assert_eq!(
+        applied[0].name, "approved",
+        "Approved label should be applied"
+    );
+}
+
+#[test]
+async fn test_manage_pr_state_labels_transition_draft_to_review_removes_draft() {
+    use crate::labels::manage_pr_state_labels;
+
+    let provider = PrStateMockProvider::with_applied(vec![], vec![make_label("draft")], vec![]);
+    let config = make_config(true, Some("draft"), Some("review"), Some("approved"));
+
+    manage_pr_state_labels(&provider, "owner", "repo", 1, false, false, &config)
+        .await
+        .unwrap();
+
+    let applied = provider.get_applied();
+    assert!(
+        applied.iter().all(|l| l.name != "draft"),
+        "Draft label should be removed"
+    );
+    assert!(
+        applied.iter().any(|l| l.name == "review"),
+        "Review label should be added"
+    );
+}
+
+#[test]
+async fn test_manage_pr_state_labels_transition_review_to_approved() {
+    use crate::labels::manage_pr_state_labels;
+
+    let provider = PrStateMockProvider::with_applied(vec![], vec![make_label("review")], vec![]);
+    let config = make_config(true, Some("draft"), Some("review"), Some("approved"));
+
+    manage_pr_state_labels(&provider, "owner", "repo", 1, false, true, &config)
+        .await
+        .unwrap();
+
+    let applied = provider.get_applied();
+    assert!(
+        applied.iter().all(|l| l.name != "review"),
+        "Review label should be removed"
+    );
+    assert!(
+        applied.iter().any(|l| l.name == "approved"),
+        "Approved label should be added"
+    );
+}
+
+#[test]
+async fn test_manage_pr_state_labels_revert_to_draft_removes_approved() {
+    use crate::labels::manage_pr_state_labels;
+
+    let provider = PrStateMockProvider::with_applied(vec![], vec![make_label("approved")], vec![]);
+    let config = make_config(true, Some("draft"), Some("review"), Some("approved"));
+
+    manage_pr_state_labels(&provider, "owner", "repo", 1, true, false, &config)
+        .await
+        .unwrap();
+
+    let applied = provider.get_applied();
+    assert!(
+        applied.iter().all(|l| l.name != "approved"),
+        "Approved label should be removed"
+    );
+    assert!(
+        applied.iter().any(|l| l.name == "draft"),
+        "Draft label should be added"
+    );
+}
+
+#[test]
+async fn test_manage_pr_state_labels_idempotent_no_duplicate_labels() {
+    use crate::labels::manage_pr_state_labels;
+
+    let provider = PrStateMockProvider::new(vec![], vec![]);
+    let config = make_config(true, Some("draft"), Some("review"), Some("approved"));
+
+    manage_pr_state_labels(&provider, "owner", "repo", 1, true, false, &config)
+        .await
+        .unwrap();
+
+    // Call again with the same state — should not double-add
+    manage_pr_state_labels(&provider, "owner", "repo", 1, true, false, &config)
+        .await
+        .unwrap();
+
+    let applied = provider.get_applied();
+    let draft_count = applied.iter().filter(|l| l.name == "draft").count();
+    assert_eq!(draft_count, 1, "Draft label should not be duplicated");
+}
+
+#[test]
+async fn test_manage_pr_state_labels_none_target_label_removes_others() {
+    use crate::labels::manage_pr_state_labels;
+
+    // review_label is None, meaning no label is applied for review state
+    // but draft and approved labels should still be removed from the PR
+    let provider = PrStateMockProvider::with_applied(
+        vec![],
+        vec![make_label("draft"), make_label("approved")],
+        vec![],
+    );
+    let config = make_config(true, Some("draft"), None, Some("approved"));
+
+    // is_draft=false, is_approved=false → target = review_label = None
+    manage_pr_state_labels(&provider, "owner", "repo", 1, false, false, &config)
+        .await
+        .unwrap();
+
+    let applied = provider.get_applied();
+    assert!(
+        applied.iter().all(|l| l.name != "draft"),
+        "Draft label should be removed even when target is None"
+    );
+    assert!(
+        applied.iter().all(|l| l.name != "approved"),
+        "Approved label should be removed even when target is None"
+    );
+    // No new label added since target is None
+    assert!(
+        applied.is_empty(),
+        "No label should be added when target is None"
+    );
+}
+
+#[test]
+async fn test_manage_pr_state_labels_all_none_labels_is_noop() {
+    use crate::labels::manage_pr_state_labels;
+
+    let provider = PrStateMockProvider::new(vec![], vec![]);
+    let config = make_config(true, None, None, None);
+
+    manage_pr_state_labels(&provider, "owner", "repo", 1, true, false, &config)
+        .await
+        .unwrap();
+
+    assert!(
+        provider.get_applied().is_empty(),
+        "No operations should occur when all labels are None"
     );
 }

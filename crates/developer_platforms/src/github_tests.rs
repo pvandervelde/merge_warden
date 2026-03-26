@@ -14,7 +14,7 @@ use github_bot_sdk::{
 };
 use serde_json::json;
 use wiremock::{
-    matchers::{method, path},
+    matchers::{method, path, query_param},
     Mock, MockServer, ResponseTemplate,
 };
 
@@ -857,4 +857,229 @@ async fn test_auth_error_maps_correctly() {
     let result = provider.get_pull_request("owner", "repo", 1).await;
 
     assert!(matches!(result, Err(Error::AuthError(_))));
+}
+
+// ---------------------------------------------------------------------------
+// list_pr_reviews
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_list_pr_reviews_empty_returns_vec() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/7/reviews"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider.list_pr_reviews("owner", "repo", 7).await.unwrap();
+
+    assert!(result.is_empty());
+}
+
+#[tokio::test]
+async fn test_list_pr_reviews_single_page_returns_all_reviews() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/10/reviews"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "id": 1, "state": "APPROVED",           "user": { "id": 100, "login": "alice" } },
+            { "id": 2, "state": "CHANGES_REQUESTED",  "user": { "id": 101, "login": "bob"   } }
+        ])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider.list_pr_reviews("owner", "repo", 10).await.unwrap();
+
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].id, 1);
+    assert_eq!(result[0].state, "approved");
+    assert_eq!(result[0].user.login, "alice");
+    assert_eq!(result[1].id, 2);
+    assert_eq!(result[1].state, "changes_requested");
+    assert_eq!(result[1].user.login, "bob");
+}
+
+#[tokio::test]
+async fn test_list_pr_reviews_state_is_lowercased() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/11/reviews"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "id": 99, "state": "COMMENTED", "user": { "id": 200, "login": "carol" } }
+        ])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider.list_pr_reviews("owner", "repo", 11).await.unwrap();
+
+    assert_eq!(
+        result[0].state, "commented",
+        "GitHub returns uppercase state strings; provider must lowercase them"
+    );
+}
+
+#[tokio::test]
+async fn test_list_pr_reviews_paginated_fetches_all_pages() {
+    let server = MockServer::start().await;
+
+    // Page 1: return 2 reviews and a Link header signalling page 2 exists.
+    // The `next` URL in the Link header is absolute but we only use has_next();
+    // the implementation drives pagination itself via the page counter.
+    let link_header = format!(
+        "<{uri}/repos/owner/repo/pulls/20/reviews?per_page=100&page=2>; rel=\"next\", \
+         <{uri}/repos/owner/repo/pulls/20/reviews?per_page=100&page=2>; rel=\"last\"",
+        uri = server.uri()
+    );
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/20/reviews"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("Link", link_header.as_str())
+                .set_body_json(json!([
+                    { "id": 1, "state": "APPROVED",          "user": { "id": 1, "login": "u1" } },
+                    { "id": 2, "state": "CHANGES_REQUESTED", "user": { "id": 2, "login": "u2" } }
+                ])),
+        )
+        .mount(&server)
+        .await;
+
+    // Page 2: no Link header → last page.
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/20/reviews"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "2"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "id": 3, "state": "APPROVED", "user": { "id": 3, "login": "u3" } }
+        ])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider.list_pr_reviews("owner", "repo", 20).await.unwrap();
+
+    assert_eq!(result.len(), 3, "Both pages combined must yield 3 reviews");
+    assert_eq!(result[0].id, 1);
+    assert_eq!(result[1].id, 2);
+    assert_eq!(result[2].id, 3);
+}
+
+#[tokio::test]
+async fn test_list_pr_reviews_three_pages_fetches_all() {
+    let server = MockServer::start().await;
+
+    let make_link = |page: u32, server_uri: &str| -> String {
+        format!(
+            "<{uri}/repos/owner/repo/pulls/21/reviews?per_page=100&page={next}>; rel=\"next\"",
+            uri = server_uri,
+            next = page
+        )
+    };
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/21/reviews"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("Link", make_link(2, &server.uri()).as_str())
+                .set_body_json(json!([
+                    { "id": 10, "state": "APPROVED", "user": { "id": 10, "login": "a" } }
+                ])),
+        )
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/21/reviews"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "2"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .append_header("Link", make_link(3, &server.uri()).as_str())
+                .set_body_json(json!([
+                    { "id": 11, "state": "COMMENTED", "user": { "id": 11, "login": "b" } }
+                ])),
+        )
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/21/reviews"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "3"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "id": 12, "state": "CHANGES_REQUESTED", "user": { "id": 12, "login": "c" } }
+        ])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider.list_pr_reviews("owner", "repo", 21).await.unwrap();
+
+    assert_eq!(result.len(), 3);
+    let ids: Vec<u64> = result.iter().map(|r| r.id).collect();
+    assert_eq!(ids, vec![10, 11, 12]);
+}
+
+#[tokio::test]
+async fn test_list_pr_reviews_api_error_returns_err() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/99/reviews"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("Internal Server Error"))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider.list_pr_reviews("owner", "repo", 99).await;
+
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_list_pr_reviews_null_user_id_review_is_skipped() {
+    // Reviews whose user object is null or whose user.id is missing cannot be
+    // attributed to a specific reviewer and must be silently dropped rather than
+    // colliding at key 0 in the per-reviewer deduplication HashMap.
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/30/reviews"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            // Valid review — should be included.
+            { "id": 1, "state": "APPROVED", "user": { "id": 100, "login": "alice" } },
+            // Null user object — should be skipped.
+            { "id": 2, "state": "APPROVED", "user": null },
+            // Missing user.id — should be skipped.
+            { "id": 3, "state": "CHANGES_REQUESTED", "user": { "login": "bot" } }
+        ])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider.list_pr_reviews("owner", "repo", 30).await.unwrap();
+
+    // Only the review with a valid, non-null user.id survives.
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].id, 1);
+    assert_eq!(result[0].user.id, 100);
 }

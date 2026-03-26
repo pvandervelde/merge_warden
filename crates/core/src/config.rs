@@ -295,6 +295,10 @@ pub struct ApplicationDefaults {
     /// Application-level defaults for WIP detection and blocking
     #[serde(rename = "wip", default)]
     pub wip_check: WipCheckConfig,
+
+    /// Application-level defaults for state-based PR lifecycle labels
+    #[serde(rename = "prState", default)]
+    pub pr_state_labels: PrStateLabelsConfig,
 }
 
 impl ApplicationDefaults {
@@ -342,6 +346,7 @@ impl Default for ApplicationDefaults {
             pr_size_check: PrSizeCheckConfig::default(),
             change_type_labels: ChangeTypeLabelConfig::default(),
             wip_check: WipCheckConfig::default(),
+            pr_state_labels: PrStateLabelsConfig::default(),
         }
     }
 }
@@ -583,6 +588,9 @@ pub struct CurrentPullRequestValidationConfiguration {
     /// Configuration for WIP (Work In Progress) detection and blocking
     pub wip_check: WipCheckConfig,
 
+    /// Configuration for state-based PR lifecycle labels
+    pub pr_state_labels: PrStateLabelsConfig,
+
     /// Rules for bypassing validation checks
     pub bypass_rules: BypassRules,
 }
@@ -618,6 +626,7 @@ impl CurrentPullRequestValidationConfiguration {
             pr_size_check: pr_size_check.unwrap_or_default(),
             change_type_labels: None, // Use default behavior for tests
             wip_check: WipCheckConfig::default(),
+            pr_state_labels: PrStateLabelsConfig::default(),
             bypass_rules: bypass_rules.unwrap_or_default(),
         }
     }
@@ -635,6 +644,7 @@ impl Default for CurrentPullRequestValidationConfiguration {
             pr_size_check: PrSizeCheckConfig::default(),
             change_type_labels: None, // Default to None, will be populated from app defaults
             wip_check: WipCheckConfig::default(),
+            pr_state_labels: PrStateLabelsConfig::default(),
             bypass_rules: BypassRules::default(),
         }
     }
@@ -666,6 +676,10 @@ pub struct PullRequestsPoliciesConfig {
     /// Configuration for WIP detection and blocking policies
     #[serde(default, rename = "wip")]
     pub wip_policies: WipCheckConfig,
+
+    /// Configuration for state-based PR lifecycle labels
+    #[serde(default, rename = "prState")]
+    pub pr_state_policies: PrStateLabelsConfig,
 }
 
 /// Configuration for PR title policy
@@ -786,6 +800,7 @@ impl RepositoryProvidedConfig {
 
         let pr_size_check = pr_policies.size_policies.clone();
         let wip_check = pr_policies.wip_policies.clone();
+        let pr_state_labels = pr_policies.pr_state_policies.clone();
 
         CurrentPullRequestValidationConfiguration {
             enforce_title_convention,
@@ -797,6 +812,7 @@ impl RepositoryProvidedConfig {
             pr_size_check,
             change_type_labels: self.change_type_labels.clone(),
             wip_check,
+            pr_state_labels,
             bypass_rules: bypass_rules.clone(),
         }
     }
@@ -1019,6 +1035,62 @@ impl Default for WipCheckConfig {
             wip_label: Self::default_wip_label(),
             wip_title_patterns: Self::default_title_patterns(),
             wip_description_patterns: Vec::new(),
+        }
+    }
+}
+
+/// Configuration for state-based PR lifecycle labels.
+///
+/// When enabled, exactly one label from `{draft_label, review_label, approved_label}`
+/// is active on the PR at any time. Labels are automatically applied and removed as the
+/// PR moves through its lifecycle. Setting any label to `None` disables labeling for
+/// that state without affecting the other states.
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_core::config::PrStateLabelsConfig;
+///
+/// let config = PrStateLabelsConfig::default();
+/// assert!(!config.enabled);
+/// assert!(config.draft_label.is_none());
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct PrStateLabelsConfig {
+    /// Whether lifecycle label management is enabled for this repository.
+    #[serde(default = "PrStateLabelsConfig::default_enabled")]
+    pub enabled: bool,
+
+    /// Label applied when the PR is in draft state.
+    /// Set to `None` (or omit the key) to disable labeling for this state.
+    #[serde(default)]
+    pub draft_label: Option<String>,
+
+    /// Label applied when the PR is open and awaiting review (not draft, not approved).
+    /// Set to `None` (or omit the key) to disable labeling for this state.
+    #[serde(default)]
+    pub review_label: Option<String>,
+
+    /// Label applied when the PR has at least one approved review and is not a draft.
+    /// Set to `None` (or omit the key) to disable labeling for this state.
+    #[serde(default)]
+    pub approved_label: Option<String>,
+}
+
+impl PrStateLabelsConfig {
+    /// Default value for `enabled` — opt-in, disabled by default.
+    fn default_enabled() -> bool {
+        false
+    }
+}
+
+impl Default for PrStateLabelsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: Self::default_enabled(),
+            draft_label: None,
+            review_label: None,
+            approved_label: None,
         }
     }
 }
@@ -1406,6 +1478,14 @@ pub async fn load_merge_warden_config(
                 .pull_requests
                 .wip_policies
                 .wip_description_patterns = app_defaults.wip_check.wip_description_patterns.clone();
+        }
+
+        // Merge PR state label configuration from app defaults:
+        // If the repo has not enabled state labels, use the app-level settings wholesale.
+        if !config.policies.pull_requests.pr_state_policies.enabled
+            && app_defaults.pr_state_labels.enabled
+        {
+            config.policies.pull_requests.pr_state_policies = app_defaults.pr_state_labels.clone();
         }
 
         // End of valid config processing

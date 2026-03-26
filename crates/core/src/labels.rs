@@ -10,7 +10,8 @@
 //! - Special labels based on PR description keywords
 
 use crate::config::{
-    ChangeTypeLabelConfig, CurrentPullRequestValidationConfiguration, CONVENTIONAL_COMMIT_REGEX,
+    ChangeTypeLabelConfig, CurrentPullRequestValidationConfiguration, PrStateLabelsConfig,
+    CONVENTIONAL_COMMIT_REGEX,
 };
 use crate::errors::MergeWardenError;
 use crate::size::{PrSizeCategory, PrSizeInfo};
@@ -2266,4 +2267,153 @@ impl LabelManager {
 
         Ok(result)
     }
+}
+
+/// Manages state-lifecycle labels for a pull request based on its current state.
+///
+/// Applies exactly one of the three configured state labels (`draft_label`,
+/// `review_label`, `approved_label`) and removes the other two.  All operations
+/// are idempotent — calling this function multiple times with the same inputs
+/// produces the same outcome.
+///
+/// The state priority is:
+/// 1. `is_draft == true` → apply `draft_label`
+/// 2. `is_approved == true` → apply `approved_label`
+/// 3. Otherwise → apply `review_label`
+///
+/// When the target label for a state is `None`, it is simply not applied;
+/// the other two state labels are still removed so the PR cannot be left
+/// carrying a stale label.
+///
+/// Returns early without touching labels when `config.enabled` is `false`.
+///
+/// # Arguments
+///
+/// * `provider` - The Git provider implementation
+/// * `owner` - The owner of the repository
+/// * `repo` - The name of the repository
+/// * `pr_number` - The pull request number
+/// * `is_draft` - Whether the PR is currently in draft state
+/// * `is_approved` - Whether the PR has at least one approving review
+/// * `config` - The PR state labels configuration
+///
+/// # Returns
+///
+/// `Ok(())` on success; provider errors are propagated.
+pub async fn manage_pr_state_labels<P: PullRequestProvider>(
+    provider: &P,
+    owner: &str,
+    repo: &str,
+    pr_number: u64,
+    is_draft: bool,
+    is_approved: bool,
+    config: &PrStateLabelsConfig,
+) -> Result<(), MergeWardenError> {
+    if !config.enabled {
+        debug!(
+            repository_owner = owner,
+            repository = repo,
+            pr_number = pr_number,
+            "PR state labels disabled — skipping"
+        );
+        return Ok(());
+    }
+
+    // Determine which label is the target for the current state.
+    let target_label: &Option<String> = if is_draft {
+        &config.draft_label
+    } else if is_approved {
+        &config.approved_label
+    } else {
+        &config.review_label
+    };
+
+    info!(
+        repository_owner = owner,
+        repository = repo,
+        pr_number = pr_number,
+        is_draft = is_draft,
+        is_approved = is_approved,
+        target_label = ?target_label,
+        "Managing PR state lifecycle labels"
+    );
+
+    // Snapshot current labels once to avoid multiple API calls.
+    let current_pr_labels = provider
+        .list_applied_labels(owner, repo, pr_number)
+        .await
+        .map_err(|e| {
+            MergeWardenError::FailedToUpdatePullRequest(format!("Failed to list PR labels: {e}"))
+        })?;
+
+    // Collect all configured state label names.
+    let all_state_labels: [&Option<String>; 3] = [
+        &config.draft_label,
+        &config.review_label,
+        &config.approved_label,
+    ];
+
+    // Remove every state label that is NOT the target and IS currently applied.
+    for label_name in all_state_labels.iter().filter_map(|opt| opt.as_deref()) {
+        let is_target = target_label.as_deref() == Some(label_name);
+        if !is_target && current_pr_labels.iter().any(|l| l.name == label_name) {
+            if let Err(e) = provider
+                .remove_label(owner, repo, pr_number, label_name)
+                .await
+            {
+                warn!(
+                    repository_owner = owner,
+                    repository = repo,
+                    pr_number = pr_number,
+                    label = %label_name,
+                    error = %e,
+                    "Failed to remove stale state label"
+                );
+            } else {
+                info!(
+                    repository_owner = owner,
+                    repository = repo,
+                    pr_number = pr_number,
+                    label = %label_name,
+                    "Removed stale state label"
+                );
+            }
+        }
+    }
+
+    // Add the target label if it is configured and not already present.
+    // Note: removal failures above are treated as best-effort (warn + continue).
+    // Addition failures are propagated so callers can detect and surface them.
+    // An empty target string (e.g. draft_label = "") is treated the same as None:
+    // no label is applied, but the other state labels have already been removed.
+    if let Some(target) = target_label {
+        if !target.is_empty() && !current_pr_labels.iter().any(|l| &l.name == target) {
+            provider
+                .add_labels(owner, repo, pr_number, std::slice::from_ref(target))
+                .await
+                .map_err(|e| {
+                    warn!(
+                        repository_owner = owner,
+                        repository = repo,
+                        pr_number = pr_number,
+                        label = %target,
+                        error = %e,
+                        "Failed to add state label"
+                    );
+                    MergeWardenError::FailedToUpdatePullRequest(format!(
+                        "Failed to add PR state label '{target}'"
+                    ))
+                })?;
+
+            info!(
+                repository_owner = owner,
+                repository = repo,
+                pr_number = pr_number,
+                label = %target,
+                "Applied PR state label"
+            );
+        }
+    }
+
+    Ok(())
 }

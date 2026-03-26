@@ -54,6 +54,7 @@ add_comment = true
 # Enable WIP (Work In Progress) detection and blocking.
 # When enabled, PRs whose title or description match any WIP pattern will have
 # their merge check set to "failure" until the WIP markers are removed.
+
 # WIP blocking cannot be bypassed by any user — it is always enforced.
 enforce_wip_blocking = false
 
@@ -70,6 +71,24 @@ wip_title_patterns = ["WIP", "wip:", "[wip]", "draft:", "Draft:"]
 # Substrings to search for in the PR DESCRIPTION to detect WIP status.
 # Empty by default — WIP detection in the description is opt-in.
 wip_description_patterns = []
+
+# PR state lifecycle labels — apply a single label reflecting the current PR
+# state (draft, awaiting review, or approved). Labels are managed idempotently
+# on every PR event: exactly one state label is applied and the other two are
+# removed.
+[policies.pullRequests.prState]
+# Set to true to enable state-lifecycle label management.
+enabled = false
+
+# Label applied when the PR is in draft mode.
+# Remove this key (or set to empty string) to skip labeling for this state.
+# draft_label = "status: draft"
+
+# Label applied when the PR is ready for review but not yet approved.
+# review_label = "status: in-review"
+
+# Label applied when the PR has at least one approving review.
+# approved_label = "status: approved"
 
 # Configuration for smart change type label detection
 [change_type_labels]
