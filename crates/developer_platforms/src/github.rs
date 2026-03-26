@@ -878,7 +878,11 @@ impl PullRequestProvider for GitHubProvider {
                 .filter_map(|v| {
                     let id = v["id"].as_u64()?;
                     let state = v["state"].as_str()?.to_lowercase();
-                    let user_id = v["user"]["id"].as_u64().unwrap_or_default();
+                    // Skip reviews whose user object is missing or has a null id.
+                    // Such reviews cannot be attributed to a specific reviewer and
+                    // must not participate in per-reviewer deduplication (they would
+                    // all collide at key 0 in the HashMap).
+                    let user_id = v["user"]["id"].as_u64()?;
                     let user_login = v["user"]["login"].as_str().unwrap_or_default().to_string();
                     Some(Review {
                         id,

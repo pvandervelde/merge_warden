@@ -1052,3 +1052,34 @@ async fn test_list_pr_reviews_api_error_returns_err() {
 
     assert!(result.is_err());
 }
+
+#[tokio::test]
+async fn test_list_pr_reviews_null_user_id_review_is_skipped() {
+    // Reviews whose user object is null or whose user.id is missing cannot be
+    // attributed to a specific reviewer and must be silently dropped rather than
+    // colliding at key 0 in the per-reviewer deduplication HashMap.
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/30/reviews"))
+        .and(query_param("per_page", "100"))
+        .and(query_param("page", "1"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            // Valid review — should be included.
+            { "id": 1, "state": "APPROVED", "user": { "id": 100, "login": "alice" } },
+            // Null user object — should be skipped.
+            { "id": 2, "state": "APPROVED", "user": null },
+            // Missing user.id — should be skipped.
+            { "id": 3, "state": "CHANGES_REQUESTED", "user": { "login": "bot" } }
+        ])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider.list_pr_reviews("owner", "repo", 30).await.unwrap();
+
+    // Only the review with a valid, non-null user.id survives.
+    assert_eq!(result.len(), 1);
+    assert_eq!(result[0].id, 1);
+    assert_eq!(result[0].user.id, 100);
+}

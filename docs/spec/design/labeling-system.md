@@ -691,7 +691,11 @@ order events arrive, providing idempotent, eventually-consistent behaviour.
 The evaluation logic on each event:
 
 1. Check `pr.draft` — if `true`, the PR is in draft state regardless of reviews.
-2. Otherwise call `list_pr_reviews` to check whether any current review has `state: "approved"`.
+2. Otherwise call `list_pr_reviews`, then group all reviews by reviewer (taking the **most
+   recent review per reviewer** — the API returns reviews oldest-first). A reviewer who first
+   approved and later submitted `changes_requested` or was `dismissed` is no longer counted
+   as an approver. After deduplication, check whether any reviewer's latest review has
+   `state: "approved"`.
 3. Apply/replace the label that matches the current state; remove the labels for the other
    two states.
 
@@ -797,8 +801,10 @@ State labels are orthogonal to all other label categories:
    applied.
 4. When a PR is converted back to draft, `review_label` and `approved_label` are removed and
    `draft_label` is applied.
-5. When a PR previously approved receives a `changes_requested` review, it is no longer
-   considered approved and reverts to `review_label`.
+5. When a PR previously approved receives a `changes_requested` or `dismissed` review, it
+   is no longer considered approved and reverts to `review_label`. (A `dismissed` review
+   is not an approval; the implementation's per-reviewer latest-review check handles this
+   correctly without special-casing.)
 6. If `enabled = false`, no lifecycle labels are ever applied or removed.
 7. If a specific state label is `None`, no label is applied for that state; labels for the
    other states are still removed normally.
