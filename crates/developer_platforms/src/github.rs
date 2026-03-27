@@ -9,8 +9,10 @@ use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
     errors::Error,
-    models::{Comment, Label, PullRequest, PullRequestFile, Review, User},
-    ConfigFetcher, PullRequestProvider,
+    models::{
+        Comment, IssueMetadata, IssueMilestone, Label, PullRequest, PullRequestFile, Review, User,
+    },
+    ConfigFetcher, IssueMetadataProvider, PullRequestProvider,
 };
 
 #[cfg(test)]
@@ -912,5 +914,141 @@ impl PullRequestProvider for GitHubProvider {
         );
 
         Ok(all_reviews)
+    }
+}
+
+#[async_trait]
+impl IssueMetadataProvider for GitHubProvider {
+    /// Fetches milestone metadata for a single issue.
+    ///
+    /// Calls `GET /repos/{owner}/{repo}/issues/{number}` and maps the milestone
+    /// field to [`IssueMilestone`]. Project metadata is not yet available because
+    /// the github-bot-sdk GraphQL project operations are unimplemented; the
+    /// `projects` field is always returned as an empty `Vec`.
+    ///
+    /// Returns `Ok(None)` when the issue does not exist (404).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidResponse`] for unexpected API responses, or the
+    /// appropriate [`Error`] variant for auth/rate-limit failures.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, issue = issue_number))]
+    async fn get_issue_metadata(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        issue_number: u64,
+    ) -> Result<Option<IssueMetadata>, Error> {
+        let issue = match self
+            .client
+            .get_issue(repo_owner, repo_name, issue_number)
+            .await
+        {
+            Ok(i) => i,
+            Err(ApiError::NotFound) => {
+                debug!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    issue = issue_number,
+                    "Issue not found (404)"
+                );
+                return Ok(None);
+            }
+            Err(e) => {
+                error!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    issue = issue_number,
+                    error = %e,
+                    "Failed to fetch issue metadata"
+                );
+                return Err(map_api_error(e));
+            }
+        };
+
+        let milestone = issue.milestone.map(|m| IssueMilestone {
+            number: m.number,
+            title: m.title,
+        });
+
+        // Project metadata requires the github-bot-sdk to implement GraphQL project
+        // operations (addProjectV2ItemById, etc.).  Until SDK support is available,
+        // always return an empty projects list.
+        debug!(
+            owner = repo_owner,
+            repo = repo_name,
+            issue = issue_number,
+            has_milestone = milestone.is_some(),
+            "Fetched issue metadata (projects not yet supported)"
+        );
+
+        Ok(Some(IssueMetadata {
+            milestone,
+            projects: vec![],
+        }))
+    }
+
+    /// Sets the milestone on a pull request.
+    ///
+    /// Delegates to `PATCH /repos/{owner}/{repo}/pulls/{number}` via the SDK.
+    /// Pass `milestone_number: None` to clear the milestone from the PR.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::FailedToUpdatePullRequest`] if the API call fails.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number, milestone = ?milestone_number))]
+    async fn set_pull_request_milestone(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr_number: u64,
+        milestone_number: Option<u64>,
+    ) -> Result<(), Error> {
+        self.client
+            .set_pull_request_milestone(repo_owner, repo_name, pr_number, milestone_number)
+            .await
+            .map(|_| ())
+            .map_err(|e| {
+                warn!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr_number,
+                    milestone = ?milestone_number,
+                    error = %e,
+                    "Failed to set milestone on pull request"
+                );
+                Error::FailedToUpdatePullRequest(format!(
+                    "Failed to set milestone on pull request: {}",
+                    e
+                ))
+            })
+    }
+
+    /// Adding a pull request to a Projects v2 project is not yet supported.
+    ///
+    /// This operation requires the `addProjectV2ItemById` GraphQL mutation,
+    /// which the github-bot-sdk does not yet implement. This method will return
+    /// an error until SDK support is available. Teams can avoid hitting this
+    /// by keeping `sync_project_from_issue = false` (the default).
+    ///
+    /// # Errors
+    ///
+    /// Always returns [`Error::ApiError`] until SDK support is available.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number, project = project_node_id))]
+    async fn add_pull_request_to_project(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr_number: u64,
+        project_node_id: &str,
+    ) -> Result<(), Error> {
+        warn!(
+            owner = repo_owner,
+            repo = repo_name,
+            pr = pr_number,
+            project = project_node_id,
+            "add_pull_request_to_project is not yet supported: github-bot-sdk GraphQL project operations are unimplemented"
+        );
+        Err(Error::ApiError())
     }
 }

@@ -20,7 +20,7 @@ use wiremock::{
 
 use super::GitHubProvider;
 use crate::errors::Error;
-use crate::{ConfigFetcher, PullRequestProvider};
+use crate::{ConfigFetcher, IssueMetadataProvider, PullRequestProvider};
 
 // ---------------------------------------------------------------------------
 // Test helper: mock authentication provider
@@ -1082,4 +1082,248 @@ async fn test_list_pr_reviews_null_user_id_review_is_skipped() {
     assert_eq!(result.len(), 1);
     assert_eq!(result[0].id, 1);
     assert_eq!(result[0].user.id, 100);
+}
+
+// ---------------------------------------------------------------------------
+// IssueMetadataProvider — get_issue_metadata
+// ---------------------------------------------------------------------------
+
+fn minimal_issue_json(issue_number: u64, with_milestone: bool) -> serde_json::Value {
+    let milestone = if with_milestone {
+        json!({
+            "id": 100,
+            "node_id": "MI_100",
+            "number": 5,
+            "title": "v1.0",
+            "description": null,
+            "state": "open",
+            "open_issues": 3,
+            "closed_issues": 7,
+            "due_on": null,
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-02-01T00:00:00Z",
+            "closed_at": null
+        })
+    } else {
+        json!(null)
+    };
+
+    json!({
+        "id": 1,
+        "node_id": "I_1",
+        "number": issue_number,
+        "title": "Test Issue",
+        "body": null,
+        "state": "open",
+        "user": { "id": 1, "login": "user", "node_id": "U_1", "type": "User" },
+        "assignees": [],
+        "labels": [],
+        "milestone": milestone,
+        "comments": 0,
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-01-01T00:00:00Z",
+        "closed_at": null,
+        "html_url": "https://github.com/owner/repo/issues/1"
+    })
+}
+
+fn minimal_pr_json(pr_number: u64) -> serde_json::Value {
+    let repo = json!({
+        "id": 1,
+        "name": "repo",
+        "full_name": "owner/repo",
+        "owner": { "id": 1, "login": "owner", "node_id": "O_1", "type": "Organization" },
+        "private": false,
+        "html_url": "https://github.com/owner/repo",
+        "clone_url": "https://github.com/owner/repo.git"
+    });
+    json!({
+        "id": 1,
+        "node_id": "PR_1",
+        "number": pr_number,
+        "title": "Test PR",
+        "body": null,
+        "state": "open",
+        "user": { "id": 1, "login": "user", "node_id": "U_1", "type": "User" },
+        "head": { "ref": "feature", "sha": "abc123", "repo": repo.clone() },
+        "base": { "ref": "main", "sha": "def456", "repo": repo },
+        "draft": false,
+        "merged": false,
+        "mergeable": null,
+        "merge_commit_sha": null,
+        "assignees": [],
+        "requested_reviewers": [],
+        "labels": [],
+        "milestone": null,
+        "created_at": "2024-01-01T00:00:00Z",
+        "updated_at": "2024-01-01T00:00:00Z",
+        "closed_at": null,
+        "merged_at": null,
+        "html_url": "https://github.com/owner/repo/pull/1"
+    })
+}
+
+#[tokio::test]
+async fn test_get_issue_metadata_with_milestone() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/issues/42"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(minimal_issue_json(42, true)))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .get_issue_metadata("owner", "repo", 42)
+        .await
+        .unwrap();
+
+    let metadata = result.expect("Expected Some(IssueMetadata)");
+    let milestone = metadata.milestone.expect("Expected milestone");
+    assert_eq!(milestone.number, 5);
+    assert_eq!(milestone.title, "v1.0");
+    assert!(
+        metadata.projects.is_empty(),
+        "Projects should be empty (SDK unsupported)"
+    );
+}
+
+#[tokio::test]
+async fn test_get_issue_metadata_without_milestone() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/issues/10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(minimal_issue_json(10, false)))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .get_issue_metadata("owner", "repo", 10)
+        .await
+        .unwrap();
+
+    let metadata = result.expect("Expected Some(IssueMetadata)");
+    assert!(metadata.milestone.is_none());
+    assert!(metadata.projects.is_empty());
+}
+
+#[tokio::test]
+async fn test_get_issue_metadata_not_found_returns_none() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/issues/999"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({
+            "message": "Not Found"
+        })))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .get_issue_metadata("owner", "repo", 999)
+        .await
+        .unwrap();
+
+    assert!(result.is_none(), "404 should yield Ok(None)");
+}
+
+#[tokio::test]
+async fn test_get_issue_metadata_api_error_returns_err() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/issues/7"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("Internal Server Error"))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider.get_issue_metadata("owner", "repo", 7).await;
+
+    assert!(result.is_err(), "500 should yield Err");
+}
+
+// ---------------------------------------------------------------------------
+// IssueMetadataProvider — set_pull_request_milestone
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_set_pull_request_milestone_success() {
+    let server = MockServer::start().await;
+
+    // SDK calls PATCH /repos/{owner}/{repo}/pulls/{number} to set the milestone.
+    Mock::given(method("PATCH"))
+        .and(path("/repos/owner/repo/pulls/42"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(minimal_pr_json(42)))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .set_pull_request_milestone("owner", "repo", 42, Some(5))
+        .await;
+
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_set_pull_request_milestone_clear() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("PATCH"))
+        .and(path("/repos/owner/repo/pulls/42"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(minimal_pr_json(42)))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .set_pull_request_milestone("owner", "repo", 42, None)
+        .await;
+
+    assert!(result.is_ok());
+}
+
+#[tokio::test]
+async fn test_set_pull_request_milestone_api_error() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("PATCH"))
+        .and(path("/repos/owner/repo/pulls/99"))
+        .respond_with(ResponseTemplate::new(404).set_body_json(json!({
+            "message": "Not Found"
+        })))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .set_pull_request_milestone("owner", "repo", 99, Some(3))
+        .await;
+
+    assert!(matches!(result, Err(Error::FailedToUpdatePullRequest(_))));
+}
+
+// ---------------------------------------------------------------------------
+// IssueMetadataProvider — add_pull_request_to_project
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_add_pull_request_to_project_not_yet_supported() {
+    // No WireMock server needed — the implementation returns Err without any HTTP call.
+    let server = MockServer::start().await;
+    let provider = make_provider(&server.uri()).await;
+
+    let result = provider
+        .add_pull_request_to_project("owner", "repo", 42, "PVT_kwDOAbc123")
+        .await;
+
+    assert!(
+        matches!(result, Err(Error::ApiError())),
+        "Expected ApiError while SDK project support is pending"
+    );
 }
