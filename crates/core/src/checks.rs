@@ -358,5 +358,61 @@ pub fn check_pr_size(
 /// assert_eq!(extract_closing_issue_reference("relates to #99"), None);
 /// ```
 pub fn extract_closing_issue_reference(body: &str) -> Option<IssueReference> {
-    todo!("implement extract_closing_issue_reference")
+    // Capture group layout:
+    //   1: keyword  (fixes|closes|resolves)
+    //   2: full reference text
+    //   3: issue number from #NNN            (same-repo)
+    //   4: issue number from GH-NNN          (same-repo)
+    //   5: owner from full GitHub URL        (cross-repo)
+    //   6: repo  from full GitHub URL        (cross-repo)
+    //   7: issue number from full GitHub URL (cross-repo)
+    //   8: owner from owner/repo#NNN         (cross-repo)
+    //   9: repo  from owner/repo#NNN         (cross-repo)
+    //  10: issue number from owner/repo#NNN  (cross-repo)
+    let regex = match Regex::new(
+        r"(?i)(fixes|closes|resolves)\s+(#(\d+)|GH-(\d+)|https://github\.com/([^/\s]+)/([^/\s]+)/issues/(\d+)|([a-zA-Z0-9_-]+)/([a-zA-Z0-9_-]+)#(\d+))",
+    ) {
+        Ok(r) => r,
+        Err(_) => return None,
+    };
+
+    for cap in regex.captures_iter(body) {
+        // #NNN — same-repo hash reference
+        if let Some(n) = cap.get(3) {
+            if let Ok(issue_number) = n.as_str().parse::<u64>() {
+                return Some(IssueReference::SameRepo { issue_number });
+            }
+        }
+
+        // GH-NNN — same-repo GH-prefixed reference
+        if let Some(n) = cap.get(4) {
+            if let Ok(issue_number) = n.as_str().parse::<u64>() {
+                return Some(IssueReference::SameRepo { issue_number });
+            }
+        }
+
+        // https://github.com/owner/repo/issues/NNN
+        if let (Some(owner), Some(repo), Some(n)) = (cap.get(5), cap.get(6), cap.get(7)) {
+            if let Ok(issue_number) = n.as_str().parse::<u64>() {
+                return Some(IssueReference::CrossRepo {
+                    owner: owner.as_str().to_string(),
+                    repo: repo.as_str().to_string(),
+                    issue_number,
+                });
+            }
+        }
+
+        // owner/repo#NNN
+        if let (Some(owner), Some(repo), Some(n)) = (cap.get(8), cap.get(9), cap.get(10)) {
+            if let Ok(issue_number) = n.as_str().parse::<u64>() {
+                return Some(IssueReference::CrossRepo {
+                    owner: owner.as_str().to_string(),
+                    repo: repo.as_str().to_string(),
+                    issue_number,
+                });
+            }
+        }
+    }
+
+    None
 }

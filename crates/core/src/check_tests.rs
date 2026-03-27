@@ -1158,3 +1158,4 @@ fn issue_number_accessor_returns_correct_number_for_cross_repo() {
         issue_number: 456,
     };
     assert_eq!(reference.issue_number(), 456);
+}
