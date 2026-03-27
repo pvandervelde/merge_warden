@@ -21,6 +21,62 @@ use regex::Regex;
 #[path = "check_tests.rs"]
 mod tests;
 
+/// A parsed issue reference extracted from a pull request body.
+///
+/// Carries enough information to fetch the issue from the appropriate repository,
+/// which may differ from the repository the PR lives in.
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_core::checks::IssueReference;
+///
+/// let same = IssueReference::SameRepo { issue_number: 42 };
+/// assert_eq!(same.issue_number(), 42);
+///
+/// let cross = IssueReference::CrossRepo {
+///     owner: "acme".to_string(),
+///     repo: "widgets".to_string(),
+///     issue_number: 7,
+/// };
+/// assert_eq!(cross.issue_number(), 7);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IssueReference {
+    /// Issue in the same repository as the PR.
+    SameRepo {
+        /// Issue number.
+        issue_number: u64,
+    },
+    /// Issue in a different repository.
+    CrossRepo {
+        /// Repository owner.
+        owner: String,
+        /// Repository name.
+        repo: String,
+        /// Issue number.
+        issue_number: u64,
+    },
+}
+
+impl IssueReference {
+    /// Returns the issue number regardless of reference kind.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use merge_warden_core::checks::IssueReference;
+    ///
+    /// let r = IssueReference::SameRepo { issue_number: 99 };
+    /// assert_eq!(r.issue_number(), 99);
+    /// ```
+    pub fn issue_number(&self) -> u64 {
+        match self {
+            Self::SameRepo { issue_number } | Self::CrossRepo { issue_number, .. } => *issue_number,
+        }
+    }
+}
+
 /// Validates that the PR title follows the Conventional Commits format with bypass support.
 ///
 /// This function checks if the PR title follows the Conventional Commits format.
@@ -270,4 +326,37 @@ pub fn check_pr_size(
     } else {
         ValidationResult::valid()
     }
+}
+
+/// Extracts the first closing-keyword issue reference from a pull request body.
+///
+/// Scans `body` for `fixes`, `closes`, or `resolves` references in all supported
+/// formats. Returns the first match found, or `None` if no closing reference is
+/// present. Informational keywords (`references`, `relates to`) are intentionally
+/// excluded — they satisfy the work-item link check but are not used for metadata
+/// propagation.
+///
+/// # Arguments
+///
+/// * `body` - The pull request body text to scan.
+///
+/// # Returns
+///
+/// The first closing-keyword issue reference found, or `None`.
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_core::checks::{extract_closing_issue_reference, IssueReference};
+///
+/// assert_eq!(
+///     extract_closing_issue_reference("fixes #42"),
+///     Some(IssueReference::SameRepo { issue_number: 42 }),
+/// );
+///
+/// // Informational keywords are not closing references
+/// assert_eq!(extract_closing_issue_reference("relates to #99"), None);
+/// ```
+pub fn extract_closing_issue_reference(body: &str) -> Option<IssueReference> {
+    todo!("implement extract_closing_issue_reference")
 }
