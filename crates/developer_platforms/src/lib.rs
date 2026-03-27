@@ -10,6 +10,7 @@
 //! # Key Components
 //!
 //! - [`PullRequestProvider`] - Core trait for pull request operations
+//! - [`IssueMetadataProvider`] - Trait for fetching and updating issue metadata
 //! - [`ConfigFetcher`] - Trait for fetching configuration files
 //! - [`models`] - Data models for pull requests, comments, labels, etc.
 //! - [`github`] - GitHub implementation of the provider traits
@@ -55,7 +56,7 @@ pub mod models;
 mod lib_tests;
 
 use errors::Error;
-use models::{Comment, Label, PullRequest, PullRequestFile, Review};
+use models::{Comment, IssueMetadata, Label, PullRequest, PullRequestFile, Review};
 
 /// Trait to fetch configuration files from remote repositories.
 #[async_trait]
@@ -644,4 +645,120 @@ pub trait PullRequestProvider {
         repo_name: &str,
         pr_number: u64,
     ) -> Result<Vec<Review>, Error>;
+}
+
+/// Provides read access to issue metadata for propagation to pull requests.
+///
+/// Implementations retrieve milestone and project information from an issue so
+/// that `merge_warden_core` can copy that information onto the associated pull
+/// request.
+///
+/// # Platform Support
+///
+/// The default implementation is [`github::GitHubIssueMetadataProvider`].
+/// Teams using external issue trackers (Jira, Linear, etc.) that do not wish
+/// to implement this trait can simply leave both propagation flags disabled in
+/// their configuration, which is the default.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use merge_warden_developer_platforms::{IssueMetadataProvider, errors::Error};
+/// use merge_warden_developer_platforms::models::{IssueMetadata, IssueMilestone, IssueProject};
+/// use async_trait::async_trait;
+///
+/// struct MyIssueProvider;
+///
+/// #[async_trait]
+/// impl IssueMetadataProvider for MyIssueProvider {
+///     async fn get_issue_metadata(
+///         &self,
+///         _repo_owner: &str,
+///         _repo_name: &str,
+///         _issue_number: u64,
+///     ) -> Result<Option<IssueMetadata>, Error> {
+///         Ok(Some(IssueMetadata {
+///             milestone: Some(IssueMilestone { number: 1, title: "v1.0".to_string() }),
+///             projects: vec![],
+///         }))
+///     }
+///     async fn set_pull_request_milestone(
+///         &self,
+///         _repo_owner: &str,
+///         _repo_name: &str,
+///         _pr_number: u64,
+///         _milestone_number: Option<u64>,
+///     ) -> Result<(), Error> {
+///         Ok(())
+///     }
+///     async fn add_pull_request_to_project(
+///         &self,
+///         _repo_owner: &str,
+///         _repo_name: &str,
+///         _pr_number: u64,
+///         _project_node_id: &str,
+///     ) -> Result<(), Error> {
+///         Ok(())
+///     }
+/// }
+/// ```
+#[async_trait]
+pub trait IssueMetadataProvider: Sync + Send {
+    /// Fetch milestone and project metadata for a single issue.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner`   - Owner of the repository where the issue lives.
+    /// * `repo_name`    - Name of the repository where the issue lives.
+    /// * `issue_number` - Issue number within that repository.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Some(metadata))` — issue exists and metadata was fetched.
+    /// - `Ok(None)` — issue does not exist (404).
+    /// - `Err(e)` — transient or permission error.
+    async fn get_issue_metadata(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        issue_number: u64,
+    ) -> Result<Option<IssueMetadata>, Error>;
+
+    /// Set the milestone on a pull request.
+    ///
+    /// Overwrites any existing milestone on the PR. Pass `milestone_number: None`
+    /// to clear — but note that the propagation logic never calls this with `None`.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner`       - Owner of the repository containing the PR.
+    /// * `repo_name`        - Name of that repository.
+    /// * `pr_number`        - Pull request number.
+    /// * `milestone_number` - Milestone number to apply, or `None` to clear.
+    async fn set_pull_request_milestone(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr_number: u64,
+        milestone_number: Option<u64>,
+    ) -> Result<(), Error>;
+
+    /// Add a pull request to a GitHub Projects v2 project.
+    ///
+    /// Uses the PR's node ID and the project's node ID to call the
+    /// `addProjectV2ItemById` GraphQL mutation.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner`      - Owner of the repository containing the PR.
+    /// * `repo_name`       - Name of that repository.
+    /// * `pr_number`       - Pull request number.
+    /// * `project_node_id` - GraphQL node ID of the target project.
+    async fn add_pull_request_to_project(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr_number: u64,
+        project_node_id: &str,
+    ) -> Result<(), Error>;
 }

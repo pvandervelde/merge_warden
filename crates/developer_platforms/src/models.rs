@@ -97,6 +97,88 @@ pub struct Installation {
     pub name: Option<String>,
 }
 
+/// Metadata fetched from a referenced issue for propagation to a pull request.
+///
+/// Contains the milestone and project information from the issue that
+/// can be copied onto the associated pull request. Both fields may be empty
+/// or absent when the issue has no milestone or project links, or when the
+/// provider does not support project propagation.
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_developer_platforms::models::{IssueMetadata, IssueMilestone, IssueProject};
+///
+/// let metadata = IssueMetadata {
+///     milestone: Some(IssueMilestone { number: 3, title: "v1.2.0".to_string() }),
+///     projects: vec![IssueProject { node_id: "PVT_abc123".to_string(), title: "Roadmap".to_string() }],
+/// };
+/// assert_eq!(metadata.milestone.unwrap().number, 3);
+/// assert_eq!(metadata.projects.len(), 1);
+/// ```
+#[derive(Debug, Clone)]
+pub struct IssueMetadata {
+    /// Milestone on the issue, if any.
+    pub milestone: Option<IssueMilestone>,
+
+    /// Projects v2 the issue belongs to.
+    ///
+    /// Empty when the issue has no linked projects, or when project
+    /// propagation is not supported by the provider implementation.
+    pub projects: Vec<IssueProject>,
+}
+
+/// Milestone information from a referenced issue.
+///
+/// Contains the data needed to copy a milestone onto a pull request via
+/// the REST API.
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_developer_platforms::models::IssueMilestone;
+///
+/// let milestone = IssueMilestone {
+///     number: 5,
+///     title: "v2.0.0".to_string(),
+/// };
+/// assert_eq!(milestone.number, 5);
+/// assert_eq!(milestone.title, "v2.0.0");
+/// ```
+#[derive(Debug, Clone)]
+pub struct IssueMilestone {
+    /// Milestone number (repository-scoped, used to set PR milestone via REST).
+    pub number: u64,
+
+    /// Human-readable milestone title (used in log messages).
+    pub title: String,
+}
+
+/// Projects v2 project information from a referenced issue.
+///
+/// Contains the data needed to add a pull request to a Projects v2 project
+/// via the GraphQL `addProjectV2ItemById` mutation.
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_developer_platforms::models::IssueProject;
+///
+/// let project = IssueProject {
+///     node_id: "PVT_kwDOAbc123".to_string(),
+///     title: "Team Roadmap".to_string(),
+/// };
+/// assert!(project.node_id.starts_with("PVT_"));
+/// ```
+#[derive(Debug, Clone)]
+pub struct IssueProject {
+    /// GraphQL node ID of the project (used in `addProjectV2ItemById` mutation).
+    pub node_id: String,
+
+    /// Human-readable project title (used in log messages).
+    pub title: String,
+}
+
 /// Represents a label on a pull request.
 ///
 /// This struct contains the essential information about a label

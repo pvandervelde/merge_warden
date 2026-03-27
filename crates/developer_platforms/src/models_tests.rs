@@ -702,3 +702,162 @@ fn test_user_serialization() {
     assert_eq!(parsed["id"], 303);
     assert_eq!(parsed["login"], "developer");
 }
+
+// ── IssueMetadata tests ──────────────────────────────────────────────────────
+
+#[test]
+fn test_issue_metadata_with_milestone_and_projects() {
+    let metadata = IssueMetadata {
+        milestone: Some(IssueMilestone {
+            number: 3,
+            title: "v1.2.0".to_string(),
+        }),
+        projects: vec![
+            IssueProject {
+                node_id: "PVT_kwDOAbc123".to_string(),
+                title: "Team Roadmap".to_string(),
+            },
+            IssueProject {
+                node_id: "PVT_kwDOXyz789".to_string(),
+                title: "Sprint Board".to_string(),
+            },
+        ],
+    };
+
+    let milestone = metadata.milestone.unwrap();
+    assert_eq!(milestone.number, 3);
+    assert_eq!(milestone.title, "v1.2.0");
+    assert_eq!(metadata.projects.len(), 2);
+    assert_eq!(metadata.projects[0].node_id, "PVT_kwDOAbc123");
+    assert_eq!(metadata.projects[0].title, "Team Roadmap");
+    assert_eq!(metadata.projects[1].node_id, "PVT_kwDOXyz789");
+    assert_eq!(metadata.projects[1].title, "Sprint Board");
+}
+
+#[test]
+fn test_issue_metadata_no_milestone() {
+    let metadata = IssueMetadata {
+        milestone: None,
+        projects: vec![IssueProject {
+            node_id: "PVT_kwDOAbc123".to_string(),
+            title: "Roadmap".to_string(),
+        }],
+    };
+
+    assert!(metadata.milestone.is_none());
+    assert_eq!(metadata.projects.len(), 1);
+}
+
+#[test]
+fn test_issue_metadata_no_projects() {
+    let metadata = IssueMetadata {
+        milestone: Some(IssueMilestone {
+            number: 7,
+            title: "v3.0.0".to_string(),
+        }),
+        projects: vec![],
+    };
+
+    assert_eq!(metadata.milestone.unwrap().number, 7);
+    assert!(metadata.projects.is_empty());
+}
+
+#[test]
+fn test_issue_metadata_empty() {
+    let metadata = IssueMetadata {
+        milestone: None,
+        projects: vec![],
+    };
+
+    assert!(metadata.milestone.is_none());
+    assert!(metadata.projects.is_empty());
+}
+
+#[test]
+fn test_issue_metadata_clone() {
+    let original = IssueMetadata {
+        milestone: Some(IssueMilestone {
+            number: 1,
+            title: "v1.0.0".to_string(),
+        }),
+        projects: vec![IssueProject {
+            node_id: "PVT_abc".to_string(),
+            title: "My Project".to_string(),
+        }],
+    };
+
+    let cloned = original.clone();
+    assert_eq!(cloned.milestone.unwrap().number, 1);
+    assert_eq!(cloned.projects.len(), 1);
+    assert_eq!(cloned.projects[0].node_id, "PVT_abc");
+}
+
+// ── IssueMilestone tests ─────────────────────────────────────────────────────
+
+#[test]
+fn test_issue_milestone_fields() {
+    let milestone = IssueMilestone {
+        number: 12,
+        title: "Q2 2025".to_string(),
+    };
+
+    assert_eq!(milestone.number, 12);
+    assert_eq!(milestone.title, "Q2 2025");
+}
+
+#[test]
+fn test_issue_milestone_clone() {
+    let original = IssueMilestone {
+        number: 5,
+        title: "v2.0.0".to_string(),
+    };
+    let cloned = original.clone();
+
+    assert_eq!(cloned.number, original.number);
+    assert_eq!(cloned.title, original.title);
+}
+
+#[test]
+fn test_issue_milestone_zero_number() {
+    // milestone number 0 is technically invalid in GitHub but we don't validate here
+    let milestone = IssueMilestone {
+        number: 0,
+        title: "empty".to_string(),
+    };
+    assert_eq!(milestone.number, 0);
+}
+
+// ── IssueProject tests ───────────────────────────────────────────────────────
+
+#[test]
+fn test_issue_project_fields() {
+    let project = IssueProject {
+        node_id: "PVT_kwDOBcd456".to_string(),
+        title: "Engineering Backlog".to_string(),
+    };
+
+    assert_eq!(project.node_id, "PVT_kwDOBcd456");
+    assert_eq!(project.title, "Engineering Backlog");
+}
+
+#[test]
+fn test_issue_project_clone() {
+    let original = IssueProject {
+        node_id: "PVT_kwDOAbc123".to_string(),
+        title: "Roadmap".to_string(),
+    };
+    let cloned = original.clone();
+
+    assert_eq!(cloned.node_id, original.node_id);
+    assert_eq!(cloned.title, original.title);
+}
+
+#[test]
+fn test_issue_project_empty_node_id_allowed() {
+    // Struct does not validate — empty node_id is accepted at construction time
+    let project = IssueProject {
+        node_id: String::new(),
+        title: "Unnamed".to_string(),
+    };
+    assert!(project.node_id.is_empty());
+}
