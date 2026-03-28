@@ -452,6 +452,7 @@ impl PullRequestProvider for GitHubProvider {
                 id: pr.user.id,
                 login: pr.user.login,
             }),
+            milestone_number: pr.milestone.as_ref().map(|m| m.number),
         })
     }
 

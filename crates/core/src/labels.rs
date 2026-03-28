@@ -75,6 +75,7 @@ mod tests;
 ///         draft: false,
 ///         body: Some("This PR adds GitHub login functionality.".to_string()),
 ///         author: None,
+///         milestone_number: None,
 ///     };
 ///
 ///     let labels = set_pull_request_labels(provider, "owner", "repo", &pr).await?;

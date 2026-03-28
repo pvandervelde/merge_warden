@@ -258,6 +258,7 @@ impl MergeWardenWebhookHandler {
                     bypass_rules: self.policies.bypass_rules.clone(),
                     wip_check: self.policies.wip_check.clone(),
                     pr_state_labels: self.policies.pr_state_labels.clone(),
+                    issue_propagation: Default::default(),
                 }
             }
         };

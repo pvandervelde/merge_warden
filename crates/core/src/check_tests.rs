@@ -35,6 +35,7 @@ fn create_pull_request(
         draft: false,
         body: body.map(|b| b.to_string()),
         author,
+        milestone_number: None,
     }
 }
 

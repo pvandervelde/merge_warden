@@ -106,6 +106,7 @@ impl IssueReference {
 ///     draft: false,
 ///     body: Some("This PR adds GitHub login functionality.".to_string()),
 ///     author: None,
+///     milestone_number: None,
 /// };
 ///
 /// let bypass_rule = BypassRule::default(); // Disabled bypass
@@ -124,6 +125,7 @@ impl IssueReference {
 ///         id: 123,
 ///         login: "emergency-bot".to_string(),
 ///     }),
+///     milestone_number: None,
 /// };
 ///
 /// let bypass_rule = BypassRule::new(true, vec!["emergency-bot".to_string()]);
@@ -198,6 +200,7 @@ pub fn check_pr_title(
 ///     draft: false,
 ///     body: Some("Emergency fix without work item".to_string()),
 ///     author: Some(bypass_user),
+///     milestone_number: None,
 /// };
 ///
 /// let bypass_rule = BypassRule::new(true, vec!["bypass-user".to_string()]);

@@ -345,6 +345,7 @@ fn test_pull_request_serialization() {
         draft: false,
         body: Some("This PR adds a new feature.\n\nFixes #123".to_string()),
         author: None,
+        milestone_number: None,
     };
 
     // Serialize to JSON
@@ -388,6 +389,7 @@ fn test_pull_request_with_author_serialization() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
 
     // Serialize to JSON
@@ -411,6 +413,7 @@ fn test_pull_request_without_author() {
         draft: false,
         body: Some("Updated documentation".to_string()),
         author: None,
+        milestone_number: None,
     };
 
     // Serialize to JSON
@@ -438,6 +441,7 @@ fn test_pull_request_without_body() {
         draft: false,
         body: None,
         author: None,
+        milestone_number: None,
     };
 
     // Serialize to JSON

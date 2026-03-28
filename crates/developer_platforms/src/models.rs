@@ -244,6 +244,7 @@ pub struct Organization {
 /// * `draft` - Whether the pull request is a draft
 /// * `body` - The description/body of the pull request, if any
 /// * `author` - The user who created the pull request, if available
+/// * `milestone_number` - The milestone number currently set on the PR, if any
 ///
 /// # Examples
 ///
@@ -259,6 +260,7 @@ pub struct Organization {
 ///         id: 456,
 ///         login: "developer123".to_string(),
 ///     }),
+///     milestone_number: None,
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -277,6 +279,13 @@ pub struct PullRequest {
 
     /// The user who created the pull request, if available
     pub author: Option<User>,
+
+    /// The milestone number currently set on the pull request, if any.
+    ///
+    /// Used to detect when the PR milestone already matches the issue milestone
+    /// so that redundant API calls can be skipped during issue metadata propagation.
+    #[serde(default)]
+    pub milestone_number: Option<u64>,
 }
 
 /// Represents a file that has been changed in a pull request.

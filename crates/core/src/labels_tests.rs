@@ -410,6 +410,7 @@ async fn test_determine_labels_breaking_change() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -438,6 +439,7 @@ async fn test_determine_labels_breaking_change_in_body() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -466,6 +468,7 @@ async fn test_determine_labels_bug_fix() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -495,6 +498,7 @@ async fn test_determine_labels_conflicting_information() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -523,6 +527,7 @@ async fn test_determine_labels_empty_pr_body() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -544,6 +549,7 @@ async fn test_determine_labels_error_handling() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
 
     let result = set_pull_request_labels(&provider, "owner", "repo", &pr).await;
@@ -572,6 +578,7 @@ async fn test_determine_labels_feature() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -598,6 +605,7 @@ async fn test_determine_labels_hotfix() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -626,6 +634,7 @@ async fn test_determine_labels_invalid_type_in_pr_title() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -650,6 +659,7 @@ async fn test_determine_labels_keyword_priority() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -683,6 +693,7 @@ async fn test_determine_labels_missing_type_in_pr_title() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -706,6 +717,7 @@ async fn test_determine_labels_multiple_keywords() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -738,6 +750,7 @@ async fn test_determine_labels_no_keywords_in_pr_body() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -762,6 +775,7 @@ async fn test_determine_labels_security() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -790,6 +804,7 @@ async fn test_determine_labels_tech_debt() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -818,6 +833,7 @@ async fn test_determine_labels_with_scope() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -1524,6 +1540,7 @@ async fn test_smart_labeling_pipeline_end_to_end() {
             id: 123,
             login: "developer".to_string(),
         }),
+        milestone_number: None,
     };
 
     // Test the complete pipeline
@@ -1579,6 +1596,7 @@ async fn test_smart_labeling_pipeline_with_fallback() {
             id: 123,
             login: "developer".to_string(),
         }),
+        milestone_number: None,
     };
 
     let labels =
@@ -1605,6 +1623,7 @@ async fn test_smart_labeling_pipeline_legacy_fallback() {
             id: 123,
             login: "developer".to_string(),
         }),
+        milestone_number: None,
     };
 
     let labels = set_pull_request_labels_with_config(&provider, "owner", "repo", &pr, None)
@@ -1642,6 +1661,7 @@ async fn test_smart_labeling_pipeline_disabled() {
             id: 123,
             login: "developer".to_string(),
         }),
+        milestone_number: None,
     };
 
     let labels =
@@ -1696,6 +1716,7 @@ async fn test_smart_labeling_pipeline_multiple_keywords() {
             id: 123,
             login: "developer".to_string(),
         }),
+        milestone_number: None,
     };
 
     let labels =
@@ -1744,6 +1765,7 @@ async fn test_smart_labeling_pipeline_error_recovery() {
             id: 123,
             login: "developer".to_string(),
         }),
+        milestone_number: None,
     };
 
     // Even if some parts fail, should continue processing

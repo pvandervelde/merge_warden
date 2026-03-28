@@ -66,9 +66,10 @@
 //! }
 //! ```
 
+use checks::extract_closing_issue_reference;
 use indoc::formatdoc;
 use merge_warden_developer_platforms::models::{Installation, PullRequest, Repository, Review};
-use merge_warden_developer_platforms::PullRequestProvider;
+use merge_warden_developer_platforms::{IssueMetadataProvider, PullRequestProvider};
 
 pub mod checks;
 pub mod config;
@@ -1351,6 +1352,68 @@ Please update the PR body to include a valid work item reference."#;
                 return Ok(Vec::new());
             }
         }
+    }
+
+    /// Propagates milestone and project metadata from a referenced issue to the pull request.
+    ///
+    /// Runs only when at least one propagation flag is enabled. Extracts the first
+    /// closing-keyword issue reference from the PR body, fetches its metadata via
+    /// `issue_provider`, and applies milestone/project updates as configured.
+    ///
+    /// Failures are logged at `warn` level and do not affect the check status outcome.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner` - The owner of the repository containing the PR.
+    /// * `repo_name` - The name of that repository.
+    /// * `pr` - The pull request being processed.
+    /// * `issue_provider` - Provider for fetching issue metadata and setting PR milestone/projects.
+    #[instrument(skip(issue_provider), fields(owner = repo_owner, repo = repo_name, pr = pr.number))]
+    pub async fn propagate_issue_metadata(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr: &PullRequest,
+        issue_provider: &dyn IssueMetadataProvider,
+    ) {
+        // TODO: implement
+        let _ = (repo_owner, repo_name, pr, issue_provider);
+    }
+
+    /// Copies the milestone from the issue onto the pull request.
+    ///
+    /// No-op when:
+    /// - The issue has no milestone.
+    /// - The PR already has the same milestone number as the issue.
+    ///
+    /// Logs at `info` when overwriting an existing PR milestone that differs.
+    /// Logs at `warn` when the API call fails (propagation errors do not surface to check status).
+    async fn sync_milestone(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr: &PullRequest,
+        metadata: &merge_warden_developer_platforms::models::IssueMetadata,
+        issue_provider: &dyn IssueMetadataProvider,
+    ) {
+        // TODO: implement
+        let _ = (repo_owner, repo_name, pr, metadata, issue_provider);
+    }
+
+    /// Adds the pull request to each Projects v2 project from the referenced issue.
+    ///
+    /// The SDK GraphQL project operations are not yet implemented. This method
+    /// logs a warning and skips project propagation until SDK support is available.
+    async fn sync_projects(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr: &PullRequest,
+        metadata: &merge_warden_developer_platforms::models::IssueMetadata,
+        issue_provider: &dyn IssueMetadataProvider,
+    ) {
+        // TODO: implement
+        let _ = (repo_owner, repo_name, pr, metadata, issue_provider);
     }
 
     /// Creates a new `MergeWarden` instance with default configuration.
