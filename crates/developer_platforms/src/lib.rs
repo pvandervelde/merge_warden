@@ -703,7 +703,7 @@ pub trait PullRequestProvider {
 /// }
 /// ```
 #[async_trait]
-pub trait IssueMetadataProvider: Sync + Send {
+pub trait IssueMetadataProvider: std::fmt::Debug + Sync + Send {
     /// Fetch milestone and project metadata for a single issue.
     ///
     /// # Arguments

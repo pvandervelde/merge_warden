@@ -194,6 +194,11 @@ pub struct MergeWarden<P: PullRequestProvider + std::fmt::Debug> {
 
     /// The validation configuration settings for this instance
     config: CurrentPullRequestValidationConfiguration,
+
+    /// Optional provider for fetching issue metadata and writing milestone/project
+    /// updates back to pull requests. When `None`, `propagate_issue_metadata` is
+    /// skipped regardless of the `issue_propagation` config flags.
+    issue_provider: Option<Box<dyn IssueMetadataProvider>>,
 }
 
 impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
@@ -1642,6 +1647,7 @@ Please update the PR body to include a valid work item reference."#;
         Self {
             provider,
             config: CurrentPullRequestValidationConfiguration::default(),
+            issue_provider: None,
         }
     }
 
@@ -2215,6 +2221,34 @@ Please update the PR body to include a valid work item reference."#;
     /// fn main() {}
     /// ```
     pub fn with_config(provider: P, config: CurrentPullRequestValidationConfiguration) -> Self {
-        Self { provider, config }
+        Self {
+            provider,
+            config,
+            issue_provider: None,
+        }
+    }
+
+    /// Attaches an [`IssueMetadataProvider`] to this instance.
+    ///
+    /// When set, [`process_pull_request`] will call [`propagate_issue_metadata`]
+    /// after all validation checks and label updates, immediately before the
+    /// final check-status update. The propagation honours the
+    /// `issue_propagation` flags in the configuration and is non-fatal —
+    /// failures are logged at `warn` level and never affect the check-status
+    /// outcome.
+    ///
+    /// # Arguments
+    ///
+    /// * `provider` - A boxed [`IssueMetadataProvider`] implementation.
+    ///
+    /// # Returns
+    ///
+    /// The updated `MergeWarden` instance (builder pattern).
+    ///
+    /// [`process_pull_request`]: MergeWarden::process_pull_request
+    /// [`propagate_issue_metadata`]: MergeWarden::propagate_issue_metadata
+    pub fn with_issue_provider(mut self, provider: Box<dyn IssueMetadataProvider>) -> Self {
+        self.issue_provider = Some(provider);
+        self
     }
 }

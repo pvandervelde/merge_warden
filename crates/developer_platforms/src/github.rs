@@ -66,7 +66,7 @@ fn map_api_error(e: ApiError) -> Error {
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GitHubProvider {
     /// Installation-scoped GitHub API client.
     client: InstallationClient,

@@ -2550,7 +2550,7 @@ use merge_warden_developer_platforms::{
 };
 
 /// Minimal mock for `IssueMetadataProvider`.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct MockIssueProvider {
     /// Metadata returned by `get_issue_metadata`. `None` means 404.
     metadata: Option<IssueMetadata>,
@@ -3017,4 +3017,104 @@ async fn test_propagate_issue_metadata_both_flags_enabled() {
 
     assert_eq!(issue_provider.milestone_calls().len(), 1);
     assert_eq!(issue_provider.project_calls().len(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// process_pull_request + with_issue_provider integration tests (task 6.8)
+// ---------------------------------------------------------------------------
+
+/// Verify that `process_pull_request` calls `propagate_issue_metadata` when an
+/// `IssueMetadataProvider` is wired in via `with_issue_provider` and the
+/// `sync_milestone_from_issue` flag is enabled.
+#[tokio::test]
+async fn test_process_pull_request_calls_milestone_propagation_via_issue_provider() {
+    // Set up a PR with a closing issue reference in its body.
+    let pr = PullRequest {
+        number: 77,
+        title: "feat: new widget".to_string(),
+        draft: false,
+        body: Some("Closes #10".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+
+    let pr_provider = MockGitProvider::new();
+    pr_provider.set_pull_request(pr);
+
+    // Issue provider: issue 10 has milestone 5.
+    let issue_provider = MockIssueProvider::new().with_metadata(IssueMetadata {
+        milestone: Some(IssueMilestone {
+            number: 5,
+            title: "v1.0".to_string(),
+        }),
+        projects: vec![],
+    });
+    let issue_provider_check = issue_provider.clone();
+
+    let config = CurrentPullRequestValidationConfiguration {
+        issue_propagation: IssuePropagationConfig {
+            sync_milestone_from_issue: true,
+            sync_project_from_issue: false,
+        },
+        ..CurrentPullRequestValidationConfiguration::default()
+    };
+
+    let warden =
+        MergeWarden::with_config(pr_provider, config).with_issue_provider(Box::new(issue_provider));
+
+    warden
+        .process_pull_request("owner", "repo", 77)
+        .await
+        .unwrap();
+
+    let calls = issue_provider_check.milestone_calls();
+    assert_eq!(
+        calls.len(),
+        1,
+        "set_pull_request_milestone should be called once when issue provider is wired in"
+    );
+    assert_eq!(calls[0], (77, Some(5)));
+}
+
+/// Verify that `process_pull_request` does NOT call any issue-provider methods
+/// when no `IssueMetadataProvider` is attached (backward-compatible behaviour).
+#[tokio::test]
+async fn test_process_pull_request_skips_propagation_without_issue_provider() {
+    let pr = PullRequest {
+        number: 1,
+        title: "feat: something".to_string(),
+        draft: false,
+        body: Some("Closes #10".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+
+    let pr_provider = MockGitProvider::new();
+    pr_provider.set_pull_request(pr);
+
+    // Config has the flag enabled, but no issue provider is set.
+    let config = CurrentPullRequestValidationConfiguration {
+        issue_propagation: IssuePropagationConfig {
+            sync_milestone_from_issue: true,
+            sync_project_from_issue: false,
+        },
+        ..CurrentPullRequestValidationConfiguration::default()
+    };
+
+    // No `.with_issue_provider(...)` call — propagation must be silently skipped.
+    let warden = MergeWarden::with_config(pr_provider, config);
+
+    // Must complete without panicking.
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+    // If we reach here without a panic, the test passes. There is no issue
+    // provider to assert on since none was supplied.
 }

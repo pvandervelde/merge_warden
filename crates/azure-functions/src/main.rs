@@ -190,6 +190,8 @@ impl WebhookHandler for MergeWardenHandler {
             })?;
 
         let provider = GitHubProvider::new(installation_client);
+        // Clone before moving — cheap Arc-backed clone of InstallationClient.
+        let issue_provider = provider.clone();
 
         let merge_warden_config_path = ".github/merge-warden.toml";
         let validation_config = match load_merge_warden_config(
@@ -230,7 +232,8 @@ impl WebhookHandler for MergeWardenHandler {
             }
         };
 
-        let warden = MergeWarden::with_config(provider, validation_config);
+        let warden = MergeWarden::with_config(provider, validation_config)
+            .with_issue_provider(Box::new(issue_provider));
 
         info!(
             message = "Processing pull request",

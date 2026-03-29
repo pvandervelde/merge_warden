@@ -222,6 +222,10 @@ impl MergeWardenWebhookHandler {
             })?;
 
         let provider = GitHubProvider::new(installation_client);
+        // Clone the provider before moving it into MergeWarden, so the same
+        // installation-scoped client can also serve as the IssueMetadataProvider.
+        // The clone is cheap: InstallationClient wraps an Arc<GitHubClient>.
+        let issue_provider = provider.clone();
 
         let merge_warden_config_path = ".github/merge-warden.toml";
 
@@ -263,7 +267,8 @@ impl MergeWardenWebhookHandler {
             }
         };
 
-        let warden = MergeWarden::with_config(provider, validation_config);
+        let warden = MergeWarden::with_config(provider, validation_config)
+            .with_issue_provider(Box::new(issue_provider));
 
         warden
             .process_pull_request(repo_owner, repo_name, pr_number.into())
