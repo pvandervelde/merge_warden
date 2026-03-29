@@ -2094,6 +2094,15 @@ Please update the PR body to include a valid work item reference."#;
             }
         };
 
+        // Propagate issue metadata (milestone / projects) to the PR when an
+        // IssueMetadataProvider has been attached via with_issue_provider.
+        // Runs after all validation and labelling, immediately before the final
+        // check-status update. Failures are non-fatal and logged at warn level.
+        if let Some(issue_prov) = &self.issue_provider {
+            self.propagate_issue_metadata(repo_owner, repo_name, &pr, issue_prov.as_ref())
+                .await;
+        }
+
         // Smart text formatting that includes all messages with separators when content exists
         let text = {
             let mut messages = Vec::new();
