@@ -566,7 +566,7 @@ impl BypassRules {
 /// flags disabled (or omit `[policies.pullRequests.issuePropagation]` entirely).
 /// When both are `false`, no additional GitHub API calls are made beyond what
 /// the existing work-item reference check already performs.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IssuePropagationConfig {
     /// When `true`, copy the milestone from the first closing-keyword issue
     /// reference in the PR body onto the pull request.
@@ -594,14 +594,7 @@ impl IssuePropagationConfig {
     }
 }
 
-impl Default for IssuePropagationConfig {
-    fn default() -> Self {
-        Self {
-            sync_milestone_from_issue: false,
-            sync_project_from_issue: false,
-        }
-    }
-}
+
 
 /// Configuration for the validation of the current pull request.
 #[derive(Debug, Clone)]

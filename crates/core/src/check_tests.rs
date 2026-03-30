@@ -6,7 +6,9 @@
 use merge_warden_developer_platforms::models::{PullRequest, User};
 
 use crate::{
-    checks::{check_pr_title, check_work_item_reference, extract_closing_issue_reference, IssueReference},
+    checks::{
+        check_pr_title, check_work_item_reference, extract_closing_issue_reference, IssueReference,
+    },
     config::{
         BypassRule, CurrentPullRequestValidationConfiguration, CONVENTIONAL_COMMIT_REGEX,
         WORK_ITEM_REGEX,
@@ -1075,8 +1077,7 @@ fn should_parse_cross_repo_owner_repo_reference() {
 /// Assertion 5: full GitHub URL cross-repo reference.
 #[test]
 fn should_parse_cross_repo_full_github_url_reference() {
-    let result =
-        extract_closing_issue_reference("closes https://github.com/owner/repo/issues/88");
+    let result = extract_closing_issue_reference("closes https://github.com/owner/repo/issues/88");
     assert_eq!(
         result,
         Some(IssueReference::CrossRepo {

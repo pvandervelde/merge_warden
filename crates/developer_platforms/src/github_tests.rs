@@ -1327,3 +1327,55 @@ async fn test_add_pull_request_to_project_not_yet_supported() {
         "Expected ApiError while SDK project support is pending"
     );
 }
+
+// ---------------------------------------------------------------------------
+// End-to-end: milestone propagation flow (GET issue → PATCH pull request)
+// ---------------------------------------------------------------------------
+
+/// Verifies the complete milestone propagation flow via the GitHub API:
+/// 1. Fetch issue metadata (includes milestone number 5).
+/// 2. Apply that milestone number to the pull request.
+/// Both HTTP legs are asserted through independent WireMock mocks.
+#[tokio::test]
+async fn test_milestone_propagation_end_to_end_get_then_set() {
+    let server = MockServer::start().await;
+
+    // Step 1 mock: GET /repos/owner/repo/issues/42 → returns milestone 5.
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/issues/42"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(minimal_issue_json(42, true)))
+        .mount(&server)
+        .await;
+
+    // Step 2 mock: PATCH /repos/owner/repo/pulls/10 → success.
+    Mock::given(method("PATCH"))
+        .and(path("/repos/owner/repo/pulls/10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(minimal_pr_json(10)))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+
+    // Step 1: retrieve milestone from issue.
+    let metadata = provider
+        .get_issue_metadata("owner", "repo", 42)
+        .await
+        .expect("get_issue_metadata must succeed")
+        .expect("Expected Some(IssueMetadata)");
+
+    let milestone_number = metadata
+        .milestone
+        .expect("Expected milestone on issue")
+        .number;
+    assert_eq!(milestone_number, 5, "Milestone number from issue must be 5");
+
+    // Step 2: apply the milestone to the pull request.
+    let set_result = provider
+        .set_pull_request_milestone("owner", "repo", 10, Some(milestone_number))
+        .await;
+
+    assert!(
+        set_result.is_ok(),
+        "set_pull_request_milestone must succeed: {set_result:?}"
+    );
+}

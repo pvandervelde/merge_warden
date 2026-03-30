@@ -1,6 +1,7 @@
 use crate::config::{
     BypassRule, BypassRules, ChangeTypeLabelConfig, CurrentPullRequestValidationConfiguration,
-    PrSizeCheckConfig, WipCheckConfig, CONVENTIONAL_COMMIT_REGEX, WORK_ITEM_REGEX,
+    IssuePropagationConfig, PrSizeCheckConfig, WipCheckConfig, CONVENTIONAL_COMMIT_REGEX,
+    WORK_ITEM_REGEX,
 };
 use crate::size::SizeThresholds;
 use async_trait::async_trait;
@@ -1168,5 +1169,126 @@ async fn test_load_merge_warden_config_app_description_patterns_propagate() {
             .wip_description_patterns,
         vec!["🚧"],
         "App-level description patterns should propagate when repo has none"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// IssuePropagationConfig — spec assertions 6.7-1, 6.7-2, 6.7-3
+// ---------------------------------------------------------------------------
+
+/// Spec assertion 6.7-1: IssuePropagationConfig::default() has both flags false.
+#[test]
+fn test_issue_propagation_config_default_has_both_flags_false() {
+    let config = IssuePropagationConfig::default();
+    assert!(
+        !config.sync_milestone_from_issue,
+        "sync_milestone_from_issue should default to false"
+    );
+    assert!(
+        !config.sync_project_from_issue,
+        "sync_project_from_issue should default to false"
+    );
+}
+
+/// Spec assertion 6.7-2: omitting [policies.pullRequests.issuePropagation] from TOML
+/// produces IssuePropagationConfig::default() (both flags false).
+#[tokio::test]
+async fn test_issue_propagation_config_absent_from_toml_yields_default() {
+    let toml = r#"schemaVersion = 1
+[policies.pullRequests.prTitle]
+required = true
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let app_defaults = ApplicationDefaults::default();
+    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
+        .await
+        .unwrap();
+
+    let propagation = &config.policies.pull_requests.issue_propagation;
+    assert!(
+        !propagation.sync_milestone_from_issue,
+        "sync_milestone_from_issue should default to false when section is absent"
+    );
+    assert!(
+        !propagation.sync_project_from_issue,
+        "sync_project_from_issue should default to false when section is absent"
+    );
+}
+
+/// Spec assertion 6.7-3: setting sync_milestone_from_issue = true in TOML is reflected
+/// in the parsed config.
+#[tokio::test]
+async fn test_issue_propagation_config_sync_milestone_flag_parsed_from_toml() {
+    let toml = r#"schemaVersion = 1
+[policies.pullRequests.issuePropagation]
+sync_milestone_from_issue = true
+sync_project_from_issue = false
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let app_defaults = ApplicationDefaults::default();
+    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
+        .await
+        .unwrap();
+
+    let propagation = &config.policies.pull_requests.issue_propagation;
+    assert!(
+        propagation.sync_milestone_from_issue,
+        "sync_milestone_from_issue should be true after parsing TOML"
+    );
+    assert!(
+        !propagation.sync_project_from_issue,
+        "sync_project_from_issue should be false"
+    );
+}
+
+/// Spec assertion 6.7-3 (project flag variant): setting sync_project_from_issue = true
+/// in TOML is reflected in the parsed config.
+#[tokio::test]
+async fn test_issue_propagation_config_sync_project_flag_parsed_from_toml() {
+    let toml = r#"schemaVersion = 1
+[policies.pullRequests.issuePropagation]
+sync_milestone_from_issue = false
+sync_project_from_issue = true
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let app_defaults = ApplicationDefaults::default();
+    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
+        .await
+        .unwrap();
+
+    let propagation = &config.policies.pull_requests.issue_propagation;
+    assert!(
+        !propagation.sync_milestone_from_issue,
+        "sync_milestone_from_issue should be false"
+    );
+    assert!(
+        propagation.sync_project_from_issue,
+        "sync_project_from_issue should be true after parsing TOML"
+    );
+}
+
+/// Verify that to_validation_config() forwards issue_propagation into
+/// CurrentPullRequestValidationConfiguration.
+#[tokio::test]
+async fn test_to_validation_config_forwards_issue_propagation() {
+    let toml = r#"schemaVersion = 1
+[policies.pullRequests.issuePropagation]
+sync_milestone_from_issue = true
+sync_project_from_issue = true
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let app_defaults = ApplicationDefaults::default();
+    let merge_warden_config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
+        .await
+        .unwrap();
+
+    let validation = merge_warden_config.to_validation_config(&BypassRules::default());
+    assert!(
+        validation.issue_propagation.sync_milestone_from_issue,
+        "to_validation_config should forward sync_milestone_from_issue = true"
+    );
+    assert!(
+        validation.issue_propagation.sync_project_from_issue,
+        "to_validation_config should forward sync_project_from_issue = true"
     );
 }
