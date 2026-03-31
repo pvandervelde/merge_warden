@@ -91,8 +91,6 @@ sync_milestone_from_issue = false
 # referenced issue belongs to.
 #
 # No-op when the referenced issue has no linked projects.
-# Note: this feature requires GraphQL project support in github-bot-sdk and is
-# not yet fully operational; leave false until SDK support is confirmed.
 sync_project_from_issue = false
 
 # PR state lifecycle labels — apply a single label reflecting the current PR

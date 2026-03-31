@@ -2562,8 +2562,8 @@ struct MockIssueProvider {
     error_on_add_project: bool,
     /// Records every `set_pull_request_milestone` call as `(pr_number, milestone_number)`.
     milestone_calls: Arc<Mutex<Vec<(u64, Option<u64>)>>>,
-    /// Records every `add_pull_request_to_project` call as `(pr_number, project_node_id)`.
-    project_calls: Arc<Mutex<Vec<(u64, String)>>>,
+    /// Records every `add_pull_request_to_project` call as `(pr_number, project_number)`.
+    project_calls: Arc<Mutex<Vec<(u64, u64)>>>,
 }
 
 impl MockIssueProvider {
@@ -2602,7 +2602,7 @@ impl MockIssueProvider {
         self.milestone_calls.lock().unwrap().clone()
     }
 
-    fn project_calls(&self) -> Vec<(u64, String)> {
+    fn project_calls(&self) -> Vec<(u64, u64)> {
         self.project_calls.lock().unwrap().clone()
     }
 }
@@ -2645,7 +2645,8 @@ impl IssueMetadataProvider for MockIssueProvider {
         _repo_owner: &str,
         _repo_name: &str,
         pr_number: u64,
-        project_node_id: &str,
+        project_number: u64,
+        _project_owner_login: &str,
     ) -> Result<(), Error> {
         if self.error_on_add_project {
             return Err(Error::ApiError());
@@ -2653,7 +2654,7 @@ impl IssueMetadataProvider for MockIssueProvider {
         self.project_calls
             .lock()
             .unwrap()
-            .push((pr_number, project_node_id.to_string()));
+            .push((pr_number, project_number));
         Ok(())
     }
 }
@@ -2934,10 +2935,14 @@ async fn test_propagate_issue_metadata_adds_pr_to_projects() {
         projects: vec![
             IssueProject {
                 node_id: "PVT_aaa".to_string(),
+                number: 1,
+                owner_login: "myorg".to_string(),
                 title: "Team Alpha".to_string(),
             },
             IssueProject {
                 node_id: "PVT_bbb".to_string(),
+                number: 2,
+                owner_login: "myorg".to_string(),
                 title: "Team Beta".to_string(),
             },
         ],
@@ -2950,8 +2955,8 @@ async fn test_propagate_issue_metadata_adds_pr_to_projects() {
 
     let calls = issue_provider.project_calls();
     assert_eq!(calls.len(), 2, "Expected one project call per project");
-    assert!(calls.iter().any(|(_, id)| id == "PVT_aaa"));
-    assert!(calls.iter().any(|(_, id)| id == "PVT_bbb"));
+    assert!(calls.iter().any(|(_, num)| *num == 1));
+    assert!(calls.iter().any(|(_, num)| *num == 2));
     // Milestone should not have been called since the flag is off.
     assert!(issue_provider.milestone_calls().is_empty());
 }
@@ -2983,6 +2988,8 @@ async fn test_propagate_issue_metadata_add_project_error_is_non_fatal() {
             milestone: None,
             projects: vec![IssueProject {
                 node_id: "PVT_aaa".to_string(),
+                number: 1,
+                owner_login: "myorg".to_string(),
                 title: "Alpha".to_string(),
             }],
         })
@@ -3006,6 +3013,8 @@ async fn test_propagate_issue_metadata_both_flags_enabled() {
         }),
         projects: vec![IssueProject {
             node_id: "PVT_xyz".to_string(),
+            number: 7,
+            owner_login: "myorg".to_string(),
             title: "Roadmap".to_string(),
         }],
     });

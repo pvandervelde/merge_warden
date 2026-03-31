@@ -1571,14 +1571,21 @@ Please update the PR body to include a valid work item reference."#;
 
         for project in &metadata.projects {
             if let Err(e) = issue_provider
-                .add_pull_request_to_project(repo_owner, repo_name, pr.number, &project.node_id)
+                .add_pull_request_to_project(
+                    repo_owner,
+                    repo_name,
+                    pr.number,
+                    project.number,
+                    &project.owner_login,
+                )
                 .await
             {
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,
                     pr = pr.number,
-                    project_node_id = %project.node_id,
+                    project_number = project.number,
+                    project_owner = %project.owner_login,
                     project_title = %project.title,
                     error = %e,
                     "Failed to add PR to project; check status outcome unaffected"

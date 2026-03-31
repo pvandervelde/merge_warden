@@ -719,10 +719,14 @@ fn test_issue_metadata_with_milestone_and_projects() {
         projects: vec![
             IssueProject {
                 node_id: "PVT_kwDOAbc123".to_string(),
+                number: 1,
+                owner_login: "myorg".to_string(),
                 title: "Team Roadmap".to_string(),
             },
             IssueProject {
                 node_id: "PVT_kwDOXyz789".to_string(),
+                number: 2,
+                owner_login: "myorg".to_string(),
                 title: "Sprint Board".to_string(),
             },
         ],
@@ -744,6 +748,8 @@ fn test_issue_metadata_no_milestone() {
         milestone: None,
         projects: vec![IssueProject {
             node_id: "PVT_kwDOAbc123".to_string(),
+            number: 3,
+            owner_login: "myorg".to_string(),
             title: "Roadmap".to_string(),
         }],
     };
@@ -786,6 +792,8 @@ fn test_issue_metadata_clone() {
         }),
         projects: vec![IssueProject {
             node_id: "PVT_abc".to_string(),
+            number: 10,
+            owner_login: "myorg".to_string(),
             title: "My Project".to_string(),
         }],
     };
@@ -837,10 +845,14 @@ fn test_issue_milestone_zero_number() {
 fn test_issue_project_fields() {
     let project = IssueProject {
         node_id: "PVT_kwDOBcd456".to_string(),
+        number: 5,
+        owner_login: "myorg".to_string(),
         title: "Engineering Backlog".to_string(),
     };
 
     assert_eq!(project.node_id, "PVT_kwDOBcd456");
+    assert_eq!(project.number, 5);
+    assert_eq!(project.owner_login, "myorg");
     assert_eq!(project.title, "Engineering Backlog");
 }
 
@@ -848,11 +860,15 @@ fn test_issue_project_fields() {
 fn test_issue_project_clone() {
     let original = IssueProject {
         node_id: "PVT_kwDOAbc123".to_string(),
+        number: 3,
+        owner_login: "myorg".to_string(),
         title: "Roadmap".to_string(),
     };
     let cloned = original.clone();
 
     assert_eq!(cloned.node_id, original.node_id);
+    assert_eq!(cloned.number, original.number);
+    assert_eq!(cloned.owner_login, original.owner_login);
     assert_eq!(cloned.title, original.title);
 }
 
@@ -861,6 +877,8 @@ fn test_issue_project_empty_node_id_allowed() {
     // Struct does not validate — empty node_id is accepted at construction time
     let project = IssueProject {
         node_id: String::new(),
+        number: 0,
+        owner_login: String::new(),
         title: "Unnamed".to_string(),
     };
     assert!(project.node_id.is_empty());

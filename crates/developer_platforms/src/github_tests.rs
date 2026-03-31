@@ -14,7 +14,7 @@ use github_bot_sdk::{
 };
 use serde_json::json;
 use wiremock::{
-    matchers::{method, path, query_param},
+    matchers::{body_string_contains, method, path, query_param},
     Mock, MockServer, ResponseTemplate,
 };
 
@@ -1127,6 +1127,90 @@ fn minimal_issue_json(issue_number: u64, with_milestone: bool) -> serde_json::Va
     })
 }
 
+/// Helper: GraphQL response JSON for a single linked project.
+fn graphql_linked_projects_response(
+    project_number: u64,
+    title: &str,
+    owner_login: &str,
+) -> serde_json::Value {
+    json!({
+        "data": {
+            "repository": {
+                "issue": {
+                    "projectsV2": {
+                        "pageInfo": { "hasNextPage": false, "endCursor": null },
+                        "nodes": [{
+                            "id": format!("PVT_node{}", project_number),
+                            "databaseId": project_number,
+                            "number": project_number,
+                            "title": title,
+                            "description": null,
+                            "public": true,
+                            "url": format!("https://github.com/orgs/{}/projects/{}", owner_login, project_number),
+                            "createdAt": "2024-01-01T00:00:00Z",
+                            "updatedAt": "2024-01-01T00:00:00Z",
+                            "owner": {
+                                "id": "O_org1",
+                                "databaseId": 100,
+                                "login": owner_login,
+                                "type": "Organization"
+                            }
+                        }]
+                    }
+                }
+            }
+        }
+    })
+}
+
+/// Helper: GraphQL response JSON for empty linked projects.
+fn graphql_no_linked_projects_response() -> serde_json::Value {
+    json!({
+        "data": {
+            "repository": {
+                "issue": {
+                    "projectsV2": {
+                        "pageInfo": { "hasNextPage": false, "endCursor": null },
+                        "nodes": []
+                    }
+                }
+            }
+        }
+    })
+}
+
+/// Helper: returns a GraphQL response with the org project node ID.
+fn graphql_project_node_id_org_response(node_id: &str) -> serde_json::Value {
+    json!({
+        "data": {
+            "organization": {
+                "projectV2": {
+                    "id": node_id
+                }
+            }
+        }
+    })
+}
+
+/// Helper: GraphQL response for AddProjectV2ItemById mutation.
+fn graphql_add_item_response(item_id: &str) -> serde_json::Value {
+    json!({
+        "data": {
+            "addProjectV2ItemById": {
+                "item": {
+                    "id": item_id,
+                    "type": "PullRequest",
+                    "createdAt": "2024-01-01T00:00:00Z",
+                    "updatedAt": "2024-01-01T00:00:00Z",
+                    "content": {
+                        "id": "PR_1"
+                    }
+                }
+            }
+        }
+    })
+}
+
 fn minimal_pr_json(pr_number: u64) -> serde_json::Value {
     let repo = json!({
         "id": 1,
@@ -1185,7 +1269,7 @@ async fn test_get_issue_metadata_with_milestone() {
     assert_eq!(milestone.title, "v1.0");
     assert!(
         metadata.projects.is_empty(),
-        "Projects should be empty (SDK unsupported)"
+        "Projects should be empty when GraphQL returns no linked projects"
     );
 }
 
@@ -1245,6 +1329,43 @@ async fn test_get_issue_metadata_api_error_returns_err() {
     let result = provider.get_issue_metadata("owner", "repo", 7).await;
 
     assert!(result.is_err(), "500 should yield Err");
+}
+
+/// Verifies that `get_issue_metadata` populates the `projects` field when the
+/// GraphQL endpoint returns linked projects for the issue.
+#[tokio::test]
+async fn test_get_issue_metadata_with_linked_projects() {
+    let server = MockServer::start().await;
+
+    // REST: issue exists with no milestone.
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/issues/10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(minimal_issue_json(10, false)))
+        .mount(&server)
+        .await;
+
+    // GraphQL: issue is linked to one project.
+    Mock::given(method("POST"))
+        .and(path("/graphql"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(graphql_linked_projects_response(5, "Roadmap", "myorg")),
+        )
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let metadata = provider
+        .get_issue_metadata("owner", "repo", 10)
+        .await
+        .expect("should succeed")
+        .expect("should be Some");
+
+    assert!(metadata.milestone.is_none());
+    assert_eq!(metadata.projects.len(), 1);
+    assert_eq!(metadata.projects[0].number, 5);
+    assert_eq!(metadata.projects[0].owner_login, "myorg");
+    assert_eq!(metadata.projects[0].title, "Roadmap");
 }
 
 // ---------------------------------------------------------------------------
@@ -1312,19 +1433,81 @@ async fn test_set_pull_request_milestone_api_error() {
 // IssueMetadataProvider — add_pull_request_to_project
 // ---------------------------------------------------------------------------
 
+/// Verifies that `add_pull_request_to_project` fetches the PR node ID and then
+/// calls the GraphQL mutation to add the PR to the project.
 #[tokio::test]
-async fn test_add_pull_request_to_project_not_yet_supported() {
-    // No WireMock server needed — the implementation returns Err without any HTTP call.
+async fn test_add_pull_request_to_project_adds_pr_to_project() {
     let server = MockServer::start().await;
-    let provider = make_provider(&server.uri()).await;
 
+    // Fetch PR to get node_id: GET /repos/owner/repo/pulls/42
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/42"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(minimal_pr_json(42)))
+        .mount(&server)
+        .await;
+
+    // Resolve project node ID: POST /graphql (GetProjectNodeIdOrg)
+    Mock::given(method("POST"))
+        .and(path("/graphql"))
+        .and(body_string_contains("GetProjectNodeIdOrg"))
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(graphql_project_node_id_org_response("PVT_orgnode5")),
+        )
+        .mount(&server)
+        .await;
+
+    // Add item to project: POST /graphql (AddProjectV2Item mutation)
+    Mock::given(method("POST"))
+        .and(path("/graphql"))
+        .and(body_string_contains("AddProjectV2Item"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(graphql_add_item_response("PVTI_item1")),
+        )
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
     let result = provider
-        .add_pull_request_to_project("owner", "repo", 42, "PVT_kwDOAbc123")
+        .add_pull_request_to_project("owner", "repo", 42, 5, "myorg")
         .await;
 
     assert!(
-        matches!(result, Err(Error::ApiError())),
-        "Expected ApiError while SDK project support is pending"
+        result.is_ok(),
+        "add_pull_request_to_project must succeed: {result:?}"
+    );
+}
+
+/// Verifies that `add_pull_request_to_project` returns an error when the project
+/// is not found (GraphQL returns NOT_FOUND).
+#[tokio::test]
+async fn test_add_pull_request_to_project_project_not_found() {
+    let server = MockServer::start().await;
+
+    // Fetch PR: GET /repos/owner/repo/pulls/42
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/pulls/42"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(minimal_pr_json(42)))
+        .mount(&server)
+        .await;
+
+    // Project not found: POST /graphql → GraphQL NOT_FOUND error
+    Mock::given(method("POST"))
+        .and(path("/graphql"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "errors": [{ "type": "NOT_FOUND", "message": "project not found" }]
+        })))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .add_pull_request_to_project("owner", "repo", 42, 999, "myorg")
+        .await;
+
+    assert!(
+        matches!(result, Err(Error::FailedToUpdatePullRequest(_))),
+        "Expected FailedToUpdatePullRequest for not-found project"
     );
 }
 

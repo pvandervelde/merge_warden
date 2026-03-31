@@ -10,7 +10,8 @@ use tracing::{debug, error, info, instrument, warn};
 use crate::{
     errors::Error,
     models::{
-        Comment, IssueMetadata, IssueMilestone, Label, PullRequest, PullRequestFile, Review, User,
+        Comment, IssueMetadata, IssueMilestone, IssueProject, Label, PullRequest, PullRequestFile,
+        Review, User,
     },
     ConfigFetcher, IssueMetadataProvider, PullRequestProvider,
 };
@@ -972,20 +973,47 @@ impl IssueMetadataProvider for GitHubProvider {
             title: m.title,
         });
 
-        // Project metadata requires the github-bot-sdk to implement GraphQL project
-        // operations (addProjectV2ItemById, etc.).  Until SDK support is available,
-        // always return an empty projects list.
+        // Fetch Projects v2 linked to the issue via GraphQL.
+        // Non-fatal: degrade gracefully to an empty list on any error so that
+        // milestone propagation still proceeds when project lookup fails.
+        let projects = match self
+            .client
+            .get_issue_linked_projects(repo_owner, repo_name, issue_number)
+            .await
+        {
+            Ok(linked) => linked
+                .into_iter()
+                .map(|p| IssueProject {
+                    node_id: p.node_id,
+                    number: p.number,
+                    owner_login: p.owner.login,
+                    title: p.title,
+                })
+                .collect(),
+            Err(e) => {
+                warn!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    issue = issue_number,
+                    error = %e,
+                    "Failed to fetch issue linked projects; returning empty list"
+                );
+                vec![]
+            }
+        };
+
         debug!(
             owner = repo_owner,
             repo = repo_name,
             issue = issue_number,
             has_milestone = milestone.is_some(),
-            "Fetched issue metadata (projects not yet supported)"
+            project_count = projects.len(),
+            "Fetched issue metadata"
         );
 
         Ok(Some(IssueMetadata {
             milestone,
-            projects: vec![],
+            projects,
         }))
     }
 
@@ -1033,23 +1061,91 @@ impl IssueMetadataProvider for GitHubProvider {
     /// by keeping `sync_project_from_issue = false` (the default).
     ///
     /// # Errors
+    /// Adds the pull request to the given Projects v2 project.
     ///
-    /// Always returns [`Error::ApiError`] until SDK support is available.
-    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number, project = project_node_id))]
+    /// Fetches the PR's global node ID, resolves the project node ID from
+    /// `project_owner_login` + `project_number`, then calls the
+    /// `addProjectV2ItemById` GraphQL mutation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::FailedToUpdatePullRequest`] if fetching the PR or calling
+    /// the GraphQL mutation fails.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number, project_number, project_owner = project_owner_login))]
     async fn add_pull_request_to_project(
         &self,
         repo_owner: &str,
         repo_name: &str,
         pr_number: u64,
-        project_node_id: &str,
+        project_number: u64,
+        project_owner_login: &str,
     ) -> Result<(), Error> {
-        warn!(
-            owner = repo_owner,
-            repo = repo_name,
-            pr = pr_number,
-            project = project_node_id,
-            "add_pull_request_to_project is not yet supported: github-bot-sdk GraphQL project operations are unimplemented"
-        );
-        Err(Error::ApiError())
+        // Fetch the PR to obtain its global node ID required by the GraphQL mutation.
+        let pr = match self
+            .client
+            .get_pull_request(repo_owner, repo_name, pr_number)
+            .await
+        {
+            Ok(pr) => pr,
+            Err(e) => {
+                error!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr_number,
+                    error = %e,
+                    "Failed to fetch PR node_id for project addition"
+                );
+                return Err(map_api_error(e));
+            }
+        };
+
+        let pr_node_id = pr.node_id;
+
+        match self
+            .client
+            .add_item_to_project(project_owner_login, project_number, &pr_node_id)
+            .await
+        {
+            Ok(_) => {
+                info!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr_number,
+                    project_number,
+                    project_owner = project_owner_login,
+                    "Successfully added PR to project"
+                );
+                Ok(())
+            }
+            Err(ApiError::NotFound) => {
+                warn!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr_number,
+                    project_number,
+                    project_owner = project_owner_login,
+                    "Project not found; skipping"
+                );
+                Err(Error::FailedToUpdatePullRequest(format!(
+                    "Project {} not found for owner {}",
+                    project_number, project_owner_login
+                )))
+            }
+            Err(e) => {
+                warn!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr_number,
+                    project_number,
+                    project_owner = project_owner_login,
+                    error = %e,
+                    "Failed to add PR to project"
+                );
+                Err(Error::FailedToUpdatePullRequest(format!(
+                    "Failed to add PR {} to project {}: {}",
+                    pr_number, project_number, e
+                )))
+            }
+        }
     }
 }

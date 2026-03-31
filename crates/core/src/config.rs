@@ -594,8 +594,6 @@ impl IssuePropagationConfig {
     }
 }
 
-
-
 /// Configuration for the validation of the current pull request.
 #[derive(Debug, Clone)]
 pub struct CurrentPullRequestValidationConfiguration {

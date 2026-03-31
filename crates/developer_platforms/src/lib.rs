@@ -696,7 +696,8 @@ pub trait PullRequestProvider {
 ///         _repo_owner: &str,
 ///         _repo_name: &str,
 ///         _pr_number: u64,
-///         _project_node_id: &str,
+///         _project_number: u64,
+///         _project_owner_login: &str,
 ///     ) -> Result<(), Error> {
 ///         Ok(())
 ///     }
@@ -745,20 +746,23 @@ pub trait IssueMetadataProvider: std::fmt::Debug + Sync + Send {
 
     /// Add a pull request to a GitHub Projects v2 project.
     ///
-    /// Uses the PR's node ID and the project's node ID to call the
-    /// `addProjectV2ItemById` GraphQL mutation.
+    /// Resolves the project's GraphQL node ID from `project_owner_login` and
+    /// `project_number`, fetches the PR's global node ID, then calls the
+    /// `addProjectV2ItemById` GraphQL mutation to attach the PR to the project.
     ///
     /// # Arguments
     ///
-    /// * `repo_owner`      - Owner of the repository containing the PR.
-    /// * `repo_name`       - Name of that repository.
-    /// * `pr_number`       - Pull request number.
-    /// * `project_node_id` - GraphQL node ID of the target project.
+    /// * `repo_owner`          - Owner of the repository containing the PR.
+    /// * `repo_name`           - Name of that repository.
+    /// * `pr_number`           - Pull request number.
+    /// * `project_number`      - Project number (owner-scoped).
+    /// * `project_owner_login` - Login of the project owner (org or user).
     async fn add_pull_request_to_project(
         &self,
         repo_owner: &str,
         repo_name: &str,
         pr_number: u64,
-        project_node_id: &str,
+        project_number: u64,
+        project_owner_login: &str,
     ) -> Result<(), Error>;
 }
