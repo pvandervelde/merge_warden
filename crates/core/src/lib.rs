@@ -1549,8 +1549,8 @@ Please update the PR body to include a valid work item reference."#;
 
     /// Adds the pull request to each Projects v2 project from the referenced issue.
     ///
-    /// The SDK GraphQL project operations are not yet implemented. This method
-    /// logs a warning and skips project propagation until SDK support is available.
+    /// For each project linked to the referenced issue, fetches the PR node ID and
+    /// calls the platform API to add the PR to that project.
     async fn sync_projects(
         &self,
         repo_owner: &str,
