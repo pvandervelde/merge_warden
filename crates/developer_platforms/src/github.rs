@@ -9,8 +9,11 @@ use tracing::{debug, error, info, instrument, warn};
 
 use crate::{
     errors::Error,
-    models::{Comment, Label, PullRequest, PullRequestFile, Review, User},
-    ConfigFetcher, PullRequestProvider,
+    models::{
+        Comment, IssueMetadata, IssueMilestone, IssueProject, Label, PullRequest, PullRequestFile,
+        Review, User,
+    },
+    ConfigFetcher, IssueMetadataProvider, PullRequestProvider,
 };
 
 #[cfg(test)]
@@ -64,7 +67,7 @@ fn map_api_error(e: ApiError) -> Error {
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct GitHubProvider {
     /// Installation-scoped GitHub API client.
     client: InstallationClient,
@@ -450,6 +453,7 @@ impl PullRequestProvider for GitHubProvider {
                 id: pr.user.id,
                 login: pr.user.login,
             }),
+            milestone_number: pr.milestone.as_ref().map(|m| m.number),
         })
     }
 
@@ -912,5 +916,227 @@ impl PullRequestProvider for GitHubProvider {
         );
 
         Ok(all_reviews)
+    }
+}
+
+#[async_trait]
+impl IssueMetadataProvider for GitHubProvider {
+    /// Fetches milestone metadata for a single issue.
+    ///
+    /// Calls `GET /repos/{owner}/{repo}/issues/{number}` and maps the milestone
+    /// field to [`IssueMilestone`]. Project metadata is not yet available because
+    /// the github-bot-sdk GraphQL project operations are unimplemented; the
+    /// `projects` field is always returned as an empty `Vec`.
+    ///
+    /// Returns `Ok(None)` when the issue does not exist (404).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidResponse`] for unexpected API responses, or the
+    /// appropriate [`Error`] variant for auth/rate-limit failures.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, issue = issue_number))]
+    async fn get_issue_metadata(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        issue_number: u64,
+    ) -> Result<Option<IssueMetadata>, Error> {
+        let issue = match self
+            .client
+            .get_issue(repo_owner, repo_name, issue_number)
+            .await
+        {
+            Ok(i) => i,
+            Err(ApiError::NotFound) => {
+                debug!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    issue = issue_number,
+                    "Issue not found (404)"
+                );
+                return Ok(None);
+            }
+            Err(e) => {
+                error!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    issue = issue_number,
+                    error = %e,
+                    "Failed to fetch issue metadata"
+                );
+                return Err(map_api_error(e));
+            }
+        };
+
+        let milestone = issue.milestone.map(|m| IssueMilestone {
+            number: m.number,
+            title: m.title,
+        });
+
+        // Fetch Projects v2 linked to the issue via GraphQL.
+        // Non-fatal: degrade gracefully to an empty list on any error so that
+        // milestone propagation still proceeds when project lookup fails.
+        let projects = match self
+            .client
+            .get_issue_linked_projects(repo_owner, repo_name, issue_number)
+            .await
+        {
+            Ok(linked) => linked
+                .into_iter()
+                .map(|p| IssueProject {
+                    number: p.number,
+                    owner_login: p.owner.login,
+                    title: p.title,
+                })
+                .collect(),
+            Err(e) => {
+                warn!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    issue = issue_number,
+                    error = %e,
+                    "Failed to fetch issue linked projects; returning empty list"
+                );
+                vec![]
+            }
+        };
+
+        debug!(
+            owner = repo_owner,
+            repo = repo_name,
+            issue = issue_number,
+            has_milestone = milestone.is_some(),
+            project_count = projects.len(),
+            "Fetched issue metadata"
+        );
+
+        Ok(Some(IssueMetadata {
+            milestone,
+            projects,
+        }))
+    }
+
+    /// Sets the milestone on a pull request.
+    ///
+    /// Delegates to `PATCH /repos/{owner}/{repo}/pulls/{number}` via the SDK.
+    /// Pass `milestone_number: None` to clear the milestone from the PR.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::FailedToUpdatePullRequest`] if the API call fails.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number, milestone = ?milestone_number))]
+    async fn set_pull_request_milestone(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr_number: u64,
+        milestone_number: Option<u64>,
+    ) -> Result<(), Error> {
+        self.client
+            .set_pull_request_milestone(repo_owner, repo_name, pr_number, milestone_number)
+            .await
+            .map(|_| ())
+            .map_err(|e| {
+                warn!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr_number,
+                    milestone = ?milestone_number,
+                    error = %e,
+                    "Failed to set milestone on pull request"
+                );
+                Error::FailedToUpdatePullRequest(format!(
+                    "Failed to set milestone on pull request: {}",
+                    e
+                ))
+            })
+    }
+
+    /// Adds the pull request to the given Projects v2 project.
+    ///
+    /// Fetches the PR's global node ID, resolves the project node ID from
+    /// `project_owner_login` + `project_number`, then calls the
+    /// `addProjectV2ItemById` GraphQL mutation.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::FailedToUpdatePullRequest`] if fetching the PR or calling
+    /// the GraphQL mutation fails.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number, project_number, project_owner = project_owner_login))]
+    async fn add_pull_request_to_project(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr_number: u64,
+        project_number: u64,
+        project_owner_login: &str,
+    ) -> Result<(), Error> {
+        // Fetch the PR to obtain its global node ID required by the GraphQL mutation.
+        let pr = match self
+            .client
+            .get_pull_request(repo_owner, repo_name, pr_number)
+            .await
+        {
+            Ok(pr) => pr,
+            Err(e) => {
+                error!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr_number,
+                    error = %e,
+                    "Failed to fetch PR node_id for project addition"
+                );
+                return Err(map_api_error(e));
+            }
+        };
+
+        let pr_node_id = pr.node_id;
+
+        match self
+            .client
+            .add_item_to_project(project_owner_login, project_number, &pr_node_id)
+            .await
+        {
+            Ok(_) => {
+                info!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr_number,
+                    project_number,
+                    project_owner = project_owner_login,
+                    "Successfully added PR to project"
+                );
+                Ok(())
+            }
+            Err(ApiError::NotFound) => {
+                warn!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr_number,
+                    project_number,
+                    project_owner = project_owner_login,
+                    "Project not found; skipping"
+                );
+                Err(Error::FailedToUpdatePullRequest(format!(
+                    "Project {} not found for owner {}",
+                    project_number, project_owner_login
+                )))
+            }
+            Err(e) => {
+                warn!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr_number,
+                    project_number,
+                    project_owner = project_owner_login,
+                    error = %e,
+                    "Failed to add PR to project"
+                );
+                Err(Error::FailedToUpdatePullRequest(format!(
+                    "Failed to add PR {} to project {}: {}",
+                    pr_number, project_number, e
+                )))
+            }
+        }
     }
 }

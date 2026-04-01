@@ -104,6 +104,7 @@ impl PullRequestProvider for MockApiProvider {
             draft: false,
             body: Some("This adds a new feature".to_string()),
             author: None,
+            milestone_number: None,
         })
     }
 

@@ -6,7 +6,9 @@
 use merge_warden_developer_platforms::models::{PullRequest, User};
 
 use crate::{
-    checks::{check_pr_title, check_work_item_reference},
+    checks::{
+        check_pr_title, check_work_item_reference, extract_closing_issue_reference, IssueReference,
+    },
     config::{
         BypassRule, CurrentPullRequestValidationConfiguration, CONVENTIONAL_COMMIT_REGEX,
         WORK_ITEM_REGEX,
@@ -35,6 +37,7 @@ fn create_pull_request(
         draft: false,
         body: body.map(|b| b.to_string()),
         author,
+        milestone_number: None,
     }
 }
 
@@ -1025,4 +1028,136 @@ fn should_return_invalid_when_body_is_empty_string() {
     assert!(!result.is_valid());
     assert!(!result.was_bypassed());
     assert!(result.bypass_info().is_none());
+}
+
+// Tests for extract_closing_issue_reference
+
+/// Assertion 1: simple hash reference with closing keyword.
+#[test]
+fn should_parse_same_repo_hash_reference() {
+    let result = extract_closing_issue_reference("fixes #42");
+    assert_eq!(result, Some(IssueReference::SameRepo { issue_number: 42 }));
+}
+
+/// Assertion 2: GH-prefixed reference with closing keyword.
+#[test]
+fn should_parse_same_repo_gh_prefix_reference() {
+    let result = extract_closing_issue_reference("closes GH-100");
+    assert_eq!(result, Some(IssueReference::SameRepo { issue_number: 100 }));
+}
+
+/// Assertion 3: keyword matching is case-insensitive.
+#[test]
+fn should_be_case_insensitive_for_closing_keyword() {
+    let result = extract_closing_issue_reference("RESOLVES #7");
+    assert_eq!(result, Some(IssueReference::SameRepo { issue_number: 7 }));
+}
+
+/// Assertion 3 variant: mixed-case keyword.
+#[test]
+fn should_be_case_insensitive_mixed_case_keyword() {
+    let result = extract_closing_issue_reference("Fixes #3");
+    assert_eq!(result, Some(IssueReference::SameRepo { issue_number: 3 }));
+}
+
+/// Assertion 4: cross-repo owner/repo#NNN format.
+#[test]
+fn should_parse_cross_repo_owner_repo_reference() {
+    let result = extract_closing_issue_reference("closes owner/repo#55");
+    assert_eq!(
+        result,
+        Some(IssueReference::CrossRepo {
+            owner: "owner".to_string(),
+            repo: "repo".to_string(),
+            issue_number: 55,
+        })
+    );
+}
+
+/// Assertion 5: full GitHub URL cross-repo reference.
+#[test]
+fn should_parse_cross_repo_full_github_url_reference() {
+    let result = extract_closing_issue_reference("closes https://github.com/owner/repo/issues/88");
+    assert_eq!(
+        result,
+        Some(IssueReference::CrossRepo {
+            owner: "owner".to_string(),
+            repo: "repo".to_string(),
+            issue_number: 88,
+        })
+    );
+}
+
+/// Assertion 6: informational 'references' keyword is excluded.
+#[test]
+fn should_return_none_for_references_keyword() {
+    assert_eq!(extract_closing_issue_reference("references #42"), None);
+}
+
+/// Assertion 7: informational 'relates to' keyword is excluded.
+#[test]
+fn should_return_none_for_relates_to_keyword() {
+    assert_eq!(extract_closing_issue_reference("relates to #42"), None);
+}
+
+/// Assertion 8: empty string returns None.
+#[test]
+fn should_return_none_for_empty_body() {
+    assert_eq!(extract_closing_issue_reference(""), None);
+}
+
+/// Assertion 9: body with no issue references at all returns None.
+#[test]
+fn should_return_none_when_no_references_present() {
+    assert_eq!(
+        extract_closing_issue_reference("This PR adds a new feature"),
+        None
+    );
+}
+
+/// Assertion 10: when informational reference precedes a closing reference,
+/// the closing reference is returned (first *closing* keyword wins).
+#[test]
+fn should_skip_informational_and_return_first_closing_reference() {
+    let result = extract_closing_issue_reference("references #10\nfixes #20");
+    assert_eq!(result, Some(IssueReference::SameRepo { issue_number: 20 }));
+}
+
+/// Assertion 11: when multiple closing references exist, first one wins.
+#[test]
+fn should_return_first_of_multiple_closing_references() {
+    let result = extract_closing_issue_reference("fixes #10\nfixes #20");
+    assert_eq!(result, Some(IssueReference::SameRepo { issue_number: 10 }));
+}
+
+/// Extra: keyword mid-sentence is still matched.
+#[test]
+fn should_match_closing_keyword_mid_sentence() {
+    let result = extract_closing_issue_reference("This PR fixes #99 for the user.");
+    assert_eq!(result, Some(IssueReference::SameRepo { issue_number: 99 }));
+}
+
+/// Extra: multiple spaces between keyword and reference are allowed.
+#[test]
+fn should_handle_multiple_spaces_between_keyword_and_reference() {
+    let result = extract_closing_issue_reference("fixes   #77");
+    assert_eq!(result, Some(IssueReference::SameRepo { issue_number: 77 }));
+}
+
+/// Extra: issue_number() accessor returns the correct number for SameRepo.
+#[test]
+fn issue_number_accessor_returns_correct_number_for_same_repo() {
+    let reference = IssueReference::SameRepo { issue_number: 123 };
+    assert_eq!(reference.issue_number(), 123);
+}
+
+/// Extra: issue_number() accessor returns the correct number for CrossRepo.
+#[test]
+fn issue_number_accessor_returns_correct_number_for_cross_repo() {
+    let reference = IssueReference::CrossRepo {
+        owner: "org".to_string(),
+        repo: "project".to_string(),
+        issue_number: 456,
+    };
+    assert_eq!(reference.issue_number(), 456);
 }

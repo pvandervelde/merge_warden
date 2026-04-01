@@ -559,6 +559,41 @@ impl BypassRules {
     }
 }
 
+/// Configuration for propagating issue metadata to pull requests.
+///
+/// Both flags default to `false`. Teams that do not use GitHub Milestones or
+/// Projects v2, or that track issues in an external system, should leave both
+/// flags disabled (or omit `[policies.pullRequests.issuePropagation]` entirely).
+/// When both are `false`, no additional GitHub API calls are made beyond what
+/// the existing work-item reference check already performs.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IssuePropagationConfig {
+    /// When `true`, copy the milestone from the first closing-keyword issue
+    /// reference in the PR body onto the pull request.
+    ///
+    /// No-op when the referenced issue has no milestone, or when the PR
+    /// already has the same milestone. Overwrites an existing PR milestone
+    /// if it differs from the issue's.
+    #[serde(default = "IssuePropagationConfig::default_false")]
+    pub sync_milestone_from_issue: bool,
+
+    /// When `true`, add the pull request to every Projects v2 project that
+    /// the referenced issue belongs to.
+    ///
+    /// No-op when the referenced issue has no linked projects. This feature
+    /// requires github-bot-sdk support for GraphQL project operations;
+    /// see the SDK issue filed against pvandervelde/github-bot-sdk.
+    #[serde(default = "IssuePropagationConfig::default_false")]
+    pub sync_project_from_issue: bool,
+}
+
+impl IssuePropagationConfig {
+    /// Returns `false` — used as the serde default for both flags.
+    fn default_false() -> bool {
+        false
+    }
+}
+
 /// Configuration for the validation of the current pull request.
 #[derive(Debug, Clone)]
 pub struct CurrentPullRequestValidationConfiguration {
@@ -593,6 +628,9 @@ pub struct CurrentPullRequestValidationConfiguration {
 
     /// Rules for bypassing validation checks
     pub bypass_rules: BypassRules,
+
+    /// Configuration for issue metadata propagation.
+    pub issue_propagation: IssuePropagationConfig,
 }
 
 impl CurrentPullRequestValidationConfiguration {
@@ -628,6 +666,7 @@ impl CurrentPullRequestValidationConfiguration {
             wip_check: WipCheckConfig::default(),
             pr_state_labels: PrStateLabelsConfig::default(),
             bypass_rules: bypass_rules.unwrap_or_default(),
+            issue_propagation: IssuePropagationConfig::default(),
         }
     }
 }
@@ -646,6 +685,7 @@ impl Default for CurrentPullRequestValidationConfiguration {
             wip_check: WipCheckConfig::default(),
             pr_state_labels: PrStateLabelsConfig::default(),
             bypass_rules: BypassRules::default(),
+            issue_propagation: IssuePropagationConfig::default(),
         }
     }
 }
@@ -680,6 +720,10 @@ pub struct PullRequestsPoliciesConfig {
     /// Configuration for state-based PR lifecycle labels
     #[serde(default, rename = "prState")]
     pub pr_state_policies: PrStateLabelsConfig,
+
+    /// Configuration for issue metadata propagation.
+    #[serde(default, rename = "issuePropagation")]
+    pub issue_propagation: IssuePropagationConfig,
 }
 
 /// Configuration for PR title policy
@@ -814,6 +858,7 @@ impl RepositoryProvidedConfig {
             wip_check,
             pr_state_labels,
             bypass_rules: bypass_rules.clone(),
+            issue_propagation: pr_policies.issue_propagation.clone(),
         }
     }
 }

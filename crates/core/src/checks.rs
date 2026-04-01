@@ -16,10 +16,81 @@ use crate::{
 };
 use merge_warden_developer_platforms::models::{PullRequest, PullRequestFile, User};
 use regex::Regex;
+use std::sync::OnceLock;
+
+/// Compiled once at first use. Handles all four supported closing-keyword formats:
+/// `#NNN`, `GH-NNN`, full GitHub URL, and `owner/repo#NNN` (including dots in names).
+static CLOSING_ISSUE_REGEX: OnceLock<Regex> = OnceLock::new();
+
+/// Returns the compiled closing-issue regex, initialising it on first call.
+fn closing_issue_regex() -> &'static Regex {
+    CLOSING_ISSUE_REGEX.get_or_init(|| {
+        Regex::new(
+            r"(?i)(fixes|closes|resolves)\s+(#(\d+)|GH-(\d+)|https://github\.com/([^/\s]+)/([^/\s]+)/issues/(\d+)|([a-zA-Z0-9_.-]+)/([a-zA-Z0-9_.-]+)#(\d+))",
+        )
+        .expect("CLOSING_ISSUE_REGEX is a valid regex")
+    })
+}
 
 #[cfg(test)]
 #[path = "check_tests.rs"]
 mod tests;
+
+/// A parsed issue reference extracted from a pull request body.
+///
+/// Carries enough information to fetch the issue from the appropriate repository,
+/// which may differ from the repository the PR lives in.
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_core::checks::IssueReference;
+///
+/// let same = IssueReference::SameRepo { issue_number: 42 };
+/// assert_eq!(same.issue_number(), 42);
+///
+/// let cross = IssueReference::CrossRepo {
+///     owner: "acme".to_string(),
+///     repo: "widgets".to_string(),
+///     issue_number: 7,
+/// };
+/// assert_eq!(cross.issue_number(), 7);
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum IssueReference {
+    /// Issue in the same repository as the PR.
+    SameRepo {
+        /// Issue number.
+        issue_number: u64,
+    },
+    /// Issue in a different repository.
+    CrossRepo {
+        /// Repository owner.
+        owner: String,
+        /// Repository name.
+        repo: String,
+        /// Issue number.
+        issue_number: u64,
+    },
+}
+
+impl IssueReference {
+    /// Returns the issue number regardless of reference kind.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use merge_warden_core::checks::IssueReference;
+    ///
+    /// let r = IssueReference::SameRepo { issue_number: 99 };
+    /// assert_eq!(r.issue_number(), 99);
+    /// ```
+    pub fn issue_number(&self) -> u64 {
+        match self {
+            Self::SameRepo { issue_number } | Self::CrossRepo { issue_number, .. } => *issue_number,
+        }
+    }
+}
 
 /// Validates that the PR title follows the Conventional Commits format with bypass support.
 ///
@@ -50,6 +121,7 @@ mod tests;
 ///     draft: false,
 ///     body: Some("This PR adds GitHub login functionality.".to_string()),
 ///     author: None,
+///     milestone_number: None,
 /// };
 ///
 /// let bypass_rule = BypassRule::default(); // Disabled bypass
@@ -68,6 +140,7 @@ mod tests;
 ///         id: 123,
 ///         login: "emergency-bot".to_string(),
 ///     }),
+///     milestone_number: None,
 /// };
 ///
 /// let bypass_rule = BypassRule::new(true, vec!["emergency-bot".to_string()]);
@@ -142,6 +215,7 @@ pub fn check_pr_title(
 ///     draft: false,
 ///     body: Some("Emergency fix without work item".to_string()),
 ///     author: Some(bypass_user),
+///     milestone_number: None,
 /// };
 ///
 /// let bypass_rule = BypassRule::new(true, vec!["bypass-user".to_string()]);
@@ -270,4 +344,88 @@ pub fn check_pr_size(
     } else {
         ValidationResult::valid()
     }
+}
+
+/// Extracts the first closing-keyword issue reference from a pull request body.
+///
+/// Scans `body` for `fixes`, `closes`, or `resolves` references in all supported
+/// formats. Returns the first match found, or `None` if no closing reference is
+/// present. Informational keywords (`references`, `relates to`) are intentionally
+/// excluded — they satisfy the work-item link check but are not used for metadata
+/// propagation.
+///
+/// # Arguments
+///
+/// * `body` - The pull request body text to scan.
+///
+/// # Returns
+///
+/// The first closing-keyword issue reference found, or `None`.
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_core::checks::{extract_closing_issue_reference, IssueReference};
+///
+/// assert_eq!(
+///     extract_closing_issue_reference("fixes #42"),
+///     Some(IssueReference::SameRepo { issue_number: 42 }),
+/// );
+///
+/// // Informational keywords are not closing references
+/// assert_eq!(extract_closing_issue_reference("relates to #99"), None);
+/// ```
+pub fn extract_closing_issue_reference(body: &str) -> Option<IssueReference> {
+    // Capture group layout:
+    //   1: keyword  (fixes|closes|resolves)
+    //   2: full reference text
+    //   3: issue number from #NNN            (same-repo)
+    //   4: issue number from GH-NNN          (same-repo)
+    //   5: owner from full GitHub URL        (cross-repo)
+    //   6: repo  from full GitHub URL        (cross-repo)
+    //   7: issue number from full GitHub URL (cross-repo)
+    //   8: owner from owner/repo#NNN         (cross-repo, dots allowed)
+    //   9: repo  from owner/repo#NNN         (cross-repo, dots allowed)
+    //  10: issue number from owner/repo#NNN  (cross-repo)
+    let regex = closing_issue_regex();
+
+    for cap in regex.captures_iter(body) {
+        // #NNN — same-repo hash reference
+        if let Some(n) = cap.get(3) {
+            if let Ok(issue_number) = n.as_str().parse::<u64>() {
+                return Some(IssueReference::SameRepo { issue_number });
+            }
+        }
+
+        // GH-NNN — same-repo GH-prefixed reference
+        if let Some(n) = cap.get(4) {
+            if let Ok(issue_number) = n.as_str().parse::<u64>() {
+                return Some(IssueReference::SameRepo { issue_number });
+            }
+        }
+
+        // https://github.com/owner/repo/issues/NNN
+        if let (Some(owner), Some(repo), Some(n)) = (cap.get(5), cap.get(6), cap.get(7)) {
+            if let Ok(issue_number) = n.as_str().parse::<u64>() {
+                return Some(IssueReference::CrossRepo {
+                    owner: owner.as_str().to_string(),
+                    repo: repo.as_str().to_string(),
+                    issue_number,
+                });
+            }
+        }
+
+        // owner/repo#NNN
+        if let (Some(owner), Some(repo), Some(n)) = (cap.get(8), cap.get(9), cap.get(10)) {
+            if let Ok(issue_number) = n.as_str().parse::<u64>() {
+                return Some(IssueReference::CrossRepo {
+                    owner: owner.as_str().to_string(),
+                    repo: repo.as_str().to_string(),
+                    issue_number,
+                });
+            }
+        }
+    }
+
+    None
 }

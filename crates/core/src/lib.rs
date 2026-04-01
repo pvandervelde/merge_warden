@@ -66,9 +66,10 @@
 //! }
 //! ```
 
+use checks::extract_closing_issue_reference;
 use indoc::formatdoc;
 use merge_warden_developer_platforms::models::{Installation, PullRequest, Repository, Review};
-use merge_warden_developer_platforms::PullRequestProvider;
+use merge_warden_developer_platforms::{IssueMetadataProvider, PullRequestProvider};
 
 pub mod checks;
 pub mod config;
@@ -193,6 +194,11 @@ pub struct MergeWarden<P: PullRequestProvider + std::fmt::Debug> {
 
     /// The validation configuration settings for this instance
     config: CurrentPullRequestValidationConfiguration,
+
+    /// Optional provider for fetching issue metadata and writing milestone/project
+    /// updates back to pull requests. When `None`, `propagate_issue_metadata` is
+    /// skipped regardless of the `issue_propagation` config flags.
+    issue_provider: Option<Box<dyn IssueMetadataProvider>>,
 }
 
 impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
@@ -1353,6 +1359,241 @@ Please update the PR body to include a valid work item reference."#;
         }
     }
 
+    /// Propagates milestone and project metadata from a referenced issue to the pull request.
+    ///
+    /// Runs only when at least one propagation flag is enabled. Extracts the first
+    /// closing-keyword issue reference from the PR body, fetches its metadata via
+    /// `issue_provider`, and applies milestone/project updates as configured.
+    ///
+    /// Failures are logged at `warn` level and do not affect the check status outcome.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner` - The owner of the repository containing the PR.
+    /// * `repo_name` - The name of that repository.
+    /// * `pr` - The pull request being processed.
+    /// * `issue_provider` - Provider for fetching issue metadata and setting PR milestone/projects.
+    #[instrument(skip(issue_provider), fields(owner = repo_owner, repo = repo_name, pr = pr.number))]
+    pub(crate) async fn propagate_issue_metadata(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr: &PullRequest,
+        issue_provider: &dyn IssueMetadataProvider,
+    ) {
+        let config = &self.config.issue_propagation;
+
+        if !config.sync_milestone_from_issue && !config.sync_project_from_issue {
+            debug!(
+                owner = repo_owner,
+                repo = repo_name,
+                pr = pr.number,
+                "Issue propagation disabled; skipping"
+            );
+            return;
+        }
+
+        let body = match &pr.body {
+            Some(b) if !b.is_empty() => b,
+            _ => {
+                debug!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr.number,
+                    "PR body is empty; no issue reference to propagate from"
+                );
+                return;
+            }
+        };
+
+        let reference = match extract_closing_issue_reference(body) {
+            Some(r) => r,
+            None => {
+                debug!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr.number,
+                    "No closing-keyword issue reference found in PR body"
+                );
+                return;
+            }
+        };
+
+        let (issue_owner, issue_repo) = match &reference {
+            checks::IssueReference::SameRepo { .. } => (repo_owner, repo_name),
+            checks::IssueReference::CrossRepo { owner, repo, .. } => {
+                (owner.as_str(), repo.as_str())
+            }
+        };
+
+        let metadata = match issue_provider
+            .get_issue_metadata(issue_owner, issue_repo, reference.issue_number())
+            .await
+        {
+            Ok(Some(m)) => m,
+            Ok(None) => {
+                debug!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr.number,
+                    issue = reference.issue_number(),
+                    "Referenced issue not found; skipping propagation"
+                );
+                return;
+            }
+            Err(e) => {
+                warn!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr.number,
+                    issue = reference.issue_number(),
+                    error = %e,
+                    "Failed to fetch issue metadata; skipping propagation"
+                );
+                return;
+            }
+        };
+
+        if config.sync_milestone_from_issue {
+            self.sync_milestone(repo_owner, repo_name, pr, &metadata, issue_provider)
+                .await;
+        }
+
+        if config.sync_project_from_issue {
+            self.sync_projects(repo_owner, repo_name, pr, &metadata, issue_provider)
+                .await;
+        }
+    }
+
+    /// Copies the milestone from the issue onto the pull request.
+    ///
+    /// No-op when:
+    /// - The issue has no milestone.
+    /// - The PR already has the same milestone number as the issue.
+    ///
+    /// Logs at `info` when overwriting an existing PR milestone that differs.
+    /// Logs at `warn` when the API call fails (propagation errors do not surface to check status).
+    async fn sync_milestone(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr: &PullRequest,
+        metadata: &merge_warden_developer_platforms::models::IssueMetadata,
+        issue_provider: &dyn IssueMetadataProvider,
+    ) {
+        let issue_milestone = match &metadata.milestone {
+            Some(m) => m,
+            None => {
+                debug!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr.number,
+                    "Issue has no milestone; skipping milestone propagation"
+                );
+                return;
+            }
+        };
+
+        // No-op if PR already has the same milestone.
+        if pr.milestone_number == Some(issue_milestone.number) {
+            debug!(
+                owner = repo_owner,
+                repo = repo_name,
+                pr = pr.number,
+                milestone = issue_milestone.number,
+                "PR already has the correct milestone; no-op"
+            );
+            return;
+        }
+
+        if let Some(existing) = pr.milestone_number {
+            info!(
+                owner = repo_owner,
+                repo = repo_name,
+                pr = pr.number,
+                old_milestone = existing,
+                new_milestone = issue_milestone.number,
+                new_milestone_title = %issue_milestone.title,
+                "Overwriting PR milestone with issue milestone"
+            );
+        } else {
+            info!(
+                owner = repo_owner,
+                repo = repo_name,
+                pr = pr.number,
+                milestone = issue_milestone.number,
+                milestone_title = %issue_milestone.title,
+                "Setting PR milestone from issue"
+            );
+        }
+
+        if let Err(e) = issue_provider
+            .set_pull_request_milestone(
+                repo_owner,
+                repo_name,
+                pr.number,
+                Some(issue_milestone.number),
+            )
+            .await
+        {
+            warn!(
+                owner = repo_owner,
+                repo = repo_name,
+                pr = pr.number,
+                milestone = issue_milestone.number,
+                error = %e,
+                "Failed to set PR milestone from issue; check status outcome unaffected"
+            );
+        }
+    }
+
+    /// Adds the pull request to each Projects v2 project from the referenced issue.
+    ///
+    /// For each project linked to the referenced issue, fetches the PR node ID and
+    /// calls the platform API to add the PR to that project.
+    async fn sync_projects(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr: &PullRequest,
+        metadata: &merge_warden_developer_platforms::models::IssueMetadata,
+        issue_provider: &dyn IssueMetadataProvider,
+    ) {
+        if metadata.projects.is_empty() {
+            debug!(
+                owner = repo_owner,
+                repo = repo_name,
+                pr = pr.number,
+                "Issue has no linked projects; skipping project propagation"
+            );
+            return;
+        }
+
+        for project in &metadata.projects {
+            if let Err(e) = issue_provider
+                .add_pull_request_to_project(
+                    repo_owner,
+                    repo_name,
+                    pr.number,
+                    project.number,
+                    &project.owner_login,
+                )
+                .await
+            {
+                warn!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr.number,
+                    project_number = project.number,
+                    project_owner = %project.owner_login,
+                    project_title = %project.title,
+                    error = %e,
+                    "Failed to add PR to project; check status outcome unaffected"
+                );
+            }
+        }
+    }
+
     /// Creates a new `MergeWarden` instance with default configuration.
     ///
     /// # Arguments
@@ -1413,6 +1654,7 @@ Please update the PR body to include a valid work item reference."#;
         Self {
             provider,
             config: CurrentPullRequestValidationConfiguration::default(),
+            issue_provider: None,
         }
     }
 
@@ -1859,6 +2101,24 @@ Please update the PR body to include a valid work item reference."#;
             }
         };
 
+        // Propagate issue metadata (milestone / projects) to the PR when an
+        // IssueMetadataProvider has been attached via with_issue_provider.
+        // Runs after all validation and labelling, immediately before the final
+        // check-status update. Failures are non-fatal and logged at warn level.
+        if let Some(issue_prov) = &self.issue_provider {
+            self.propagate_issue_metadata(repo_owner, repo_name, &pr, issue_prov.as_ref())
+                .await;
+        } else if self.config.issue_propagation.sync_milestone_from_issue
+            || self.config.issue_propagation.sync_project_from_issue
+        {
+            warn!(
+                owner = repo_owner,
+                repo = repo_name,
+                pr = pr.number,
+                "Issue propagation configured but no IssueMetadataProvider is attached; skipping"
+            );
+        }
+
         // Smart text formatting that includes all messages with separators when content exists
         let text = {
             let mut messages = Vec::new();
@@ -1986,6 +2246,34 @@ Please update the PR body to include a valid work item reference."#;
     /// fn main() {}
     /// ```
     pub fn with_config(provider: P, config: CurrentPullRequestValidationConfiguration) -> Self {
-        Self { provider, config }
+        Self {
+            provider,
+            config,
+            issue_provider: None,
+        }
+    }
+
+    /// Attaches an [`IssueMetadataProvider`] to this instance.
+    ///
+    /// When set, [`process_pull_request`] will call [`propagate_issue_metadata`]
+    /// after all validation checks and label updates, immediately before the
+    /// final check-status update. The propagation honours the
+    /// `issue_propagation` flags in the configuration and is non-fatal —
+    /// failures are logged at `warn` level and never affect the check-status
+    /// outcome.
+    ///
+    /// # Arguments
+    ///
+    /// * `provider` - A boxed [`IssueMetadataProvider`] implementation.
+    ///
+    /// # Returns
+    ///
+    /// The updated `MergeWarden` instance (builder pattern).
+    ///
+    /// [`process_pull_request`]: MergeWarden::process_pull_request
+    /// [`propagate_issue_metadata`]: MergeWarden::propagate_issue_metadata
+    pub fn with_issue_provider(mut self, provider: Box<dyn IssueMetadataProvider>) -> Self {
+        self.issue_provider = Some(provider);
+        self
     }
 }

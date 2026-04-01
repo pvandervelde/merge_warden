@@ -1,9 +1,10 @@
 use crate::{
     config::{
         BypassRule, BypassRules, ChangeTypeLabelConfig, ConventionalCommitMappings,
-        CurrentPullRequestValidationConfiguration, FallbackLabelSettings, LabelDetectionStrategy,
-        WipCheckConfig, CONVENTIONAL_COMMIT_REGEX, MISSING_WORK_ITEM_LABEL, TITLE_COMMENT_MARKER,
-        TITLE_INVALID_LABEL, WIP_COMMENT_MARKER, WORK_ITEM_COMMENT_MARKER, WORK_ITEM_REGEX,
+        CurrentPullRequestValidationConfiguration, FallbackLabelSettings, IssuePropagationConfig,
+        LabelDetectionStrategy, WipCheckConfig, CONVENTIONAL_COMMIT_REGEX, MISSING_WORK_ITEM_LABEL,
+        TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL, WIP_COMMENT_MARKER, WORK_ITEM_COMMENT_MARKER,
+        WORK_ITEM_REGEX,
     },
     validation_result::{BypassRuleType, ValidationResult},
     MergeWarden,
@@ -95,6 +96,7 @@ impl PullRequestProvider for ErrorMockGitProvider {
                     id: 456,
                     login: "developer123".to_string(),
                 }),
+                milestone_number: None,
             })
         }
     }
@@ -661,6 +663,7 @@ async fn test_process_pull_request_valid() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
     provider.set_pull_request(pr);
 
@@ -722,6 +725,7 @@ async fn test_process_pull_request_invalid_title() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
     provider.set_pull_request(pr);
 
@@ -773,6 +777,7 @@ async fn test_process_pull_request_missing_work_item() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
     provider.set_pull_request(pr);
 
@@ -824,6 +829,7 @@ async fn test_process_pull_request_both_invalid() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
     provider.set_pull_request(pr);
 
@@ -904,6 +910,7 @@ async fn test_handle_title_validation_invalid_to_valid() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
 
     // Handle title validation with valid title
@@ -944,6 +951,7 @@ async fn test_process_pull_request_custom_config_disabled_checks() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
     provider.set_pull_request(pr); // Create a custom configuration with disabled checks
     let config = CurrentPullRequestValidationConfiguration {
@@ -1053,6 +1061,7 @@ async fn test_process_pull_request_existing_labels_comments() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
     provider.set_pull_request(pr);
 
@@ -1120,6 +1129,7 @@ async fn test_process_pull_request_dynamic_provider() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
 
     let invalid_pr = PullRequest {
@@ -1131,6 +1141,7 @@ async fn test_process_pull_request_dynamic_provider() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
 
     provider.add_pull_request(valid_pr);
@@ -1293,6 +1304,7 @@ async fn test_handle_work_item_validation_missing_to_present() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
 
     // Handle work item validation with valid work item reference
@@ -1333,6 +1345,7 @@ async fn test_bypass_functionality_with_title_bypass() {
             id: 789,
             login: "bypass-user".to_string(),
         }),
+        milestone_number: None,
     };
 
     // Add the PR to the mock provider
@@ -1389,6 +1402,7 @@ async fn test_bypass_functionality_with_work_item_bypass() {
             id: 890,
             login: "emergency-user".to_string(),
         }),
+        milestone_number: None,
     };
 
     // Add the PR to the mock provider
@@ -1445,6 +1459,7 @@ async fn test_bypass_functionality_with_multiple_bypasses() {
             id: 999,
             login: "admin-user".to_string(),
         }),
+        milestone_number: None,
     };
 
     // Add the PR to the mock provider
@@ -1512,6 +1527,7 @@ async fn test_no_bypass_when_user_not_authorized() {
             id: 111,
             login: "regular-user".to_string(),
         }),
+        milestone_number: None,
     };
 
     // Add the PR to the mock provider
@@ -1565,6 +1581,7 @@ async fn test_check_status_with_bypass_information() {
             id: 200,
             login: "emergency-admin".to_string(),
         }),
+        milestone_number: None,
     };
 
     // Add the PR to the mock provider
@@ -1622,6 +1639,7 @@ async fn test_check_status_text_formatting() {
             id: 201,
             login: "regular-dev".to_string(),
         }),
+        milestone_number: None,
     };
 
     // Add the PR to the mock provider
@@ -1669,6 +1687,7 @@ async fn test_check_status_bypass_information_formatting() {
             id: 301,
             login: "bypass-user".to_string(),
         }),
+        milestone_number: None,
     };
 
     // Add the PR to the mock provider
@@ -1737,6 +1756,7 @@ async fn test_check_status_multiple_bypasses_formatting() {
             id: 302,
             login: "super-bypass-user".to_string(),
         }),
+        milestone_number: None,
     };
 
     // Add the PR to the mock provider
@@ -1800,6 +1820,7 @@ async fn test_process_pull_request_smart_label_detection() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
     provider.set_pull_request(pr);
 
@@ -1887,6 +1908,7 @@ async fn test_process_pull_request_smart_label_detection_with_audit_logging() {
             id: 123,
             login: "smart-dev".to_string(),
         }),
+        milestone_number: None,
     };
     provider.set_pull_request(pr);
 
@@ -2018,6 +2040,7 @@ async fn test_check_wip_status_detects_wip_prefix_in_title() {
         draft: false,
         body: Some("Fixes #123".to_string()),
         author: None,
+        milestone_number: None,
     };
 
     assert!(warden.check_wip_status(&pr), "Should detect 'WIP:' prefix");
@@ -2043,6 +2066,7 @@ async fn test_check_wip_status_detects_bracketed_wip_in_title() {
         draft: false,
         body: Some("Fixes #456".to_string()),
         author: None,
+        milestone_number: None,
     };
 
     assert!(
@@ -2071,6 +2095,7 @@ async fn test_check_wip_status_returns_false_for_clean_title() {
         draft: false,
         body: Some("Fixes #789".to_string()),
         author: None,
+        milestone_number: None,
     };
 
     assert!(
@@ -2100,6 +2125,7 @@ async fn test_check_wip_status_detects_custom_description_pattern() {
         draft: false,
         body: Some("DO NOT MERGE: waiting for design approval\nFixes #100".to_string()),
         author: None,
+        milestone_number: None,
     };
 
     assert!(
@@ -2129,6 +2155,7 @@ async fn test_check_wip_status_no_body_with_description_pattern_returns_false() 
         draft: false,
         body: None, // No body
         author: None,
+        milestone_number: None,
     };
 
     assert!(
@@ -2153,6 +2180,7 @@ async fn test_process_pull_request_wip_title_returns_wip_detected_true() {
             id: 1,
             login: "dev".to_string(),
         }),
+        milestone_number: None,
     });
 
     let config = CurrentPullRequestValidationConfiguration {
@@ -2189,6 +2217,7 @@ async fn test_process_pull_request_wip_sets_failure_check_status() {
             id: 2,
             login: "dev2".to_string(),
         }),
+        milestone_number: None,
     });
 
     let config = CurrentPullRequestValidationConfiguration {
@@ -2229,6 +2258,7 @@ async fn test_process_pull_request_clean_pr_has_wip_detected_false() {
             id: 3,
             login: "dev3".to_string(),
         }),
+        milestone_number: None,
     });
 
     let config = CurrentPullRequestValidationConfiguration {
@@ -2266,6 +2296,7 @@ async fn test_process_pull_request_wip_blocking_disabled_does_not_flag_wip() {
             id: 4,
             login: "dev4".to_string(),
         }),
+        milestone_number: None,
     });
 
     let config = CurrentPullRequestValidationConfiguration {
@@ -2304,6 +2335,7 @@ async fn test_process_pull_request_wip_bypasses_are_not_applied() {
             id: 5,
             login: "release-bot".to_string(),
         }),
+        milestone_number: None,
     });
 
     let bypass_rule = BypassRule::new(true, vec!["release-bot".to_string()]);
@@ -2342,6 +2374,7 @@ async fn test_communicate_wip_status_adds_comment_when_wip() {
             id: 10,
             login: "tester".to_string(),
         }),
+        milestone_number: None,
     });
 
     let config = CurrentPullRequestValidationConfiguration {
@@ -2359,6 +2392,7 @@ async fn test_communicate_wip_status_adds_comment_when_wip() {
         draft: false,
         body: Some("Fixes #1".to_string()),
         author: None,
+        milestone_number: None,
     };
 
     warden
@@ -2390,6 +2424,7 @@ async fn test_communicate_wip_status_removes_comment_when_not_wip() {
             id: 11,
             login: "tester2".to_string(),
         }),
+        milestone_number: None,
     });
 
     // Pre-populate with a WIP comment
@@ -2421,6 +2456,7 @@ async fn test_communicate_wip_status_removes_comment_when_not_wip() {
         draft: false,
         body: Some("Fixes #2".to_string()),
         author: None,
+        milestone_number: None,
     };
 
     warden
@@ -2470,6 +2506,7 @@ async fn test_communicate_pr_state_labels_superseded_approval_shows_review_state
             id: 10,
             login: "author".to_string(),
         }),
+        milestone_number: None,
     };
 
     let mut provider = DynamicMockGitProvider::new().with_reviews(reviews);
@@ -2501,4 +2538,588 @@ async fn test_communicate_pr_state_labels_superseded_approval_shows_review_state
         "The approved label must NOT be applied when the latest review supersedes the approval, got: {:?}",
         labels
     );
+}
+
+// ---------------------------------------------------------------------------
+// propagate_issue_metadata tests
+// ---------------------------------------------------------------------------
+
+use merge_warden_developer_platforms::{
+    models::{IssueMetadata, IssueMilestone, IssueProject},
+    IssueMetadataProvider,
+};
+
+/// Minimal mock for `IssueMetadataProvider`.
+#[derive(Debug, Clone)]
+struct MockIssueProvider {
+    /// Metadata returned by `get_issue_metadata`. `None` means 404.
+    metadata: Option<IssueMetadata>,
+    /// Set to `true` to make `get_issue_metadata` return an error.
+    error_on_get: bool,
+    /// Set to `true` to make `set_pull_request_milestone` return an error.
+    error_on_set_milestone: bool,
+    /// Set to `true` to make `add_pull_request_to_project` return an error.
+    error_on_add_project: bool,
+    /// Records every `set_pull_request_milestone` call as `(pr_number, milestone_number)`.
+    milestone_calls: Arc<Mutex<Vec<(u64, Option<u64>)>>>,
+    /// Records every `add_pull_request_to_project` call as `(pr_number, project_number)`.
+    project_calls: Arc<Mutex<Vec<(u64, u64)>>>,
+}
+
+impl MockIssueProvider {
+    fn new() -> Self {
+        Self {
+            metadata: None,
+            error_on_get: false,
+            error_on_set_milestone: false,
+            error_on_add_project: false,
+            milestone_calls: Arc::new(Mutex::new(Vec::new())),
+            project_calls: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    fn with_metadata(mut self, m: IssueMetadata) -> Self {
+        self.metadata = Some(m);
+        self
+    }
+
+    fn with_get_error(mut self) -> Self {
+        self.error_on_get = true;
+        self
+    }
+
+    fn with_set_milestone_error(mut self) -> Self {
+        self.error_on_set_milestone = true;
+        self
+    }
+
+    fn with_add_project_error(mut self) -> Self {
+        self.error_on_add_project = true;
+        self
+    }
+
+    fn milestone_calls(&self) -> Vec<(u64, Option<u64>)> {
+        self.milestone_calls.lock().unwrap().clone()
+    }
+
+    fn project_calls(&self) -> Vec<(u64, u64)> {
+        self.project_calls.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl IssueMetadataProvider for MockIssueProvider {
+    async fn get_issue_metadata(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _issue_number: u64,
+    ) -> Result<Option<IssueMetadata>, Error> {
+        if self.error_on_get {
+            return Err(Error::ApiError());
+        }
+        Ok(self.metadata.clone())
+    }
+
+    async fn set_pull_request_milestone(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        pr_number: u64,
+        milestone_number: Option<u64>,
+    ) -> Result<(), Error> {
+        if self.error_on_set_milestone {
+            return Err(Error::FailedToUpdatePullRequest(
+                "mock set_milestone error".to_string(),
+            ));
+        }
+        self.milestone_calls
+            .lock()
+            .unwrap()
+            .push((pr_number, milestone_number));
+        Ok(())
+    }
+
+    async fn add_pull_request_to_project(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        pr_number: u64,
+        project_number: u64,
+        _project_owner_login: &str,
+    ) -> Result<(), Error> {
+        if self.error_on_add_project {
+            return Err(Error::ApiError());
+        }
+        self.project_calls
+            .lock()
+            .unwrap()
+            .push((pr_number, project_number));
+        Ok(())
+    }
+}
+
+/// Helper: build a `MergeWarden` with `sync_milestone_from_issue` and/or
+/// `sync_project_from_issue` set as requested.
+fn warden_with_issue_propagation(milestone: bool, project: bool) -> MergeWarden<MockGitProvider> {
+    let provider = MockGitProvider::new();
+    let config = CurrentPullRequestValidationConfiguration {
+        issue_propagation: IssuePropagationConfig {
+            sync_milestone_from_issue: milestone,
+            sync_project_from_issue: project,
+        },
+        ..CurrentPullRequestValidationConfiguration::default()
+    };
+    MergeWarden::with_config(provider, config)
+}
+
+/// Helper: minimal `PullRequest` with the given body and milestone_number.
+fn make_pr(body: Option<&str>, milestone_number: Option<u64>) -> PullRequest {
+    PullRequest {
+        number: 42,
+        title: "feat: something".to_string(),
+        draft: false,
+        body: body.map(|s| s.to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number,
+    }
+}
+
+#[tokio::test]
+async fn test_propagate_issue_metadata_flags_off_skips_all_calls() {
+    // Both flags off → no API calls regardless of PR body / issue data.
+    let warden = warden_with_issue_propagation(false, false);
+    let issue_provider = MockIssueProvider::new().with_metadata(IssueMetadata {
+        milestone: Some(IssueMilestone {
+            number: 7,
+            title: "v1.0".to_string(),
+        }),
+        projects: vec![],
+    });
+    let pr = make_pr(Some("Closes #10"), None);
+
+    warden
+        .propagate_issue_metadata("owner", "repo", &pr, &issue_provider)
+        .await;
+
+    assert!(
+        issue_provider.milestone_calls().is_empty(),
+        "set_pull_request_milestone must not be called when flag is off"
+    );
+    assert!(
+        issue_provider.project_calls().is_empty(),
+        "add_pull_request_to_project must not be called when flag is off"
+    );
+}
+
+#[tokio::test]
+async fn test_propagate_issue_metadata_empty_body_skips_propagation() {
+    let warden = warden_with_issue_propagation(true, false);
+    let issue_provider = MockIssueProvider::new().with_metadata(IssueMetadata {
+        milestone: Some(IssueMilestone {
+            number: 7,
+            title: "v1.0".to_string(),
+        }),
+        projects: vec![],
+    });
+
+    // No body at all.
+    let pr = make_pr(None, None);
+    warden
+        .propagate_issue_metadata("owner", "repo", &pr, &issue_provider)
+        .await;
+    assert!(issue_provider.milestone_calls().is_empty());
+
+    // Empty-string body.
+    let pr_empty = make_pr(Some(""), None);
+    warden
+        .propagate_issue_metadata("owner", "repo", &pr_empty, &issue_provider)
+        .await;
+    assert!(issue_provider.milestone_calls().is_empty());
+}
+
+#[tokio::test]
+async fn test_propagate_issue_metadata_no_closing_keyword_skips_propagation() {
+    // "References #10" is informational only — not a closing keyword.
+    let warden = warden_with_issue_propagation(true, false);
+    let issue_provider = MockIssueProvider::new().with_metadata(IssueMetadata {
+        milestone: Some(IssueMilestone {
+            number: 7,
+            title: "v1.0".to_string(),
+        }),
+        projects: vec![],
+    });
+
+    let pr = make_pr(Some("This PR references #10 but does not close it."), None);
+    warden
+        .propagate_issue_metadata("owner", "repo", &pr, &issue_provider)
+        .await;
+
+    assert!(issue_provider.milestone_calls().is_empty());
+}
+
+#[tokio::test]
+async fn test_propagate_issue_metadata_sets_milestone_when_pr_has_none() {
+    let warden = warden_with_issue_propagation(true, false);
+    let issue_provider = MockIssueProvider::new().with_metadata(IssueMetadata {
+        milestone: Some(IssueMilestone {
+            number: 5,
+            title: "v2.0.0".to_string(),
+        }),
+        projects: vec![],
+    });
+
+    let pr = make_pr(Some("Closes #10"), None); // PR has no milestone yet
+    warden
+        .propagate_issue_metadata("owner", "repo", &pr, &issue_provider)
+        .await;
+
+    let calls = issue_provider.milestone_calls();
+    assert_eq!(calls.len(), 1, "Expected exactly one milestone call");
+    assert_eq!(calls[0], (42, Some(5)));
+}
+
+#[tokio::test]
+async fn test_propagate_issue_metadata_overwrites_different_pr_milestone() {
+    let warden = warden_with_issue_propagation(true, false);
+    let issue_provider = MockIssueProvider::new().with_metadata(IssueMetadata {
+        milestone: Some(IssueMilestone {
+            number: 9,
+            title: "v3.0.0".to_string(),
+        }),
+        projects: vec![],
+    });
+
+    // PR already has milestone 3, issue has milestone 9 → should overwrite.
+    let pr = make_pr(Some("Fixes #20"), Some(3));
+    warden
+        .propagate_issue_metadata("owner", "repo", &pr, &issue_provider)
+        .await;
+
+    let calls = issue_provider.milestone_calls();
+    assert_eq!(calls.len(), 1, "Expected exactly one milestone call");
+    assert_eq!(calls[0], (42, Some(9)));
+}
+
+#[tokio::test]
+async fn test_propagate_issue_metadata_no_op_when_pr_already_has_same_milestone() {
+    let warden = warden_with_issue_propagation(true, false);
+    let issue_provider = MockIssueProvider::new().with_metadata(IssueMetadata {
+        milestone: Some(IssueMilestone {
+            number: 5,
+            title: "v2.0.0".to_string(),
+        }),
+        projects: vec![],
+    });
+
+    // PR already has the same milestone → no-op (assertion 7 from spec).
+    let pr = make_pr(Some("Closes #10"), Some(5));
+    warden
+        .propagate_issue_metadata("owner", "repo", &pr, &issue_provider)
+        .await;
+
+    assert!(
+        issue_provider.milestone_calls().is_empty(),
+        "set_pull_request_milestone must not be called when PR already has the same milestone"
+    );
+}
+
+#[tokio::test]
+async fn test_propagate_issue_metadata_no_op_when_issue_has_no_milestone() {
+    let warden = warden_with_issue_propagation(true, false);
+    let issue_provider = MockIssueProvider::new().with_metadata(IssueMetadata {
+        milestone: None, // issue has no milestone
+        projects: vec![],
+    });
+
+    let pr = make_pr(Some("Closes #10"), None);
+    warden
+        .propagate_issue_metadata("owner", "repo", &pr, &issue_provider)
+        .await;
+
+    assert!(
+        issue_provider.milestone_calls().is_empty(),
+        "set_pull_request_milestone must not be called when issue has no milestone"
+    );
+}
+
+#[tokio::test]
+async fn test_propagate_issue_metadata_issue_not_found_is_no_op() {
+    let warden = warden_with_issue_propagation(true, false);
+    // `metadata: None` simulates a 404 response.
+    let issue_provider = MockIssueProvider::new();
+
+    let pr = make_pr(Some("Closes #99"), None);
+    warden
+        .propagate_issue_metadata("owner", "repo", &pr, &issue_provider)
+        .await;
+
+    assert!(
+        issue_provider.milestone_calls().is_empty(),
+        "No milestone call expected when issue is not found"
+    );
+}
+
+#[tokio::test]
+async fn test_propagate_issue_metadata_get_error_is_non_fatal() {
+    // `get_issue_metadata` fails → propagation logs a warning but does not panic.
+    let warden = warden_with_issue_propagation(true, false);
+    let issue_provider = MockIssueProvider::new().with_get_error();
+
+    let pr = make_pr(Some("Closes #10"), None);
+    // Must complete without panicking and make no downstream calls.
+    warden
+        .propagate_issue_metadata("owner", "repo", &pr, &issue_provider)
+        .await;
+
+    assert!(issue_provider.milestone_calls().is_empty());
+}
+
+#[tokio::test]
+async fn test_propagate_issue_metadata_set_milestone_error_is_non_fatal() {
+    // `set_pull_request_milestone` fails → logs a warning, does not propagate error.
+    let warden = warden_with_issue_propagation(true, false);
+    let issue_provider = MockIssueProvider::new()
+        .with_metadata(IssueMetadata {
+            milestone: Some(IssueMilestone {
+                number: 5,
+                title: "v2.0.0".to_string(),
+            }),
+            projects: vec![],
+        })
+        .with_set_milestone_error();
+
+    let pr = make_pr(Some("Closes #10"), None);
+    // Must complete without panicking.
+    warden
+        .propagate_issue_metadata("owner", "repo", &pr, &issue_provider)
+        .await;
+    // No assertion on call count — the provider returns an error, which is expected.
+}
+
+#[tokio::test]
+async fn test_propagate_issue_metadata_cross_repo_reference() {
+    // "Closes owner2/other-repo#55" — the issue lookup must use the cross-repo
+    // owner/repo, not the PR's own repo.
+    let warden = warden_with_issue_propagation(true, false);
+    let issue_provider = MockIssueProvider::new().with_metadata(IssueMetadata {
+        milestone: Some(IssueMilestone {
+            number: 11,
+            title: "cross".to_string(),
+        }),
+        projects: vec![],
+    });
+
+    let pr = make_pr(Some("Closes owner2/other-repo#55"), None);
+    warden
+        .propagate_issue_metadata("owner", "repo", &pr, &issue_provider)
+        .await;
+
+    let calls = issue_provider.milestone_calls();
+    assert_eq!(
+        calls.len(),
+        1,
+        "Expected exactly one milestone call for cross-repo reference"
+    );
+    assert_eq!(calls[0], (42, Some(11)));
+}
+
+#[tokio::test]
+async fn test_propagate_issue_metadata_adds_pr_to_projects() {
+    let warden = warden_with_issue_propagation(false, true);
+    let issue_provider = MockIssueProvider::new().with_metadata(IssueMetadata {
+        milestone: None,
+        projects: vec![
+            IssueProject {
+                number: 1,
+                owner_login: "myorg".to_string(),
+                title: "Team Alpha".to_string(),
+            },
+            IssueProject {
+                number: 2,
+                owner_login: "myorg".to_string(),
+                title: "Team Beta".to_string(),
+            },
+        ],
+    });
+
+    let pr = make_pr(Some("Closes #10"), None);
+    warden
+        .propagate_issue_metadata("owner", "repo", &pr, &issue_provider)
+        .await;
+
+    let calls = issue_provider.project_calls();
+    assert_eq!(calls.len(), 2, "Expected one project call per project");
+    assert!(calls.iter().any(|(_, num)| *num == 1));
+    assert!(calls.iter().any(|(_, num)| *num == 2));
+    // Milestone should not have been called since the flag is off.
+    assert!(issue_provider.milestone_calls().is_empty());
+}
+
+#[tokio::test]
+async fn test_propagate_issue_metadata_no_projects_on_issue_skips_project_calls() {
+    let warden = warden_with_issue_propagation(false, true);
+    let issue_provider = MockIssueProvider::new().with_metadata(IssueMetadata {
+        milestone: None,
+        projects: vec![], // no projects
+    });
+
+    let pr = make_pr(Some("Closes #10"), None);
+    warden
+        .propagate_issue_metadata("owner", "repo", &pr, &issue_provider)
+        .await;
+
+    assert!(
+        issue_provider.project_calls().is_empty(),
+        "No project calls expected when issue has no linked projects"
+    );
+}
+
+#[tokio::test]
+async fn test_propagate_issue_metadata_add_project_error_is_non_fatal() {
+    let warden = warden_with_issue_propagation(false, true);
+    let issue_provider = MockIssueProvider::new()
+        .with_metadata(IssueMetadata {
+            milestone: None,
+            projects: vec![IssueProject {
+                number: 1,
+                owner_login: "myorg".to_string(),
+                title: "Alpha".to_string(),
+            }],
+        })
+        .with_add_project_error();
+
+    let pr = make_pr(Some("Closes #10"), None);
+    // Must not panic.
+    warden
+        .propagate_issue_metadata("owner", "repo", &pr, &issue_provider)
+        .await;
+}
+
+#[tokio::test]
+async fn test_propagate_issue_metadata_both_flags_enabled() {
+    // Both flags on → both milestone and project calls should be made.
+    let warden = warden_with_issue_propagation(true, true);
+    let issue_provider = MockIssueProvider::new().with_metadata(IssueMetadata {
+        milestone: Some(IssueMilestone {
+            number: 3,
+            title: "Q1".to_string(),
+        }),
+        projects: vec![IssueProject {
+            number: 7,
+            owner_login: "myorg".to_string(),
+            title: "Roadmap".to_string(),
+        }],
+    });
+
+    let pr = make_pr(Some("Closes #10"), None);
+    warden
+        .propagate_issue_metadata("owner", "repo", &pr, &issue_provider)
+        .await;
+
+    assert_eq!(issue_provider.milestone_calls().len(), 1);
+    assert_eq!(issue_provider.project_calls().len(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// process_pull_request + with_issue_provider integration tests (task 6.8)
+// ---------------------------------------------------------------------------
+
+/// Verify that `process_pull_request` calls `propagate_issue_metadata` when an
+/// `IssueMetadataProvider` is wired in via `with_issue_provider` and the
+/// `sync_milestone_from_issue` flag is enabled.
+#[tokio::test]
+async fn test_process_pull_request_calls_milestone_propagation_via_issue_provider() {
+    // Set up a PR with a closing issue reference in its body.
+    let pr = PullRequest {
+        number: 77,
+        title: "feat: new widget".to_string(),
+        draft: false,
+        body: Some("Closes #10".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+
+    let pr_provider = MockGitProvider::new();
+    pr_provider.set_pull_request(pr);
+
+    // Issue provider: issue 10 has milestone 5.
+    let issue_provider = MockIssueProvider::new().with_metadata(IssueMetadata {
+        milestone: Some(IssueMilestone {
+            number: 5,
+            title: "v1.0".to_string(),
+        }),
+        projects: vec![],
+    });
+    let issue_provider_check = issue_provider.clone();
+
+    let config = CurrentPullRequestValidationConfiguration {
+        issue_propagation: IssuePropagationConfig {
+            sync_milestone_from_issue: true,
+            sync_project_from_issue: false,
+        },
+        ..CurrentPullRequestValidationConfiguration::default()
+    };
+
+    let warden =
+        MergeWarden::with_config(pr_provider, config).with_issue_provider(Box::new(issue_provider));
+
+    warden
+        .process_pull_request("owner", "repo", 77)
+        .await
+        .unwrap();
+
+    let calls = issue_provider_check.milestone_calls();
+    assert_eq!(
+        calls.len(),
+        1,
+        "set_pull_request_milestone should be called once when issue provider is wired in"
+    );
+    assert_eq!(calls[0], (77, Some(5)));
+}
+
+/// Verify that `process_pull_request` does NOT call any issue-provider methods
+/// when no `IssueMetadataProvider` is attached (backward-compatible behaviour).
+#[tokio::test]
+async fn test_process_pull_request_skips_propagation_without_issue_provider() {
+    let pr = PullRequest {
+        number: 1,
+        title: "feat: something".to_string(),
+        draft: false,
+        body: Some("Closes #10".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+
+    let pr_provider = MockGitProvider::new();
+    pr_provider.set_pull_request(pr);
+
+    // Config has the flag enabled, but no issue provider is set.
+    let config = CurrentPullRequestValidationConfiguration {
+        issue_propagation: IssuePropagationConfig {
+            sync_milestone_from_issue: true,
+            sync_project_from_issue: false,
+        },
+        ..CurrentPullRequestValidationConfiguration::default()
+    };
+
+    // No `.with_issue_provider(...)` call — propagation must be silently skipped.
+    let warden = MergeWarden::with_config(pr_provider, config);
+
+    // Must complete without panicking.
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+    // If we reach here without a panic, the test passes. There is no issue
+    // provider to assert on since none was supplied.
 }

@@ -345,6 +345,7 @@ fn test_pull_request_serialization() {
         draft: false,
         body: Some("This PR adds a new feature.\n\nFixes #123".to_string()),
         author: None,
+        milestone_number: None,
     };
 
     // Serialize to JSON
@@ -388,6 +389,7 @@ fn test_pull_request_with_author_serialization() {
             id: 456,
             login: "developer123".to_string(),
         }),
+        milestone_number: None,
     };
 
     // Serialize to JSON
@@ -411,6 +413,7 @@ fn test_pull_request_without_author() {
         draft: false,
         body: Some("Updated documentation".to_string()),
         author: None,
+        milestone_number: None,
     };
 
     // Serialize to JSON
@@ -438,6 +441,7 @@ fn test_pull_request_without_body() {
         draft: false,
         body: None,
         author: None,
+        milestone_number: None,
     };
 
     // Serialize to JSON
@@ -701,4 +705,170 @@ fn test_user_serialization() {
     let parsed: serde_json::Value = serde_json::from_str(&json_str).expect("Failed to parse JSON");
     assert_eq!(parsed["id"], 303);
     assert_eq!(parsed["login"], "developer");
+}
+
+// ── IssueMetadata tests ──────────────────────────────────────────────────────
+
+#[test]
+fn test_issue_metadata_with_milestone_and_projects() {
+    let metadata = IssueMetadata {
+        milestone: Some(IssueMilestone {
+            number: 3,
+            title: "v1.2.0".to_string(),
+        }),
+        projects: vec![
+            IssueProject {
+                number: 1,
+                owner_login: "myorg".to_string(),
+                title: "Team Roadmap".to_string(),
+            },
+            IssueProject {
+                number: 2,
+                owner_login: "myorg".to_string(),
+                title: "Sprint Board".to_string(),
+            },
+        ],
+    };
+
+    let milestone = metadata.milestone.unwrap();
+    assert_eq!(milestone.number, 3);
+    assert_eq!(milestone.title, "v1.2.0");
+    assert_eq!(metadata.projects.len(), 2);
+    assert_eq!(metadata.projects[0].title, "Team Roadmap");
+    assert_eq!(metadata.projects[1].title, "Sprint Board");
+}
+
+#[test]
+fn test_issue_metadata_no_milestone() {
+    let metadata = IssueMetadata {
+        milestone: None,
+        projects: vec![IssueProject {
+            number: 3,
+            owner_login: "myorg".to_string(),
+            title: "Roadmap".to_string(),
+        }],
+    };
+
+    assert!(metadata.milestone.is_none());
+    assert_eq!(metadata.projects.len(), 1);
+}
+
+#[test]
+fn test_issue_metadata_no_projects() {
+    let metadata = IssueMetadata {
+        milestone: Some(IssueMilestone {
+            number: 7,
+            title: "v3.0.0".to_string(),
+        }),
+        projects: vec![],
+    };
+
+    assert_eq!(metadata.milestone.unwrap().number, 7);
+    assert!(metadata.projects.is_empty());
+}
+
+#[test]
+fn test_issue_metadata_empty() {
+    let metadata = IssueMetadata {
+        milestone: None,
+        projects: vec![],
+    };
+
+    assert!(metadata.milestone.is_none());
+    assert!(metadata.projects.is_empty());
+}
+
+#[test]
+fn test_issue_metadata_clone() {
+    let original = IssueMetadata {
+        milestone: Some(IssueMilestone {
+            number: 1,
+            title: "v1.0.0".to_string(),
+        }),
+        projects: vec![IssueProject {
+            number: 10,
+            owner_login: "myorg".to_string(),
+            title: "My Project".to_string(),
+        }],
+    };
+
+    let cloned = original.clone();
+    assert_eq!(cloned.milestone.unwrap().number, 1);
+    assert_eq!(cloned.projects.len(), 1);
+    assert_eq!(cloned.projects[0].number, 10);
+}
+
+// ── IssueMilestone tests ─────────────────────────────────────────────────────
+
+#[test]
+fn test_issue_milestone_fields() {
+    let milestone = IssueMilestone {
+        number: 12,
+        title: "Q2 2025".to_string(),
+    };
+
+    assert_eq!(milestone.number, 12);
+    assert_eq!(milestone.title, "Q2 2025");
+}
+
+#[test]
+fn test_issue_milestone_clone() {
+    let original = IssueMilestone {
+        number: 5,
+        title: "v2.0.0".to_string(),
+    };
+    let cloned = original.clone();
+
+    assert_eq!(cloned.number, original.number);
+    assert_eq!(cloned.title, original.title);
+}
+
+#[test]
+fn test_issue_milestone_zero_number() {
+    // milestone number 0 is technically invalid in GitHub but we don't validate here
+    let milestone = IssueMilestone {
+        number: 0,
+        title: "empty".to_string(),
+    };
+    assert_eq!(milestone.number, 0);
+}
+
+// ── IssueProject tests ───────────────────────────────────────────────────────
+
+#[test]
+fn test_issue_project_fields() {
+    let project = IssueProject {
+        number: 5,
+        owner_login: "myorg".to_string(),
+        title: "Engineering Backlog".to_string(),
+    };
+
+    assert_eq!(project.number, 5);
+    assert_eq!(project.owner_login, "myorg");
+    assert_eq!(project.title, "Engineering Backlog");
+}
+
+#[test]
+fn test_issue_project_clone() {
+    let original = IssueProject {
+        number: 3,
+        owner_login: "myorg".to_string(),
+        title: "Roadmap".to_string(),
+    };
+    let cloned = original.clone();
+
+    assert_eq!(cloned.number, original.number);
+    assert_eq!(cloned.owner_login, original.owner_login);
+    assert_eq!(cloned.title, original.title);
+}
+
+#[test]
+fn test_issue_project_zero_number_allowed() {
+    // Struct does not validate — zero project number is accepted at construction time
+    let project = IssueProject {
+        number: 0,
+        owner_login: String::new(),
+        title: "Unnamed".to_string(),
+    };
+    assert_eq!(project.number, 0);
 }

@@ -60,6 +60,12 @@ Design for the `EventIngress` abstraction and queue-based webhook decoupling. De
 `ProcessableEvent`, `WebhookIngress`, `QueueIngress`, the `WebhookQueueMessage` schema,
 session ID convention, and the phased migration strategy.
 
+### [Issue Metadata Propagation](./issue-metadata-propagation.md)
+
+Design for copying milestone and project membership from a referenced issue onto the pull
+request. Covers the `IssueMetadataProvider` trait, issue reference parsing, new model types,
+`IssuePropagationConfig`, conflict behaviour, and the GitHub REST/GraphQL implementation split.
+
 ## Key Design Patterns
 
 ### Event-Driven Architecture

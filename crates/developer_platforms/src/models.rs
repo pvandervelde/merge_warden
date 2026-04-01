@@ -97,6 +97,92 @@ pub struct Installation {
     pub name: Option<String>,
 }
 
+/// Metadata fetched from a referenced issue for propagation to a pull request.
+///
+/// Contains the milestone and project information from the issue that
+/// can be copied onto the associated pull request. Both fields may be empty
+/// or absent when the issue has no milestone or project links, or when the
+/// provider does not support project propagation.
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_developer_platforms::models::{IssueMetadata, IssueMilestone, IssueProject};
+///
+/// let metadata = IssueMetadata {
+///     milestone: Some(IssueMilestone { number: 3, title: "v1.2.0".to_string() }),
+///     projects: vec![IssueProject { number: 3, owner_login: "myorg".to_string(), title: "Roadmap".to_string() }],
+/// };
+/// assert_eq!(metadata.milestone.unwrap().number, 3);
+/// assert_eq!(metadata.projects.len(), 1);
+/// ```
+#[derive(Debug, Clone)]
+pub struct IssueMetadata {
+    /// Milestone on the issue, if any.
+    pub milestone: Option<IssueMilestone>,
+
+    /// Projects v2 the issue belongs to.
+    ///
+    /// Empty when the issue has no linked projects, or when project
+    /// propagation is not supported by the provider implementation.
+    pub projects: Vec<IssueProject>,
+}
+
+/// Milestone information from a referenced issue.
+///
+/// Contains the data needed to copy a milestone onto a pull request via
+/// the REST API.
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_developer_platforms::models::IssueMilestone;
+///
+/// let milestone = IssueMilestone {
+///     number: 5,
+///     title: "v2.0.0".to_string(),
+/// };
+/// assert_eq!(milestone.number, 5);
+/// assert_eq!(milestone.title, "v2.0.0");
+/// ```
+#[derive(Debug, Clone)]
+pub struct IssueMilestone {
+    /// Milestone number (repository-scoped, used to set PR milestone via REST).
+    pub number: u64,
+
+    /// Human-readable milestone title (used in log messages).
+    pub title: String,
+}
+
+/// Projects v2 project information from a referenced issue.
+///
+/// Contains the data needed to add a pull request to a Projects v2 project
+/// via the `add_item_to_project` SDK call.
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_developer_platforms::models::IssueProject;
+///
+/// let project = IssueProject {
+///     number: 5,
+///     owner_login: "myorg".to_string(),
+///     title: "Team Roadmap".to_string(),
+/// };
+/// assert_eq!(project.number, 5);
+/// ```
+#[derive(Debug, Clone)]
+pub struct IssueProject {
+    /// Project number (owner-scoped, used with `add_item_to_project` SDK call).
+    pub number: u64,
+
+    /// Login name of the project owner (organisation or user).
+    pub owner_login: String,
+
+    /// Human-readable project title (used in log messages).
+    pub title: String,
+}
+
 /// Represents a label on a pull request.
 ///
 /// This struct contains the essential information about a label
@@ -162,6 +248,7 @@ pub struct Organization {
 /// * `draft` - Whether the pull request is a draft
 /// * `body` - The description/body of the pull request, if any
 /// * `author` - The user who created the pull request, if available
+/// * `milestone_number` - The milestone number currently set on the PR, if any
 ///
 /// # Examples
 ///
@@ -177,6 +264,7 @@ pub struct Organization {
 ///         id: 456,
 ///         login: "developer123".to_string(),
 ///     }),
+///     milestone_number: None,
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -195,6 +283,13 @@ pub struct PullRequest {
 
     /// The user who created the pull request, if available
     pub author: Option<User>,
+
+    /// The milestone number currently set on the pull request, if any.
+    ///
+    /// Used to detect when the PR milestone already matches the issue milestone
+    /// so that redundant API calls can be skipped during issue metadata propagation.
+    #[serde(default)]
+    pub milestone_number: Option<u64>,
 }
 
 /// Represents a file that has been changed in a pull request.

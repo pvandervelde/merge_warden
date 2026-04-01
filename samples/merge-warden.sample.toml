@@ -72,6 +72,27 @@ wip_title_patterns = ["WIP", "wip:", "[wip]", "draft:", "Draft:"]
 # Empty by default — WIP detection in the description is opt-in.
 wip_description_patterns = []
 
+# Configuration for propagating issue metadata onto the pull request.
+#
+# Both flags default to false. Teams that do not use GitHub Milestones or
+# Projects v2, or that track issues in an external system, should leave both
+# flags disabled (or omit this section entirely). When both are false, no
+# additional GitHub API calls are made beyond the existing work-item check.
+[policies.pullRequests.issuePropagation]
+# When true, copy the milestone from the first closing-keyword issue reference
+# in the PR body onto the pull request.
+#
+# No-op when the referenced issue has no milestone, or when the PR already has
+# the same milestone. Overwrites an existing PR milestone if it differs from
+# the issue's.
+sync_milestone_from_issue = false
+
+# When true, add the pull request to every Projects v2 project that the
+# referenced issue belongs to.
+#
+# No-op when the referenced issue has no linked projects.
+sync_project_from_issue = false
+
 # PR state lifecycle labels — apply a single label reflecting the current PR
 # state (draft, awaiting review, or approved). Labels are managed idempotently
 # on every PR event: exactly one state label is applied and the other two are
