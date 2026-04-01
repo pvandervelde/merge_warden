@@ -1374,7 +1374,7 @@ Please update the PR body to include a valid work item reference."#;
     /// * `pr` - The pull request being processed.
     /// * `issue_provider` - Provider for fetching issue metadata and setting PR milestone/projects.
     #[instrument(skip(issue_provider), fields(owner = repo_owner, repo = repo_name, pr = pr.number))]
-    pub async fn propagate_issue_metadata(
+    pub(crate) async fn propagate_issue_metadata(
         &self,
         repo_owner: &str,
         repo_name: &str,
@@ -2108,6 +2108,15 @@ Please update the PR body to include a valid work item reference."#;
         if let Some(issue_prov) = &self.issue_provider {
             self.propagate_issue_metadata(repo_owner, repo_name, &pr, issue_prov.as_ref())
                 .await;
+        } else if self.config.issue_propagation.sync_milestone_from_issue
+            || self.config.issue_propagation.sync_project_from_issue
+        {
+            warn!(
+                owner = repo_owner,
+                repo = repo_name,
+                pr = pr.number,
+                "Issue propagation configured but no IssueMetadataProvider is attached; skipping"
+            );
         }
 
         // Smart text formatting that includes all messages with separators when content exists

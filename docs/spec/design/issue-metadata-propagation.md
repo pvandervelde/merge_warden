@@ -203,21 +203,24 @@ pub trait IssueMetadataProvider: Sync + Send {
 
     /// Add a pull request to a GitHub Projects v2 project.
     ///
-    /// Uses the PR's node ID and the project's node ID to call the
-    /// `addProjectV2ItemById` GraphQL mutation.
+    /// Fetches the PR's global node ID via `get_pull_request`, resolves the
+    /// project node ID from `project_owner_login` + `project_number` using
+    /// a GraphQL query, then adds the PR via the `addProjectV2ItemById` mutation.
     ///
     /// # Arguments
     ///
-    /// * `repo_owner`       - Owner of the repository containing the PR.
-    /// * `repo_name`        - Name of that repository.
-    /// * `pr_number`        - Pull request number.
-    /// * `project_node_id`  - GraphQL node ID of the target project.
+    /// * `repo_owner`          - Owner of the repository containing the PR.
+    /// * `repo_name`           - Name of that repository.
+    /// * `pr_number`           - Pull request number.
+    /// * `project_number`      - Owner-scoped project number (from `IssueProject.number`).
+    /// * `project_owner_login` - Login of the project owner (from `IssueProject.owner_login`).
     async fn add_pull_request_to_project(
         &self,
         repo_owner: &str,
         repo_name: &str,
         pr_number: u64,
-        project_node_id: &str,
+        project_number: u64,
+        project_owner_login: &str,
     ) -> Result<(), Error>;
 }
 ```
@@ -259,8 +262,11 @@ pub struct IssueMilestone {
 /// Projects v2 project information from a referenced issue.
 #[derive(Debug, Clone)]
 pub struct IssueProject {
-    /// GraphQL node ID of the project (used in `addProjectV2ItemById` mutation).
-    pub node_id: String,
+    /// Project number (owner-scoped, used with `add_item_to_project` SDK call).
+    pub number: u64,
+
+    /// Login name of the project owner (organisation or user).
+    pub owner_login: String,
 
     /// Human-readable project title (used in log messages).
     pub title: String,

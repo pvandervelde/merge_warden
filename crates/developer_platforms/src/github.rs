@@ -984,7 +984,6 @@ impl IssueMetadataProvider for GitHubProvider {
             Ok(linked) => linked
                 .into_iter()
                 .map(|p| IssueProject {
-                    node_id: p.node_id,
                     number: p.number,
                     owner_login: p.owner.login,
                     title: p.title,
@@ -1053,14 +1052,6 @@ impl IssueMetadataProvider for GitHubProvider {
             })
     }
 
-    /// Adding a pull request to a Projects v2 project is not yet supported.
-    ///
-    /// This operation requires the `addProjectV2ItemById` GraphQL mutation,
-    /// which the github-bot-sdk does not yet implement. This method will return
-    /// an error until SDK support is available. Teams can avoid hitting this
-    /// by keeping `sync_project_from_issue = false` (the default).
-    ///
-    /// # Errors
     /// Adds the pull request to the given Projects v2 project.
     ///
     /// Fetches the PR's global node ID, resolves the project node ID from

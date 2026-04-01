@@ -111,7 +111,7 @@ pub struct Installation {
 ///
 /// let metadata = IssueMetadata {
 ///     milestone: Some(IssueMilestone { number: 3, title: "v1.2.0".to_string() }),
-///     projects: vec![IssueProject { node_id: "PVT_abc123".to_string(), number: 3, owner_login: "myorg".to_string(), title: "Roadmap".to_string() }],
+///     projects: vec![IssueProject { number: 3, owner_login: "myorg".to_string(), title: "Roadmap".to_string() }],
 /// };
 /// assert_eq!(metadata.milestone.unwrap().number, 3);
 /// assert_eq!(metadata.projects.len(), 1);
@@ -165,19 +165,14 @@ pub struct IssueMilestone {
 /// use merge_warden_developer_platforms::models::IssueProject;
 ///
 /// let project = IssueProject {
-///     node_id: "PVT_kwDOAbc123".to_string(),
 ///     number: 5,
 ///     owner_login: "myorg".to_string(),
 ///     title: "Team Roadmap".to_string(),
 /// };
-/// assert!(project.node_id.starts_with("PVT_"));
 /// assert_eq!(project.number, 5);
 /// ```
 #[derive(Debug, Clone)]
 pub struct IssueProject {
-    /// GraphQL node ID of the project (for reference and logging).
-    pub node_id: String,
-
     /// Project number (owner-scoped, used with `add_item_to_project` SDK call).
     pub number: u64,
 

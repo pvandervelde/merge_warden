@@ -667,6 +667,7 @@ pub trait PullRequestProvider {
 /// use merge_warden_developer_platforms::models::{IssueMetadata, IssueMilestone, IssueProject};
 /// use async_trait::async_trait;
 ///
+/// #[derive(Debug)]
 /// struct MyIssueProvider;
 ///
 /// #[async_trait]

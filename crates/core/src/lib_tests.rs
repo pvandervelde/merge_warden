@@ -2934,13 +2934,11 @@ async fn test_propagate_issue_metadata_adds_pr_to_projects() {
         milestone: None,
         projects: vec![
             IssueProject {
-                node_id: "PVT_aaa".to_string(),
                 number: 1,
                 owner_login: "myorg".to_string(),
                 title: "Team Alpha".to_string(),
             },
             IssueProject {
-                node_id: "PVT_bbb".to_string(),
                 number: 2,
                 owner_login: "myorg".to_string(),
                 title: "Team Beta".to_string(),
@@ -2987,7 +2985,6 @@ async fn test_propagate_issue_metadata_add_project_error_is_non_fatal() {
         .with_metadata(IssueMetadata {
             milestone: None,
             projects: vec![IssueProject {
-                node_id: "PVT_aaa".to_string(),
                 number: 1,
                 owner_login: "myorg".to_string(),
                 title: "Alpha".to_string(),
@@ -3012,7 +3009,6 @@ async fn test_propagate_issue_metadata_both_flags_enabled() {
             title: "Q1".to_string(),
         }),
         projects: vec![IssueProject {
-            node_id: "PVT_xyz".to_string(),
             number: 7,
             owner_login: "myorg".to_string(),
             title: "Roadmap".to_string(),

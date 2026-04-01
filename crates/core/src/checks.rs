@@ -16,6 +16,21 @@ use crate::{
 };
 use merge_warden_developer_platforms::models::{PullRequest, PullRequestFile, User};
 use regex::Regex;
+use std::sync::OnceLock;
+
+/// Compiled once at first use. Handles all four supported closing-keyword formats:
+/// `#NNN`, `GH-NNN`, full GitHub URL, and `owner/repo#NNN` (including dots in names).
+static CLOSING_ISSUE_REGEX: OnceLock<Regex> = OnceLock::new();
+
+/// Returns the compiled closing-issue regex, initialising it on first call.
+fn closing_issue_regex() -> &'static Regex {
+    CLOSING_ISSUE_REGEX.get_or_init(|| {
+        Regex::new(
+            r"(?i)(fixes|closes|resolves)\s+(#(\d+)|GH-(\d+)|https://github\.com/([^/\s]+)/([^/\s]+)/issues/(\d+)|([a-zA-Z0-9_.-]+)/([a-zA-Z0-9_.-]+)#(\d+))",
+        )
+        .expect("CLOSING_ISSUE_REGEX is a valid regex")
+    })
+}
 
 #[cfg(test)]
 #[path = "check_tests.rs"]
@@ -369,15 +384,10 @@ pub fn extract_closing_issue_reference(body: &str) -> Option<IssueReference> {
     //   5: owner from full GitHub URL        (cross-repo)
     //   6: repo  from full GitHub URL        (cross-repo)
     //   7: issue number from full GitHub URL (cross-repo)
-    //   8: owner from owner/repo#NNN         (cross-repo)
-    //   9: repo  from owner/repo#NNN         (cross-repo)
+    //   8: owner from owner/repo#NNN         (cross-repo, dots allowed)
+    //   9: repo  from owner/repo#NNN         (cross-repo, dots allowed)
     //  10: issue number from owner/repo#NNN  (cross-repo)
-    let regex = match Regex::new(
-        r"(?i)(fixes|closes|resolves)\s+(#(\d+)|GH-(\d+)|https://github\.com/([^/\s]+)/([^/\s]+)/issues/(\d+)|([a-zA-Z0-9_-]+)/([a-zA-Z0-9_-]+)#(\d+))",
-    ) {
-        Ok(r) => r,
-        Err(_) => return None,
-    };
+    let regex = closing_issue_regex();
 
     for cap in regex.captures_iter(body) {
         // #NNN — same-repo hash reference
