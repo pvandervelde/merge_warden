@@ -6,7 +6,8 @@ name: Cleanup Test Repositories
 # (REPO_CREATION_APP_ID / REPO_CREATION_APP_PRIVATE_KEY) that creates them.
 #
 # The workflow runs automatically every day and can also be triggered manually
-# with optional overrides for the age threshold and a dry-run flag.
+# with optional overrides for the age threshold, a dry-run flag, and the
+# repository name prefix to clean up.
 
 on:
     schedule:
@@ -27,6 +28,11 @@ on:
                 required: false
                 default: "false"
                 type: boolean
+            repository_prefix:
+                description: "Repository name prefix to target for cleanup (default: merge-warden-test). Must match the TEST_REPOSITORY_PREFIX value used when creating test repos."
+                required: false
+                default: ""
+                type: string
 
 permissions:
     contents: read
@@ -131,9 +137,10 @@ jobs:
                   # from in-progress runs alone.
                   MAX_AGE_HOURS: ${{ inputs.max_age_hours || '2' }}
                   DRY_RUN: ${{ inputs.dry_run || 'false' }}
-                  # Must match the TEST_REPOSITORY_PREFIX default used by the
-                  # integration-test environment (see environment.rs).
-                  REPO_PREFIX: "merge-warden-test"
+                  # Defaults to the same value as TEST_REPOSITORY_PREFIX in environment.rs.
+                  # Override via the repository_prefix workflow_dispatch input when repos were
+                  # created with a non-default prefix so that all stale repos are found.
+                  REPO_PREFIX: ${{ inputs.repository_prefix || 'merge-warden-test' }}
               run: |
                   echo "Organisation  : ${TEST_ORGANIZATION}"
                   echo "Prefix filter : ${REPO_PREFIX}"
@@ -159,11 +166,26 @@ jobs:
                   REPO_LIST=$(mktemp)
                   trap 'rm -f "${REPO_LIST}"' EXIT
 
-                  # Fetch all pages; append a trailing newline after each page's
-                  # jq output so entries never run together when concatenated.
-                  gh api --paginate "orgs/${TEST_ORGANIZATION}/repos" \
+                  # Detect whether TEST_ORGANIZATION is a GitHub organisation or a
+                  # personal user account — each uses a different REST API path.
+                  # The /orgs endpoint returns HTTP 404 for plain user accounts.
+                  if gh api "orgs/${TEST_ORGANIZATION}" >/dev/null 2>&1; then
+                    REPOS_ENDPOINT="orgs/${TEST_ORGANIZATION}/repos"
+                  else
+                    echo "Note: '${TEST_ORGANIZATION}' is not a GitHub organisation — using users endpoint"
+                    REPOS_ENDPOINT="users/${TEST_ORGANIZATION}/repos"
+                  fi
+
+                  # Fetch all pages into the temp file in a single invocation.
+                  # mktemp creates a fresh empty file, so > is correct here.
+                  gh api --paginate "${REPOS_ENDPOINT}" \
                     --jq ".[] | select(.name | startswith(\"${REPO_PREFIX}\")) | [.name, .created_at] | @tsv" \
-                    >> "${REPO_LIST}"
+                    > "${REPO_LIST}"
+
+                  # jq appends a newline after each record, but add a trailing newline
+                  # explicitly so the final line is always consumed by 'read' even if
+                  # the output ends without one (e.g. empty result set).
+                  printf '\n' >> "${REPO_LIST}"
 
                   echo "Found $(wc -l < "${REPO_LIST}") candidate repositories"
                   echo ""
