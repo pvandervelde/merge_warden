@@ -102,3 +102,15 @@ jobs:
       - name: Run security audit
         # RUSTSEC-2023-0071: rsa timing side-channel - transitive via github-bot-sdk; no upstream fix available
         run: cargo audit --ignore RUSTSEC-2023-0071
+
+  actionlint:
+    name: Lint GitHub Actions Workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      # actionlint statically validates GitHub Actions workflow YAML files and
+      # automatically runs shellcheck on all embedded `run:` bash scripts.
+      # This catches shell quoting errors, undefined variables, and other script
+      # issues in the workflows themselves — including cleanup-test-repositories.yml.
+      - name: Run actionlint
+        uses: rhysd/actionlint@v1.7.7
