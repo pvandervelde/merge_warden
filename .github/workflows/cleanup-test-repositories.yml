@@ -178,11 +178,14 @@ jobs:
 
           # Fetch all pages into the temp file in a single invocation.
           # mktemp creates a fresh empty file, so > is correct here.
-          # REPO_PREFIX is passed via --arg so jq treats it as a literal string,
-          # preventing injection if the prefix contains special characters like " or \.
+          # Prefix filtering is done by awk with -v (passes the value as a literal
+          # string with no shell/regex interpretation), which is safe even if
+          # REPO_PREFIX contains characters like " or \ that would need escaping in
+          # a jq string literal.  The gh api --jq flag does not accept jq --arg, so
+          # keeping the prefix out of the jq expression is the correct approach.
           gh api --paginate "${REPOS_ENDPOINT}" \
-            --arg prefix "${REPO_PREFIX}" \
-            --jq '.[] | select(.name | startswith($prefix)) | [.name, .created_at] | @tsv' \
+            --jq '.[] | [.name, .created_at] | @tsv' \
+            | awk -v prefix="${REPO_PREFIX}" 'substr($1, 1, length(prefix)) == prefix' \
             > "${REPO_LIST}"
 
           # jq appends a newline after each record, but add a trailing newline
