@@ -178,8 +178,11 @@ jobs:
 
           # Fetch all pages into the temp file in a single invocation.
           # mktemp creates a fresh empty file, so > is correct here.
+          # REPO_PREFIX is passed via --arg so jq treats it as a literal string,
+          # preventing injection if the prefix contains special characters like " or \.
           gh api --paginate "${REPOS_ENDPOINT}" \
-            --jq ".[] | select(.name | startswith(\"${REPO_PREFIX}\")) | [.name, .created_at] | @tsv" \
+            --arg prefix "${REPO_PREFIX}" \
+            --jq '.[] | select(.name | startswith($prefix)) | [.name, .created_at] | @tsv' \
             > "${REPO_LIST}"
 
           # jq appends a newline after each record, but add a trailing newline
