@@ -45,15 +45,15 @@ jobs:
         run: |
           # Use Conventional Commits Next Version to calculate the next version
           LAST_TAG=$(git describe --tags --abbrev=0)
-          LAST_COMMIT=$(git rev-parse ${LAST_TAG})
+          LAST_COMMIT=$(git rev-parse "${LAST_TAG}")
 
           # Debug logging
           echo "Debug: LAST_TAG = '${LAST_TAG}'"
           echo "Debug: LAST_COMMIT = '${LAST_COMMIT}'"
           echo "Debug: About to run: conventional_commits_next_version --from-version ${LAST_TAG} --calculation-mode Batch ${LAST_COMMIT}"
 
-          NEXT_VERSION=$(conventional_commits_next_version --from-version ${LAST_TAG} --calculation-mode Batch ${LAST_COMMIT})
-          echo "NEXT_VERSION=${NEXT_VERSION}" >> $GITHUB_OUTPUT
+          NEXT_VERSION=$(conventional_commits_next_version --from-version "${LAST_TAG}" --calculation-mode Batch "${LAST_COMMIT}")
+          echo "NEXT_VERSION=${NEXT_VERSION}" >> "${GITHUB_OUTPUT}"
           echo "The next version is: ${NEXT_VERSION}"
 
       - name: Show stale release branches
@@ -66,7 +66,7 @@ jobs:
           git fetch origin 'refs/heads/release/*:refs/remotes/origin/release/*'
           for branch in $(git branch -r --list 'origin/release/*' | sed 's|origin/||'); do
             # Extract version from branch name (e.g., release/1.2.3 -> 1.2.3)
-            branch_version=$(echo "$branch" | sed 's|release/||')
+            branch_version="${branch#release/}"
             echo "Found existing release branch: ${branch} (version: ${branch_version})"
 
             if [[ "$branch_version" != "$NEXT_VERSION" ]]; then
@@ -90,10 +90,10 @@ jobs:
           BRANCH_NAME="release/${NEXT_VERSION}"
           if git rev-parse --verify --quiet "origin/${BRANCH_NAME}"; then
             echo "Branch ${BRANCH_NAME} already exists."
-            echo "exists=true" >> $GITHUB_OUTPUT
+            echo "exists=true" >> "${GITHUB_OUTPUT}"
           else
             echo "Branch ${BRANCH_NAME} does not exist."
-            echo "exists=false" >> $GITHUB_OUTPUT
+            echo "exists=false" >> "${GITHUB_OUTPUT}"
           fi
 
       - name: Generate Changelog Section
@@ -106,10 +106,10 @@ jobs:
           echo "Generated release notes for ${NEXT_VERSION}"
           # Check if notes were actually generated (might be empty if no relevant commits)
           if [ -s release_notes.md ]; then
-            echo "has_notes=true" >> $GITHUB_OUTPUT
+            echo "has_notes=true" >> "${GITHUB_OUTPUT}"
           else
             echo "No relevant commits found for changelog."
-            echo "has_notes=false" >> $GITHUB_OUTPUT
+            echo "has_notes=false" >> "${GITHUB_OUTPUT}"
           fi
 
   test:

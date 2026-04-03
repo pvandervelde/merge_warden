@@ -58,9 +58,9 @@ jobs:
         run: |
           # Use Conventional Commits Next Version to calculate the next version
           LAST_TAG=$(git describe --tags --abbrev=0)
-          LAST_COMMIT=$(git rev-parse ${LAST_TAG})
-          NEXT_VERSION=$(conventional_commits_next_version --from-version ${LAST_TAG} --calculation-mode Batch ${LAST_COMMIT})
-          echo "NEXT_VERSION=${NEXT_VERSION}" >> $GITHUB_OUTPUT
+          LAST_COMMIT=$(git rev-parse "${LAST_TAG}")
+          NEXT_VERSION=$(conventional_commits_next_version --from-version "${LAST_TAG}" --calculation-mode Batch "${LAST_COMMIT}")
+          echo "NEXT_VERSION=${NEXT_VERSION}" >> "${GITHUB_OUTPUT}"
           echo "The next version is: ${NEXT_VERSION}"
 
       - name: Generate Changelog Section
@@ -73,10 +73,10 @@ jobs:
           echo "Generated release notes for ${NEXT_VERSION}"
           # Check if notes were actually generated (might be empty if no relevant commits)
           if [ -s release_notes.md ]; then
-            echo "has_notes=true" >> $GITHUB_OUTPUT
+            echo "has_notes=true" >> "${GITHUB_OUTPUT}"
           else
             echo "No relevant commits found for changelog."
-            echo "has_notes=false" >> $GITHUB_OUTPUT
+            echo "has_notes=false" >> "${GITHUB_OUTPUT}"
           fi
 
       - name: Set up Node.js

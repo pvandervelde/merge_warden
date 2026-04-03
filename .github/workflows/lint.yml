@@ -17,9 +17,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: dtolnay/rust-toolchain@stable # v1
         with:
-          profile: minimal
           toolchain: stable
-          override: true
       - uses: actions-rs/cargo@844f36862e911db73fe0815f00a4a2602c279505 # v1
         with:
           command: check
@@ -36,8 +34,6 @@ jobs:
           # Not MSRV because its harder to jump between versions and people are
           # more likely to have stable
           toolchain: stable
-          profile: minimal
-          override: true
           components: rustfmt
       - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
       - name: Check formatting
@@ -54,7 +50,6 @@ jobs:
         with:
           toolchain: stable
           components: clippy
-          override: true
       - uses: actions-rs/clippy-check@b5b5f21f4797c02da247df37026fcd0a5024aa4d # v1
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
@@ -76,9 +71,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: dtolnay/rust-toolchain@stable # v1
         with:
-          profile: minimal
           toolchain: stable
-          override: true
       - name: Install cargo-deny
         uses: taiki-e/install-action@v2
         with:
@@ -102,3 +95,15 @@ jobs:
       - name: Run security audit
         # RUSTSEC-2023-0071: rsa timing side-channel - transitive via github-bot-sdk; no upstream fix available
         run: cargo audit --ignore RUSTSEC-2023-0071
+
+  actionlint:
+    name: Lint GitHub Actions Workflows
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      # actionlint statically validates GitHub Actions workflow YAML files and
+      # automatically runs shellcheck on all embedded `run:` bash scripts.
+      # This catches shell quoting errors, undefined variables, and other script
+      # issues in the workflows themselves — including cleanup-test-repositories.yml.
+      - name: Run actionlint
+        uses: rhysd/actionlint@03d0035246f3e81f36aed592ffb4bebf33a03106 # v1.7.7

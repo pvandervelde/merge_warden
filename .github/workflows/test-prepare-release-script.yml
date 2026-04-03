@@ -45,7 +45,7 @@ jobs:
         id: test_version
         run: |
           TEST_VERSION="0.0.$(date +%s)"
-          echo "TEST_VERSION=${TEST_VERSION}" >> $GITHUB_OUTPUT
+          echo "TEST_VERSION=${TEST_VERSION}" >> "${GITHUB_OUTPUT}"
           echo "Test release notes for version ${TEST_VERSION}" > test_release_notes.md
 
       - name: Generate GitHub App token
