@@ -153,10 +153,10 @@ async fn create_concurrent_pr_specifications(count: usize) -> TestResult<Vec<Con
     for i in 0..count {
         specs.push(ConcurrentPrSpec {
             id: i,
-            title: format!("feat: concurrent feature {}", i),
-            body: format!("Test PR {} for concurrent processing validation", i),
+            _title: format!("feat: concurrent feature {}", i),
+            _body: format!("Test PR {} for concurrent processing validation", i),
             files_count: (i % 5) + 1, // 1-5 files per PR
-            expected_processing_time: Duration::from_secs(((i % 3) + 1) as u64), // 1-3 seconds expected
+            _expected_processing_time: Duration::from_secs(((i % 3) + 1) as u64), // 1-3 seconds expected
         });
     }
 
@@ -216,7 +216,7 @@ async fn create_performance_test_specs(count: usize) -> TestResult<Vec<Performan
                 "low"
             },
             expected_duration: Duration::from_millis((i as u64 * 100) + 200),
-            resource_requirements: i % 4 + 1,
+            _resource_requirements: i % 4 + 1,
         });
     }
 
@@ -243,11 +243,11 @@ async fn simulate_performance_processing(
         tokio::time::sleep(Duration::from_millis(50)).await; // Simulate work
 
         results.push(PerformanceResult {
-            spec_id: spec.id,
-            actual_duration: start_time.elapsed(),
-            expected_duration: spec.expected_duration,
-            complexity: spec.complexity.to_string(),
-            success: true,
+            _spec_id: spec.id,
+            _actual_duration: start_time.elapsed(),
+            _expected_duration: spec.expected_duration,
+            _complexity: spec.complexity.to_string(),
+            _success: true,
         });
     }
 
@@ -262,8 +262,8 @@ async fn create_test_resources_for_cleanup(count: usize) -> TestResult<Vec<TestR
         resources.push(TestResource {
             id: i,
             resource_type: if i % 2 == 0 { "repository" } else { "webhook" },
-            cleanup_required: true,
-            creation_time: Instant::now(),
+            _cleanup_required: true,
+            _creation_time: Instant::now(),
         });
     }
 
@@ -284,7 +284,7 @@ async fn simulate_concurrent_cleanup(resources: &[TestResource]) -> TestResult<V
             resource_id: resource.id,
             cleanup_duration: cleanup_start.elapsed(),
             success: true,
-            resource_type: resource.resource_type.to_string(),
+            _resource_type: resource.resource_type.to_string(),
         });
     }
 
@@ -351,18 +351,16 @@ async fn validate_cleanup_completeness(results: &[CleanupResult]) -> TestResult<
 
 /// Specification for concurrent PR processing test
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct ConcurrentPrSpec {
     id: usize,
-    title: String,
-    body: String,
+    _title: String,
+    _body: String,
     files_count: usize,
-    expected_processing_time: Duration,
+    _expected_processing_time: Duration,
 }
 
 /// Result of processing a single PR in concurrent test
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct ProcessingResult {
     pr_id: usize,
     processing_time: Duration,
@@ -373,41 +371,37 @@ struct ProcessingResult {
 
 /// Specification for performance testing under load
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct PerformanceTestSpec {
     id: usize,
     complexity: &'static str,
     expected_duration: Duration,
-    resource_requirements: usize,
+    _resource_requirements: usize,
 }
 
 /// Result of performance testing
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct PerformanceResult {
-    spec_id: usize,
-    actual_duration: Duration,
-    expected_duration: Duration,
-    complexity: String,
-    success: bool,
+    _spec_id: usize,
+    _actual_duration: Duration,
+    _expected_duration: Duration,
+    _complexity: String,
+    _success: bool,
 }
 
 /// Test resource for cleanup validation
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct TestResource {
     id: usize,
     resource_type: &'static str,
-    cleanup_required: bool,
-    creation_time: Instant,
+    _cleanup_required: bool,
+    _creation_time: Instant,
 }
 
 /// Result of cleanup operation
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct CleanupResult {
     resource_id: usize,
     cleanup_duration: Duration,
     success: bool,
-    resource_type: String,
+    _resource_type: String,
 }

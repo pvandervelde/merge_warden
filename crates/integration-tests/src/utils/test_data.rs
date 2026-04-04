@@ -83,7 +83,6 @@ impl TestDataManager {
     /// assert!(spec.title.contains("feat:"));
     /// ```
     pub fn create_pull_request_spec(&self, branch_name: &str) -> PullRequestSpec {
-        // TODO: implement - Create PR spec with test data
         PullRequestSpec {
             title: format!("feat: add {}", branch_name),
             body: "This PR adds a new feature for testing.".to_string(),
@@ -117,7 +116,6 @@ impl TestDataManager {
     /// assert_eq!(spec.event, "APPROVE");
     /// ```
     pub fn create_review_spec(&self, review_type: &str) -> ReviewSpec {
-        // TODO: implement - Create review spec with test data
         ReviewSpec {
             event: review_type.to_string(),
             body: Some(format!("{} review for testing.", review_type)),
@@ -146,7 +144,6 @@ impl TestDataManager {
     /// assert!(spec.body.contains("suggestion"));
     /// ```
     pub fn create_comment_spec(&self, comment_type: &str) -> CommentSpec {
-        // TODO: implement - Create comment spec with test data
         CommentSpec {
             body: format!("This is a {} comment for testing.", comment_type),
             comment_type: comment_type.to_string(),
@@ -175,7 +172,6 @@ impl TestDataManager {
     /// assert!(config.contains("schemaVersion"));
     /// ```
     pub fn load_config_template(&self, template_name: &str) -> TestResult<String> {
-        // TODO: implement - Load configuration template
         Ok(format!(
             "schemaVersion = '1.0'\ntemplate = '{}'\n",
             template_name
@@ -207,7 +203,6 @@ impl TestDataManager {
         file_type: &str,
         size_category: &str,
     ) -> TestResult<String> {
-        // TODO: implement - Generate file content for testing
         Ok(format!(
             "{} file content for {} size",
             file_type.to_uppercase(),

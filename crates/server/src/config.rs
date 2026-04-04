@@ -181,10 +181,6 @@ pub struct ServerConfig {
     pub port: u16,
     /// Ingress mode. From `MERGE_WARDEN_RECEIVER_MODE`. Default: `Webhook`.
     pub receiver_mode: ReceiverMode,
-    /// Optional path to a TOML policy configuration file. From `MERGE_WARDEN_CONFIG_FILE`.
-    /// Populated at startup and available for hot-reload or diagnostic introspection.
-    #[allow(dead_code)]
-    pub config_file_path: Option<PathBuf>,
     /// Merge-warden application policy defaults (from TOML file or `ApplicationDefaults::default()`).
     pub application_defaults: ApplicationDefaults,
     /// Queue-mode settings. `Some(...)` only when `receiver_mode == ReceiverMode::Queue`.
@@ -331,7 +327,6 @@ pub fn load_config() -> Result<ServerConfig, ServerError> {
     Ok(ServerConfig {
         port,
         receiver_mode,
-        config_file_path,
         application_defaults,
         queue,
     })

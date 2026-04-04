@@ -44,7 +44,6 @@ pub mod ci_config;
 pub mod environment;
 pub mod errors;
 pub mod github;
-pub mod mocks;
 pub mod utils;
 
 #[cfg(test)]
@@ -64,7 +63,6 @@ pub use errors::{TestError, TestResult};
 pub use github::{
     FileAction, FileChange, RepositorySpec, TestBotInstance, TestRepositoryManager, WebhookResponse,
 };
-pub use mocks::{MockAppConfigService, MockKeyVaultService, MockServiceProvider};
 pub use utils::{CommentSpec, PullRequestSpec, ReviewSpec, TestDataManager};
 
 // Re-export utility functions that are used in doc tests

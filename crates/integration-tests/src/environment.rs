@@ -9,7 +9,6 @@ use std::time::Duration;
 use crate::errors::{TestError, TestResult};
 use crate::github::repository_manager::FileAction;
 use crate::github::{TestBotInstance, TestRepositoryManager};
-use crate::mocks::MockServiceProvider;
 
 /// Main integration test environment coordinator.
 ///
@@ -22,7 +21,6 @@ use crate::mocks::MockServiceProvider;
 /// The test environment consists of several coordinated components:
 /// - **Repository Manager**: Handles GitHub repository creation and cleanup
 /// - **Bot Instance**: Manages GitHub App configuration and webhook setup
-/// - **Mock Services**: Simulates Azure App Config and Key Vault services
 /// - **Configuration**: Centralizes test environment settings
 ///
 /// # Lifecycle
@@ -56,8 +54,6 @@ pub struct IntegrationTestEnvironment {
     pub repository_manager: TestRepositoryManager,
     /// GitHub App and webhook configuration
     pub bot_instance: TestBotInstance,
-    /// Mock Azure service provider
-    pub mock_services: MockServiceProvider,
     /// List of resources created during testing for cleanup
     cleanup_resources: Vec<CleanupResource>,
 }
@@ -172,7 +168,6 @@ impl IntegrationTestEnvironment {
     ///     // Verify environment is ready
     ///     assert!(test_env.is_ready());
     ///     assert_eq!(test_env.config.github_organization, "glitchgrove");
-    ///     assert!(test_env.mock_services.is_healthy().await?);
     ///
     ///     Ok(())
     /// }
@@ -215,9 +210,6 @@ impl IntegrationTestEnvironment {
         // Validate configuration
         config.validate()?;
 
-        // Initialize mock services
-        let mock_services = MockServiceProvider::new().await?;
-
         // Initialize repository manager using the test helper app's installation token
         let repository_manager = TestRepositoryManager::new(
             config.repo_creation_app_id.clone(),
@@ -244,7 +236,6 @@ impl IntegrationTestEnvironment {
             config,
             repository_manager,
             bot_instance,
-            mock_services,
             cleanup_resources,
         };
 
@@ -407,13 +398,12 @@ impl IntegrationTestEnvironment {
     ///     Ok(())
     /// }
     /// ```
-    pub async fn simulate_azure_outage(&mut self, outage_config: &OutageConfig) -> TestResult<()> {
-        self.mock_services
-            .simulate_outages(
-                outage_config.app_config_failure_rate,
-                outage_config.key_vault_failure_rate,
-            )
-            .await?;
+    pub async fn simulate_azure_outage(
+        &mut self,
+        _outage_config: &OutageConfig,
+    ) -> TestResult<()> {
+        // Azure mock services have been removed. This is a no-op retained for
+        // API compatibility with tests that are annotated #[ignore].
         Ok(())
     }
 
@@ -437,14 +427,15 @@ impl IntegrationTestEnvironment {
     ///     // Restore services
     ///     test_env.restore_azure_services().await?;
     ///
-    ///     // Verify services are working normally
-    ///     assert!(test_env.mock_services.is_healthy().await?);
+    ///     // Verify environment is ready
+    ///     assert!(test_env.is_ready());
     ///
     ///     Ok(())
     /// }
     /// ```
     pub async fn restore_azure_services(&mut self) -> TestResult<()> {
-        self.mock_services.restore_services().await?;
+        // Azure mock services have been removed. This is a no-op retained for
+        // API compatibility with tests that are annotated #[ignore].
         Ok(())
     }
 
@@ -543,9 +534,6 @@ impl IntegrationTestEnvironment {
 
         // Clear the cleanup resources list
         self.cleanup_resources.clear();
-
-        // Reset mock services to clean state
-        self.mock_services.reset().await?;
 
         Ok(())
     }
@@ -680,22 +668,26 @@ impl IntegrationTestEnvironment {
 
     /// Simulates App Config outage.
     pub async fn simulate_app_config_outage(&mut self) -> TestResult<()> {
-        self.mock_services.simulate_app_config_failure().await
+        // Azure mock services have been removed. No-op retained for #[ignore]-gated tests.
+        Ok(())
     }
 
     /// Restores App Config.
     pub async fn restore_app_config(&mut self) -> TestResult<()> {
-        self.mock_services.restore_app_config().await
+        // Azure mock services have been removed. No-op retained for #[ignore]-gated tests.
+        Ok(())
     }
 
     /// Simulates Key Vault outage.
     pub async fn simulate_key_vault_outage(&mut self) -> TestResult<()> {
-        self.mock_services.simulate_key_vault_failure().await
+        // Azure mock services have been removed. No-op retained for #[ignore]-gated tests.
+        Ok(())
     }
 
     /// Restores Key Vault.
     pub async fn restore_key_vault(&mut self) -> TestResult<()> {
-        self.mock_services.restore_key_vault().await
+        // Azure mock services have been removed. No-op retained for #[ignore]-gated tests.
+        Ok(())
     }
 }
 

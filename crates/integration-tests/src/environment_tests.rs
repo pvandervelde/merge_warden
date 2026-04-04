@@ -25,7 +25,7 @@ use std::time::Duration;
 
 use serial_test::serial;
 
-use crate::environment::{IntegrationTestEnvironment, OutageConfig, TestConfig};
+use crate::environment::{IntegrationTestEnvironment, TestConfig};
 use crate::errors::{TestError, TestResult};
 
 /// Tests for TestConfig::from_environment() functionality
@@ -617,7 +617,7 @@ mod environment_setup_tests {
         // Assert: Verify environment is properly initialized
         assert!(test_env.is_ready());
         assert_eq!(test_env.config.github_organization, "glitchgrove");
-        assert!(test_env.mock_services.is_healthy().await?);
+        // (Azure mock services removed — health check no longer applicable)
 
         // Cleanup
         cleanup_test_environment();
@@ -812,103 +812,3 @@ mod environment_readiness_tests {
     }
 }
 
-/// Tests for OutageConfig functionality and Azure service simulation
-mod outage_simulation_tests {
-    use super::*;
-
-    #[tokio::test]
-    #[serial]
-    async fn test_complete_outage_configuration() {
-        // Arrange & Act: Create complete outage configuration
-        let outage = OutageConfig::complete_outage();
-
-        // Assert: Verify complete outage settings
-        assert_eq!(outage.app_config_failure_rate, 1.0);
-        assert_eq!(outage.key_vault_failure_rate, 1.0);
-        assert!(outage.simulate_auth_failures);
-        assert_eq!(outage.outage_duration, Duration::from_secs(300));
-    }
-
-    #[tokio::test]
-    #[serial]
-    async fn test_partial_outage_configuration() {
-        // Arrange & Act: Create partial outage configuration
-        let outage = OutageConfig::partial_outage(0.3);
-
-        // Assert: Verify partial outage settings
-        assert_eq!(outage.app_config_failure_rate, 0.3);
-        assert_eq!(outage.key_vault_failure_rate, 0.3);
-        assert!(!outage.simulate_auth_failures);
-        assert_eq!(outage.outage_duration, Duration::from_secs(60));
-        assert_eq!(outage.response_delay, Duration::from_millis(500));
-    }
-
-    #[tokio::test]
-    #[serial]
-    async fn test_simulate_azure_outage() -> TestResult<()> {
-        // Arrange: Set up test environment
-        setup_valid_test_environment();
-        let mut test_env = IntegrationTestEnvironment::setup().await?;
-
-        // Act: Simulate Azure service outage
-        let outage_config = OutageConfig::complete_outage();
-        test_env.simulate_azure_outage(&outage_config).await?;
-
-        // Assert: Verify outage is in effect
-        // This would check that mock services are now returning failures
-        // Implementation would verify failure rates are applied
-
-        cleanup_test_environment();
-        Ok(())
-    }
-
-    #[tokio::test]
-    #[serial]
-    async fn test_restore_azure_services() -> TestResult<()> {
-        // Arrange: Set up environment and simulate outage
-        setup_valid_test_environment();
-        let mut test_env = IntegrationTestEnvironment::setup().await?;
-        let outage_config = OutageConfig::complete_outage();
-        test_env.simulate_azure_outage(&outage_config).await?;
-
-        // Act: Restore services
-        test_env.restore_azure_services().await?;
-
-        // Assert: Verify services are restored
-        assert!(test_env.mock_services.is_healthy().await?);
-
-        cleanup_test_environment();
-        Ok(())
-    }
-
-    /// Helper function to set up a valid test environment
-    fn setup_valid_test_environment() {
-        env::set_var("REPO_CREATION_APP_ID", "123456");
-        env::set_var(
-            "REPO_CREATION_APP_PRIVATE_KEY",
-            "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEAtest...\n-----END RSA PRIVATE KEY-----",
-        );
-        env::set_var("MERGE_WARDEN_APP_ID", "789012");
-        env::set_var(
-            "MERGE_WARDEN_APP_PRIVATE_KEY",
-            "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEAtest...\n-----END RSA PRIVATE KEY-----",
-        );
-        env::set_var("MERGE_WARDEN_WEBHOOK_SECRET", "secure_webhook_secret_123");
-        env::set_var("USE_MOCK_SERVICES", "true");
-    }
-
-    /// Helper function to clean up test environment
-    fn cleanup_test_environment() {
-        env::remove_var("REPO_CREATION_APP_ID");
-        env::remove_var("REPO_CREATION_APP_PRIVATE_KEY");
-        env::remove_var("MERGE_WARDEN_APP_ID");
-        env::remove_var("MERGE_WARDEN_APP_PRIVATE_KEY");
-        env::remove_var("MERGE_WARDEN_WEBHOOK_SECRET");
-        env::remove_var("TEST_ORGANIZATION");
-        env::remove_var("TEST_TIMEOUT_SECONDS");
-        env::remove_var("TEST_CLEANUP_ENABLED");
-        env::remove_var("LOCAL_WEBHOOK_ENDPOINT");
-        env::remove_var("USE_MOCK_SERVICES");
-        env::remove_var("TEST_REPOSITORY_PREFIX");
-    }
-}

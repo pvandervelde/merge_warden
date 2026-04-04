@@ -20,7 +20,6 @@ use merge_warden_core::config::{
 use merge_warden_core::MergeWarden;
 use merge_warden_developer_platforms::app_auth::AppAuthProvider;
 use merge_warden_developer_platforms::github::GitHubProvider;
-use serde::Serialize;
 use std::collections::HashMap;
 use std::env;
 use std::fs;
@@ -259,16 +258,6 @@ pub struct CheckPrArgs {
     /// Alternate config file
     #[arg(short, long)]
     pub config: Option<String>,
-}
-
-/// Result of the check-pr command
-#[derive(Debug, Serialize)]
-pub struct ValidationResult {
-    /// Whether the validation passed
-    pub passed: bool,
-
-    /// List of validation failures
-    pub failures: Vec<String>,
 }
 
 /// Creates a GitHub application client based on the provided configuration.
