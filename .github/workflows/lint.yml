@@ -73,7 +73,7 @@ jobs:
         with:
           toolchain: stable
       - name: Install cargo-deny
-        uses: taiki-e/install-action@v2
+        uses: taiki-e/install-action@7a562dfa955aa2e4d5b0fd6ebd57ff9715c07b0b # v2
         with:
           tool: cargo-deny
       - name: Run cargo-deny checks
@@ -90,7 +90,7 @@ jobs:
         uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
 
       - name: Install cargo-audit
-        uses: taiki-e/install-action@cargo-audit
+        uses: taiki-e/install-action@2e5e45e985ec9321fdd2b05aa8de0872b125c29f # cargo-audit
 
       - name: Run security audit
         # RUSTSEC-2023-0071: rsa timing side-channel - transitive via github-bot-sdk; no upstream fix available
