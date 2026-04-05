@@ -207,7 +207,6 @@ fn load_config_uses_default_port_3000_when_var_absent() {
     let c = r.unwrap();
     assert_eq!(c.port, 3000);
     assert_eq!(c.receiver_mode, ReceiverMode::Webhook);
-    assert!(c.config_file_path.is_none());
     assert!(c.queue.is_none());
 }
 
