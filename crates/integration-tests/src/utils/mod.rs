@@ -260,13 +260,16 @@ pub fn create_webhook_payload(
 /// Retry utility for flaky operations in integration tests.
 ///
 /// This utility retries operations that may fail due to temporary issues such as
-/// network connectivity or eventual consistency in external services.
+/// network connectivity or eventual consistency in external services. Each failed
+/// attempt waits for an exponentially increasing delay (doubling from `initial_delay`
+/// on each attempt) capped at 30 seconds before the next attempt.
 ///
 /// # Parameters
 ///
 /// - `operation`: The operation to retry
 /// - `max_attempts`: Maximum number of retry attempts
-/// - `delay`: Delay between retry attempts
+/// - `initial_delay`: Base delay before the second attempt; doubled on each subsequent
+///   failure, capped at 30 seconds
 ///
 /// # Returns
 ///
@@ -302,12 +305,13 @@ pub fn create_webhook_payload(
 pub async fn retry_operation<F, Fut, T>(
     mut operation: F,
     max_attempts: u32,
-    delay: Duration,
+    initial_delay: Duration,
 ) -> TestResult<T>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = TestResult<T>>,
 {
+    let max_delay = Duration::from_secs(30);
     let mut last_error = None;
     for attempt in 0..max_attempts {
         match operation().await {
@@ -315,7 +319,10 @@ where
             Err(e) => {
                 last_error = Some(e);
                 if attempt + 1 < max_attempts {
-                    tokio::time::sleep(delay).await;
+                    // Exponential backoff: initial_delay * 2^attempt, capped at 30 s.
+                    let multiplier = 1u32 << attempt.min(31);
+                    let backoff = initial_delay.saturating_mul(multiplier).min(max_delay);
+                    tokio::time::sleep(backoff).await;
                 }
             }
         }

@@ -358,87 +358,6 @@ impl IntegrationTestEnvironment {
         todo!("Configure bot instance for repository")
     }
 
-    /// Simulates Azure service outages for resilience testing.
-    ///
-    /// This method allows testing bot behavior under various Azure service failure
-    /// conditions by configuring the mock services to simulate outages, timeouts,
-    /// and other failure scenarios.
-    ///
-    /// # Parameters
-    ///
-    /// - `outage_config`: Configuration specifying which services to affect and
-    ///   how to simulate the outage conditions.
-    ///
-    /// # Outage Types
-    ///
-    /// - **Complete Outage**: Service returns errors for all requests
-    /// - **Partial Outage**: Service fails intermittently based on failure rate
-    /// - **Timeout Simulation**: Service delays responses beyond timeout limits
-    /// - **Authentication Failure**: Service rejects authentication attempts
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use merge_warden_integration_tests::{IntegrationTestEnvironment, OutageConfig, TestError};
-    ///
-    /// #[tokio::test]
-    /// async fn test_resilience_to_outages() -> Result<(), TestError> {
-    ///     let mut test_env = IntegrationTestEnvironment::setup().await?;
-    ///
-    ///     // Simulate App Config outage
-    ///     test_env.simulate_azure_outage(&OutageConfig {
-    ///         app_config_failure_rate: 1.0,
-    ///         key_vault_failure_rate: 0.0,
-    ///         outage_duration: std::time::Duration::from_secs(10),
-    ///     }).await?;
-    ///
-    ///     // Test bot behavior during outage
-    ///     // Bot should fall back to default configuration
-    ///
-    ///     Ok(())
-    /// }
-    /// ```
-    pub async fn simulate_azure_outage(
-        &mut self,
-        _outage_config: &OutageConfig,
-    ) -> TestResult<()> {
-        // Azure mock services have been removed. This is a no-op retained for
-        // API compatibility with tests that are annotated #[ignore].
-        Ok(())
-    }
-
-    /// Restores normal Azure service operation after outage simulation.
-    ///
-    /// This method restores all mock Azure services to normal operation,
-    /// resetting failure rates and timeouts to their default values.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use merge_warden_integration_tests::{IntegrationTestEnvironment, OutageConfig, TestError};
-    ///
-    /// #[tokio::test]
-    /// async fn test_service_recovery() -> Result<(), TestError> {
-    ///     let mut test_env = IntegrationTestEnvironment::setup().await?;
-    ///
-    ///     // Simulate outage
-    ///     test_env.simulate_azure_outage(&OutageConfig::complete_outage()).await?;
-    ///
-    ///     // Restore services
-    ///     test_env.restore_azure_services().await?;
-    ///
-    ///     // Verify environment is ready
-    ///     assert!(test_env.is_ready());
-    ///
-    ///     Ok(())
-    /// }
-    /// ```
-    pub async fn restore_azure_services(&mut self) -> TestResult<()> {
-        // Azure mock services have been removed. This is a no-op retained for
-        // API compatibility with tests that are annotated #[ignore].
-        Ok(())
-    }
-
     /// Checks if the test environment is ready for operation.
     ///
     /// This method validates that all components of the test environment are
@@ -663,30 +582,6 @@ impl IntegrationTestEnvironment {
     /// Restores GitHub API.
     pub async fn restore_github_api(&mut self) -> TestResult<()> {
         println!("Restoring GitHub API");
-        Ok(())
-    }
-
-    /// Simulates App Config outage.
-    pub async fn simulate_app_config_outage(&mut self) -> TestResult<()> {
-        // Azure mock services have been removed. No-op retained for #[ignore]-gated tests.
-        Ok(())
-    }
-
-    /// Restores App Config.
-    pub async fn restore_app_config(&mut self) -> TestResult<()> {
-        // Azure mock services have been removed. No-op retained for #[ignore]-gated tests.
-        Ok(())
-    }
-
-    /// Simulates Key Vault outage.
-    pub async fn simulate_key_vault_outage(&mut self) -> TestResult<()> {
-        // Azure mock services have been removed. No-op retained for #[ignore]-gated tests.
-        Ok(())
-    }
-
-    /// Restores Key Vault.
-    pub async fn restore_key_vault(&mut self) -> TestResult<()> {
-        // Azure mock services have been removed. No-op retained for #[ignore]-gated tests.
         Ok(())
     }
 }
@@ -1310,80 +1205,6 @@ pub struct BotConfiguration {
     pub webhook_secret: String,
     /// Installation permissions granted to the bot
     pub permissions: HashMap<String, String>,
-}
-
-/// Configuration for simulating Azure service outages.
-///
-/// This struct defines how mock Azure services should simulate failure conditions
-/// for testing bot resilience and error handling.
-#[derive(Debug, Clone)]
-pub struct OutageConfig {
-    /// Failure rate for App Config service (0.0 = no failures, 1.0 = all requests fail)
-    pub app_config_failure_rate: f32,
-    /// Failure rate for Key Vault service (0.0 = no failures, 1.0 = all requests fail)
-    pub key_vault_failure_rate: f32,
-    /// Duration of the simulated outage
-    pub outage_duration: Duration,
-    /// Additional delay to add to service responses (simulates slow responses)
-    pub response_delay: Duration,
-    /// Whether to simulate authentication failures
-    pub simulate_auth_failures: bool,
-}
-
-impl OutageConfig {
-    /// Creates a configuration for complete service outage.
-    ///
-    /// # Returns
-    ///
-    /// An `OutageConfig` that simulates complete failure of all Azure services.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use merge_warden_integration_tests::OutageConfig;
-    ///
-    /// let outage = OutageConfig::complete_outage();
-    /// assert_eq!(outage.app_config_failure_rate, 1.0);
-    /// assert_eq!(outage.key_vault_failure_rate, 1.0);
-    /// ```
-    pub fn complete_outage() -> Self {
-        Self {
-            app_config_failure_rate: 1.0,
-            key_vault_failure_rate: 1.0,
-            outage_duration: Duration::from_secs(300), // 5 minutes
-            response_delay: Duration::from_secs(0),
-            simulate_auth_failures: true,
-        }
-    }
-
-    /// Creates a configuration for partial service degradation.
-    ///
-    /// # Parameters
-    ///
-    /// - `failure_rate`: The rate of failures (0.0 to 1.0)
-    ///
-    /// # Returns
-    ///
-    /// An `OutageConfig` that simulates partial service degradation.
-    ///
-    /// # Examples
-    ///
-    /// ```rust
-    /// use merge_warden_integration_tests::OutageConfig;
-    ///
-    /// let outage = OutageConfig::partial_outage(0.3);
-    /// assert_eq!(outage.app_config_failure_rate, 0.3);
-    /// assert_eq!(outage.key_vault_failure_rate, 0.3);
-    /// ```
-    pub fn partial_outage(failure_rate: f32) -> Self {
-        Self {
-            app_config_failure_rate: failure_rate,
-            key_vault_failure_rate: failure_rate,
-            outage_duration: Duration::from_secs(60),
-            response_delay: Duration::from_millis(500),
-            simulate_auth_failures: false,
-        }
-    }
 }
 
 /// Internal resource tracking for cleanup purposes.

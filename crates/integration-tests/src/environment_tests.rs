@@ -811,4 +811,3 @@ mod environment_readiness_tests {
         env::remove_var("TEST_REPOSITORY_PREFIX");
     }
 }
-

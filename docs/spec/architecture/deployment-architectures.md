@@ -5,7 +5,9 @@
 
 ## Overview
 
-This specification defines the deployment architectures for Merge Warden across multiple platforms, focusing on Azure Functions as the primary deployment target, CLI interface for local development and testing, and patterns for future platform support.
+> **Note:** The Azure Functions deployment described in this document has been retired. The current production deployment target is the containerised `crates/server` binary (Docker / OCI image). The Azure Functions sections are preserved here for historical reference only.
+
+This specification defines the deployment architectures for Merge Warden across multiple platforms, focusing on the containerised server (`crates/server`) as the primary deployment target, CLI interface for local development and testing, and patterns for future platform support.
 
 ## Design Principles
 

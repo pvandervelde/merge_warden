@@ -56,9 +56,7 @@ pub use ci_config::{
     CiTestConfig, CiTestExecutor, CleanupConfig, EnvironmentIsolation, GitHubRateLimit,
     IndividualTestResult, RetryConfig, TestExecutionResults, TestStatus, TestTimeouts,
 };
-pub use environment::{
-    BotConfiguration, IntegrationTestEnvironment, OutageConfig, TestConfig, TestRepository,
-};
+pub use environment::{BotConfiguration, IntegrationTestEnvironment, TestConfig, TestRepository};
 pub use errors::{TestError, TestResult};
 pub use github::{
     FileAction, FileChange, RepositorySpec, TestBotInstance, TestRepositoryManager, WebhookResponse,
