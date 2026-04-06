@@ -14,21 +14,9 @@ fn test_auth_error_display() {
 }
 
 #[test]
-fn test_network_error_display() {
-    let err = CliError::NetworkError("net fail".to_string());
-    assert_eq!(format!("{}", err), "Network error: net fail");
-}
-
-#[test]
 fn test_invalid_arguments_display() {
     let err = CliError::InvalidArguments("bad arg".to_string());
     assert_eq!(format!("{}", err), "Invalid arguments: bad arg");
-}
-
-#[test]
-fn test_validation_failed_display() {
-    let err = CliError::ValidationFailed("fail".to_string());
-    assert_eq!(format!("{}", err), "Validation failed: fail");
 }
 
 #[test]

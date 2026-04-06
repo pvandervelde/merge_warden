@@ -46,7 +46,7 @@ impl PullRequestProvider for WipMockProvider {
         _repo: &str,
         _number: u64,
     ) -> Result<PullRequest, Error> {
-        unimplemented!()
+        unimplemented!("Not needed for this test")
     }
 
     async fn add_comment(
@@ -2332,7 +2332,7 @@ impl PullRequestProvider for PrStateMockProvider {
         _repo: &str,
         _number: u64,
     ) -> Result<PullRequest, Error> {
-        unimplemented!()
+        unimplemented!("Not needed for this test")
     }
 
     async fn add_comment(

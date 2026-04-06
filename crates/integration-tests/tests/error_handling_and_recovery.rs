@@ -164,8 +164,6 @@ async fn test_multiple_concurrent_service_failures() -> TestResult<()> {
 
     // Simulate multiple service failures
     test_env.simulate_github_api_failure().await?;
-    test_env.simulate_app_config_outage().await?;
-    test_env.simulate_key_vault_outage().await?;
 
     // Create PR during multiple failures
     let pr_spec = PullRequestSpec {
@@ -199,12 +197,6 @@ async fn test_multiple_concurrent_service_failures() -> TestResult<()> {
 
             // Gradually restore services
             test_env.restore_github_api().await?;
-            tokio::time::sleep(Duration::from_secs(2)).await;
-
-            test_env.restore_app_config().await?;
-            tokio::time::sleep(Duration::from_secs(2)).await;
-
-            test_env.restore_key_vault().await?;
 
             // Trigger processing after recovery
             trigger_webhook_redelivery(&test_env, &repo, &pr).await?;
@@ -227,8 +219,6 @@ async fn test_multiple_concurrent_service_failures() -> TestResult<()> {
 
             // Restore services
             test_env.restore_github_api().await?;
-            test_env.restore_app_config().await?;
-            test_env.restore_key_vault().await?;
 
             // Now PR creation should succeed
             let pr = create_test_pull_request_with_retries(&test_env, &repo, &pr_spec).await?;

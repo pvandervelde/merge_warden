@@ -26,9 +26,7 @@ async fn test_crate_imports_compile() {
     let _bot_instance_type: Option<TestBotInstance> = None;
 
     // Mock service types should be importable
-    let _mock_provider_type: Option<MockServiceProvider> = None;
-    let _mock_app_config_type: Option<MockAppConfigService> = None;
-    let _mock_key_vault_type: Option<MockKeyVaultService> = None;
+    // (Azure mocks removed in post-containerisation cleanup)
 
     // This test passes if compilation succeeds
     assert!(true, "All types should be importable");
@@ -177,7 +175,6 @@ async fn test_module_structure_accessibility() {
     let _test_config_type: Option<TestConfig> = None;
     let _test_repo_type: Option<TestRepository> = None;
     let _bot_config_type: Option<BotConfiguration> = None;
-    let _outage_config_type: Option<OutageConfig> = None;
 
     // GitHub module should be accessible
     use merge_warden_integration_tests::github::*;
@@ -185,9 +182,7 @@ async fn test_module_structure_accessibility() {
     let _file_change_type: Option<FileChange> = None;
     let _webhook_response_type: Option<WebhookResponse> = None;
 
-    // Mocks module should be accessible
-    use merge_warden_integration_tests::mocks::*;
-    // Types already validated above
+    // (Azure mocks module removed in post-containerisation cleanup)
 
     // Utils module should be accessible
     use merge_warden_integration_tests::utils::*;
@@ -245,25 +240,25 @@ async fn test_documentation_examples_compile() {
     // Since implementations are TODO, we test the type signatures
 
     // Environment setup pattern from docs
-    let setup_signature = |/* config */| async {
+    let _setup_signature = |/* config */| async {
         // This represents: IntegrationTestEnvironment::setup().await?
         let _result: TestResult<IntegrationTestEnvironment> = todo!();
     };
 
     // Repository creation pattern from docs
-    let repo_creation_signature = |/* env, name */| async {
+    let _repo_creation_signature = |/* env, name */| async {
         // This represents: env.create_test_repository("name").await?
         let _result: TestResult<TestRepository> = todo!();
     };
 
     // Bot configuration pattern from docs
-    let bot_config_signature = |/* env, repo */| async {
+    let _bot_config_signature = |/* env, repo */| async {
         // This represents: env.configure_bot_for_repository(&repo).await?
         let _result: TestResult<BotConfiguration> = todo!();
     };
 
     // Mock service pattern from docs
-    let mock_setup_signature = |/* provider */| async {
+    let _mock_setup_signature = |/* provider */| async {
         // This represents: provider.set_app_config_value("key", "value").await?
         let _result: TestResult<()> = todo!();
     };
@@ -281,7 +276,7 @@ async fn test_integration_test_crate_ready_for_implementation() {
     let _env: Option<IntegrationTestEnvironment> = None;
     let _repo_manager: Option<TestRepositoryManager> = None;
     let _bot_instance: Option<TestBotInstance> = None;
-    let _mock_provider: Option<MockServiceProvider> = None;
+    // (MockServiceProvider removed in post-containerisation cleanup)
 
     // Error handling should be comprehensive
     let config_error = TestError::InvalidConfiguration("test".to_string());
@@ -310,8 +305,8 @@ async fn test_integration_test_crate_ready_for_implementation() {
     assert!(matches!(network_error, TestError::NetworkError(_)));
     assert!(matches!(internal_error, TestError::InternalError(_)));
 
-    // All modules should be accessible
-    use merge_warden_integration_tests::{environment, errors, github, mocks, utils};
+    // All modules (environment, errors, github, utils) are verified accessible
+    // by the fact that this test file compiles.
 
     // Constants should be defined
     assert!(!DEFAULT_TEST_ORGANIZATION.is_empty());

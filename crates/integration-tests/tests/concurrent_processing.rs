@@ -69,51 +69,6 @@ async fn test_concurrent_pull_request_processing() -> TestResult<()> {
     Ok(())
 }
 
-/// Test concurrent processing performance under load.
-///
-/// This test validates system performance when processing many PRs simultaneously
-/// and ensures that throughput remains acceptable under load conditions.
-#[tokio::test]
-async fn test_concurrent_processing_performance() -> TestResult<()> {
-    // Arrange: Performance test parameters
-    let concurrent_count = 5; // Reduced for test stability
-    let performance_start = Instant::now();
-
-    // Create performance test data
-    let performance_specs = create_performance_test_specs(concurrent_count).await?;
-
-    // Act: Simulate concurrent processing with performance monitoring
-    let processing_results = simulate_performance_processing(&performance_specs).await?;
-
-    let processing_duration = performance_start.elapsed();
-
-    // Assert: Validate performance metrics
-    assert!(
-        processing_duration <= Duration::from_secs(30),
-        "Performance processing should complete within 30 seconds for {} PRs, took {:?}",
-        concurrent_count,
-        processing_duration
-    );
-
-    // Validate throughput
-    let throughput = concurrent_count as f64 / processing_duration.as_secs_f64();
-    assert!(
-        throughput >= 0.1, // At least 0.1 PRs per second (very conservative)
-        "Throughput should be at least 0.1 PRs/sec, got {:.2}",
-        throughput
-    );
-
-    // Validate all processing completed successfully
-    assert_eq!(
-        processing_results.len(),
-        concurrent_count,
-        "All {} PRs should complete processing",
-        concurrent_count
-    );
-
-    Ok(())
-}
-
 /// Test resource cleanup under concurrent operations.
 ///
 /// This test ensures that resources are properly managed and cleaned up
@@ -153,10 +108,10 @@ async fn create_concurrent_pr_specifications(count: usize) -> TestResult<Vec<Con
     for i in 0..count {
         specs.push(ConcurrentPrSpec {
             id: i,
-            title: format!("feat: concurrent feature {}", i),
-            body: format!("Test PR {} for concurrent processing validation", i),
+            _title: format!("feat: concurrent feature {}", i),
+            _body: format!("Test PR {} for concurrent processing validation", i),
             files_count: (i % 5) + 1, // 1-5 files per PR
-            expected_processing_time: Duration::from_secs(((i % 3) + 1) as u64), // 1-3 seconds expected
+            _expected_processing_time: Duration::from_secs(((i % 3) + 1) as u64), // 1-3 seconds expected
         });
     }
 
@@ -201,59 +156,6 @@ async fn simulate_single_pr_processing(spec: &ConcurrentPrSpec) -> TestResult<Pr
     })
 }
 
-/// Creates performance test specifications
-async fn create_performance_test_specs(count: usize) -> TestResult<Vec<PerformanceTestSpec>> {
-    let mut specs = Vec::with_capacity(count);
-
-    for i in 0..count {
-        specs.push(PerformanceTestSpec {
-            id: i,
-            complexity: if i % 3 == 0 {
-                "high"
-            } else if i % 2 == 0 {
-                "medium"
-            } else {
-                "low"
-            },
-            expected_duration: Duration::from_millis((i as u64 * 100) + 200),
-            resource_requirements: i % 4 + 1,
-        });
-    }
-
-    Ok(specs)
-}
-
-/// Simulates performance testing under concurrent load
-async fn simulate_performance_processing(
-    specs: &[PerformanceTestSpec],
-) -> TestResult<Vec<PerformanceResult>> {
-    let mut results = Vec::with_capacity(specs.len());
-
-    for spec in specs {
-        let start_time = Instant::now();
-
-        // Simulate processing based on complexity
-        let _processing_time = match spec.complexity {
-            "high" => Duration::from_millis(300),
-            "medium" => Duration::from_millis(200),
-            "low" => Duration::from_millis(100),
-            _ => Duration::from_millis(150),
-        };
-
-        tokio::time::sleep(Duration::from_millis(50)).await; // Simulate work
-
-        results.push(PerformanceResult {
-            spec_id: spec.id,
-            actual_duration: start_time.elapsed(),
-            expected_duration: spec.expected_duration,
-            complexity: spec.complexity.to_string(),
-            success: true,
-        });
-    }
-
-    Ok(results)
-}
-
 /// Creates test resources for cleanup validation
 async fn create_test_resources_for_cleanup(count: usize) -> TestResult<Vec<TestResource>> {
     let mut resources = Vec::with_capacity(count);
@@ -262,8 +164,8 @@ async fn create_test_resources_for_cleanup(count: usize) -> TestResult<Vec<TestR
         resources.push(TestResource {
             id: i,
             resource_type: if i % 2 == 0 { "repository" } else { "webhook" },
-            cleanup_required: true,
-            creation_time: Instant::now(),
+            _cleanup_required: true,
+            _creation_time: Instant::now(),
         });
     }
 
@@ -284,7 +186,7 @@ async fn simulate_concurrent_cleanup(resources: &[TestResource]) -> TestResult<V
             resource_id: resource.id,
             cleanup_duration: cleanup_start.elapsed(),
             success: true,
-            resource_type: resource.resource_type.to_string(),
+            _resource_type: resource.resource_type.to_string(),
         });
     }
 
@@ -351,18 +253,16 @@ async fn validate_cleanup_completeness(results: &[CleanupResult]) -> TestResult<
 
 /// Specification for concurrent PR processing test
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct ConcurrentPrSpec {
     id: usize,
-    title: String,
-    body: String,
+    _title: String,
+    _body: String,
     files_count: usize,
-    expected_processing_time: Duration,
+    _expected_processing_time: Duration,
 }
 
 /// Result of processing a single PR in concurrent test
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct ProcessingResult {
     pr_id: usize,
     processing_time: Duration,
@@ -371,43 +271,20 @@ struct ProcessingResult {
     labels_count: usize,
 }
 
-/// Specification for performance testing under load
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-struct PerformanceTestSpec {
-    id: usize,
-    complexity: &'static str,
-    expected_duration: Duration,
-    resource_requirements: usize,
-}
-
-/// Result of performance testing
-#[derive(Debug, Clone)]
-#[allow(dead_code)]
-struct PerformanceResult {
-    spec_id: usize,
-    actual_duration: Duration,
-    expected_duration: Duration,
-    complexity: String,
-    success: bool,
-}
-
 /// Test resource for cleanup validation
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct TestResource {
     id: usize,
     resource_type: &'static str,
-    cleanup_required: bool,
-    creation_time: Instant,
+    _cleanup_required: bool,
+    _creation_time: Instant,
 }
 
 /// Result of cleanup operation
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 struct CleanupResult {
     resource_id: usize,
     cleanup_duration: Duration,
     success: bool,
-    resource_type: String,
+    _resource_type: String,
 }

@@ -4,9 +4,9 @@ pub mod test_data;
 
 pub use test_data::{CommentSpec, PullRequestSpec, ReviewSpec, TestDataManager, TestPullRequest};
 
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use crate::errors::TestResult;
+use crate::errors::{TestError, TestResult};
 
 /// Waits for a condition to be met with a timeout.
 ///
@@ -48,15 +48,28 @@ use crate::errors::TestResult;
 /// }
 /// ```
 pub async fn wait_for_condition<F>(
-    _condition: F,
-    _timeout_duration: Duration,
-    _check_interval: Duration,
+    mut condition: F,
+    timeout_duration: Duration,
+    check_interval: Duration,
 ) -> TestResult<()>
 where
     F: FnMut() -> TestResult<bool>,
 {
-    // TODO: implement - Wait for condition with timeout
-    todo!("Implement wait for condition utility")
+    let deadline = Instant::now() + timeout_duration;
+    loop {
+        match condition() {
+            Ok(true) => return Ok(()),
+            Ok(false) => {}
+            Err(e) => return Err(e),
+        }
+        if Instant::now() >= deadline {
+            return Err(TestError::Timeout {
+                operation: "wait_for_condition".to_string(),
+                timeout_seconds: timeout_duration.as_secs(),
+            });
+        }
+        tokio::time::sleep(check_interval).await;
+    }
 }
 
 /// Waits for a GitHub webhook to be processed and result in expected changes.
@@ -96,15 +109,29 @@ where
 /// }
 /// ```
 pub async fn wait_for_webhook_processing<F, Fut>(
-    _check_fn: F,
-    _timeout_duration: Duration,
+    check_fn: F,
+    timeout_duration: Duration,
 ) -> TestResult<()>
 where
     F: Fn() -> Fut,
     Fut: std::future::Future<Output = TestResult<bool>>,
 {
-    // TODO: implement - Wait for webhook processing with backoff
-    todo!("Implement webhook processing wait utility")
+    let deadline = Instant::now() + timeout_duration;
+    let check_interval = Duration::from_millis(500);
+    loop {
+        match check_fn().await {
+            Ok(true) => return Ok(()),
+            Ok(false) => {}
+            Err(e) => return Err(e),
+        }
+        if Instant::now() >= deadline {
+            return Err(TestError::Timeout {
+                operation: "wait_for_webhook_processing".to_string(),
+                timeout_seconds: timeout_duration.as_secs(),
+            });
+        }
+        tokio::time::sleep(check_interval).await;
+    }
 }
 
 /// Generates a unique identifier for test resources.
@@ -233,13 +260,16 @@ pub fn create_webhook_payload(
 /// Retry utility for flaky operations in integration tests.
 ///
 /// This utility retries operations that may fail due to temporary issues such as
-/// network connectivity or eventual consistency in external services.
+/// network connectivity or eventual consistency in external services. Each failed
+/// attempt waits for an exponentially increasing delay (doubling from `initial_delay`
+/// on each attempt) capped at 30 seconds before the next attempt.
 ///
 /// # Parameters
 ///
 /// - `operation`: The operation to retry
 /// - `max_attempts`: Maximum number of retry attempts
-/// - `delay`: Delay between retry attempts
+/// - `initial_delay`: Base delay before the second attempt; doubled on each subsequent
+///   failure, capped at 30 seconds
 ///
 /// # Returns
 ///
@@ -273,14 +303,32 @@ pub fn create_webhook_payload(
 /// }
 /// ```
 pub async fn retry_operation<F, Fut, T>(
-    _operation: F,
-    _max_attempts: u32,
-    _delay: Duration,
+    mut operation: F,
+    max_attempts: u32,
+    initial_delay: Duration,
 ) -> TestResult<T>
 where
     F: FnMut() -> Fut,
     Fut: std::future::Future<Output = TestResult<T>>,
 {
-    // TODO: implement - Retry operation with exponential backoff
-    todo!("Implement retry operation utility")
+    let max_delay = Duration::from_secs(30);
+    let mut last_error = None;
+    for attempt in 0..max_attempts {
+        match operation().await {
+            Ok(value) => return Ok(value),
+            Err(e) => {
+                last_error = Some(e);
+                if attempt + 1 < max_attempts {
+                    // Exponential backoff: initial_delay * 2^attempt, capped at 30 s.
+                    let multiplier = 1u32 << attempt.min(31);
+                    let backoff = initial_delay.saturating_mul(multiplier).min(max_delay);
+                    tokio::time::sleep(backoff).await;
+                }
+            }
+        }
+    }
+    Err(last_error.unwrap_or_else(|| TestError::EnvironmentError {
+        component: "retry_operation".to_string(),
+        message: "All retry attempts exhausted with no error details".to_string(),
+    }))
 }
