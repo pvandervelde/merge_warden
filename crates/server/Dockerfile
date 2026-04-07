@@ -1,5 +1,6 @@
 # Build stage: compile the release binary.
-FROM rust:1.90-slim@sha256:7fa728f3678acf5980d5db70960cf8491aff9411976789086676bdf0c19db39e AS builder
+# Digest pinned to rust:1.94-slim (multi-arch manifest list). Renovate keeps this current.
+FROM rust:1.94-slim@sha256:48150eec4f1e854ec689c7ca4c16d35193c4ea19dde13b6df515192707229ff8 AS builder
 WORKDIR /app
 COPY . .
 RUN cargo build --release -p merge_warden_server
