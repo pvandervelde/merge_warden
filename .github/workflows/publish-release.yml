@@ -68,9 +68,10 @@ jobs:
           echo "The release version is: ${RELEASE_VERSION}"
 
       - name: Assert calculated version matches release branch
+        env:
+          RELEASE_VERSION: ${{ steps.get_version.outputs.RELEASE_VERSION }}
+          BRANCH_REF: ${{ github.event.pull_request.head.ref }}
         run: |
-          RELEASE_VERSION="${{ steps.get_version.outputs.RELEASE_VERSION }}"
-          BRANCH_REF="${{ github.event.pull_request.head.ref }}"
           BRANCH_VERSION="${BRANCH_REF#release/}"
           if [[ "${RELEASE_VERSION}" != "${BRANCH_VERSION}" ]]; then
             echo "ERROR: Calculated version (${RELEASE_VERSION}) does not match branch version (${BRANCH_VERSION})"
