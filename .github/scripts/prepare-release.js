@@ -96,6 +96,7 @@ function githubGraphQL(query, variables) {
  */
 function githubRest(path, method = 'GET', body = null) {
   return new Promise((resolve, reject) => {
+    const bodyData = body ? JSON.stringify(body) : null;
     const options = {
       hostname: 'api.github.com',
       path,
@@ -103,7 +104,8 @@ function githubRest(path, method = 'GET', body = null) {
       headers: {
         'Authorization': `bearer ${GH_TOKEN}`,
         'User-Agent': 'prepare-release-script',
-        'Accept': 'application/vnd.github+json'
+        'Accept': 'application/vnd.github+json',
+        ...(bodyData ? { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(bodyData) } : {})
       }
     };
     const req = https.request(options, res => {
@@ -118,7 +120,7 @@ function githubRest(path, method = 'GET', body = null) {
       });
     });
     req.on('error', reject);
-    if (body) req.write(JSON.stringify(body));
+    if (bodyData) req.write(bodyData);
     req.end();
   });
 }
@@ -193,12 +195,15 @@ async function main() {
   // If the branch already exists we force-update it so that any new commits that have
   // landed on the default branch since the last workflow run are incorporated (i.e. the
   // branch is effectively rebased onto master's HEAD before we add the release commit).
+  // NOTE: Force-resetting the branch and adding a new commit will dismiss any existing
+  // approvals on an open release PR. This is intentional — the PR content changes on
+  // every push to master and must be re-reviewed.
   let branchExists = false;
   try {
     await githubRest(`/repos/${OWNER}/${REPO}/git/refs/heads/${BRANCH_NAME}`);
     branchExists = true;
   } catch {
-    branchExists = false;
+    // Branch does not exist; branchExists remains false.
   }
 
   if (branchExists) {
@@ -399,6 +404,9 @@ async function main() {
 
 // Entry point: run main() and handle errors
 main().catch(err => {
-  console.error(err);
+  console.error('[ERROR] Script failed:', err.message || err);
+  if ((err.message || '').includes('expectedHeadOid')) {
+    console.error('[HINT] The "expectedHeadOid" conflict usually means a concurrent workflow run updated the branch first. Re-running the workflow should succeed.');
+  }
   process.exit(1);
 });
