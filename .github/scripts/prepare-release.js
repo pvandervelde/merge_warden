@@ -189,14 +189,26 @@ async function main() {
   const baseCommitOid = branchInfo.data.repository.ref.target.oid;
   console.log(`[INFO] Latest commit OID on ${DEFAULT_BRANCH}: ${baseCommitOid}`);
 
-  // 3. Check if the release branch exists
+  // 3. Ensure the release branch exists and is up to date with the default branch.
+  // If the branch already exists we force-update it so that any new commits that have
+  // landed on the default branch since the last workflow run are incorporated (i.e. the
+  // branch is effectively rebased onto master's HEAD before we add the release commit).
   let branchExists = false;
   try {
     await githubRest(`/repos/${OWNER}/${REPO}/git/refs/heads/${BRANCH_NAME}`);
     branchExists = true;
-    console.log(`[INFO] Release branch "${BRANCH_NAME}" already exists.`);
   } catch {
     branchExists = false;
+  }
+
+  if (branchExists) {
+    console.log(`[INFO] Release branch "${BRANCH_NAME}" already exists. Updating it to ${DEFAULT_BRANCH} HEAD (${baseCommitOid})...`);
+    await githubRest(`/repos/${OWNER}/${REPO}/git/refs/heads/${BRANCH_NAME}`, 'PATCH', {
+      sha: baseCommitOid,
+      force: true
+    });
+    console.log(`[INFO] Updated release branch "${BRANCH_NAME}" to ${DEFAULT_BRANCH} (${baseCommitOid}).`);
+  } else {
     console.log(`[INFO] Release branch "${BRANCH_NAME}" does not exist. Will create it.`);
     // Branch does not exist, create it from the default branch's latest commit
     await githubRest(`/repos/${OWNER}/${REPO}/git/refs`, 'POST', {
@@ -218,12 +230,9 @@ async function main() {
     }
   `, { owner: OWNER, repo: REPO, head: BRANCH_NAME });
 
-  if (branchExists && prs.data.repository.pullRequests.nodes.length > 0) {
-    // Both branch and PR exist, do not proceed
-    console.log(`[INFO] Both release branch "${BRANCH_NAME}" and an open PR already exist.`);
-    console.log(`[INFO] Existing PR: ${prs.data.repository.pullRequests.nodes[0].url}`);
-    console.log(`[INFO] Exiting without making changes.`);
-    return;
+  if (prs.data.repository.pullRequests.nodes.length > 0) {
+    console.log(`[INFO] An open PR already exists for "${BRANCH_NAME}": ${prs.data.repository.pullRequests.nodes[0].url}`);
+    console.log(`[INFO] Will still update the branch content with the latest changelog and version.`);
   }
 
   // 5. Prepare updated file contents for CHANGELOG.md and Cargo.toml
