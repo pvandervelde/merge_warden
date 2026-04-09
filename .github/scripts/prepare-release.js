@@ -15,7 +15,7 @@
  *   2. Ensures a release branch (release/<next_version>) exists, creating it if needed.
  *   3. Reads and updates CHANGELOG.md and Cargo.toml for the new version.
  *   4. Uses the GitHub GraphQL API to create a "Verified" commit with both file changes.
- *   5. Opens a pull request if one does not already exist.
+ *   5. Ensures a pull request is open: reopens an auto-closed PR or creates a fresh one.
  *
  * This approach ensures the commit is attributed to the GitHub App and marked as "Verified" by GitHub.
  *
@@ -123,6 +123,56 @@ function githubRest(path, method = 'GET', body = null) {
     if (bodyData) req.write(bodyData);
     req.end();
   });
+}
+
+/**
+ * Creates a new release pull request for the given branch.
+ * Throws if the GitHub API does not return a PR URL, so callers can detect failures.
+ *
+ * @param {string} owner - Repository owner
+ * @param {string} repo - Repository name
+ * @param {string} branchName - Head branch name (e.g. release/1.2.3)
+ * @param {string} defaultBranch - Base branch name (e.g. master)
+ * @param {string} nextVersion - Version string used in the PR title
+ * @returns {Promise<void>}
+ */
+async function createReleasePR(owner, repo, branchName, defaultBranch, nextVersion) {
+  console.log(`[INFO] Creating new PR for branch "${branchName}"...`);
+  const prMutation = `
+    mutation($input: CreatePullRequestInput!) {
+      createPullRequest(input: $input) {
+        pullRequest { number url }
+      }
+    }
+  `;
+  const repoIdInfo = await githubGraphQL(`
+    query($owner: String!, $repo: String!) {
+      repository(owner: $owner, name: $repo) {
+        id
+      }
+    }
+  `, { owner, repo });
+  const repositoryId = repoIdInfo.data.repository.id;
+  const prInput = {
+    repositoryId,
+    baseRefName: defaultBranch,
+    headRefName: branchName,
+    title: `chore(release): ${nextVersion}`,
+    body: `Prepare release ${nextVersion}. Please review the changes and merge to trigger the release.`
+  };
+  const prResp = await githubGraphQL(prMutation, { input: prInput });
+  if (
+    prResp &&
+    prResp.data &&
+    prResp.data.createPullRequest &&
+    prResp.data.createPullRequest.pullRequest &&
+    prResp.data.createPullRequest.pullRequest.url
+  ) {
+    console.log(`[INFO] Created PR: ${prResp.data.createPullRequest.pullRequest.url}`);
+  } else {
+    console.error('[ERROR] Failed to create PR. Response:', JSON.stringify(prResp, null, 2));
+    throw new Error('Failed to create release PR — GitHub API returned no PR URL.');
+  }
 }
 
 async function main() {
@@ -357,48 +407,70 @@ async function main() {
   const commitUrl = commitResp.data.createCommitOnBranch.commit.url;
   console.log(`[INFO] Created verified commit: ${commitUrl}`);
 
-  // 8. Create a pull request if one does not already exist for this branch
-  if (prs.data.repository.pullRequests.nodes.length === 0) {
-    // No open PR, create one
-    console.log(`[INFO] No open PR found for branch "${BRANCH_NAME}". Creating new PR...`);
-    const prMutation = `
-      mutation($input: CreatePullRequestInput!) {
-        createPullRequest(input: $input) {
-          pullRequest { number url }
-        }
-      }
-    `;
-    // We need the repositoryId for the mutation
-    const repoIdInfo = await githubGraphQL(`
-      query($owner: String!, $repo: String!) {
+  // 8. Ensure the release PR is open.
+  //
+  // When the release branch is force-reset to master HEAD (step 3), GitHub may
+  // asynchronously process the push event and auto-close any open PR whose head
+  // branch temporarily has no diff from the base. The step-4 query often runs
+  // before GitHub finishes that processing, so the PR appears open at that point
+  // but gets closed shortly afterward. A subsequent new commit does not reliably
+  // cause GitHub to auto-reopen the PR.
+  //
+  // To defend against this, we poll for an open PR after the release commit lands,
+  // giving GitHub time to finish async processing, then reopen or create as needed.
+  //
+  // NOTE: In the unlikely case where GitHub's async close completes before the
+  // step-4 query (i.e. prs.nodes is already empty at that point), previousPrNumber
+  // will be null and we fall through to createReleasePR(), which creates a fresh PR
+  // and loses any review history on the closed PR. This edge case is left as-is
+  // because it requires a closed-PR query at step 4 to fully address and is rare
+  // in practice.
+
+  console.log(`[INFO] Verifying PR state for branch "${BRANCH_NAME}" after commit (with retry)...`);
+  const postCommitRetries = 3;
+  const postCommitDelayMs = 3000;
+  let postCommitPrs = null;
+  for (let attempt = 1; attempt <= postCommitRetries; attempt++) {
+    postCommitPrs = await githubGraphQL(`
+      query($owner: String!, $repo: String!, $head: String!) {
         repository(owner: $owner, name: $repo) {
-          id
+          pullRequests(headRefName: $head, states: OPEN, first: 1) {
+            nodes { number url }
+          }
         }
       }
-    `, { owner: OWNER, repo: REPO });
-    const repositoryId = repoIdInfo.data.repository.id;
-    const prInput = {
-      repositoryId: repositoryId,
-      baseRefName: DEFAULT_BRANCH,
-      headRefName: BRANCH_NAME,
-      title: `chore(release): ${NEXT_VERSION}`,
-      body: `Prepare release ${NEXT_VERSION}. Please review the changes and merge to trigger the release.`
-    };
-    const prResp = await githubGraphQL(prMutation, { input: prInput });
-    if (
-      prResp &&
-      prResp.data &&
-      prResp.data.createPullRequest &&
-      prResp.data.createPullRequest.pullRequest &&
-      prResp.data.createPullRequest.pullRequest.url
-    ) {
-      console.log(`[INFO] Created PR: ${prResp.data.createPullRequest.pullRequest.url}`);
-    } else {
-      console.error('[ERROR] Failed to create PR. Response:', JSON.stringify(prResp, null, 2));
+    `, { owner: OWNER, repo: REPO, head: BRANCH_NAME });
+    if (postCommitPrs.data.repository.pullRequests.nodes.length > 0) {
+      break;
     }
+    if (attempt < postCommitRetries) {
+      console.log(`[INFO] No open PR observed yet (attempt ${attempt}/${postCommitRetries}). Waiting ${postCommitDelayMs}ms for GitHub to finish processing...`);
+      await new Promise(res => setTimeout(res, postCommitDelayMs));
+    }
+  }
+
+  if (postCommitPrs.data.repository.pullRequests.nodes.length > 0) {
+    console.log(`[INFO] PR is open: ${postCommitPrs.data.repository.pullRequests.nodes[0].url}`);
   } else {
-    // PR already exists
-    console.log(`[INFO] PR already exists: ${prs.data.repository.pullRequests.nodes[0].url}`);
+    // No open PR found after retries. If we saw an open PR earlier (step 4),
+    // GitHub likely auto-closed it during the force-push. Try to reopen it first
+    // so that review history is preserved; fall back to creating a fresh PR.
+    const previousPrNumber = prs.data.repository.pullRequests.nodes.length > 0
+      ? prs.data.repository.pullRequests.nodes[0].number
+      : null;
+
+    if (previousPrNumber) {
+      console.log(`[INFO] PR #${previousPrNumber} is no longer open (likely auto-closed by force-push). Reopening...`);
+      try {
+        const reopened = await githubRest(`/repos/${OWNER}/${REPO}/pulls/${previousPrNumber}`, 'PATCH', { state: 'open' });
+        console.log(`[INFO] Reopened PR: ${reopened.html_url}`);
+      } catch (reopenErr) {
+        console.warn(`[WARN] Could not reopen PR #${previousPrNumber}: ${reopenErr.message || reopenErr}. Creating a new PR instead.`);
+        await createReleasePR(OWNER, REPO, BRANCH_NAME, DEFAULT_BRANCH, NEXT_VERSION);
+      }
+    } else {
+      await createReleasePR(OWNER, REPO, BRANCH_NAME, DEFAULT_BRANCH, NEXT_VERSION);
+    }
   }
 }
 
