@@ -7,13 +7,15 @@ use merge_warden_developer_platforms::models::{PullRequest, User};
 
 use crate::{
     checks::{
-        check_pr_title, check_work_item_reference, extract_closing_issue_reference, IssueReference,
+        check_pr_title, check_work_item_reference, diagnose_pr_title,
+        extract_closing_issue_reference, IssueReference, TitleDiagnosis, TitleIssue,
+        TitleValidationResult,
     },
     config::{
         BypassRule, CurrentPullRequestValidationConfiguration, CONVENTIONAL_COMMIT_REGEX,
         WORK_ITEM_REGEX,
     },
-    validation_result::BypassRuleType,
+    validation_result::{BypassInfo, BypassRuleType, ValidationResult},
 };
 
 // Helper functions for creating test data
@@ -1160,4 +1162,532 @@ fn issue_number_accessor_returns_correct_number_for_cross_repo() {
         issue_number: 456,
     };
     assert_eq!(reference.issue_number(), 456);
+}
+
+// ── TitleIssue construction tests ──────────────────────────────────────────
+
+#[test]
+fn should_construct_title_issue_empty_description() {
+    let issue = TitleIssue::EmptyDescription;
+    assert_eq!(issue, TitleIssue::EmptyDescription);
+}
+
+#[test]
+fn should_construct_title_issue_invalid_scope() {
+    let issue = TitleIssue::InvalidScope {
+        scope: "Auth".to_string(),
+    };
+    assert!(matches!(issue, TitleIssue::InvalidScope { scope } if scope == "Auth"));
+}
+
+#[test]
+fn should_construct_title_issue_leading_whitespace() {
+    let issue = TitleIssue::LeadingWhitespace;
+    assert_eq!(issue, TitleIssue::LeadingWhitespace);
+}
+
+#[test]
+fn should_construct_title_issue_missing_colon() {
+    let issue = TitleIssue::MissingColon;
+    assert_eq!(issue, TitleIssue::MissingColon);
+}
+
+#[test]
+fn should_construct_title_issue_missing_space_after_colon() {
+    let issue = TitleIssue::MissingSpaceAfterColon;
+    assert_eq!(issue, TitleIssue::MissingSpaceAfterColon);
+}
+
+#[test]
+fn should_construct_title_issue_no_type_prefix() {
+    let issue = TitleIssue::NoTypePrefix;
+    assert_eq!(issue, TitleIssue::NoTypePrefix);
+}
+
+#[test]
+fn should_construct_title_issue_unrecognized_type_with_nearest_valid() {
+    let issue = TitleIssue::UnrecognizedType {
+        found: "feature".to_string(),
+        nearest_valid: Some("feat".to_string()),
+    };
+    assert!(
+        matches!(issue, TitleIssue::UnrecognizedType { ref found, ref nearest_valid }
+            if found == "feature" && nearest_valid.as_deref() == Some("feat"))
+    );
+}
+
+#[test]
+fn should_construct_title_issue_unrecognized_type_without_nearest_valid() {
+    let issue = TitleIssue::UnrecognizedType {
+        found: "xyz".to_string(),
+        nearest_valid: None,
+    };
+    assert!(
+        matches!(issue, TitleIssue::UnrecognizedType { ref found, ref nearest_valid }
+            if found == "xyz" && nearest_valid.is_none())
+    );
+}
+
+#[test]
+fn should_construct_title_issue_uppercase_type() {
+    let issue = TitleIssue::UppercaseType {
+        found: "FEAT".to_string(),
+    };
+    assert!(matches!(issue, TitleIssue::UppercaseType { found } if found == "FEAT"));
+}
+
+#[test]
+fn should_construct_title_issue_whitespace_before_colon() {
+    let issue = TitleIssue::WhitespaceBeforeColon {
+        found: "feat ".to_string(),
+    };
+    assert!(matches!(issue, TitleIssue::WhitespaceBeforeColon { found } if found == "feat "));
+}
+
+// ── TitleDiagnosis construction tests ──────────────────────────────────────
+
+#[test]
+fn should_construct_title_diagnosis_with_single_issue_and_fix() {
+    let diagnosis = TitleDiagnosis {
+        issues: vec![TitleIssue::UppercaseType {
+            found: "FEAT".to_string(),
+        }],
+        suggested_fix: Some("feat: add login".to_string()),
+    };
+    assert_eq!(diagnosis.issues.len(), 1);
+    assert_eq!(diagnosis.suggested_fix.as_deref(), Some("feat: add login"));
+}
+
+#[test]
+fn should_construct_title_diagnosis_with_multiple_issues_and_no_fix() {
+    let diagnosis = TitleDiagnosis {
+        issues: vec![TitleIssue::NoTypePrefix, TitleIssue::EmptyDescription],
+        suggested_fix: None,
+    };
+    assert_eq!(diagnosis.issues.len(), 2);
+    assert!(diagnosis.suggested_fix.is_none());
+}
+
+#[test]
+fn should_construct_title_diagnosis_with_no_issues() {
+    let diagnosis = TitleDiagnosis {
+        issues: vec![],
+        suggested_fix: None,
+    };
+    assert!(diagnosis.issues.is_empty());
+    assert!(diagnosis.suggested_fix.is_none());
+}
+
+// ── TitleValidationResult construction and delegation tests ────────────────
+
+#[test]
+fn should_construct_title_validation_result_valid_no_diagnosis() {
+    let result = TitleValidationResult {
+        validation: ValidationResult::valid(),
+        diagnosis: None,
+    };
+    assert!(result.is_valid());
+    assert!(!result.was_bypassed());
+    assert!(result.bypass_info().is_none());
+    assert!(result.diagnosis.is_none());
+}
+
+#[test]
+fn should_construct_title_validation_result_invalid_with_diagnosis() {
+    let diagnosis = TitleDiagnosis {
+        issues: vec![TitleIssue::NoTypePrefix],
+        suggested_fix: None,
+    };
+    let result = TitleValidationResult {
+        validation: ValidationResult::invalid(),
+        diagnosis: Some(diagnosis),
+    };
+    assert!(!result.is_valid());
+    assert!(!result.was_bypassed());
+    assert!(result.bypass_info().is_none());
+    assert!(result.diagnosis.is_some());
+}
+
+#[test]
+fn should_construct_title_validation_result_bypassed_no_diagnosis() {
+    let bypass_info = BypassInfo {
+        rule_type: BypassRuleType::TitleConvention,
+        user: "release-bot".to_string(),
+    };
+    let result = TitleValidationResult {
+        validation: ValidationResult::bypassed(bypass_info.clone()),
+        diagnosis: None,
+    };
+    assert!(result.is_valid());
+    assert!(result.was_bypassed());
+    assert_eq!(result.bypass_info(), Some(&bypass_info));
+    assert!(result.diagnosis.is_none());
+}
+
+// ── diagnose_pr_title: 3.1 LeadingWhitespace ──────────────────────────────
+
+#[test]
+fn should_detect_leading_whitespace_and_suggest_trim() {
+    let diagnosis = diagnose_pr_title(" feat: add login");
+    assert!(
+        diagnosis.issues.contains(&TitleIssue::LeadingWhitespace),
+        "Expected LeadingWhitespace in issues: {:?}",
+        diagnosis.issues
+    );
+    assert_eq!(
+        diagnosis.suggested_fix.as_deref(),
+        Some("feat: add login"),
+        "Expected trimmed title as suggested_fix"
+    );
+}
+
+#[test]
+fn should_detect_leading_whitespace_only_once_even_with_multiple_spaces() {
+    let diagnosis = diagnose_pr_title("   feat: add login");
+    assert_eq!(
+        diagnosis
+            .issues
+            .iter()
+            .filter(|i| **i == TitleIssue::LeadingWhitespace)
+            .count(),
+        1,
+        "LeadingWhitespace should appear exactly once"
+    );
+    assert_eq!(diagnosis.suggested_fix.as_deref(), Some("feat: add login"));
+}
+
+// ── diagnose_pr_title: 3.2 WhitespaceBeforeColon ──────────────────────────
+
+#[test]
+fn should_detect_whitespace_before_colon_with_no_scope() {
+    let diagnosis = diagnose_pr_title("feat : add login");
+    assert!(
+        diagnosis
+            .issues
+            .iter()
+            .any(|i| matches!(i, TitleIssue::WhitespaceBeforeColon { found } if found == "feat ")),
+        "Expected WhitespaceBeforeColon {{ found: \"feat \" }}, got: {:?}",
+        diagnosis.issues
+    );
+    assert_eq!(diagnosis.suggested_fix.as_deref(), Some("feat: add login"));
+}
+
+#[test]
+fn should_detect_whitespace_before_colon_with_scope() {
+    let diagnosis = diagnose_pr_title("feat(auth) : add login");
+    assert!(
+        diagnosis.issues.iter().any(
+            |i| matches!(i, TitleIssue::WhitespaceBeforeColon { found } if found == "feat(auth) ")
+        ),
+        "Expected WhitespaceBeforeColon {{ found: \"feat(auth) \" }}, got: {:?}",
+        diagnosis.issues
+    );
+    assert_eq!(
+        diagnosis.suggested_fix.as_deref(),
+        Some("feat(auth): add login")
+    );
+}
+
+// ── diagnose_pr_title: 3.3 UppercaseType ──────────────────────────────────
+
+#[test]
+fn should_detect_fully_uppercase_type() {
+    let diagnosis = diagnose_pr_title("FEAT: add login");
+    assert!(
+        diagnosis
+            .issues
+            .iter()
+            .any(|i| matches!(i, TitleIssue::UppercaseType { found } if found == "FEAT")),
+        "Expected UppercaseType {{ found: \"FEAT\" }}, got: {:?}",
+        diagnosis.issues
+    );
+    assert_eq!(diagnosis.suggested_fix.as_deref(), Some("feat: add login"));
+}
+
+#[test]
+fn should_detect_mixed_case_type() {
+    let diagnosis = diagnose_pr_title("Fix: bug in auth");
+    assert!(
+        diagnosis
+            .issues
+            .iter()
+            .any(|i| matches!(i, TitleIssue::UppercaseType { found } if found == "Fix")),
+        "Expected UppercaseType {{ found: \"Fix\" }}, got: {:?}",
+        diagnosis.issues
+    );
+    assert_eq!(diagnosis.suggested_fix.as_deref(), Some("fix: bug in auth"));
+}
+
+// ── diagnose_pr_title: 3.4 UnrecognizedType ───────────────────────────────
+
+#[test]
+fn should_detect_unrecognized_type_for_each_typo_map_entry() {
+    let cases: &[(&str, &str, &str)] = &[
+        ("bug: fix crash", "bug", "fix"),
+        ("bugfix: fix crash", "bugfix", "fix"),
+        ("dep: update packages", "dep", "chore"),
+        ("dependencies: update packages", "dependencies", "chore"),
+        ("enhancement: add feature", "enhancement", "feat"),
+        ("feature: add login", "feature", "feat"),
+        ("hotfix: urgent patch", "hotfix", "fix"),
+    ];
+
+    for (title, typo, correct) in cases {
+        let diagnosis = diagnose_pr_title(title);
+        assert!(
+            diagnosis.issues.iter().any(|i| matches!(i,
+                TitleIssue::UnrecognizedType { found, nearest_valid: Some(nv) }
+                if found == typo && nv == correct
+            )),
+            "Title '{}': expected UnrecognizedType {{ found: {:?}, nearest_valid: Some({:?}) }}, got: {:?}",
+            title, typo, correct, diagnosis.issues
+        );
+        // suggested_fix should replace the typo token with the correction
+        let expected_fix = title.replacen(typo, correct, 1);
+        assert_eq!(
+            diagnosis.suggested_fix.as_deref(),
+            Some(expected_fix.as_str()),
+            "Title '{}': expected suggested_fix = {:?}",
+            title,
+            expected_fix
+        );
+    }
+}
+
+#[test]
+fn should_detect_unrecognized_type_with_no_nearest_valid_and_no_suggested_fix() {
+    let diagnosis = diagnose_pr_title("xyz: add login");
+    assert!(
+        diagnosis.issues.iter().any(|i| matches!(i,
+            TitleIssue::UnrecognizedType { found, nearest_valid: None }
+            if found == "xyz"
+        )),
+        "Expected UnrecognizedType {{ found: \"xyz\", nearest_valid: None }}, got: {:?}",
+        diagnosis.issues
+    );
+    assert!(
+        diagnosis.suggested_fix.is_none(),
+        "Expected no suggested_fix for unknown type, got: {:?}",
+        diagnosis.suggested_fix
+    );
+}
+
+// ── diagnose_pr_title: 3.5 MissingColon ───────────────────────────────────
+
+#[test]
+fn should_detect_missing_colon_and_suggest_insertion() {
+    let diagnosis = diagnose_pr_title("feat add login");
+    assert!(
+        diagnosis.issues.contains(&TitleIssue::MissingColon),
+        "Expected MissingColon, got: {:?}",
+        diagnosis.issues
+    );
+    assert_eq!(diagnosis.suggested_fix.as_deref(), Some("feat: add login"));
+}
+
+// ── diagnose_pr_title: 3.6 MissingSpaceAfterColon ─────────────────────────
+
+#[test]
+fn should_detect_missing_space_after_colon_and_suggest_insertion() {
+    let diagnosis = diagnose_pr_title("feat:add login");
+    assert!(
+        diagnosis
+            .issues
+            .contains(&TitleIssue::MissingSpaceAfterColon),
+        "Expected MissingSpaceAfterColon, got: {:?}",
+        diagnosis.issues
+    );
+    assert_eq!(diagnosis.suggested_fix.as_deref(), Some("feat: add login"));
+}
+
+// ── diagnose_pr_title: 3.7 EmptyDescription ───────────────────────────────
+
+#[test]
+fn should_detect_empty_description_with_trailing_space() {
+    let diagnosis = diagnose_pr_title("feat: ");
+    assert!(
+        diagnosis.issues.contains(&TitleIssue::EmptyDescription),
+        "Expected EmptyDescription, got: {:?}",
+        diagnosis.issues
+    );
+    assert!(
+        diagnosis.suggested_fix.is_none(),
+        "Expected no suggested_fix for EmptyDescription"
+    );
+}
+
+#[test]
+fn should_detect_empty_description_with_multiple_trailing_spaces() {
+    let diagnosis = diagnose_pr_title("feat:  ");
+    assert!(
+        diagnosis.issues.contains(&TitleIssue::EmptyDescription),
+        "Expected EmptyDescription, got: {:?}",
+        diagnosis.issues
+    );
+    assert!(diagnosis.suggested_fix.is_none());
+}
+
+// ── diagnose_pr_title: 3.8 InvalidScope ───────────────────────────────────
+
+#[test]
+fn should_detect_uppercase_chars_in_scope_and_suggest_lowercase() {
+    let diagnosis = diagnose_pr_title("feat(Auth): add login");
+    assert!(
+        diagnosis
+            .issues
+            .iter()
+            .any(|i| matches!(i, TitleIssue::InvalidScope { scope } if scope == "Auth")),
+        "Expected InvalidScope {{ scope: \"Auth\" }}, got: {:?}",
+        diagnosis.issues
+    );
+    assert_eq!(
+        diagnosis.suggested_fix.as_deref(),
+        Some("feat(auth): add login")
+    );
+}
+
+#[test]
+fn should_detect_space_in_scope_and_suggest_hyphen_replacement() {
+    let diagnosis = diagnose_pr_title("feat(user service): add user");
+    assert!(
+        diagnosis
+            .issues
+            .iter()
+            .any(|i| matches!(i, TitleIssue::InvalidScope { scope } if scope == "user service")),
+        "Expected InvalidScope {{ scope: \"user service\" }}, got: {:?}",
+        diagnosis.issues
+    );
+    assert_eq!(
+        diagnosis.suggested_fix.as_deref(),
+        Some("feat(user-service): add user")
+    );
+}
+
+// ── diagnose_pr_title: 3.9 NoTypePrefix ───────────────────────────────────
+
+#[test]
+fn should_detect_no_type_prefix_for_plain_sentence() {
+    let diagnosis = diagnose_pr_title("Add login functionality");
+    assert!(
+        diagnosis.issues.contains(&TitleIssue::NoTypePrefix),
+        "Expected NoTypePrefix for plain sentence, got: {:?}",
+        diagnosis.issues
+    );
+    assert!(
+        diagnosis.suggested_fix.is_none(),
+        "Expected no suggested_fix for NoTypePrefix"
+    );
+}
+
+#[test]
+fn should_detect_no_type_prefix_for_empty_string() {
+    let diagnosis = diagnose_pr_title("");
+    assert!(
+        diagnosis.issues.contains(&TitleIssue::NoTypePrefix),
+        "Expected NoTypePrefix for empty string, got: {:?}",
+        diagnosis.issues
+    );
+    assert!(diagnosis.suggested_fix.is_none());
+}
+
+#[test]
+fn should_detect_no_type_prefix_for_whitespace_only_string() {
+    let diagnosis = diagnose_pr_title("   ");
+    assert!(
+        diagnosis.issues.contains(&TitleIssue::LeadingWhitespace),
+        "Expected LeadingWhitespace for whitespace-only string, got: {:?}",
+        diagnosis.issues
+    );
+    assert!(
+        diagnosis.issues.contains(&TitleIssue::NoTypePrefix),
+        "Expected NoTypePrefix for whitespace-only string, got: {:?}",
+        diagnosis.issues
+    );
+    assert!(diagnosis.suggested_fix.is_none());
+}
+
+// ── diagnose_pr_title: 3.10 Compound case ─────────────────────────────────
+
+#[test]
+fn should_detect_leading_whitespace_and_uppercase_type_together() {
+    let diagnosis = diagnose_pr_title(" FEAT: add login");
+    assert_eq!(
+        diagnosis.issues,
+        vec![
+            TitleIssue::LeadingWhitespace,
+            TitleIssue::UppercaseType {
+                found: "FEAT".to_string()
+            }
+        ],
+        "Expected [LeadingWhitespace, UppercaseType], got: {:?}",
+        diagnosis.issues
+    );
+    assert_eq!(diagnosis.suggested_fix.as_deref(), Some("feat: add login"));
+}
+
+// ── diagnose_pr_title: 3.11 Valid title ───────────────────────────────────
+
+#[test]
+fn should_return_empty_issues_and_no_fix_for_valid_conventional_title() {
+    let diagnosis = diagnose_pr_title("feat: add login");
+    // diagnose_pr_title is called only for invalid titles, but a conforming title
+    // should produce an empty issues list (no problems found).
+    assert!(
+        diagnosis.issues.is_empty(),
+        "Expected no issues for valid title, got: {:?}",
+        diagnosis.issues
+    );
+    assert!(
+        diagnosis.suggested_fix.is_none(),
+        "Expected no suggested_fix for valid title"
+    );
+}
+
+// ── check_pr_title: 3.12 – 3.14 ───────────────────────────────────────────
+
+#[test]
+fn should_return_diagnosis_some_when_check_pr_title_with_invalid_title() {
+    let pr = create_pull_request(1, "invalid title format", None, None);
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_default_config();
+
+    let result = check_pr_title(&pr, &bypass_rule, &config);
+
+    assert!(!result.is_valid(), "Expected invalid result for bad title");
+    assert!(
+        result.diagnosis.is_some(),
+        "Expected Some(diagnosis) for invalid title"
+    );
+}
+
+#[test]
+fn should_return_diagnosis_none_when_check_pr_title_with_valid_title() {
+    let pr = create_pull_request(1, "feat: add new login feature", None, None);
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_default_config();
+
+    let result = check_pr_title(&pr, &bypass_rule, &config);
+
+    assert!(result.is_valid(), "Expected valid result for good title");
+    assert!(
+        result.diagnosis.is_none(),
+        "Expected None diagnosis for valid title"
+    );
+}
+
+#[test]
+fn should_return_diagnosis_none_when_check_pr_title_with_bypassed_user() {
+    let user = create_user(123, "release-bot");
+    let pr = create_pull_request(1, "invalid title format", None, Some(user));
+    let bypass_rule = create_bypass_rule_enabled_for_users(vec!["release-bot"]);
+    let config = create_default_config();
+
+    let result = check_pr_title(&pr, &bypass_rule, &config);
+
+    assert!(result.is_valid(), "Expected bypassed result to be valid");
+    assert!(result.was_bypassed(), "Expected bypass to have been used");
+    assert!(
+        result.diagnosis.is_none(),
+        "Expected None diagnosis when bypassed"
+    );
 }
