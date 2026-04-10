@@ -385,6 +385,142 @@ const TYPE_TYPO_MAP: &[(&str, &str)] = &[
     ("hotfix", "fix"),
 ];
 
+/// Constructs a best-effort corrected title from the working (trimmed) title and the
+/// list of issues that were diagnosed.
+///
+/// Returns `None` when the problems are unresolvable (e.g. `NoTypePrefix`,
+/// `EmptyDescription`).
+fn build_suggested_fix(working: &str, issues: &[TitleIssue]) -> Option<String> {
+    // Unresolvable issues: no fix possible.
+    // UnrecognizedType without a nearest_valid is also unresolvable — we don't know
+    // what type the author intended, so we cannot suggest a corrected title.
+    let unresolvable = issues.iter().any(|i| {
+        matches!(
+            i,
+            TitleIssue::NoTypePrefix
+                | TitleIssue::EmptyDescription
+                | TitleIssue::UnrecognizedType {
+                    nearest_valid: None,
+                    ..
+                }
+        )
+    });
+    if unresolvable {
+        return None;
+    }
+
+    let mut result = working.to_string();
+
+    // Apply corrections in reverse order of their lexical position so that
+    // index-based mutations don't invalidate later positions.
+
+    // Fix UppercaseType or UnrecognizedType — replace the type token at the start.
+    let token_end = result.find(['(', '!', ':', ' ']).unwrap_or(result.len());
+    let raw_token = result[..token_end].to_string();
+    let replacement_token: Option<String> = issues.iter().find_map(|i| match i {
+        TitleIssue::UppercaseType { found } => Some(found.to_lowercase()),
+        TitleIssue::UnrecognizedType { nearest_valid, .. } => nearest_valid.clone(),
+        _ => None,
+    });
+    if let Some(ref rep) = replacement_token {
+        result = format!("{}{}", rep, &result[token_end..]);
+    }
+
+    // Fix WhitespaceBeforeColon — remove whitespace directly before the colon.
+    if issues
+        .iter()
+        .any(|i| matches!(i, TitleIssue::WhitespaceBeforeColon { .. }))
+    {
+        // After possibly replacing the type token, find and strip whitespace before `:`.
+        if let Some(colon_pos) = result.find(':') {
+            let trimmed_prefix = result[..colon_pos].trim_end().to_string();
+            let after_colon = result[colon_pos..].to_string();
+            result = format!("{trimmed_prefix}{after_colon}");
+        }
+    }
+
+    // Fix InvalidScope — lowercase the scope and replace spaces with `-`.
+    if let Some(TitleIssue::InvalidScope { scope }) = issues
+        .iter()
+        .find(|i| matches!(i, TitleIssue::InvalidScope { .. }))
+    {
+        let fixed_scope = scope.to_lowercase().replace(' ', "-");
+        // Replace only the first occurrence of `(<scope>)` in the result.
+        let needle = format!("({scope})");
+        let replacement = format!("({fixed_scope})");
+        result = result.replacen(&needle, &replacement, 1);
+    }
+
+    // Fix MissingColon — insert `:` after the type token (and optional scope/!).
+    if issues.iter().any(|i| matches!(i, TitleIssue::MissingColon)) {
+        // Find the end of the type+scope+! prefix.
+        let prefix_end = result.find(' ').unwrap_or(result.len());
+        result = format!("{}:{}", &result[..prefix_end], &result[prefix_end..]);
+    }
+
+    // Fix MissingSpaceAfterColon — insert a space after the colon.
+    if issues
+        .iter()
+        .any(|i| matches!(i, TitleIssue::MissingSpaceAfterColon))
+    {
+        if let Some(colon_pos) = result.find(':') {
+            let after = &result[colon_pos + 1..];
+            if !after.starts_with(' ') {
+                result = format!("{}: {}", &result[..colon_pos], after);
+            }
+        }
+    }
+
+    // Guard against producing the same string as the original.
+    let _ = raw_token; // used implicitly above
+    Some(result)
+}
+
+/// Checks for missing-colon, missing-space-after-colon, and empty-description issues.
+///
+/// Appends the relevant [`TitleIssue`] variant(s) found in the working title.
+fn check_colon_issues(
+    working: &str,
+    colon_pos: Option<usize>,
+    type_token_diagnosed: bool,
+    issues: &mut Vec<TitleIssue>,
+) {
+    if colon_pos.is_none() && !type_token_diagnosed {
+        // ── Step 5: Missing colon ─────────────────────────────────────────────
+        issues.push(TitleIssue::MissingColon);
+    } else if let Some(colon) = colon_pos {
+        let after_colon = &working[colon + 1..];
+        if !after_colon.is_empty() && !after_colon.starts_with(' ') {
+            // ── Step 6: Missing space after colon ─────────────────────────────
+            issues.push(TitleIssue::MissingSpaceAfterColon);
+        } else if after_colon.trim().is_empty() {
+            // ── Step 7: Empty description ──────────────────────────────────────
+            issues.push(TitleIssue::EmptyDescription);
+        }
+    }
+}
+
+/// Checks for an invalid scope in the working title and appends [`TitleIssue::InvalidScope`]
+/// when found.
+///
+/// A scope is considered invalid when it contains characters outside `[a-z0-9_-]`.
+fn check_scope(working: &str, issues: &mut Vec<TitleIssue>) {
+    if let Some(scope_start) = working.find('(') {
+        let scope_end = working[scope_start..].find(')').map(|i| scope_start + i);
+        if let Some(end) = scope_end {
+            let scope_content = &working[scope_start + 1..end];
+            let scope_invalid = scope_content
+                .chars()
+                .any(|c| !matches!(c, 'a'..='z' | '0'..='9' | '_' | '-'));
+            if scope_invalid {
+                issues.push(TitleIssue::InvalidScope {
+                    scope: scope_content.to_string(),
+                });
+            }
+        }
+    }
+}
+
 /// Analyses a PR title that is known to be invalid and returns a structured diagnosis
 /// describing every detected problem and, where possible, a suggested corrected title.
 ///
@@ -542,143 +678,6 @@ pub fn diagnose_pr_title(title: &str) -> TitleDiagnosis {
         issues,
         suggested_fix,
     }
-}
-
-/// Checks for an invalid scope in the working title and appends [`TitleIssue::InvalidScope`]
-/// when found.
-///
-/// A scope is considered invalid when it contains characters outside `[a-z0-9_-]`.
-fn check_scope(working: &str, issues: &mut Vec<TitleIssue>) {
-    if let Some(scope_start) = working.find('(') {
-        let scope_end = working[scope_start..].find(')').map(|i| scope_start + i);
-        if let Some(end) = scope_end {
-            let scope_content = &working[scope_start + 1..end];
-            let scope_invalid = scope_content
-                .chars()
-                .any(|c| !matches!(c, 'a'..='z' | '0'..='9' | '_' | '-'));
-            if scope_invalid {
-                issues.push(TitleIssue::InvalidScope {
-                    scope: scope_content.to_string(),
-                });
-            }
-        }
-    }
-}
-
-/// Checks for missing-colon, missing-space-after-colon, and empty-description issues.
-///
-/// Appends the relevant [`TitleIssue`] variant(s) found in the working title.
-fn check_colon_issues(
-    working: &str,
-    colon_pos: Option<usize>,
-    type_token_diagnosed: bool,
-    issues: &mut Vec<TitleIssue>,
-) {
-    if colon_pos.is_none() && !type_token_diagnosed {
-        // ── Step 5: Missing colon ─────────────────────────────────────────────
-        issues.push(TitleIssue::MissingColon);
-    } else if let Some(colon) = colon_pos {
-        let after_colon = &working[colon + 1..];
-        if !after_colon.is_empty() && !after_colon.starts_with(' ') {
-            // ── Step 6: Missing space after colon ─────────────────────────────
-            issues.push(TitleIssue::MissingSpaceAfterColon);
-        } else if after_colon.trim().is_empty() {
-            // ── Step 7: Empty description ──────────────────────────────────────
-            issues.push(TitleIssue::EmptyDescription);
-        }
-    }
-}
-
-/// Constructs a best-effort corrected title from the working (trimmed) title and the
-/// list of issues that were diagnosed.
-///
-/// Returns `None` when the problems are unresolvable (e.g. `NoTypePrefix`,
-/// `EmptyDescription`).
-fn build_suggested_fix(working: &str, issues: &[TitleIssue]) -> Option<String> {
-    // Unresolvable issues: no fix possible.
-    // UnrecognizedType without a nearest_valid is also unresolvable — we don't know
-    // what type the author intended, so we cannot suggest a corrected title.
-    let unresolvable = issues.iter().any(|i| {
-        matches!(
-            i,
-            TitleIssue::NoTypePrefix
-                | TitleIssue::EmptyDescription
-                | TitleIssue::UnrecognizedType {
-                    nearest_valid: None,
-                    ..
-                }
-        )
-    });
-    if unresolvable {
-        return None;
-    }
-
-    let mut result = working.to_string();
-
-    // Apply corrections in reverse order of their lexical position so that
-    // index-based mutations don't invalidate later positions.
-
-    // Fix UppercaseType or UnrecognizedType — replace the type token at the start.
-    let token_end = result.find(['(', '!', ':', ' ']).unwrap_or(result.len());
-    let raw_token = result[..token_end].to_string();
-    let replacement_token: Option<String> = issues.iter().find_map(|i| match i {
-        TitleIssue::UppercaseType { found } => Some(found.to_lowercase()),
-        TitleIssue::UnrecognizedType { nearest_valid, .. } => nearest_valid.clone(),
-        _ => None,
-    });
-    if let Some(ref rep) = replacement_token {
-        result = format!("{}{}", rep, &result[token_end..]);
-    }
-
-    // Fix WhitespaceBeforeColon — remove whitespace directly before the colon.
-    if issues
-        .iter()
-        .any(|i| matches!(i, TitleIssue::WhitespaceBeforeColon { .. }))
-    {
-        // After possibly replacing the type token, find and strip whitespace before `:`.
-        if let Some(colon_pos) = result.find(':') {
-            let trimmed_prefix = result[..colon_pos].trim_end().to_string();
-            let after_colon = result[colon_pos..].to_string();
-            result = format!("{trimmed_prefix}{after_colon}");
-        }
-    }
-
-    // Fix InvalidScope — lowercase the scope and replace spaces with `-`.
-    if let Some(TitleIssue::InvalidScope { scope }) = issues
-        .iter()
-        .find(|i| matches!(i, TitleIssue::InvalidScope { .. }))
-    {
-        let fixed_scope = scope.to_lowercase().replace(' ', "-");
-        // Replace only the first occurrence of `(<scope>)` in the result.
-        let needle = format!("({scope})");
-        let replacement = format!("({fixed_scope})");
-        result = result.replacen(&needle, &replacement, 1);
-    }
-
-    // Fix MissingColon — insert `:` after the type token (and optional scope/!).
-    if issues.iter().any(|i| matches!(i, TitleIssue::MissingColon)) {
-        // Find the end of the type+scope+! prefix.
-        let prefix_end = result.find(' ').unwrap_or(result.len());
-        result = format!("{}:{}", &result[..prefix_end], &result[prefix_end..]);
-    }
-
-    // Fix MissingSpaceAfterColon — insert a space after the colon.
-    if issues
-        .iter()
-        .any(|i| matches!(i, TitleIssue::MissingSpaceAfterColon))
-    {
-        if let Some(colon_pos) = result.find(':') {
-            let after = &result[colon_pos + 1..];
-            if !after.starts_with(' ') {
-                result = format!("{}: {}", &result[..colon_pos], after);
-            }
-        }
-    }
-
-    // Replace the token string "Some(raw)"/None label note if replacements were
-    // performed; also guard against producing the same string as the original.
-    let _ = raw_token; // used implicitly above
-    Some(result)
 }
 
 /// Validates that the PR title follows the Conventional Commits format with bypass support.

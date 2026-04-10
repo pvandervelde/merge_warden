@@ -668,20 +668,18 @@ Your PR title does not follow the [Conventional Commits](https://www.conventiona
 Please update the PR title to match the conventional commit message guidelines.";
 
             let comment_text = {
-                // 4.2: extract diagnosis (guaranteed Some when !is_valid and not bypassed)
+                // Build the diagnosis section: one bullet per TitleIssue, optional suggested fix.
                 let mut diagnosis_section =
                     String::from("\nThe pull request title needs correction:\n");
                 if let Some(diagnosis) = validation_result.diagnosis.as_ref() {
-                    // 4.3: build diagnosis section — one bullet per TitleIssue
                     for issue in &diagnosis.issues {
                         diagnosis_section.push_str(&format!("- {}\n", format_title_issue(issue)));
                     }
                     if let Some(fix) = &diagnosis.suggested_fix {
-                        // 4.3: append suggested fix when available
                         diagnosis_section.push_str(&format!("\nSuggested fix: `{fix}`"));
                     }
                 }
-                // 4.4: compose final comment_text = diagnosis_section + separator + format reminder
+                // Compose final comment: diagnosis section + separator + general format reminder.
                 format!("{diagnosis_section}\n\n{format_reminder}")
             };
 
