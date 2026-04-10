@@ -3,6 +3,18 @@
 **Version:** 1.1
 **Last Updated:** April 10, 2026
 
+> **Note:** The detailed `ValidationRule` trait, `ValidationContext`, `RuleRegistry`, and
+> `TitleValidationRule` sections below describe the **target / aspirational architecture**.
+> They have not yet been implemented. The current implementation lives in
+> `crates/core/src/lib.rs` (`MergeWarden::check_title` /
+> `communicate_pr_title_validity_status`) and `crates/core/src/checks.rs`
+> (`check_pr_title`, `diagnose_pr_title`, `TitleIssue`, `TitleDiagnosis`,
+> `TitleValidationResult`).  The types `TitleFormat::ConventionalCommits`,
+> `DEFAULT_ALLOWED_TYPES`, `context.configuration.policies`, and `TitleValidationRule`
+> do not exist in the current codebase.  Per-issue human-readable messages are produced
+> by `<TitleIssue as std::fmt::Display>` in `checks.rs`, not by a standalone
+> `format_title_issue` function.
+
 ## Overview
 
 The validation engine is the core component responsible for evaluating pull requests against configured rules and policies. It provides an extensible framework for implementing validation rules, executing them efficiently, and collecting comprehensive results.

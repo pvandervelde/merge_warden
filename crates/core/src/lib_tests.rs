@@ -3270,7 +3270,7 @@ async fn test_comment_contains_unrecognized_type_message_with_nearest_valid_sugg
 
     let body = get_title_comment(warden.provider.get_comments());
     assert!(
-        body.contains("not a recognised conventional commit type"),
+        body.contains("not a recognized conventional commit type"),
         "comment should describe unrecognised-type issue; got:\n{body}"
     );
     assert!(
@@ -3381,5 +3381,130 @@ async fn test_no_title_comment_posted_when_enforce_title_convention_is_false() {
     assert!(
         !comments.iter().any(|c| c.body.contains(TITLE_COMMENT_MARKER)),
         "no title comment should be posted when enforce_title_convention is false; got:\n{comments:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_stale_title_comment_is_replaced_when_diagnosis_changes() {
+    // When a PR title changes from one invalid form to another the pre-existing
+    // title-validation comment (with a different diagnosis body) must be replaced,
+    // not left stale, so the author sees up-to-date feedback.
+
+    let provider = MockGitProvider::new();
+
+    // Pre-seed a comment that represents a previous (now stale) diagnosis for an
+    // UppercaseType error ("FEAT").
+    let stale_comment = format!(
+        "{}\nThe pull request title needs correction:\n- The type `FEAT` must be lowercase",
+        TITLE_COMMENT_MARKER
+    );
+    provider
+        .add_comment("owner", "repo", 1, &stale_comment)
+        .await
+        .unwrap();
+
+    // The author has since pushed a new title that has a DIFFERENT issue:
+    // "feature" is an UnrecognizedType (synonym for "feat"), not an UppercaseType.
+    let pr = PullRequest {
+        number: 1,
+        title: "feature: add login".to_string(),
+        draft: false,
+        body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
+        milestone_number: None,
+    };
+    provider.set_pull_request(pr);
+
+    let warden = MergeWarden::new(provider);
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    let title_comments: Vec<_> = comments
+        .iter()
+        .filter(|c| c.body.contains(TITLE_COMMENT_MARKER))
+        .collect();
+
+    assert_eq!(
+        title_comments.len(),
+        1,
+        "exactly one title comment should remain after diagnosis update; got: {:?}",
+        title_comments.iter().map(|c| &c.body).collect::<Vec<_>>()
+    );
+    assert!(
+        !title_comments[0].body.contains("must be lowercase"),
+        "stale UppercaseType message should no longer appear; got:\n{}",
+        title_comments[0].body
+    );
+    assert!(
+        title_comments[0]
+            .body
+            .contains("not a recognized conventional commit type"),
+        "updated comment should describe the UnrecognizedType issue; got:\n{}",
+        title_comments[0].body
+    );
+}
+
+#[tokio::test]
+async fn test_identical_title_comment_is_not_reposted() {
+    // When the title is unchanged between two push events the existing comment
+    // body is identical and should not be deleted-and-reposted (idempotent path).
+
+    let provider = MockGitProvider::new();
+
+    // Simulate a PR with an invalid title ("feature: ...") that has already
+    // been processed and has a comment on it.
+    let pr = PullRequest {
+        number: 1,
+        title: "feature: add login".to_string(),
+        draft: false,
+        body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
+        milestone_number: None,
+    };
+    provider.set_pull_request(pr);
+
+    let warden = MergeWarden::new(provider);
+
+    // First processing run — comment is created.
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comment_count_after_first_run = warden
+        .provider
+        .get_comments()
+        .iter()
+        .filter(|c| c.body.contains(TITLE_COMMENT_MARKER))
+        .count();
+    assert_eq!(
+        comment_count_after_first_run, 1,
+        "first run should produce exactly one title comment"
+    );
+
+    // Second processing run with the same title — comment body is identical.
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comment_count_after_second_run = warden
+        .provider
+        .get_comments()
+        .iter()
+        .filter(|c| c.body.contains(TITLE_COMMENT_MARKER))
+        .count();
+    assert_eq!(
+        comment_count_after_second_run, 1,
+        "second run with identical title should not create a duplicate comment"
     );
 }

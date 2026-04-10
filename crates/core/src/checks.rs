@@ -17,6 +17,7 @@ use crate::{
 use merge_warden_developer_platforms::models::{PullRequest, PullRequestFile, User};
 use regex::Regex;
 use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::sync::OnceLock;
 
 /// Compiled once at first use. Handles all four supported closing-keyword formats:
@@ -371,6 +372,60 @@ pub enum TitleIssue {
     },
 }
 
+impl fmt::Display for TitleIssue {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::LeadingWhitespace => write!(
+                f,
+                "The title starts with whitespace \u{2014} please remove the leading spaces."
+            ),
+            Self::WhitespaceBeforeColon { found } => write!(
+                f,
+                "There is whitespace before the `:` separator (found `{found}`) \u{2014} remove the extra space."
+            ),
+            Self::UppercaseType { found } => write!(
+                f,
+                "The type `{found}` must be lowercase (e.g. use `{}` instead).",
+                found.to_lowercase()
+            ),
+            Self::UnrecognizedType {
+                found,
+                nearest_valid: Some(nv),
+            } => write!(
+                f,
+                "The type `{found}` is not a recognized conventional commit type \u{2014} did you mean `{nv}`?"
+            ),
+            Self::UnrecognizedType {
+                found,
+                nearest_valid: None,
+            } => write!(
+                f,
+                "The type `{found}` is not a recognized conventional commit type."
+            ),
+            Self::MissingColon => write!(
+                f,
+                "A `:` separator is required between the type/scope and the description (e.g. `feat: ...`)."
+            ),
+            Self::MissingSpaceAfterColon => write!(
+                f,
+                "A space is required after the `:` separator (e.g. `feat: description`)."
+            ),
+            Self::EmptyDescription => write!(
+                f,
+                "The description after `:` is missing or blank \u{2014} please add a short summary."
+            ),
+            Self::InvalidScope { scope } => write!(
+                f,
+                "The scope `{scope}` contains invalid characters; scopes must only use lowercase letters, digits, `_`, and `-`."
+            ),
+            Self::NoTypePrefix => write!(
+                f,
+                "No conventional commit type prefix was found at the start of the title."
+            ),
+        }
+    }
+}
+
 /// Common typo / synonym mappings from a known-wrong type word to the correct one.
 ///
 /// Used by [`diagnose_pr_title`] to populate [`TitleIssue::UnrecognizedType::nearest_valid`]
@@ -416,7 +471,6 @@ fn build_suggested_fix(working: &str, issues: &[TitleIssue]) -> Option<String> {
 
     // Fix UppercaseType or UnrecognizedType — replace the type token at the start.
     let token_end = result.find(['(', '!', ':', ' ']).unwrap_or(result.len());
-    let raw_token = result[..token_end].to_string();
     let replacement_token: Option<String> = issues.iter().find_map(|i| match i {
         TitleIssue::UppercaseType { found } => Some(found.to_lowercase()),
         TitleIssue::UnrecognizedType { nearest_valid, .. } => nearest_valid.clone(),
@@ -471,8 +525,6 @@ fn build_suggested_fix(working: &str, issues: &[TitleIssue]) -> Option<String> {
         }
     }
 
-    // Guard against producing the same string as the original.
-    let _ = raw_token; // used implicitly above
     Some(result)
 }
 
@@ -483,11 +535,7 @@ fn build_suggested_fix(working: &str, issues: &[TitleIssue]) -> Option<String> {
 /// caller to receive a complete picture of all problems at once.
 ///
 /// Appends the relevant [`TitleIssue`] variant(s) found in the working title.
-fn check_colon_issues(
-    working: &str,
-    colon_pos: Option<usize>,
-    issues: &mut Vec<TitleIssue>,
-) {
+fn check_colon_issues(working: &str, colon_pos: Option<usize>, issues: &mut Vec<TitleIssue>) {
     if colon_pos.is_none() {
         // ── Step 5: Missing colon ─────────────────────────────────────────────
         issues.push(TitleIssue::MissingColon);
@@ -760,7 +808,11 @@ pub fn check_pr_title(
         };
     }
 
-    // Otherwise, perform normal validation
+    // Otherwise, perform normal validation.
+    // NOTE: The title_pattern regex is recompiled on every call. Since the pattern is
+    // configuration-derived (not static), OnceLock is not suitable here. A per-instance
+    // cache keyed by pattern string would improve throughput under high load.
+    // This is a known performance gap — tracked for future optimisation.
     let regex = match Regex::new(&current_configuration.title_pattern) {
         Ok(r) => r,
         Err(_) => {

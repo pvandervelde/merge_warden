@@ -647,13 +647,12 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
                 .await)
                 .unwrap_or_default();
 
-            let mut has_comment = false;
-            for comment in comments {
-                if comment.body.contains(TITLE_COMMENT_MARKER) {
-                    has_comment = true;
-                    break;
-                }
-            }
+            // Find any existing comment with TITLE_COMMENT_MARKER (capture id + body so we
+            // can replace it when the diagnosis changes between two invalid push events).
+            let existing_comment = comments
+                .iter()
+                .find(|c| c.body.contains(TITLE_COMMENT_MARKER))
+                .map(|c| (c.id, c.body.clone()));
 
             // Add comment with diagnosis and format reminder
             let format_reminder = "\
@@ -673,7 +672,7 @@ Please update the PR title to match the conventional commit message guidelines."
                     String::from("\nThe pull request title needs correction:\n");
                 if let Some(diagnosis) = validation_result.diagnosis.as_ref() {
                     for issue in &diagnosis.issues {
-                        diagnosis_section.push_str(&format!("- {}\n", format_title_issue(issue)));
+                        diagnosis_section.push_str(&format!("- {issue}\n"));
                     }
                     if let Some(fix) = &diagnosis.suggested_fix {
                         diagnosis_section.push_str(&format!("\nSuggested fix: `{fix}`"));
@@ -688,7 +687,33 @@ Please update the PR title to match the conventional commit message guidelines."
                 prefix = TITLE_COMMENT_MARKER,
                 text = comment_text
             );
-            if !has_comment {
+
+            // Post or replace the comment:
+            // - No prior comment → add new one.
+            // - Prior comment with different body → delete stale comment then add the updated
+            //   one so the author receives a fresh notification when the diagnosis changes.
+            // - Prior comment with identical body → skip (idempotent, avoids notification spam).
+            let should_post = match &existing_comment {
+                None => true,
+                Some((_, existing_body)) => existing_body != &comment,
+            };
+
+            if should_post {
+                if let Some((existing_id, _)) = existing_comment {
+                    let del_result = self
+                        .provider
+                        .delete_comment(repo_owner, repo_name, existing_id)
+                        .await;
+                    if del_result.is_err() {
+                        warn!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr.number,
+                            "Failed to delete stale title validation comment before posting updated one."
+                        );
+                    }
+                }
+
                 let result = self
                     .provider
                     .add_comment(repo_owner, repo_name, pr.number, &comment)
@@ -2293,50 +2318,5 @@ Please update the PR body to include a valid work item reference."#;
     pub fn with_issue_provider(mut self, provider: Box<dyn IssueMetadataProvider>) -> Self {
         self.issue_provider = Some(provider);
         self
-    }
-}
-
-/// Returns a human-readable description of a single [`checks::TitleIssue`] for use in PR
-/// comments.
-///
-/// Each variant is mapped to a short, actionable sentence that explains the problem and, where
-/// applicable, shows how to correct it.
-fn format_title_issue(issue: &checks::TitleIssue) -> String {
-    match issue {
-        checks::TitleIssue::LeadingWhitespace => {
-            "The title starts with whitespace — please remove the leading spaces.".to_string()
-        }
-        checks::TitleIssue::WhitespaceBeforeColon { found } => format!(
-            "There is whitespace before the `:` separator (found `{found}`) — remove the extra space."
-        ),
-        checks::TitleIssue::UppercaseType { found } => format!(
-            "The type `{found}` must be lowercase (e.g. use `{}` instead).",
-            found.to_lowercase()
-        ),
-        checks::TitleIssue::UnrecognizedType {
-            found,
-            nearest_valid: Some(nv),
-        } => format!(
-            "The type `{found}` is not a recognised conventional commit type — did you mean `{nv}`?"
-        ),
-        checks::TitleIssue::UnrecognizedType {
-            found,
-            nearest_valid: None,
-        } => format!("The type `{found}` is not a recognised conventional commit type."),
-        checks::TitleIssue::MissingColon => {
-            "A `:` separator is required between the type/scope and the description (e.g. `feat: ...`).".to_string()
-        }
-        checks::TitleIssue::MissingSpaceAfterColon => {
-            "A space is required after the `:` separator (e.g. `feat: description`).".to_string()
-        }
-        checks::TitleIssue::EmptyDescription => {
-            "The description after `:` is missing or blank — please add a short summary.".to_string()
-        }
-        checks::TitleIssue::InvalidScope { scope } => format!(
-            "The scope `{scope}` contains invalid characters; scopes must only use lowercase letters, digits, `_`, and `-`."
-        ),
-        checks::TitleIssue::NoTypePrefix => {
-            "No conventional commit type prefix was found at the start of the title.".to_string()
-        }
     }
 }
