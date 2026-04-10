@@ -1,7 +1,7 @@
 # Validation Engine
 
-**Version:** 1.0
-**Last Updated:** July 22, 2025
+**Version:** 1.1
+**Last Updated:** April 10, 2026
 
 ## Overview
 
@@ -192,15 +192,32 @@ impl ValidationRule for TitleValidationRule {
                 bypass_info: None,
             })
         } else {
+            // Run structural diagnosis to produce actionable, per-issue feedback.
+            // diagnose_pr_title() classifies each violation individually and attempts
+            // to synthesise a corrected title string when possible.
+            let diagnosis = diagnose_pr_title(title);
+
+            // Map each TitleIssue variant to a short human-readable sentence.
+            let suggestions: Vec<String> = diagnosis.issues.iter()
+                .map(format_title_issue)
+                .collect();
+
+            // Include the suggested fix in the message when one could be inferred.
+            let message = match &diagnosis.suggested_fix {
+                Some(fix) => format!(
+                    "Title does not follow conventional commit format.\n\
+                     Suggested fix: `{}`",
+                    fix
+                ),
+                None => "Title does not follow conventional commit format.".to_string(),
+            };
+
             Ok(RuleResult {
                 rule_name: self.name().to_string(),
                 status: RuleStatus::Failed,
                 severity: Severity::Error,
-                message: Some("Title does not follow conventional commit format".to_string()),
-                suggestions: vec![
-                    "Use format: type(scope): description".to_string(),
-                    "Valid types: feat, fix, docs, chore, refactor, test".to_string(),
-                ],
+                message: Some(message),
+                suggestions,
                 bypass_info: None,
             })
         }
@@ -242,6 +259,169 @@ impl TitleValidationRule {
     }
 }
 ```
+
+#### PR Title Diagnostic Types
+
+When title validation fails the engine runs `diagnose_pr_title()` to classify each
+violation individually and, where possible, synthesise a corrected title.  The result
+is carried in three concrete types that live in `merge_warden_core::checks`.
+
+##### `TitleIssue`
+
+A single structural violation found in the PR title.  Multiple variants can be present
+simultaneously (e.g. a title of `" FEAT: add login"` produces both `LeadingWhitespace`
+and `UppercaseType`).
+
+```rust
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TitleIssue {
+    /// The description after `:` is absent or whitespace-only.
+    ///
+    /// No `suggested_fix` is produced because the user must supply meaningful content.
+    /// Examples: `"feat: "`, `"feat:  "`
+    EmptyDescription,
+
+    /// The scope contains characters outside `[a-z0-9_-]`.
+    ///
+    /// `suggested_fix` lowercases the scope and replaces spaces with `-`.
+    /// Examples: `"feat(Auth): …"`, `"feat(user service): …"`
+    InvalidScope { scope: String },
+
+    /// The title begins with one or more whitespace characters.
+    ///
+    /// This variant may appear alongside others; all subsequent checks operate on
+    /// the trimmed title.
+    /// Examples: `" feat: add login"`
+    LeadingWhitespace,
+
+    /// A recognised type token is present but not followed by `:`.
+    ///
+    /// `suggested_fix` inserts `:` after the type/scope prefix.
+    /// Examples: `"feat add login"`
+    MissingColon,
+
+    /// The `:` separator is present but the character immediately after it is not a space.
+    ///
+    /// `suggested_fix` inserts the missing space.
+    /// Examples: `"feat:add login"`
+    MissingSpaceAfterColon,
+
+    /// No recognisable type prefix was found at the start of the title.
+    ///
+    /// This is the general fallback when no other pattern matches.  No `suggested_fix`
+    /// is produced.
+    /// Examples: `"Add login functionality"`, `""`, `"   "`
+    NoTypePrefix,
+
+    /// The type token is not in the approved list and is not a known synonym.
+    ///
+    /// `nearest_valid` is `Some` when a known typo/synonym mapping exists (see
+    /// [`TYPE_TYPO_MAP`]); otherwise `None`.  `suggested_fix` is only produced when
+    /// `nearest_valid` is `Some`.
+    /// Examples: `"feature: …"` → `nearest_valid: Some("feat")`;
+    ///           `"xyz: …"` → `nearest_valid: None`
+    UnrecognizedType {
+        found: String,
+        nearest_valid: Option<String>,
+    },
+
+    /// The type token is a correctly-spelled approved type but is not all-lowercase.
+    ///
+    /// `suggested_fix` lowercases the type token.
+    /// Examples: `"FEAT: add login"`, `"Fix: bug"`
+    UppercaseType { found: String },
+
+    /// There is whitespace between the type/scope and the `:` separator.
+    ///
+    /// `suggested_fix` removes the extra whitespace.
+    /// Examples: `"feat : add login"`, `"feat(auth) : add login"`
+    WhitespaceBeforeColon { found: String },
+}
+```
+
+Known synonym / typo mappings that populate `UnrecognizedType::nearest_valid`:
+
+| User wrote | Corrected to |
+|------------|--------------|
+| `bug`      | `fix`        |
+| `bugfix`   | `fix`        |
+| `dep`      | `chore`      |
+| `dependencies` | `chore`  |
+| `enhancement` | `feat`    |
+| `feature`  | `feat`       |
+| `hotfix`   | `fix`        |
+
+##### `TitleDiagnosis`
+
+The structured outcome of running `diagnose_pr_title()` on a single title string.
+
+```rust
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TitleDiagnosis {
+    /// One entry per detected violation.  May contain multiple entries when several
+    /// problems are observed simultaneously.
+    pub issues: Vec<TitleIssue>,
+
+    /// A best-effort corrected title, or `None` when no fix can be inferred
+    /// (e.g. `NoTypePrefix`, `EmptyDescription`, or `UnrecognizedType` with no
+    /// nearest valid mapping).
+    pub suggested_fix: Option<String>,
+}
+```
+
+**Example** — title `"FEAT: add login"`:
+
+```rust
+TitleDiagnosis {
+    issues: vec![
+        TitleIssue::UppercaseType { found: "FEAT".to_string() },
+    ],
+    suggested_fix: Some("feat: add login".to_string()),
+}
+```
+
+**Example** — title `"Add login functionality"` (plain prose):
+
+```rust
+TitleDiagnosis {
+    issues: vec![TitleIssue::NoTypePrefix],
+    suggested_fix: None,   // no fix can be inferred
+}
+```
+
+##### `TitleValidationResult`
+
+Returned by `check_pr_title()` and `MergeWarden::check_title()`.  Combines the
+pass/fail/bypass outcome with the optional structured diagnosis.
+
+```rust
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TitleValidationResult {
+    /// The underlying validation outcome (valid, invalid, or bypassed).
+    pub validation: ValidationResult,
+
+    /// Present only when the title is **invalid and not bypassed**.
+    /// `None` when the title is valid or when validation was bypassed.
+    pub diagnosis: Option<TitleDiagnosis>,
+}
+```
+
+Delegation methods forward to the inner `ValidationResult` so existing call sites do
+not need to pattern-match on `validation` directly:
+
+| Method | Returns | Forwards to |
+|--------|---------|-------------|
+| `is_valid()` | `bool` | `ValidationResult::is_valid()` |
+| `was_bypassed()` | `bool` | `ValidationResult::was_bypassed()` |
+| `bypass_info()` | `Option<&BypassInfo>` | `ValidationResult::bypass_info()` |
+
+When `communicate_pr_title_validity_status()` builds the PR comment it:
+
+1. Iterates `diagnosis.issues` and calls `format_title_issue(issue)` on each to produce
+   one human-readable bullet per violation.
+2. If `diagnosis.suggested_fix` is `Some`, appends `` \nSuggested fix: `<fix>` ``.
+3. Always appends the general format reminder (supported types, expected format, link to
+   the Conventional Commits specification).
 
 ### Work Item Reference Rule
 
