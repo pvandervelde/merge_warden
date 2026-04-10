@@ -213,9 +213,10 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     ///
     /// # Returns
     ///
-    /// A `ValidationResult` containing validation status and bypass information
+    /// A `TitleValidationResult` containing validation status, bypass information,
+    /// and structured diagnosis when the title is invalid
     #[instrument]
-    fn check_title(&self, pr: &PullRequest) -> validation_result::ValidationResult {
+    fn check_title(&self, pr: &PullRequest) -> checks::TitleValidationResult {
         debug!(pull_request = pr.number, "Checking PR title");
         checks::check_pr_title(
             pr,
@@ -545,7 +546,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     /// * `repo_owner` - The owner of the repository
     /// * `repo_name` - The name of the repository
     /// * `pr` - The pull request to validate
-    /// * `validation_result` - The result of title validation including bypass information
+    /// * `validation_result` - The result of title validation including bypass information and diagnosis
     ///
     /// # Returns
     ///
@@ -556,7 +557,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
         repo_owner: &str,
         repo_name: &str,
         pr: &PullRequest,
-        validation_result: &validation_result::ValidationResult,
+        validation_result: &checks::TitleValidationResult,
     ) -> String {
         info!(
             repository_owner = repo_owner,
@@ -646,34 +647,73 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
                 .await)
                 .unwrap_or_default();
 
-            let mut has_comment = false;
-            for comment in comments {
-                if comment.body.contains(TITLE_COMMENT_MARKER) {
-                    has_comment = true;
-                    break;
+            // Find any existing comment with TITLE_COMMENT_MARKER (capture id + body so we
+            // can replace it when the diagnosis changes between two invalid push events).
+            let existing_comment = comments
+                .iter()
+                .find(|c| c.body.contains(TITLE_COMMENT_MARKER))
+                .map(|c| (c.id, c.body.clone()));
+
+            // Add comment with diagnosis and format reminder
+            let format_reminder = "\
+Your PR title does not follow the [Conventional Commits](https://www.conventionalcommits.org/) message format.\n\
+- Supported types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert\n\
+- Expected format: `<type>(<optional scope>): <description>`\n\
+- Examples:\n\
+    * feat(auth): add login functionality\n\
+    * fix: resolve null pointer exception\n\
+- For full details, see: https://www.conventionalcommits.org/\n\
+\n\
+Please update the PR title to match the conventional commit message guidelines.";
+
+            let comment_text = {
+                // Build the diagnosis section: one bullet per TitleIssue, optional suggested fix.
+                let mut diagnosis_section =
+                    String::from("\nThe pull request title needs correction:\n");
+                if let Some(diagnosis) = validation_result.diagnosis.as_ref() {
+                    for issue in &diagnosis.issues {
+                        diagnosis_section.push_str(&format!("- {issue}\n"));
+                    }
+                    if let Some(fix) = &diagnosis.suggested_fix {
+                        diagnosis_section.push_str(&format!("\nSuggested fix: `{fix}`"));
+                    }
                 }
-            }
-
-            // Add comment with suggestions
-            let comment_text = r#"
-The pull request title needs correction:
-
-Your PR title does not follow the [Conventional Commits](https://www.conventionalcommits.org/) message format.
-- Supported types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
-- Expected format: `<type>(<optional scope>): <description>`
-- Examples:
-    * feat(auth): add login functionality
-    * fix: resolve null pointer exception
-- For full details, see: https://www.conventionalcommits.org/
-
-Please update the PR title to match the conventional commit message guidelines."#;
+                // Compose final comment: diagnosis section + separator + general format reminder.
+                format!("{diagnosis_section}\n\n{format_reminder}")
+            };
 
             let comment = format!(
                 "{prefix}{text}",
                 prefix = TITLE_COMMENT_MARKER,
                 text = comment_text
             );
-            if !has_comment {
+
+            // Post or replace the comment:
+            // - No prior comment → add new one.
+            // - Prior comment with different body → delete stale comment then add the updated
+            //   one so the author receives a fresh notification when the diagnosis changes.
+            // - Prior comment with identical body → skip (idempotent, avoids notification spam).
+            let should_post = match &existing_comment {
+                None => true,
+                Some((_, existing_body)) => existing_body != &comment,
+            };
+
+            if should_post {
+                if let Some((existing_id, _)) = existing_comment {
+                    let del_result = self
+                        .provider
+                        .delete_comment(repo_owner, repo_name, existing_id)
+                        .await;
+                    if del_result.is_err() {
+                        warn!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr.number,
+                            "Failed to delete stale title validation comment before posting updated one."
+                        );
+                    }
+                }
+
                 let result = self
                     .provider
                     .add_comment(repo_owner, repo_name, pr.number, &comment)
@@ -698,7 +738,7 @@ Please update the PR title to match the conventional commit message guidelines."
                 }
             }
 
-            comment_text.to_string()
+            comment_text
         } else {
             // Title validation passed (either valid or bypassed)
 
@@ -1930,7 +1970,10 @@ Please update the PR body to include a valid work item reference."#;
         let title_result = if self.config.enforce_title_convention {
             self.check_title(&pr)
         } else {
-            validation_result::ValidationResult::valid()
+            checks::TitleValidationResult {
+                validation: validation_result::ValidationResult::valid(),
+                diagnosis: None,
+            }
         };
 
         // Check that the PR body has a reference to a work item if enabled

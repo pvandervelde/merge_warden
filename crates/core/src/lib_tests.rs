@@ -1,4 +1,5 @@
 use crate::{
+    checks::TitleValidationResult,
     config::{
         BypassRule, BypassRules, ChangeTypeLabelConfig, ConventionalCommitMappings,
         CurrentPullRequestValidationConfiguration, FallbackLabelSettings, IssuePropagationConfig,
@@ -914,7 +915,10 @@ async fn test_handle_title_validation_invalid_to_valid() {
     };
 
     // Handle title validation with valid title
-    let validation_result = ValidationResult::valid();
+    let validation_result = TitleValidationResult {
+        validation: ValidationResult::valid(),
+        diagnosis: None,
+    };
     warden
         .communicate_pr_title_validity_status("owner", "repo", &pr, &validation_result)
         .await;
@@ -3122,4 +3126,385 @@ async fn test_process_pull_request_skips_propagation_without_issue_provider() {
         .unwrap();
     // If we reach here without a panic, the test passes. There is no issue
     // provider to assert on since none was supplied.
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Task 5.0 — Tests for targeted comment content produced by
+// communicate_pr_title_validity_status() for each TitleIssue variant.
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Build a minimal `PullRequest` with the given number and title.
+///
+/// The body always contains a valid work item reference so that work-item
+/// validation does not interfere with the assertions about title comments.
+fn make_pr_for_title_test(number: u64, title: &str) -> PullRequest {
+    PullRequest {
+        number,
+        title: title.to_string(),
+        draft: false,
+        body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    }
+}
+
+/// Build a `DynamicMockGitProvider` that already contains `pr`.
+fn provider_with_pr(pr: PullRequest) -> DynamicMockGitProvider {
+    let mut provider = DynamicMockGitProvider::new();
+    provider.add_pull_request(pr);
+    provider
+}
+
+/// Return the single title-related comment body from the provider, or panic
+/// if none (or more than one) was found.
+fn get_title_comment(comments: Vec<Comment>) -> String {
+    let title_comments: Vec<_> = comments
+        .iter()
+        .filter(|c| c.body.contains(TITLE_COMMENT_MARKER))
+        .collect();
+    assert_eq!(
+        title_comments.len(),
+        1,
+        "expected exactly one title comment, got {}: {:?}",
+        title_comments.len(),
+        title_comments.iter().map(|c| &c.body).collect::<Vec<_>>()
+    );
+    title_comments[0].body.clone()
+}
+
+#[tokio::test]
+async fn test_comment_contains_leading_whitespace_message_and_suggested_fix() {
+    // 5.1 — Title " feat: add login" triggers LeadingWhitespace.
+    let pr = make_pr_for_title_test(1, " feat: add login");
+    let provider = provider_with_pr(pr);
+    let warden = MergeWarden::new(provider);
+
+    let result = warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+    assert!(!result.title_valid, "title should be invalid");
+
+    let body = get_title_comment(warden.provider.get_comments());
+    assert!(
+        body.contains("starts with whitespace"),
+        "comment should describe leading-whitespace issue; got:\n{body}"
+    );
+    assert!(
+        body.contains("Suggested fix: `feat: add login`"),
+        "comment should include suggested fix; got:\n{body}"
+    );
+    assert!(
+        body.contains("Conventional Commits"),
+        "comment should include general format reminder; got:\n{body}"
+    );
+}
+
+#[tokio::test]
+async fn test_comment_contains_whitespace_before_colon_message_and_suggested_fix() {
+    // 5.2 — Title "feat : add login" triggers WhitespaceBeforeColon.
+    let pr = make_pr_for_title_test(2, "feat : add login");
+    let provider = provider_with_pr(pr);
+    let warden = MergeWarden::new(provider);
+
+    let result = warden
+        .process_pull_request("owner", "repo", 2)
+        .await
+        .unwrap();
+    assert!(!result.title_valid, "title should be invalid");
+
+    let body = get_title_comment(warden.provider.get_comments());
+    assert!(
+        body.contains("whitespace before the `:` separator"),
+        "comment should describe whitespace-before-colon issue; got:\n{body}"
+    );
+    assert!(
+        body.contains("Suggested fix: `feat: add login`"),
+        "comment should include suggested fix; got:\n{body}"
+    );
+}
+
+#[tokio::test]
+async fn test_comment_contains_uppercase_type_message_and_suggested_fix_and_reminder() {
+    // 5.3 — Title "FEAT: add login" triggers UppercaseType.
+    let pr = make_pr_for_title_test(3, "FEAT: add login");
+    let provider = provider_with_pr(pr);
+    let warden = MergeWarden::new(provider);
+
+    let result = warden
+        .process_pull_request("owner", "repo", 3)
+        .await
+        .unwrap();
+    assert!(!result.title_valid, "title should be invalid");
+
+    let body = get_title_comment(warden.provider.get_comments());
+    assert!(
+        body.contains("must be lowercase"),
+        "comment should describe uppercase-type issue; got:\n{body}"
+    );
+    assert!(
+        body.contains("Suggested fix: `feat: add login`"),
+        "comment should include suggested fix; got:\n{body}"
+    );
+    assert!(
+        body.contains("Conventional Commits"),
+        "comment should include general format reminder; got:\n{body}"
+    );
+}
+
+#[tokio::test]
+async fn test_comment_contains_unrecognized_type_message_with_nearest_valid_suggestion() {
+    // 5.4 — Title "feature: add login" triggers UnrecognizedType with nearest_valid "feat".
+    let pr = make_pr_for_title_test(4, "feature: add login");
+    let provider = provider_with_pr(pr);
+    let warden = MergeWarden::new(provider);
+
+    let result = warden
+        .process_pull_request("owner", "repo", 4)
+        .await
+        .unwrap();
+    assert!(!result.title_valid, "title should be invalid");
+
+    let body = get_title_comment(warden.provider.get_comments());
+    assert!(
+        body.contains("not a recognized conventional commit type"),
+        "comment should describe unrecognised-type issue; got:\n{body}"
+    );
+    assert!(
+        body.contains("`feat`"),
+        "comment should mention the nearest valid type; got:\n{body}"
+    );
+    assert!(
+        body.contains("Suggested fix: `feat: add login`"),
+        "comment should include suggested fix; got:\n{body}"
+    );
+}
+
+#[tokio::test]
+async fn test_comment_contains_missing_colon_message_and_suggested_fix() {
+    // 5.5 — Title "feat add login" triggers MissingColon.
+    let pr = make_pr_for_title_test(5, "feat add login");
+    let provider = provider_with_pr(pr);
+    let warden = MergeWarden::new(provider);
+
+    let result = warden
+        .process_pull_request("owner", "repo", 5)
+        .await
+        .unwrap();
+    assert!(!result.title_valid, "title should be invalid");
+
+    let body = get_title_comment(warden.provider.get_comments());
+    assert!(
+        body.contains("`:` separator is required"),
+        "comment should describe missing-colon issue; got:\n{body}"
+    );
+    assert!(
+        body.contains("Suggested fix: `feat: add login`"),
+        "comment should include suggested fix; got:\n{body}"
+    );
+}
+
+#[tokio::test]
+async fn test_comment_contains_missing_space_after_colon_message_and_suggested_fix() {
+    // 5.6 — Title "feat:add login" triggers MissingSpaceAfterColon.
+    let pr = make_pr_for_title_test(6, "feat:add login");
+    let provider = provider_with_pr(pr);
+    let warden = MergeWarden::new(provider);
+
+    let result = warden
+        .process_pull_request("owner", "repo", 6)
+        .await
+        .unwrap();
+    assert!(!result.title_valid, "title should be invalid");
+
+    let body = get_title_comment(warden.provider.get_comments());
+    assert!(
+        body.contains("space is required after the `:` separator"),
+        "comment should describe missing-space-after-colon issue; got:\n{body}"
+    );
+    assert!(
+        body.contains("Suggested fix: `feat: add login`"),
+        "comment should include suggested fix; got:\n{body}"
+    );
+}
+
+#[tokio::test]
+async fn test_comment_contains_no_type_prefix_message_and_no_suggested_fix_line() {
+    // 5.7 — Title "Add login functionality" triggers NoTypePrefix; no suggested fix.
+    let pr = make_pr_for_title_test(7, "Add login functionality");
+    let provider = provider_with_pr(pr);
+    let warden = MergeWarden::new(provider);
+
+    let result = warden
+        .process_pull_request("owner", "repo", 7)
+        .await
+        .unwrap();
+    assert!(!result.title_valid, "title should be invalid");
+
+    let body = get_title_comment(warden.provider.get_comments());
+    assert!(
+        body.contains("No conventional commit type prefix"),
+        "comment should describe no-type-prefix issue; got:\n{body}"
+    );
+    assert!(
+        body.contains("Conventional Commits"),
+        "comment should include general format reminder; got:\n{body}"
+    );
+    assert!(
+        !body.contains("Suggested fix:"),
+        "comment must not include a suggested fix when none exists; got:\n{body}"
+    );
+}
+
+#[tokio::test]
+async fn test_no_title_comment_posted_when_enforce_title_convention_is_false() {
+    // 5.8 — When enforce_title_convention is false a comment must never be posted,
+    //        even for a title that would otherwise be invalid.
+    let pr = make_pr_for_title_test(8, "completely wrong title");
+    let provider = provider_with_pr(pr);
+
+    let config = CurrentPullRequestValidationConfiguration {
+        enforce_title_convention: false,
+        ..CurrentPullRequestValidationConfiguration::default()
+    };
+    let warden = MergeWarden::with_config(provider, config);
+
+    warden
+        .process_pull_request("owner", "repo", 8)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    assert!(
+        !comments.iter().any(|c| c.body.contains(TITLE_COMMENT_MARKER)),
+        "no title comment should be posted when enforce_title_convention is false; got:\n{comments:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_stale_title_comment_is_replaced_when_diagnosis_changes() {
+    // When a PR title changes from one invalid form to another the pre-existing
+    // title-validation comment (with a different diagnosis body) must be replaced,
+    // not left stale, so the author sees up-to-date feedback.
+
+    let provider = MockGitProvider::new();
+
+    // Pre-seed a comment that represents a previous (now stale) diagnosis for an
+    // UppercaseType error ("FEAT").
+    let stale_comment = format!(
+        "{}\nThe pull request title needs correction:\n- The type `FEAT` must be lowercase",
+        TITLE_COMMENT_MARKER
+    );
+    provider
+        .add_comment("owner", "repo", 1, &stale_comment)
+        .await
+        .unwrap();
+
+    // The author has since pushed a new title that has a DIFFERENT issue:
+    // "feature" is an UnrecognizedType (synonym for "feat"), not an UppercaseType.
+    let pr = PullRequest {
+        number: 1,
+        title: "feature: add login".to_string(),
+        draft: false,
+        body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
+        milestone_number: None,
+    };
+    provider.set_pull_request(pr);
+
+    let warden = MergeWarden::new(provider);
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    let title_comments: Vec<_> = comments
+        .iter()
+        .filter(|c| c.body.contains(TITLE_COMMENT_MARKER))
+        .collect();
+
+    assert_eq!(
+        title_comments.len(),
+        1,
+        "exactly one title comment should remain after diagnosis update; got: {:?}",
+        title_comments.iter().map(|c| &c.body).collect::<Vec<_>>()
+    );
+    assert!(
+        !title_comments[0].body.contains("must be lowercase"),
+        "stale UppercaseType message should no longer appear; got:\n{}",
+        title_comments[0].body
+    );
+    assert!(
+        title_comments[0]
+            .body
+            .contains("not a recognized conventional commit type"),
+        "updated comment should describe the UnrecognizedType issue; got:\n{}",
+        title_comments[0].body
+    );
+}
+
+#[tokio::test]
+async fn test_identical_title_comment_is_not_reposted() {
+    // When the title is unchanged between two push events the existing comment
+    // body is identical and should not be deleted-and-reposted (idempotent path).
+
+    let provider = MockGitProvider::new();
+
+    // Simulate a PR with an invalid title ("feature: ...") that has already
+    // been processed and has a comment on it.
+    let pr = PullRequest {
+        number: 1,
+        title: "feature: add login".to_string(),
+        draft: false,
+        body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
+        milestone_number: None,
+    };
+    provider.set_pull_request(pr);
+
+    let warden = MergeWarden::new(provider);
+
+    // First processing run — comment is created.
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comment_count_after_first_run = warden
+        .provider
+        .get_comments()
+        .iter()
+        .filter(|c| c.body.contains(TITLE_COMMENT_MARKER))
+        .count();
+    assert_eq!(
+        comment_count_after_first_run, 1,
+        "first run should produce exactly one title comment"
+    );
+
+    // Second processing run with the same title — comment body is identical.
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comment_count_after_second_run = warden
+        .provider
+        .get_comments()
+        .iter()
+        .filter(|c| c.body.contains(TITLE_COMMENT_MARKER))
+        .count();
+    assert_eq!(
+        comment_count_after_second_run, 1,
+        "second run with identical title should not create a duplicate comment"
+    );
 }
