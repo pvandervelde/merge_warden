@@ -213,9 +213,10 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     ///
     /// # Returns
     ///
-    /// A `ValidationResult` containing validation status and bypass information
+    /// A `TitleValidationResult` containing validation status, bypass information,
+    /// and structured diagnosis when the title is invalid
     #[instrument]
-    fn check_title(&self, pr: &PullRequest) -> validation_result::ValidationResult {
+    fn check_title(&self, pr: &PullRequest) -> checks::TitleValidationResult {
         debug!(pull_request = pr.number, "Checking PR title");
         checks::check_pr_title(
             pr,
@@ -545,7 +546,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
     /// * `repo_owner` - The owner of the repository
     /// * `repo_name` - The name of the repository
     /// * `pr` - The pull request to validate
-    /// * `validation_result` - The result of title validation including bypass information
+    /// * `validation_result` - The result of title validation including bypass information and diagnosis
     ///
     /// # Returns
     ///
@@ -556,7 +557,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
         repo_owner: &str,
         repo_name: &str,
         pr: &PullRequest,
-        validation_result: &validation_result::ValidationResult,
+        validation_result: &checks::TitleValidationResult,
     ) -> String {
         info!(
             repository_owner = repo_owner,
@@ -654,19 +655,35 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
                 }
             }
 
-            // Add comment with suggestions
-            let comment_text = r#"
-The pull request title needs correction:
+            // Add comment with diagnosis and format reminder
+            let format_reminder = "\
+Your PR title does not follow the [Conventional Commits](https://www.conventionalcommits.org/) message format.\n\
+- Supported types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert\n\
+- Expected format: `<type>(<optional scope>): <description>`\n\
+- Examples:\n\
+    * feat(auth): add login functionality\n\
+    * fix: resolve null pointer exception\n\
+- For full details, see: https://www.conventionalcommits.org/\n\
+\n\
+Please update the PR title to match the conventional commit message guidelines.";
 
-Your PR title does not follow the [Conventional Commits](https://www.conventionalcommits.org/) message format.
-- Supported types: feat, fix, docs, style, refactor, perf, test, build, ci, chore, revert
-- Expected format: `<type>(<optional scope>): <description>`
-- Examples:
-    * feat(auth): add login functionality
-    * fix: resolve null pointer exception
-- For full details, see: https://www.conventionalcommits.org/
-
-Please update the PR title to match the conventional commit message guidelines."#;
+            let comment_text = {
+                // 4.2: extract diagnosis (guaranteed Some when !is_valid and not bypassed)
+                let mut diagnosis_section =
+                    String::from("\nThe pull request title needs correction:\n");
+                if let Some(diagnosis) = validation_result.diagnosis.as_ref() {
+                    // 4.3: build diagnosis section — one bullet per TitleIssue
+                    for issue in &diagnosis.issues {
+                        diagnosis_section.push_str(&format!("- {}\n", format_title_issue(issue)));
+                    }
+                    if let Some(fix) = &diagnosis.suggested_fix {
+                        // 4.3: append suggested fix when available
+                        diagnosis_section.push_str(&format!("\nSuggested fix: `{fix}`"));
+                    }
+                }
+                // 4.4: compose final comment_text = diagnosis_section + separator + format reminder
+                format!("{diagnosis_section}\n\n{format_reminder}")
+            };
 
             let comment = format!(
                 "{prefix}{text}",
@@ -698,7 +715,7 @@ Please update the PR title to match the conventional commit message guidelines."
                 }
             }
 
-            comment_text.to_string()
+            comment_text
         } else {
             // Title validation passed (either valid or bypassed)
 
@@ -1930,7 +1947,10 @@ Please update the PR body to include a valid work item reference."#;
         let title_result = if self.config.enforce_title_convention {
             self.check_title(&pr)
         } else {
-            validation_result::ValidationResult::valid()
+            checks::TitleValidationResult {
+                validation: validation_result::ValidationResult::valid(),
+                diagnosis: None,
+            }
         };
 
         // Check that the PR body has a reference to a work item if enabled
@@ -2275,5 +2295,50 @@ Please update the PR body to include a valid work item reference."#;
     pub fn with_issue_provider(mut self, provider: Box<dyn IssueMetadataProvider>) -> Self {
         self.issue_provider = Some(provider);
         self
+    }
+}
+
+/// Returns a human-readable description of a single [`checks::TitleIssue`] for use in PR
+/// comments.
+///
+/// Each variant is mapped to a short, actionable sentence that explains the problem and, where
+/// applicable, shows how to correct it.
+fn format_title_issue(issue: &checks::TitleIssue) -> String {
+    match issue {
+        checks::TitleIssue::LeadingWhitespace => {
+            "The title starts with whitespace — please remove the leading spaces.".to_string()
+        }
+        checks::TitleIssue::WhitespaceBeforeColon { found } => format!(
+            "There is whitespace before the `:` separator (found `{found}`) — remove the extra space."
+        ),
+        checks::TitleIssue::UppercaseType { found } => format!(
+            "The type `{found}` must be lowercase (e.g. use `{}` instead).",
+            found.to_lowercase()
+        ),
+        checks::TitleIssue::UnrecognizedType {
+            found,
+            nearest_valid: Some(nv),
+        } => format!(
+            "The type `{found}` is not a recognised conventional commit type — did you mean `{nv}`?"
+        ),
+        checks::TitleIssue::UnrecognizedType {
+            found,
+            nearest_valid: None,
+        } => format!("The type `{found}` is not a recognised conventional commit type."),
+        checks::TitleIssue::MissingColon => {
+            "A `:` separator is required between the type/scope and the description (e.g. `feat: ...`).".to_string()
+        }
+        checks::TitleIssue::MissingSpaceAfterColon => {
+            "A space is required after the `:` separator (e.g. `feat: description`).".to_string()
+        }
+        checks::TitleIssue::EmptyDescription => {
+            "The description after `:` is missing or blank — please add a short summary.".to_string()
+        }
+        checks::TitleIssue::InvalidScope { scope } => format!(
+            "The scope `{scope}` contains invalid characters; scopes must only use lowercase letters, digits, `_`, and `-`."
+        ),
+        checks::TitleIssue::NoTypePrefix => {
+            "No conventional commit type prefix was found at the start of the title.".to_string()
+        }
     }
 }

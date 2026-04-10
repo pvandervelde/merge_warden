@@ -1,4 +1,5 @@
 use crate::{
+    checks::TitleValidationResult,
     config::{
         BypassRule, BypassRules, ChangeTypeLabelConfig, ConventionalCommitMappings,
         CurrentPullRequestValidationConfiguration, FallbackLabelSettings, IssuePropagationConfig,
@@ -914,7 +915,10 @@ async fn test_handle_title_validation_invalid_to_valid() {
     };
 
     // Handle title validation with valid title
-    let validation_result = ValidationResult::valid();
+    let validation_result = TitleValidationResult {
+        validation: ValidationResult::valid(),
+        diagnosis: None,
+    };
     warden
         .communicate_pr_title_validity_status("owner", "repo", &pr, &validation_result)
         .await;
