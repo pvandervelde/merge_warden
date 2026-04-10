@@ -478,14 +478,17 @@ fn build_suggested_fix(working: &str, issues: &[TitleIssue]) -> Option<String> {
 
 /// Checks for missing-colon, missing-space-after-colon, and empty-description issues.
 ///
+/// `MissingColon` is reported whenever there is no `:` in the title, regardless of any other
+/// type issues already recorded (e.g. `UppercaseType` or `UnrecognizedType`). This allows the
+/// caller to receive a complete picture of all problems at once.
+///
 /// Appends the relevant [`TitleIssue`] variant(s) found in the working title.
 fn check_colon_issues(
     working: &str,
     colon_pos: Option<usize>,
-    type_token_diagnosed: bool,
     issues: &mut Vec<TitleIssue>,
 ) {
-    if colon_pos.is_none() && !type_token_diagnosed {
+    if colon_pos.is_none() {
         // ── Step 5: Missing colon ─────────────────────────────────────────────
         issues.push(TitleIssue::MissingColon);
     } else if let Some(colon) = colon_pos {
@@ -600,17 +603,12 @@ pub fn diagnose_pr_title(title: &str) -> TitleDiagnosis {
     let is_valid_exact = VALID_PR_TYPES.contains(&raw_token);
     let is_valid_lower = VALID_PR_TYPES.contains(&token_lower.as_str());
 
-    // Track what we have already diagnosed about the type token so we can skip
-    // the MissingColon / MissingSpaceAfterColon checks when appropriate.
-    let mut type_token_diagnosed = false;
-
     if !raw_token.is_empty() && !is_valid_exact {
         if is_valid_lower {
             // ── Step 4: Uppercase type ────────────────────────────────────────
             issues.push(TitleIssue::UppercaseType {
                 found: raw_token.to_string(),
             });
-            type_token_diagnosed = true;
         } else {
             // ── Step 3: Unrecognised type ─────────────────────────────────────
             // Only diagnose as UnrecognizedType when there is a colon (indicating a
@@ -625,7 +623,6 @@ pub fn diagnose_pr_title(title: &str) -> TitleDiagnosis {
                     found: raw_token.to_string(),
                     nearest_valid,
                 });
-                type_token_diagnosed = true;
             }
         }
     }
@@ -644,7 +641,7 @@ pub fn diagnose_pr_title(title: &str) -> TitleDiagnosis {
 
     if let Some(ref _eff_token) = effective_token {
         check_scope(working, &mut issues);
-        check_colon_issues(working, colon_pos, type_token_diagnosed, &mut issues);
+        check_colon_issues(working, colon_pos, &mut issues);
     }
 
     // ── Step 9: NoTypePrefix fallback ────────────────────────────────────────

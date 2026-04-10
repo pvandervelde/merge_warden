@@ -1625,7 +1625,56 @@ fn should_detect_leading_whitespace_and_uppercase_type_together() {
     assert_eq!(diagnosis.suggested_fix.as_deref(), Some("feat: add login"));
 }
 
-// ── diagnose_pr_title: 3.11 Valid title ───────────────────────────────────
+// ── diagnose_pr_title: 3.11 Compound UppercaseType + MissingColon ─────────
+// Regression: MissingColon must be reported even when UppercaseType is also present.
+
+#[test]
+fn should_detect_uppercase_type_and_missing_colon_together() {
+    let diagnosis = diagnose_pr_title("FEAT add login");
+    assert_eq!(
+        diagnosis.issues,
+        vec![
+            TitleIssue::UppercaseType {
+                found: "FEAT".to_string()
+            },
+            TitleIssue::MissingColon,
+        ],
+        "Expected [UppercaseType, MissingColon], got: {:?}",
+        diagnosis.issues
+    );
+    assert_eq!(
+        diagnosis.suggested_fix.as_deref(),
+        Some("feat: add login"),
+        "Expected suggested_fix to insert lowercase type and colon"
+    );
+}
+
+// ── diagnose_pr_title: 3.12 Compound UnrecognizedType + MissingColon ──────
+// Regression: MissingColon must be reported even when UnrecognizedType is also present.
+
+#[test]
+fn should_detect_unrecognized_type_and_missing_colon_together() {
+    let diagnosis = diagnose_pr_title("feature add login");
+    assert_eq!(
+        diagnosis.issues,
+        vec![
+            TitleIssue::UnrecognizedType {
+                found: "feature".to_string(),
+                nearest_valid: Some("feat".to_string()),
+            },
+            TitleIssue::MissingColon,
+        ],
+        "Expected [UnrecognizedType, MissingColon], got: {:?}",
+        diagnosis.issues
+    );
+    assert_eq!(
+        diagnosis.suggested_fix.as_deref(),
+        Some("feat: add login"),
+        "Expected suggested_fix to correct typo-type and insert colon"
+    );
+}
+
+// ── diagnose_pr_title: 3.13 Valid title ───────────────────────────────────
 
 #[test]
 fn should_return_empty_issues_and_no_fix_for_valid_conventional_title() {
