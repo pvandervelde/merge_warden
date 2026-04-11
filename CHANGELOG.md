@@ -5,6 +5,200 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-04-11
+
+### <!-- 0 -->⛰️  Features
+
+- Add structured PR title diagnostics with actionable error messages ([#211](https://github.com/pvandervelde/merge_warden/issues/211))
+- Thread TitleValidationResult through title validation
+- Add PR title diagnostic types and unit tests
+- Propagate milestone and project from linked issues to PRs ([#204](https://github.com/pvandervelde/merge_warden/issues/204))
+- Implement project propagation via SDK GraphQL
+- Call propagate_issue_metadata inside process_pull_request
+- Wire issue provider into MergeWarden and add integration tests
+- Implement propagate_issue_metadata with milestone sync
+- Add IssuePropagationConfig, PullRequest.milestone_number and propagation tests
+- Implement IssueMetadataProvider for GitHubProvider with tests
+- Add IssueMetadata models and IssueMetadataProvider trait with tests
+- Implement extract_closing_issue_reference parser
+- Add IssueReference type and tests for issue reference parser
+- Add interface design for issue metadata propagation
+- Add state-based PR lifecycle label management ([#203](https://github.com/pvandervelde/merge_warden/issues/203))
+- Implement PR state lifecycle label management (auto via agent)
+- Add types, docs, and tests for PR state lifecycle labels (auto via agent)
+- Add WIP detection and blocking for pull requests ([#201](https://github.com/pvandervelde/merge_warden/issues/201))
+- Implement WIP detection and blocking
+- Implement queue-based webhook processing ([#200](https://github.com/pvandervelde/merge_warden/issues/200))
+- Implement queue-based webhook processing (task 3.0)
+- Replace azure-functions crate with containerised server binary ([#199](https://github.com/pvandervelde/merge_warden/issues/199))
+- Implement containerised webhook server binary
+- Migrate GitHub API client from octocrab to github-bot-sdk ([#196](https://github.com/pvandervelde/merge_warden/issues/196))
+- Migrate webhook handling to SDK WebhookReceiver
+- Replace manual JWT signing with AppAuthProvider
+- Migrate GitHubProvider and entry points to github-bot-sdk
+- Add AppAuthProvider for GitHub App authentication
+- Replace octocrab with github-bot-sdk dependency and add WireMock tests
+- Add design specs and interface stubs for SDK migration, containerisation, and queue processing ([#195](https://github.com/pvandervelde/merge_warden/issues/195))
+- Add missing webhook handler and route stubs
+- Add interface design stubs for SDK migration, containerisation, and queue ingress
+- Add embedded webhook server for self-contained testing
+- Refactor integration tests into focused test modules
+- Complete integration testing infrastructure ([#188](https://github.com/pvandervelde/merge_warden/issues/188))
+- Complete integration testing infrastructure implementation
+- Introducing the integration testing crate
+- Remove Application Insights connection from Azure Function and replace with console logging ([#186](https://github.com/pvandervelde/merge_warden/issues/186))
+- Exclude Azure config files from deployment package ([#183](https://github.com/pvandervelde/merge_warden/issues/183))
+- Exclude Azure config files from deployment package
+- Refactor specs folder into comprehensive living document system ([#174](https://github.com/pvandervelde/merge_warden/issues/174))
+- Complete content migration and cleanup of old spec files
+- Refactor specs folder into comprehensive living document
+- Enforce documentation standards with clippy rules
+- Refactor PullRequestProvider trait method ordering and naming ([#171](https://github.com/pvandervelde/merge_warden/issues/171))
+- Refactor PullRequestProvider trait method ordering and naming
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- Update Docker action SHAs to valid pinned commits ([#213](https://github.com/pvandervelde/merge_warden/issues/213))
+- Update Docker action SHAs to valid pinned commits
+- Address PR review comments — dead code, stale comment, Display, spelling
+- Report MissingColon even when UppercaseType or UnrecognizedType are also present
+- Reopen PR if auto-closed by force-push during branch update ([#209](https://github.com/pvandervelde/merge_warden/issues/209))
+- Address PR review feedback on auto-close fix
+- Reopen PR if auto-closed by force-push during branch update
+- Update release branch to master HEAD on each workflow run/crea ([#208](https://github.com/pvandervelde/merge_warden/issues/208))
+- Address PR review feedback on prepare-release script
+- Update release branch to master HEAD on each workflow run
+- Update Dockerfile base image and add version assertion to publish-release workflow ([#207](https://github.com/pvandervelde/merge_warden/issues/207))
+- Harden version assertion step against script injection
+- Update Dockerfile to rust:1.94-slim and add version assertion to publish-release workflow
+- Remove dead PerformanceResult test infrastructure
+- Address PR review comments
+- Repair stale test repository cleanup workflow ([#205](https://github.com/pvandervelde/merge_warden/issues/205))
+- Replace gh api --arg with awk -v for prefix filtering
+- Pass REPO_PREFIX as jq --arg to prevent injection
+- Retry content API calls after fresh repository creation
+- Resolve actionlint errors across workflow files
+- SHA-pin actionlint action and fix repo-count display
+- Resolve stale-repo cleanup prefix mismatch and org/user API endpoint
+- Address PR review comments
+- Skip reviews with null user id; update spec
+- Address PR review comments for state-lifecycle labels
+- Resolve clippy lints in manage_pr_state_labels (auto via agent)
+- Address second round of PR review feedback
+- Address PR review feedback on WIP implementation
+- Resolve clippy warnings in test helpers
+- Add missing wip_check field to struct initializers
+- Address third round of PR review feedback
+- Address PR review feedback
+- Queue mode is pure queue consumer, no webhook endpoint
+- Address second round of PR review feedback
+- Address PR review feedback
+- Fix pre-existing clippy warnings
+- Address PR review findings
+- Remove todo! panics in GitHub mock module
+- Return error on missing default_branch; percent-encode content URLs
+- Suppress RUSTSEC-2023-0071; remove stale RUSTSEC-2025-0134 entry
+- Install rustls crypto provider before test environment setup
+- Allow pvandervelde git org source and new license exceptions
+- Pin github-bot-sdk to commit SHA; suppress RUSTSEC-2023-0071 in audit
+- Prevent thundering herd in installation token cache
+- Use constant-time HMAC comparison in webhook signature verification
+- Update tests for AppState migration from octocrab
+- Fix pagination and deletion issues in test repo cleanup workflow
+- Re-trigger webhook each poll iteration for config test
+- Poll for success conclusion instead of check-run ID change
+- Fix config-update timeout and find() scan bug
+- Fix webhook payloads and remove unachievable assertions
+- Add missing semicolons after ?-operator
+- Fix check name mismatch and add_file upsert
+- Fix configure_for_repository panic and checks permission
+- Treat empty LOCAL_WEBHOOK_ENDPOINT as unset
+- Upsert config file and add webhook endpoint secret
+- Fix remaining warnings and implement webhook stubs
+- Resolve 33 compiler warnings in test infrastructure
+- Mark credential tests as ignored for coverage runner
+- Restructure integration-tests workflow for correct credential handling
+- Resolve unit, doc, and integration test failures
+- Resolve security audit failures and add integration/e2e workflows
+- Resolve all compilation errors in integration tests
+- Force serial test execution to prevent environment variable race conditions
+- Add environment variable cleanup to prevent test interference
+- Add environment cleanup to missing github token test
+- Add environment cleanup to timeout format test
+- Resolve CI test failures with environment isolation
+- Resolve unit test failures in integration test infrastructure
+- Improve unit test environment isolation
+- Resolve doctest compilation errors
+- Update CI workflow to remove references to deleted config files
+- Add missing function documentation and resolve doc test error
+- Correct error message test expectation in developer_platforms crate
+- Add comprehensive documentation and resolve clippy issues in CLI crate
+- Add comprehensive documentation to Azure Functions crate
+- Resolve all remaining clippy documentation and lint errors
+- Resolve all missing documentation compilation errors
+- Resolve remaining missing documentation compilation errors
+
+### <!-- 2 -->🚜 Refactor
+
+- Move private helpers before diagnose_pr_title in alphabetical order
+- Rename test helper app credentials to repo-creation-app
+
+### <!-- 3 -->📚 Documentation
+
+- Document TitleIssue, TitleDiagnosis, TitleValidationResult types
+- Update sync_projects docstring to reflect GraphQL implementation
+- Add issuePropagation section to sample config
+- Document containerised server deployment
+- Mark github-bot-sdk migration spec as complete
+- Add architecture design specs for SDK migration, containerisation, and queue processing
+- Reorganise-docs-folder ([#194](https://github.com/pvandervelde/merge_warden/issues/194))
+- Adding the AGENTS.md file
+- Adding the catalog and constraint documents
+- Adding the ADR folder
+- Adding the standards folder
+- Moving the spec files
+- Update testing specs
+- Update testing spec README
+- Complete GitHubProvider functions documentation and organization
+- Add initial GitHub provider documentation
+- Complete comprehensive model struct documentation
+- Add comprehensive error variant documentation
+
+### <!-- 5 -->🎨 Styling
+
+- Apply rustfmt formatting to WIP config and labels code
+- Apply formatting fixes to integration test files
+
+### <!-- 6 -->🧪 Testing
+
+- Verify diagnosis-aware comment content per TitleIssue variant
+- Add actionlint job to validate workflow YAML and embedded shell scripts
+- Add IssuePropagationConfig TOML and milestone e2e tests
+- Update deps and crate_structure_tests for SDK migration
+- Add comprehensive integration test infrastructure ([#193](https://github.com/pvandervelde/merge_warden/issues/193))
+- Remove configuration_change_detection test
+
+### <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- 0.3.0 ([#210](https://github.com/pvandervelde/merge_warden/issues/210))
+- Improve the renovate config for security purposes ([#212](https://github.com/pvandervelde/merge_warden/issues/212))
+- Improve the renovate config for security purposes
+- Remove azure-functions crate and orphaned dead code ([#206](https://github.com/pvandervelde/merge_warden/issues/206))
+- Remove azure-functions crate and dead code
+- Suppress unmaintained advisories for instant and paste
+- Fix Rust formatting
+- Fix rust formatting
+- Add Claude PR review workflow ([#198](https://github.com/pvandervelde/merge_warden/issues/198))
+- Add the Claude PR review workflow
+- Add scheduled workflow to clean up stale test repositories ([#197](https://github.com/pvandervelde/merge_warden/issues/197))
+- Add scheduled cleanup workflow for stale test repositories
+- Fix rust formatting
+- Fix Rust formatting
+- Fixing Rust formatting
+- Comprehensive documentation improvements ([#173](https://github.com/pvandervelde/merge_warden/issues/173))
+
+
+
 ## [0.3.0] - 2026-04-10
 
 ### <!-- 0 -->⛰️  Features
