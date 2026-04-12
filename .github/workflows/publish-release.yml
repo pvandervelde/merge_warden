@@ -18,6 +18,8 @@ jobs:
     # Only run if the PR was merged and the head branch matches release/*
     if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/')
     runs-on: ubuntu-latest
+    outputs:
+      release_version: ${{ steps.get_version.outputs.RELEASE_VERSION }}
 
     steps:
       - name: Generate GitHub App token
@@ -138,3 +140,56 @@ jobs:
           tags: |
             ghcr.io/pvandervelde/merge_warden/server:latest
             ghcr.io/pvandervelde/merge_warden/server:${{ steps.get_version.outputs.RELEASE_VERSION }}
+
+  publish-cli:
+    name: Publish CLI - ${{ matrix.target }}
+    needs: publish-release
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-22.04
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+    timeout-minutes: 60
+    steps:
+      - name: Checkout release tag
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.publish-release.outputs.release_version }}
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+
+      - uses: taiki-e/setup-cross-toolchain-action@0123528f956f923e7a476f4cc04882bc005e7c89 # v1
+        with:
+          target: ${{ matrix.target }}
+        if: startsWith(matrix.os, 'ubuntu') && !contains(matrix.target, '-musl')
+
+      - uses: taiki-e/install-action@92f69c195229fe62d58b4d697ab4bc75def98e76 # v2
+        with:
+          tool: cross
+        if: contains(matrix.target, '-musl')
+
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
+
+      - run: echo "RUSTFLAGS=${RUSTFLAGS} -C target-feature=+crt-static" >> "${GITHUB_ENV}"
+        shell: bash
+        if: endsWith(matrix.target, 'windows-msvc')
+
+      - uses: taiki-e/upload-rust-binary-action@3962470d6e7f1993108411bc3f75a135ec67fc8c # v1
+        env:
+          GITHUB_REF: refs/tags/${{ needs.publish-release.outputs.release_version }}
+        with:
+          bin: merge-warden
+          target: ${{ matrix.target }}
+          tar: unix
+          zip: windows
+          token: ${{ secrets.GITHUB_TOKEN }}
