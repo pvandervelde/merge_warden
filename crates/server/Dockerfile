@@ -2,6 +2,9 @@
 # Digest pinned to rust:1.94-slim (multi-arch manifest list). Renovate keeps this current.
 FROM rust:1.94-slim@sha256:48150eec4f1e854ec689c7ca4c16d35193c4ea19dde13b6df515192707229ff8 AS builder
 WORKDIR /app
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends pkg-config libssl-dev && \
+    rm -rf /var/lib/apt/lists/*
 COPY . .
 RUN cargo build --release -p merge_warden_server
 
