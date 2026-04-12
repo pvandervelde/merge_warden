@@ -5,6 +5,10 @@ WORKDIR /app
 RUN apt-get update && \
     apt-get install -y --no-install-recommends pkg-config libssl-dev && \
     rm -rf /var/lib/apt/lists/*
+# Force static linking of OpenSSL so the runtime image does not need libssl.so.
+# The distroless/cc runtime image provides glibc/libgcc but not OpenSSL shared
+# libraries, so a dynamically-linked binary would crash at startup.
+ENV OPENSSL_STATIC=1
 COPY . .
 RUN cargo build --release -p merge_warden_server
 

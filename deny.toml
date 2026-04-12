@@ -87,6 +87,14 @@ ignore = [
     # paste is unmaintained — transitive via queue-runtime -> azure_core;
     # no safe upgrade is available; tracked upstream.
     { id = "RUSTSEC-2024-0436", reason = "transitive via queue-runtime -> azure_core; no safe upgrade available upstream" },
+    # rand unsoundness with custom logger — affects rand 0.7.x, 0.8.x, 0.9.x.
+    # All affected versions are transitive via pinned git dependencies
+    # (queue-runtime -> azure_core/http-types, github-bot-sdk -> jsonwebtoken/rsa/oauth2)
+    # that require these exact major versions of rand. Cannot be fixed without
+    # upstream dependency updates to queue-runtime and github-bot-sdk.
+    # The unsoundness only triggers when a custom logger calls rand::rng() during
+    # reseeding, which does not apply to this application's logging configuration.
+    { id = "RUSTSEC-2026-0097", reason = "transitive via queue-runtime and github-bot-sdk git deps; rand 0.7/0.8/0.9 required by azure_core, jsonwebtoken, oauth2, rsa; no upgrade path without upstream changes" },
 ]
 
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
