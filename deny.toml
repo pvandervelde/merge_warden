@@ -144,6 +144,12 @@ exceptions = [
     { name = "webpki-root-certs", allow = [
         "CDLA-Permissive-2.0",
     ] },
+    # tiny-keccak is a transitive dependency via queue-runtime -> config ->
+    # rust-ini -> ordered-multimap -> dlv-list -> const-random -> const-random-macro.
+    # CC0-1.0 is a public domain dedication; it imposes no restrictions on use.
+    { name = "tiny-keccak", allow = [
+        "CC0-1.0",
+    ] },
 ]
 
 # Some crates don't have (easily) machine readable licensing information,

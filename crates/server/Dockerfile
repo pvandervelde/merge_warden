@@ -3,7 +3,7 @@
 FROM rust:1.94-slim@sha256:48150eec4f1e854ec689c7ca4c16d35193c4ea19dde13b6df515192707229ff8 AS builder
 WORKDIR /app
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends pkg-config libssl-dev && \
+    apt-get install -y --no-install-recommends pkg-config libssl-dev zlib1g-dev libzstd-dev && \
     rm -rf /var/lib/apt/lists/*
 # Force static linking of OpenSSL so the runtime image does not need libssl.so.
 # The distroless/cc runtime image provides glibc/libgcc but not OpenSSL shared
