@@ -40,7 +40,7 @@ aws secretsmanager create-secret \
   "containerDefinitions": [
     {
       "name": "merge-warden",
-      "image": "ghcr.io/pvandervelde/merge_warden/server:latest",
+      "image": "ghcr.io/pvandervelde/merge-warden-server:latest",
       "portMappings": [{ "containerPort": 3000 }],
       "secrets": [
         {

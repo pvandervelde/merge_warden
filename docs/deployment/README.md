@@ -6,8 +6,8 @@ Registry (GHCR). The same image runs on any OCI-compatible container host.
 ## Container Image
 
 ```
-ghcr.io/pvandervelde/merge_warden/server:latest
-ghcr.io/pvandervelde/merge_warden/server:<version>
+ghcr.io/pvandervelde/merge-warden-server:latest
+ghcr.io/pvandervelde/merge-warden-server:<version>
 ```
 
 Images are built from `crates/server/Dockerfile` and published automatically on each
@@ -93,7 +93,7 @@ docker run --rm \
   -e GITHUB_APP_PRIVATE_KEY="$(cat /path/to/private-key.pem)" \
   -e GITHUB_WEBHOOK_SECRET=supersecret \
   -p 3000:3000 \
-  ghcr.io/pvandervelde/merge_warden/server:latest
+  ghcr.io/pvandervelde/merge-warden-server:latest
 ```
 
 Verify the server is healthy:

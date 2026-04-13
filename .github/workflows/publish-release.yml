@@ -13,13 +13,142 @@ permissions:
   packages: write # To push container images to GHCR
 
 jobs:
-  publish-release:
-    name: Publish Release
+  determine-version:
+    name: Determine Release Version
     # Only run if the PR was merged and the head branch matches release/*
     if: github.event.pull_request.merged == true && startsWith(github.event.pull_request.head.ref, 'release/')
     runs-on: ubuntu-latest
     outputs:
       release_version: ${{ steps.get_version.outputs.RELEASE_VERSION }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          # Checkout the base branch (master) after the merge
+          ref: ${{ github.event.pull_request.base.ref }}
+          # Fetch all history needed for conventional_commits_next_version
+          fetch-depth: 0
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
+
+      - name: Install cargo binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      - name: Install Conventional Commits Next Version
+        run: cargo binstall conventional_commits_next_version --no-confirm
+
+      - name: Get release version
+        id: get_version
+        run: |
+          LAST_TAG=$(git describe --tags --abbrev=0)
+          LAST_COMMIT=$(git rev-parse "${LAST_TAG}")
+          RELEASE_VERSION=$(conventional_commits_next_version --from-version "${LAST_TAG}" --calculation-mode Batch "${LAST_COMMIT}")
+          echo "RELEASE_VERSION=${RELEASE_VERSION}" >> "${GITHUB_OUTPUT}"
+          echo "The release version is: ${RELEASE_VERSION}"
+
+      - name: Assert calculated version matches release branch
+        env:
+          RELEASE_VERSION: ${{ steps.get_version.outputs.RELEASE_VERSION }}
+          BRANCH_REF: ${{ github.event.pull_request.head.ref }}
+        run: |
+          BRANCH_VERSION="${BRANCH_REF#release/}"
+          if [[ "${RELEASE_VERSION}" != "${BRANCH_VERSION}" ]]; then
+            echo "ERROR: Calculated version (${RELEASE_VERSION}) does not match branch version (${BRANCH_VERSION})"
+            echo "Branch: ${BRANCH_REF}"
+            echo "This usually means commits made after the release branch was cut have changed the calculated version."
+            exit 1
+          fi
+          echo "Version assertion passed: ${RELEASE_VERSION} matches branch ${BRANCH_REF}"
+
+  build-cli:
+    name: Build CLI - ${{ matrix.target }}
+    needs: determine-version
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-22.04
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+    timeout-minutes: 60
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.event.pull_request.base.ref }}
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: taiki-e/setup-cross-toolchain-action@0123528f956f923e7a476f4cc04882bc005e7c89 # v1
+        with:
+          target: ${{ matrix.target }}
+        if: startsWith(matrix.os, 'ubuntu') && !contains(matrix.target, '-musl')
+
+      - uses: taiki-e/install-action@92f69c195229fe62d58b4d697ab4bc75def98e76 # v2
+        with:
+          tool: cross
+        if: contains(matrix.target, '-musl')
+
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
+
+      - name: Set static CRT for Windows
+        run: echo "RUSTFLAGS=${RUSTFLAGS} -C target-feature=+crt-static" >> "${GITHUB_ENV}"
+        shell: bash
+        if: endsWith(matrix.target, 'windows-msvc')
+
+      - name: Build CLI binary (musl via cross)
+        run: cross build --release --target ${{ matrix.target }} --bin merge-warden
+        if: contains(matrix.target, '-musl')
+
+      - name: Build CLI binary
+        run: cargo build --release --target ${{ matrix.target }} --bin merge-warden
+        if: "!contains(matrix.target, '-musl')"
+
+      - name: Package binary (Unix)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.determine-version.outputs.release_version }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          ARCHIVE="merge-warden-${RELEASE_VERSION}-${TARGET}.tar.gz"
+          cp "target/${TARGET}/release/merge-warden" merge-warden
+          tar czf "${ARCHIVE}" merge-warden
+          echo "ARCHIVE=${ARCHIVE}" >> "${GITHUB_ENV}"
+
+      - name: Package binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ needs.determine-version.outputs.release_version }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          $archive = "merge-warden-$env:RELEASE_VERSION-$env:TARGET.zip"
+          Copy-Item "target\$env:TARGET\release\merge-warden.exe" merge-warden.exe
+          Compress-Archive -Path merge-warden.exe -DestinationPath $archive
+          "ARCHIVE=$archive" >> $env:GITHUB_ENV
+
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cli-${{ matrix.target }}
+          path: ${{ env.ARCHIVE }}
+          retention-days: 1
+
+  publish-release:
+    name: Publish Release
+    needs: [determine-version, build-cli]
+    runs-on: ubuntu-latest
 
     steps:
       - name: Generate GitHub App token
@@ -45,14 +174,8 @@ jobs:
       - name: Install cargo binstall
         uses: cargo-bins/cargo-binstall@main
 
-      - name: Install Conventional Commits Next Version
-        run: cargo install conventional_commits_next_version
-
       - name: Install git-cliff
-        run: cargo install git-cliff
-
-      - name: Install cargo typos
-        run: cargo install typos-cli
+        run: cargo binstall git-cliff --no-confirm
 
       # Recommended as per: https://github.com/actions/checkout?tab=readme-ov-file#push-a-commit-using-the-built-in-token
       - name: Configure Git user
@@ -60,43 +183,20 @@ jobs:
           git config user.name "releaser[bot]"
           git config user.email "releaser[bot]@users.noreply.github.com"
 
-      - name: Get release version from Cargo.toml
-        id: get_version
-        run: |
-          LAST_TAG=$(git describe --tags --abbrev=0)
-          LAST_COMMIT=$(git rev-parse "${LAST_TAG}")
-          RELEASE_VERSION=$(conventional_commits_next_version --from-version "${LAST_TAG}" --calculation-mode Batch "${LAST_COMMIT}")
-          echo "RELEASE_VERSION=${RELEASE_VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "The release version is: ${RELEASE_VERSION}"
-
-      - name: Assert calculated version matches release branch
-        env:
-          RELEASE_VERSION: ${{ steps.get_version.outputs.RELEASE_VERSION }}
-          BRANCH_REF: ${{ github.event.pull_request.head.ref }}
-        run: |
-          BRANCH_VERSION="${BRANCH_REF#release/}"
-          if [[ "${RELEASE_VERSION}" != "${BRANCH_VERSION}" ]]; then
-            echo "ERROR: Calculated version (${RELEASE_VERSION}) does not match branch version (${BRANCH_VERSION})"
-            echo "Branch: ${BRANCH_REF}"
-            echo "This usually means commits made after the release branch was cut have changed the calculated version."
-            exit 1
-          fi
-          echo "Version assertion passed: ${RELEASE_VERSION} matches branch ${BRANCH_REF}"
-
       - name: Set up git remote to use app token
         run: |
           git remote set-url origin "https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/${{ github.repository }}.git"
 
       - name: Create and Push Git Tag
         run: |
-          RELEASE_VERSION="${{ steps.get_version.outputs.RELEASE_VERSION }}"
+          RELEASE_VERSION="${{ needs.determine-version.outputs.release_version }}"
           git tag -a "${RELEASE_VERSION}" -m "Release ${RELEASE_VERSION}"
           git push origin "${RELEASE_VERSION}"
 
       - name: Extract Release Notes
         id: extract_notes
         run: |
-          RELEASE_VERSION="${{ steps.get_version.outputs.RELEASE_VERSION }}"
+          RELEASE_VERSION="${{ needs.determine-version.outputs.release_version }}"
           echo "Extracting notes for tag ${RELEASE_VERSION}"
           # Use git-cliff to get notes for the specific tag, stripping headers/footers
           # Use a delimiter for multiline output handling in GitHub Actions
@@ -107,15 +207,23 @@ jobs:
             echo "${delimiter}"
           } >> "${GITHUB_OUTPUT}"
 
+      - name: Download CLI artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: cli-*
+          path: artifacts
+          merge-multiple: true
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: |
-          RELEASE_VERSION="${{ steps.get_version.outputs.RELEASE_VERSION }}"
+          RELEASE_VERSION="${{ needs.determine-version.outputs.release_version }}"
           echo "Creating GitHub Release for ${RELEASE_VERSION}"
           gh release create "${RELEASE_VERSION}" \
             --title "Release ${RELEASE_VERSION}" \
-            --notes "${{ steps.extract_notes.outputs.notes }}"
+            --notes "${{ steps.extract_notes.outputs.notes }}" \
+            artifacts/*
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
@@ -138,58 +246,5 @@ jobs:
           push: true
           platforms: linux/amd64,linux/arm64
           tags: |
-            ghcr.io/pvandervelde/merge_warden/server:latest
-            ghcr.io/pvandervelde/merge_warden/server:${{ steps.get_version.outputs.RELEASE_VERSION }}
-
-  publish-cli:
-    name: Publish CLI - ${{ matrix.target }}
-    needs: publish-release
-    runs-on: ${{ matrix.os }}
-    permissions:
-      contents: write
-    strategy:
-      matrix:
-        include:
-          - target: x86_64-unknown-linux-gnu
-            os: ubuntu-22.04
-          - target: x86_64-unknown-linux-musl
-            os: ubuntu-22.04
-          - target: x86_64-pc-windows-msvc
-            os: windows-2022
-    timeout-minutes: 60
-    steps:
-      - name: Checkout release tag
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          ref: ${{ needs.publish-release.outputs.release_version }}
-
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
-
-      - uses: taiki-e/setup-cross-toolchain-action@0123528f956f923e7a476f4cc04882bc005e7c89 # v1
-        with:
-          target: ${{ matrix.target }}
-        if: startsWith(matrix.os, 'ubuntu') && !contains(matrix.target, '-musl')
-
-      - uses: taiki-e/install-action@92f69c195229fe62d58b4d697ab4bc75def98e76 # v2
-        with:
-          tool: cross
-        if: contains(matrix.target, '-musl')
-
-      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
-
-      - run: echo "RUSTFLAGS=${RUSTFLAGS} -C target-feature=+crt-static" >> "${GITHUB_ENV}"
-        shell: bash
-        if: endsWith(matrix.target, 'windows-msvc')
-
-      - uses: taiki-e/upload-rust-binary-action@3962470d6e7f1993108411bc3f75a135ec67fc8c # v1
-        env:
-          GITHUB_REF: refs/tags/${{ needs.publish-release.outputs.release_version }}
-        with:
-          bin: merge-warden
-          target: ${{ matrix.target }}
-          tar: unix
-          zip: windows
-          token: ${{ secrets.GITHUB_TOKEN }}
+            ghcr.io/pvandervelde/merge-warden-server:latest
+            ghcr.io/pvandervelde/merge-warden-server:${{ needs.determine-version.outputs.release_version }}

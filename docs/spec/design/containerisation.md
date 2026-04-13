@@ -33,7 +33,7 @@ Registry (`ghcr.io`).
 - Configuration injected as environment variables or mounted config file
 - No Azure SDK dependencies in the binary for runtime secrets/config (Azure SDK deps
   are acceptable for optional local dev tooling)
-- Single `Dockerfile`, published to `ghcr.io/pvandervelde/merge_warden/server`
+- Single `Dockerfile`, published to `ghcr.io/pvandervelde/merge-warden-server`
 - CI pipeline builds and pushes the image on release
 
 ---
@@ -234,8 +234,8 @@ permissions:
     file: crates/server/Dockerfile
     push: true
     tags: |
-      ghcr.io/pvandervelde/merge_warden/server:latest
-      ghcr.io/pvandervelde/merge_warden/server:${{ steps.get_version.outputs.RELEASE_VERSION }}
+      ghcr.io/pvandervelde/merge-warden-server:latest
+      ghcr.io/pvandervelde/merge-warden-server:${{ needs.determine-version.outputs.release_version }}
 ```
 
 No changes are needed to `prepare-release.yml`.

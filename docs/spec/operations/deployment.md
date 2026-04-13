@@ -88,7 +88,7 @@ sequentially while different PRs may be processed in parallel.
 ```yaml
 services:
   merge-warden:
-    image: ghcr.io/pvandervelde/merge_warden_server:latest
+    image: ghcr.io/pvandervelde/merge-warden-server:latest
     environment:
       MERGE_WARDEN_RECEIVER_MODE: queue
       GITHUB_APP_ID: ${GITHUB_APP_ID}
