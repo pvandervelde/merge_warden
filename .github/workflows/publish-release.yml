@@ -36,7 +36,7 @@ jobs:
       - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
 
       - name: Install cargo binstall
-        uses: cargo-bins/cargo-binstall@main
+        uses: cargo-bins/cargo-binstall@dc19f1e48450eefe5a29b8da6c6b00a87d730b37 # main
 
       - name: Install Conventional Commits Next Version
         run: cargo binstall conventional_commits_next_version --no-confirm
@@ -68,7 +68,10 @@ jobs:
     name: Build CLI - ${{ matrix.target }}
     needs: determine-version
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
     strategy:
+      fail-fast: false
       matrix:
         include:
           - target: x86_64-unknown-linux-gnu
@@ -149,6 +152,7 @@ jobs:
     name: Publish Release
     needs: [determine-version, build-cli]
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - name: Generate GitHub App token
@@ -172,7 +176,7 @@ jobs:
       - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
 
       - name: Install cargo binstall
-        uses: cargo-bins/cargo-binstall@main
+        uses: cargo-bins/cargo-binstall@dc19f1e48450eefe5a29b8da6c6b00a87d730b37 # main
 
       - name: Install git-cliff
         run: cargo binstall git-cliff --no-confirm
@@ -194,18 +198,10 @@ jobs:
           git push origin "${RELEASE_VERSION}"
 
       - name: Extract Release Notes
-        id: extract_notes
         run: |
           RELEASE_VERSION="${{ needs.determine-version.outputs.release_version }}"
           echo "Extracting notes for tag ${RELEASE_VERSION}"
-          # Use git-cliff to get notes for the specific tag, stripping headers/footers
-          # Use a delimiter for multiline output handling in GitHub Actions
-          delimiter="$(openssl rand -hex 8)"
-          {
-            echo "notes<<${delimiter}"
-            git-cliff --tag "${RELEASE_VERSION}" --strip all
-            echo "${delimiter}"
-          } >> "${GITHUB_OUTPUT}"
+          git-cliff --tag "${RELEASE_VERSION}" --strip all > /tmp/release-notes.md
 
       - name: Download CLI artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -213,6 +209,16 @@ jobs:
           pattern: cli-*
           path: artifacts
           merge-multiple: true
+
+      - name: Verify CLI artifacts
+        run: |
+          count=$(ls artifacts/ | wc -l)
+          echo "Artifacts found: ${count}"
+          if [[ "${count}" -ne 3 ]]; then
+            echo "ERROR: Expected 3 artifacts (linux-gnu, linux-musl, windows), found ${count}"
+            ls -la artifacts/
+            exit 1
+          fi
 
       - name: Create GitHub Release
         env:
@@ -222,7 +228,7 @@ jobs:
           echo "Creating GitHub Release for ${RELEASE_VERSION}"
           gh release create "${RELEASE_VERSION}" \
             --title "Release ${RELEASE_VERSION}" \
-            --notes "${{ steps.extract_notes.outputs.notes }}" \
+            --notes-file /tmp/release-notes.md \
             artifacts/*
 
       - name: Log in to GitHub Container Registry
