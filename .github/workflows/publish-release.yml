@@ -212,11 +212,11 @@ jobs:
 
       - name: Verify CLI artifacts
         run: |
-          count=$(ls artifacts/ | wc -l)
+          count=$(find artifacts/ -maxdepth 1 -type f | wc -l)
           echo "Artifacts found: ${count}"
           if [[ "${count}" -ne 3 ]]; then
             echo "ERROR: Expected 3 artifacts (linux-gnu, linux-musl, windows), found ${count}"
-            ls -la artifacts/
+            find artifacts/ -maxdepth 1 -type f
             exit 1
           fi
 
