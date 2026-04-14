@@ -38,7 +38,7 @@ az containerapp create \
   --name merge-warden \
   --resource-group rg-merge-warden \
   --environment cae-merge-warden \
-  --image ghcr.io/pvandervelde/merge_warden/server:latest \
+  --image ghcr.io/pvandervelde/merge-warden-server:latest \
   --target-port 3000 \
   --ingress external \
   --secrets \
