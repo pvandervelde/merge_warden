@@ -31,6 +31,9 @@ pub const VALID_PR_TYPES: [&str; 11] = [
 /// HTML comment marker for work item validation comments
 pub const WORK_ITEM_COMMENT_MARKER: &str = "<!-- PR_WORK_ITEM_CHECK -->";
 
+/// HTML comment marker for PR size validation comments
+pub const SIZE_COMMENT_MARKER: &str = "<!-- PR_SIZE_CHECK -->";
+
 /// HTML comment marker for WIP (Work In Progress) validation comments
 pub const WIP_COMMENT_MARKER: &str = "<!-- PR_WIP_CHECK -->";
 

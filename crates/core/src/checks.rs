@@ -274,6 +274,16 @@ pub enum TitleIssue {
     /// - `"feat:  "` — colon with multiple trailing spaces
     EmptyDescription,
 
+    /// The scope is empty.
+    ///
+    /// Triggered when parentheses are present but contain no scope name, e.g. `feat():`.
+    /// The `suggested_fix` removes the empty parentheses entirely.
+    ///
+    /// # Examples
+    ///
+    /// - `"feat(): add login"` — parentheses with no scope name
+    EmptyScope,
+
     /// The scope contains characters outside `[a-z0-9_-]`.
     ///
     /// The `suggested_fix` lowercases the scope and replaces spaces with `-`.
@@ -414,6 +424,10 @@ impl fmt::Display for TitleIssue {
                 f,
                 "The description after `:` is missing or blank \u{2014} please add a short summary."
             ),
+            Self::EmptyScope => write!(
+                f,
+                "The scope is empty \u{2014} either add a scope name (e.g. `feat(auth): ...`) or remove the parentheses completely (e.g. `feat: ...`)."
+            ),
             Self::InvalidScope { scope } => write!(
                 f,
                 "The scope `{scope}` contains invalid characters; scopes must only use lowercase letters, digits, `_`, and `-`."
@@ -493,6 +507,11 @@ fn build_suggested_fix(working: &str, issues: &[TitleIssue]) -> Option<String> {
         }
     }
 
+    // Fix EmptyScope — remove the empty parentheses `()`.
+    if issues.iter().any(|i| matches!(i, TitleIssue::EmptyScope)) {
+        result = result.replacen("()", "", 1);
+    }
+
     // Fix InvalidScope — lowercase the scope and replace spaces with `-`.
     if let Some(TitleIssue::InvalidScope { scope }) = issues
         .iter()
@@ -551,22 +570,27 @@ fn check_colon_issues(working: &str, colon_pos: Option<usize>, issues: &mut Vec<
     }
 }
 
-/// Checks for an invalid scope in the working title and appends [`TitleIssue::InvalidScope`]
-/// when found.
+/// Checks for an empty or invalid scope in the working title.
 ///
-/// A scope is considered invalid when it contains characters outside `[a-z0-9_-]`.
+/// Appends [`TitleIssue::EmptyScope`] when the parentheses contain no scope name, or
+/// [`TitleIssue::InvalidScope`] when the scope contains characters outside `[a-z0-9_-]`.
 fn check_scope(working: &str, issues: &mut Vec<TitleIssue>) {
     if let Some(scope_start) = working.find('(') {
         let scope_end = working[scope_start..].find(')').map(|i| scope_start + i);
         if let Some(end) = scope_end {
             let scope_content = &working[scope_start + 1..end];
-            let scope_invalid = scope_content
-                .chars()
-                .any(|c| !matches!(c, 'a'..='z' | '0'..='9' | '_' | '-'));
-            if scope_invalid {
-                issues.push(TitleIssue::InvalidScope {
-                    scope: scope_content.to_string(),
-                });
+            if scope_content.is_empty() {
+                // Empty parentheses: e.g. `feat(): add login`
+                issues.push(TitleIssue::EmptyScope);
+            } else {
+                let scope_invalid = scope_content
+                    .chars()
+                    .any(|c| !matches!(c, 'a'..='z' | '0'..='9' | '_' | '-'));
+                if scope_invalid {
+                    issues.push(TitleIssue::InvalidScope {
+                        scope: scope_content.to_string(),
+                    });
+                }
             }
         }
     }
