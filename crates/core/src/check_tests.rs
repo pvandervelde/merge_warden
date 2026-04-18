@@ -1740,3 +1740,95 @@ fn should_return_diagnosis_none_when_check_pr_title_with_bypassed_user() {
         "Expected None diagnosis when bypassed"
     );
 }
+
+// ── diagnose_pr_title: 3.14 EmptyScope ────────────────────────────────────
+
+#[test]
+fn should_construct_title_issue_empty_scope() {
+    let issue = TitleIssue::EmptyScope;
+    assert_eq!(issue, TitleIssue::EmptyScope);
+}
+
+#[test]
+fn should_display_empty_scope_message_with_guidance_to_add_or_remove_parentheses() {
+    let issue = TitleIssue::EmptyScope;
+    let display = format!("{issue}");
+    assert!(
+        display.contains("empty"),
+        "Display should mention 'empty', got: {display}"
+    );
+    // Guidance to either add a scope name or remove the parentheses
+    assert!(
+        display.contains("scope") || display.contains("parentheses"),
+        "Display should mention 'scope' or 'parentheses', got: {display}"
+    );
+}
+
+#[test]
+fn should_detect_empty_scope_and_suggest_removing_parentheses() {
+    let diagnosis = diagnose_pr_title("feat(): add login");
+    assert!(
+        diagnosis.issues.contains(&TitleIssue::EmptyScope),
+        "Expected EmptyScope in issues: {:?}",
+        diagnosis.issues
+    );
+    assert_eq!(
+        diagnosis.suggested_fix.as_deref(),
+        Some("feat: add login"),
+        "Expected empty parentheses removed in suggested_fix"
+    );
+}
+
+#[test]
+fn should_detect_empty_scope_with_breaking_change_marker_and_suggest_removing_parentheses() {
+    let diagnosis = diagnose_pr_title("feat()!: add login");
+    assert!(
+        diagnosis.issues.contains(&TitleIssue::EmptyScope),
+        "Expected EmptyScope in issues for breaking change with empty scope: {:?}",
+        diagnosis.issues
+    );
+    assert_eq!(
+        diagnosis.suggested_fix.as_deref(),
+        Some("feat!: add login"),
+        "Expected empty parentheses removed, breaking change marker preserved"
+    );
+}
+
+#[test]
+fn should_return_invalid_when_title_has_empty_scope() {
+    let user = create_user(123, "developer");
+    let pr = create_pull_request(1, "feat(): add login service", None, Some(user));
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_default_config();
+
+    let result = check_pr_title(&pr, &bypass_rule, &config);
+
+    assert!(!result.is_valid());
+    assert!(!result.was_bypassed());
+    assert!(result.bypass_info().is_none());
+}
+
+#[test]
+fn should_return_invalid_with_empty_scope_in_diagnosis_when_title_has_empty_scope() {
+    let user = create_user(123, "developer");
+    let pr = create_pull_request(1, "feat(): add login service", None, Some(user));
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_default_config();
+
+    let result = check_pr_title(&pr, &bypass_rule, &config);
+
+    assert!(
+        !result.is_valid(),
+        "Expected invalid result for empty scope"
+    );
+    assert!(
+        result.diagnosis.is_some(),
+        "Expected Some(diagnosis) for empty scope"
+    );
+    let diagnosis = result.diagnosis.unwrap();
+    assert!(
+        diagnosis.issues.contains(&TitleIssue::EmptyScope),
+        "Expected EmptyScope issue in diagnosis, got: {:?}",
+        diagnosis.issues
+    );
+}
