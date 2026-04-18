@@ -1,0 +1,58 @@
+# Application-level defaults for merge-warden-server.
+#
+# This file is loaded via the MERGE_WARDEN_CONFIG_FILE environment variable.
+# It supplies fallback policy defaults that apply to every repository processed
+# by this server instance.  Values here are used when a repository has no
+# .github/merge-warden.toml of its own, or when a per-repo file omits a field.
+#
+# Note: this file uses different field names to the per-repo config
+# (merge-warden.sample.toml).  These names map to the ApplicationDefaults
+# struct in the Rust codebase.
+
+[policies]
+# Enforce conventional-commit title format for all repositories by default.
+# The pattern below is the built-in conventional commit regex; uncomment and
+# edit to override.
+enforceTitleValidation = true
+# titlePattern = "^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\\([a-z0-9_-]+\\))?!?: .+"
+labelIfTitleInvalid = "pr-issue: invalid-title-format"
+
+# Require a work-item reference in the pull request description by default.
+enforceWorkItemValidation = true
+# workItemPattern = "(?i)(fixes|closes|resolves|references|relates to)\\s+(#\\d+|GH-\\d+|https://github\\.com/[^/]+/[^/]+/issues/\\d+|[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+#\\d+)"
+labelIfWorkItemMissing = "pr-issue: missing-work-item"
+
+# PR size checking — disabled by default at app level.
+[policies.prSize]
+enabled = false
+fail_on_oversized = false
+excluded_file_patterns = ["*.md", "*.txt", "docs/*"]
+label_prefix = "size/"
+add_comment = true
+
+# WIP detection — disabled by default at app level.
+[policies.wip]
+enforce_wip_blocking = true
+wip_label = "WIP"
+wip_title_patterns = ["WIP", "wip:", "[wip]", "draft:", "Draft:"]
+wip_description_patterns = []
+
+# PR state lifecycle labels — disabled by default at app level.
+[policies.prState]
+enabled = true
+draft_label = "status: draft"
+review_label = "status: in-review"
+approved_label = "status: approved"
+
+# Bypass rules — allow specific GitHub usernames to skip validations.
+[policies.bypassRules.title_convention]
+enabled = false
+users = []
+
+[policies.bypassRules.work_items]
+enabled = false
+users = []
+
+[policies.bypassRules.size]
+enabled = false
+users = []

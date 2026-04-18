@@ -14,7 +14,10 @@ RUN cargo build --release -p merge_warden_server
 
 # Runtime stage: minimal distroless image containing only the binary and its
 # shared-library dependencies (libc/libgcc). No shell, no package manager.
-FROM gcr.io/distroless/cc-debian12@sha256:329e54034ce498f9c6b345044e8f530c6691f99e94a92446f68c0adf9baa8464
+# Debian 13 (Trixie) is required because rust:1.94-slim also uses Debian 13,
+# which ships glibc 2.38. The older distroless/cc-debian12 only provides
+# glibc 2.36 and causes a "GLIBC_2.38 not found" crash at startup.
+FROM gcr.io/distroless/cc-debian13@sha256:56aaf20ab2523a346a67c8e8f8e8dabe447447d0788b82284d14ad79cd5f93cc
 COPY --from=builder /app/target/release/merge_warden_server /merge_warden_server
 EXPOSE 3000
 # The distroless runtime image contains no shell or HTTP client, so a
