@@ -2748,8 +2748,9 @@ async fn test_propagate_issue_metadata_empty_body_skips_propagation() {
 }
 
 #[tokio::test]
-async fn test_propagate_issue_metadata_no_closing_keyword_skips_propagation() {
-    // "References #10" is informational only — not a closing keyword.
+async fn test_propagate_issue_metadata_references_keyword_triggers_propagation() {
+    // "References #10" is an informational keyword but should still trigger
+    // milestone/project propagation — an issue can require multiple PRs.
     let warden = warden_with_issue_propagation(true, false);
     let issue_provider = MockIssueProvider::new().with_metadata(IssueMetadata {
         milestone: Some(IssueMilestone {
@@ -2764,7 +2765,40 @@ async fn test_propagate_issue_metadata_no_closing_keyword_skips_propagation() {
         .propagate_issue_metadata("owner", "repo", &pr, &issue_provider)
         .await;
 
-    assert!(issue_provider.milestone_calls().is_empty());
+    // Milestone should be set because 'references' now triggers propagation.
+    let calls = issue_provider.milestone_calls();
+    assert_eq!(
+        calls.len(),
+        1,
+        "Expected milestone to be set via 'references' keyword"
+    );
+    assert_eq!(calls[0], (42, Some(7)));
+}
+
+#[tokio::test]
+async fn test_propagate_issue_metadata_relates_to_keyword_triggers_propagation() {
+    // "Relates to #10" should also trigger propagation.
+    let warden = warden_with_issue_propagation(true, false);
+    let issue_provider = MockIssueProvider::new().with_metadata(IssueMetadata {
+        milestone: Some(IssueMilestone {
+            number: 7,
+            title: "v1.0".to_string(),
+        }),
+        projects: vec![],
+    });
+
+    let pr = make_pr(Some("This PR relates to #10"), None);
+    warden
+        .propagate_issue_metadata("owner", "repo", &pr, &issue_provider)
+        .await;
+
+    let calls = issue_provider.milestone_calls();
+    assert_eq!(
+        calls.len(),
+        1,
+        "Expected milestone to be set via 'relates to' keyword"
+    );
+    assert_eq!(calls[0], (42, Some(7)));
 }
 
 #[tokio::test]

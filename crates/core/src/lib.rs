@@ -66,7 +66,7 @@
 //! }
 //! ```
 
-use checks::extract_closing_issue_reference;
+use checks::{extract_any_issue_reference, extract_closing_issue_reference};
 use indoc::formatdoc;
 use merge_warden_developer_platforms::models::{Installation, PullRequest, Repository, Review};
 use merge_warden_developer_platforms::{IssueMetadataProvider, PullRequestProvider};
@@ -1549,14 +1549,14 @@ Please update the PR body to include a valid work item reference."#;
             }
         };
 
-        let reference = match extract_closing_issue_reference(body) {
+        let reference = match extract_any_issue_reference(body) {
             Some(r) => r,
             None => {
                 debug!(
                     owner = repo_owner,
                     repo = repo_name,
                     pr = pr.number,
-                    "No closing-keyword issue reference found in PR body"
+                    "No issue reference found in PR body; skipping propagation"
                 );
                 return;
             }
