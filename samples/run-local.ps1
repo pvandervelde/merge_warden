@@ -134,6 +134,10 @@ param (
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+# Initialised later; declared here so the finally block is always safe.
+$containerId = $null
+$logJob = $null
+
 # ---------------------------------------------------------------------------
 # Validate required environment variables
 # ---------------------------------------------------------------------------
@@ -256,7 +260,8 @@ $dockerRunArgs = @(
     '-e', 'GITHUB_APP_ID',
     '-e', 'GITHUB_APP_PRIVATE_KEY',
     '-e', 'GITHUB_WEBHOOK_SECRET',
-    '-e', 'MERGE_WARDEN_RECEIVER_MODE=webhook'
+    '-e', 'MERGE_WARDEN_RECEIVER_MODE=webhook',
+    '-e', 'RUST_LOG=merge_warden_core=debug,merge_warden_server=debug,merge_warden_developer_platforms=debug,info'
 )
 
 if ($resolvedAppConfigFile)
@@ -284,7 +289,20 @@ if ($LASTEXITCODE -ne 0 -or -not $containerId)
 $containerId = $containerId.Trim()
 Write-Host "Container ID: $containerId"
 
-# Give the server a moment to either start or crash before polling.
+# Start tailing container logs to a local file in the background.
+# The log goes to <repo-root>/logs/ with a timestamp so multiple runs don't clobber each other.
+$logsDir = Join-Path $repoRoot 'logs'
+New-Item -ItemType Directory -Path $logsDir -Force | Out-Null
+$logFile = Join-Path $logsDir "merge-warden-$(Get-Date -Format 'yyyyMMdd-HHmmss').log"
+
+Write-Host "Streaming container logs to: $logFile"
+Write-Host "  (tail -f '$logFile'  or  docker logs -f $containerId)"
+Write-Host ""
+
+$logJob = Start-Job -ScriptBlock {
+    param($id, $file)
+    docker logs -f $id 2>&1 | ForEach-Object { $_ | Out-File -FilePath $file -Append -Encoding utf8 }
+} -ArgumentList $containerId, $logFile
 Start-Sleep -Seconds 2
 
 # Detect an immediate crash before entering the health-check loop.
@@ -407,5 +425,13 @@ finally
     Write-Host "Stopping container $containerId ..."
     docker stop $containerId | Out-Null
     docker rm $containerId | Out-Null
+
+    if ($logJob)
+    {
+        Stop-Job -Job $logJob -ErrorAction SilentlyContinue
+        Remove-Job -Job $logJob -Force -ErrorAction SilentlyContinue
+    }
+
+    Write-Host "Logs saved to: $logFile"
     Write-Host "Done."
 }

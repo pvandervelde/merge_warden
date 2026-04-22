@@ -20,7 +20,7 @@ anyhow = "1.0"
 async-trait = "0.1"
 chrono = { version = "0.4", features = ["serde"] }
 axum = "0.8.3"
-github-bot-sdk = { git = "https://github.com/pvandervelde/github-bot-sdk", rev = "2c11e228d142ef34e34b3783abb5021d7caaddb0" }
+github-bot-sdk = "0.2.0"
 axum-macros = "0.5.0"
 clap = { version = "4.5", features = ["derive"] }
 hex = "0.4"
