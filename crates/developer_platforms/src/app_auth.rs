@@ -30,6 +30,7 @@
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
+
 use github_bot_sdk::{
     auth::{
         jwt::{JwtGenerator, RS256JwtGenerator},
@@ -214,6 +215,116 @@ impl AppAuthProvider {
             vec![],
         ))
     }
+
+    /// Resolves the GitHub App installation ID for the given repository.
+    ///
+    /// Calls `GET /repos/{owner}/{repo}/installation` with a fresh app JWT and
+    /// returns the numeric installation ID reported by GitHub.
+    ///
+    /// # Arguments
+    ///
+    /// * `owner` - Repository owner (user or organisation)
+    /// * `repo`  - Repository name
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AuthError::TokenExchangeFailed`] when:
+    /// - The HTTP request fails (network error)
+    /// - GitHub returns a non-2xx status code
+    /// - The response JSON is missing the `"id"` field or it is not a `u64`
+    ///
+    /// # Examples
+    ///
+    /// ```rust,no_run
+    /// # async fn example() -> Result<(), Box<dyn std::error::Error>> {
+    /// use merge_warden_developer_platforms::app_auth::AppAuthProvider;
+    ///
+    /// let auth = AppAuthProvider::new(12345, "-----BEGIN RSA PRIVATE KEY-----\n...", "https://api.github.com")?;
+    /// let installation_id = auth.resolve_installation_id("my-org", "my-repo").await?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[instrument(skip(self), fields(owner, repo, app_id = self.app_id.as_u64()))]
+    pub async fn resolve_installation_id(
+        &self,
+        owner: &str,
+        repo: &str,
+    ) -> Result<InstallationId, AuthError> {
+        let jwt = self.generate_app_jwt().await?;
+
+        let url = format!("{}/repos/{}/{}/installation", self.api_url, owner, repo);
+
+        debug!(owner, repo, "Resolving GitHub App installation ID");
+
+        let response = self
+            .http_client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", jwt.token()))
+            .header("Accept", "application/vnd.github+json")
+            .header("User-Agent", "merge-warden")
+            .send()
+            .await
+            .map_err(|e| {
+                error!(
+                    owner,
+                    repo,
+                    error = %e,
+                    "HTTP request to resolve installation ID failed"
+                );
+                AuthError::TokenExchangeFailed {
+                    installation_id: InstallationId::new(0),
+                    message: format!("HTTP request failed: {}", e),
+                }
+            })?;
+
+        let status = response.status();
+        if !status.is_success() {
+            let body = response.text().await.unwrap_or_default();
+            error!(
+                owner,
+                repo,
+                http_status = status.as_u16(),
+                body = body.as_str(),
+                "GitHub API returned non-success status resolving installation ID"
+            );
+            return Err(AuthError::TokenExchangeFailed {
+                installation_id: InstallationId::new(0),
+                message: format!("GitHub API returned HTTP {}: {}", status.as_u16(), body),
+            });
+        }
+
+        let body: serde_json::Value = response.json().await.map_err(|e| {
+            error!(
+                owner,
+                repo,
+                error = %e,
+                "Failed to parse installation response body"
+            );
+            AuthError::TokenExchangeFailed {
+                installation_id: InstallationId::new(0),
+                message: format!("Failed to parse response body: {}", e),
+            }
+        })?;
+
+        let id = body["id"].as_u64().ok_or_else(|| {
+            warn!(
+                owner,
+                repo, "Installation response missing 'id' field or it is not a u64"
+            );
+            AuthError::TokenExchangeFailed {
+                installation_id: InstallationId::new(0),
+                message: "Response JSON missing 'id' field or it is not a u64".to_string(),
+            }
+        })?;
+
+        debug!(
+            owner,
+            repo,
+            installation_id = id,
+            "Resolved GitHub App installation ID"
+        );
+        Ok(InstallationId::new(id))
+    }
 }
 
 #[async_trait]
@@ -308,3 +419,7 @@ impl AuthenticationProvider for AppAuthProvider {
         Ok(vec![])
     }
 }
+
+#[cfg(test)]
+#[path = "app_auth_tests.rs"]
+mod tests;
