@@ -75,9 +75,18 @@ with the following permissions:
 | Permission | Level |
 |---|---|
 | Pull requests | Read & Write |
+| Issues | Read |
 | Contents | Read |
 | Checks | Write |
 | Metadata | Read (required) |
+
+The following **organisation** permission is also required (listed under *Organization permissions*, not *Repository permissions*):
+
+| Organisation Permission | Level |
+|---|---|
+| Projects | Read & Write |
+
+> **Note:** Projects v2 propagation only works for repositories belonging to a **GitHub organisation**. Personal repositories cannot use the Projects v2 GraphQL API with GitHub App tokens, so `sync_project_from_issue` will have no effect when the repository is owned by an individual user.
 
 Subscribe to events: **Pull request**, **Pull request review**.
 

@@ -253,11 +253,19 @@ The GitHub App requires the following repository permissions:
 
 ### Required Permissions
 
+#### Repository permissions
+
 - **Metadata**: Read (basic repository information)
 - **Contents**: Read (access repository files for configuration)
 - **Pull Requests**: Write (add labels, comments, update status)
 - **Issues**: Read (access issue information for work item validation)
 - **Checks**: Write (create check runs for validation status)
+
+#### Organisation permissions
+
+- **Projects**: Read & Write (read Projects v2 linked to issues and add pull requests to those projects)
+
+> **Limitation:** Projects v2 propagation (`sync_project_from_issue`) only works for repositories owned by a **GitHub organisation**. The GitHub API does not permit GitHub App tokens to mutate Projects v2 on personal (user-owned) repositories.
 
 ### Optional Permissions
 

@@ -1703,11 +1703,16 @@ Please update the PR body to include a valid work item reference."#;
         issue_provider: &dyn IssueMetadataProvider,
     ) {
         if metadata.projects.is_empty() {
-            debug!(
+            info!(
                 owner = repo_owner,
                 repo = repo_name,
                 pr = pr.number,
-                "Issue has no linked projects; skipping project propagation"
+                "Issue has no linked projects; skipping project propagation. \
+                If you expect projects to be propagated: (1) verify the GitHub App has \
+                the organisation-level 'Projects: Read & Write' permission (distinct from \
+                the repository-level Projects permission), and (2) note that Projects v2 \
+                propagation is only supported for organisation-owned repositories — \
+                personal repositories cannot be used with this feature."
             );
             return;
         }

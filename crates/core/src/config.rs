@@ -1580,64 +1580,173 @@ pub async fn load_merge_warden_config(
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct ChangeTypeLabelConfig {
     /// Whether change type label detection is enabled
+    #[serde(default = "ChangeTypeLabelConfig::default_enabled")]
     pub enabled: bool,
     /// Mappings from conventional commit types to repository label names
+    #[serde(default)]
     pub conventional_commit_mappings: ConventionalCommitMappings,
     /// Settings for creating fallback labels when none exist
+    #[serde(default)]
     pub fallback_label_settings: FallbackLabelSettings,
     /// Configuration for the label detection strategy
+    #[serde(default)]
     pub detection_strategy: LabelDetectionStrategy,
+}
+
+impl ChangeTypeLabelConfig {
+    fn default_enabled() -> bool {
+        true
+    }
 }
 
 /// Mappings from conventional commit types to possible repository label names
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct ConventionalCommitMappings {
     /// Feature-related mappings
+    #[serde(default = "ConventionalCommitMappings::default_feat")]
     pub feat: Vec<String>,
     /// Bug fix-related mappings
+    #[serde(default = "ConventionalCommitMappings::default_fix")]
     pub fix: Vec<String>,
     /// Documentation-related mappings
+    #[serde(default = "ConventionalCommitMappings::default_docs")]
     pub docs: Vec<String>,
     /// Style-related mappings
+    #[serde(default = "ConventionalCommitMappings::default_style")]
     pub style: Vec<String>,
     /// Refactoring-related mappings
+    #[serde(default = "ConventionalCommitMappings::default_refactor")]
     pub refactor: Vec<String>,
     /// Performance-related mappings
+    #[serde(default = "ConventionalCommitMappings::default_perf")]
     pub perf: Vec<String>,
     /// Test-related mappings
+    #[serde(default = "ConventionalCommitMappings::default_test")]
     pub test: Vec<String>,
     /// Chore-related mappings
+    #[serde(default = "ConventionalCommitMappings::default_chore")]
     pub chore: Vec<String>,
     /// CI-related mappings
+    #[serde(default = "ConventionalCommitMappings::default_ci")]
     pub ci: Vec<String>,
     /// Build-related mappings
+    #[serde(default = "ConventionalCommitMappings::default_build")]
     pub build: Vec<String>,
     /// Revert-related mappings
+    #[serde(default = "ConventionalCommitMappings::default_revert")]
     pub revert: Vec<String>,
+}
+
+impl ConventionalCommitMappings {
+    fn default_feat() -> Vec<String> {
+        vec![
+            "enhancement".to_string(),
+            "feature".to_string(),
+            "new feature".to_string(),
+        ]
+    }
+    fn default_fix() -> Vec<String> {
+        vec!["bug".to_string(), "bugfix".to_string(), "fix".to_string()]
+    }
+    fn default_docs() -> Vec<String> {
+        vec!["documentation".to_string(), "docs".to_string()]
+    }
+    fn default_style() -> Vec<String> {
+        vec!["style".to_string(), "formatting".to_string()]
+    }
+    fn default_refactor() -> Vec<String> {
+        vec![
+            "refactor".to_string(),
+            "refactoring".to_string(),
+            "code quality".to_string(),
+        ]
+    }
+    fn default_perf() -> Vec<String> {
+        vec!["performance".to_string(), "optimization".to_string()]
+    }
+    fn default_test() -> Vec<String> {
+        vec![
+            "test".to_string(),
+            "tests".to_string(),
+            "testing".to_string(),
+        ]
+    }
+    fn default_chore() -> Vec<String> {
+        vec![
+            "chore".to_string(),
+            "maintenance".to_string(),
+            "housekeeping".to_string(),
+        ]
+    }
+    fn default_ci() -> Vec<String> {
+        vec![
+            "ci".to_string(),
+            "continuous integration".to_string(),
+            "build".to_string(),
+        ]
+    }
+    fn default_build() -> Vec<String> {
+        vec!["build".to_string(), "dependencies".to_string()]
+    }
+    fn default_revert() -> Vec<String> {
+        vec!["revert".to_string()]
+    }
 }
 
 /// Settings for creating fallback labels when repository labels are not found
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct FallbackLabelSettings {
     /// Format for creating new label names (e.g., "type: {change_type}")
+    #[serde(default = "FallbackLabelSettings::default_name_format")]
     pub name_format: String,
     /// Color scheme for different conventional commit types
+    #[serde(default = "FallbackLabelSettings::default_color_scheme")]
     pub color_scheme: HashMap<String, String>,
     /// Whether to create fallback labels if none are found
+    #[serde(default = "FallbackLabelSettings::default_create_if_missing")]
     pub create_if_missing: bool,
+}
+
+impl FallbackLabelSettings {
+    fn default_name_format() -> String {
+        "type: {change_type}".to_string()
+    }
+    fn default_create_if_missing() -> bool {
+        true
+    }
+    fn default_color_scheme() -> HashMap<String, String> {
+        FallbackLabelSettings::default().color_scheme
+    }
 }
 
 /// Configuration for the label detection strategy
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct LabelDetectionStrategy {
     /// Enable exact name matching (e.g., "feat", "fix")
+    #[serde(default = "LabelDetectionStrategy::default_true")]
     pub exact_match: bool,
     /// Enable prefix matching (e.g., "type: feat", "kind: fix")
+    #[serde(default = "LabelDetectionStrategy::default_true")]
     pub prefix_match: bool,
     /// Enable description matching (e.g., labels with "(type: feat)" in description)
+    #[serde(default = "LabelDetectionStrategy::default_true")]
     pub description_match: bool,
     /// Common prefixes to check for prefix matching
+    #[serde(default = "LabelDetectionStrategy::default_common_prefixes")]
     pub common_prefixes: Vec<String>,
+}
+
+impl LabelDetectionStrategy {
+    fn default_true() -> bool {
+        true
+    }
+    fn default_common_prefixes() -> Vec<String> {
+        vec![
+            "type:".to_string(),
+            "kind:".to_string(),
+            "category:".to_string(),
+        ]
+    }
 }
 
 impl Default for ChangeTypeLabelConfig {

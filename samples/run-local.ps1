@@ -96,7 +96,9 @@
     1. Create a channel at https://smee.io and copy the URL.
     2. In your GitHub App settings set Webhook URL to that smee URL.
     3. Set a Webhook secret and note the value.
-    4. Set permissions: Pull requests (R/W), Contents (R), Checks (W), Metadata (R).
+    4. Set permissions: Pull requests (R/W), Issues (R), Contents (R), Checks (W), Metadata (R).
+       Also set Organization permissions: Projects (R/W) — required for Projects v2 propagation.
+       Note: Projects v2 propagation only works for organisation-owned repositories, not personal ones.
     5. Subscribe to events: Pull request, Pull request review.
     6. Install the App on your test repository.
 
