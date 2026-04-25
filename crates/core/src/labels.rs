@@ -1560,7 +1560,7 @@ impl LabelDetector {
         let prefix_patterns = vec![
             format!("{}:", commit_type),
             format!("{}-", commit_type),
-            format!("{}_{}", commit_type, ""),
+            format!("{}_", commit_type), // matches "feat_<anything>" labels
             format!("type: {}", commit_type),
             format!("type-{}", commit_type),
             format!("type_{}", commit_type),

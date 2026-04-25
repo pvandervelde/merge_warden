@@ -1376,8 +1376,14 @@ async fn test_get_issue_metadata_with_linked_projects() {
 async fn test_set_pull_request_milestone_success() {
     let server = MockServer::start().await;
 
-    // SDK calls PATCH /repos/{owner}/{repo}/pulls/{number} to set the milestone.
+    // SDK calls PATCH /repos/{owner}/{repo}/issues/{number} (via issues().set_milestone),
+    // then GET /repos/{owner}/{repo}/pulls/{number} to return the updated PR.
     Mock::given(method("PATCH"))
+        .and(path("/repos/owner/repo/issues/42"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(minimal_issue_json(42, true)))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
         .and(path("/repos/owner/repo/pulls/42"))
         .respond_with(ResponseTemplate::new(200).set_body_json(minimal_pr_json(42)))
         .mount(&server)
@@ -1395,7 +1401,13 @@ async fn test_set_pull_request_milestone_success() {
 async fn test_set_pull_request_milestone_clear() {
     let server = MockServer::start().await;
 
+    // SDK calls PATCH /repos/{owner}/{repo}/issues/{number} then GET /pulls/{number}.
     Mock::given(method("PATCH"))
+        .and(path("/repos/owner/repo/issues/42"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(minimal_issue_json(42, false)))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
         .and(path("/repos/owner/repo/pulls/42"))
         .respond_with(ResponseTemplate::new(200).set_body_json(minimal_pr_json(42)))
         .mount(&server)
@@ -1413,8 +1425,9 @@ async fn test_set_pull_request_milestone_clear() {
 async fn test_set_pull_request_milestone_api_error() {
     let server = MockServer::start().await;
 
+    // SDK calls PATCH /repos/{owner}/{repo}/issues/{number}; 404 triggers the error path.
     Mock::given(method("PATCH"))
-        .and(path("/repos/owner/repo/pulls/99"))
+        .and(path("/repos/owner/repo/issues/99"))
         .respond_with(ResponseTemplate::new(404).set_body_json(json!({
             "message": "Not Found"
         })))
@@ -1530,8 +1543,14 @@ async fn test_milestone_propagation_end_to_end_get_then_set() {
         .mount(&server)
         .await;
 
-    // Step 2 mock: PATCH /repos/owner/repo/pulls/10 → success.
+    // Step 2 mock: PATCH /repos/owner/repo/issues/10 → success (SDK calls issues().set_milestone
+    // then re-fetches the PR via GET /pulls/10).
     Mock::given(method("PATCH"))
+        .and(path("/repos/owner/repo/issues/10"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(minimal_issue_json(10, true)))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
         .and(path("/repos/owner/repo/pulls/10"))
         .respond_with(ResponseTemplate::new(200).set_body_json(minimal_pr_json(10)))
         .mount(&server)

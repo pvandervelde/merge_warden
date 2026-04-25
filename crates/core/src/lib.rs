@@ -66,7 +66,7 @@
 //! }
 //! ```
 
-use checks::{extract_any_issue_reference, extract_closing_issue_reference};
+use checks::extract_any_issue_reference;
 use indoc::formatdoc;
 use merge_warden_developer_platforms::models::{Installation, PullRequest, Repository, Review};
 use merge_warden_developer_platforms::{IssueMetadataProvider, PullRequestProvider};
