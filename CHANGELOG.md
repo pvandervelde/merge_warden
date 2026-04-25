@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.1] - 2026-04-25
+
+### <!-- 0 -->⛰️  Features
+
+- Propagate issue metadata for all reference keywords
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- Resolve five runtime bugs in validation, labels, and issue propagation ([#223](https://github.com/pvandervelde/merge_warden/issues/223))
+- Add missing docs to serde defaults and fix pattern_matches escaping
+- Resolve test failures, unused import, and security advisories
+- Correct serde defaults, TOML config, and GitHub App permissions for issue propagation
+- Migrate to github-bot-sdk sub-client API
+- Address five bugs found during testing
+- Restructure release workflow and rename container image ([#218](https://github.com/pvandervelde/merge_warden/issues/218))
+- Replace ls with find in artifact count check
+- Address release workflow security and reliability issues
+- Restructure publish workflow and rename container image
+
+### <!-- 6 -->🧪 Testing
+
+- Add tests covering the five bug fixes
+
+### <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Ignore the logs folder
+- Upgrade to distroless/cc-debian13 and update samples
+
+
+
 ## [0.3.0] - 2026-04-12
 
 ### <!-- 0 -->⛰️  Features
