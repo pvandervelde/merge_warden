@@ -2660,3 +2660,318 @@ async fn test_manage_pr_state_labels_all_none_labels_is_noop() {
         "No operations should occur when all labels are None"
     );
 }
+
+// ── manage_size_labels idempotency tests ─────────────────────────────────────
+
+/// Mock provider that tracks add_labels and remove_label call counts, used for
+/// verifying that manage_size_labels does not make unnecessary API calls.
+struct SizeLabelMockProvider {
+    /// Labels available in the repository (returned by list_available_labels).
+    available_labels: Vec<Label>,
+    /// Labels currently applied to the PR (mutable, reflecting add/remove).
+    applied_labels: Arc<Mutex<Vec<Label>>>,
+    /// Records every batch passed to add_labels.
+    add_calls: Arc<Mutex<Vec<Vec<String>>>>,
+    /// Records each label name passed to remove_label.
+    remove_calls: Arc<Mutex<Vec<String>>>,
+}
+
+impl SizeLabelMockProvider {
+    fn new(available: Vec<Label>, applied: Vec<Label>) -> Self {
+        Self {
+            available_labels: available,
+            applied_labels: Arc::new(Mutex::new(applied)),
+            add_calls: Arc::new(Mutex::new(Vec::new())),
+            remove_calls: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    fn get_applied(&self) -> Vec<Label> {
+        self.applied_labels.lock().unwrap().clone()
+    }
+
+    fn get_add_calls(&self) -> Vec<Vec<String>> {
+        self.add_calls.lock().unwrap().clone()
+    }
+
+    fn get_remove_calls(&self) -> Vec<String> {
+        self.remove_calls.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl PullRequestProvider for SizeLabelMockProvider {
+    async fn get_pull_request(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<PullRequest, merge_warden_developer_platforms::errors::Error> {
+        unimplemented!("Not needed for this test")
+    }
+
+    async fn add_comment(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        _comment: &str,
+    ) -> Result<(), merge_warden_developer_platforms::errors::Error> {
+        unimplemented!("Not needed for this test")
+    }
+
+    async fn delete_comment(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _id: u64,
+    ) -> Result<(), merge_warden_developer_platforms::errors::Error> {
+        unimplemented!("Not needed for this test")
+    }
+
+    async fn list_comments(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<Vec<Comment>, merge_warden_developer_platforms::errors::Error> {
+        unimplemented!("Not needed for this test")
+    }
+
+    async fn list_available_labels(
+        &self,
+        _owner: &str,
+        _repo: &str,
+    ) -> Result<Vec<Label>, merge_warden_developer_platforms::errors::Error> {
+        Ok(self.available_labels.clone())
+    }
+
+    async fn add_labels(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        labels: &[String],
+    ) -> Result<(), merge_warden_developer_platforms::errors::Error> {
+        let label_batch = labels.to_vec();
+        self.add_calls.lock().unwrap().push(label_batch.clone());
+        let mut applied = self.applied_labels.lock().unwrap();
+        for l in &label_batch {
+            applied.push(Label {
+                name: l.clone(),
+                description: None,
+            });
+        }
+        Ok(())
+    }
+
+    async fn remove_label(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        label: &str,
+    ) -> Result<(), merge_warden_developer_platforms::errors::Error> {
+        self.remove_calls.lock().unwrap().push(label.to_string());
+        let mut applied = self.applied_labels.lock().unwrap();
+        applied.retain(|l| l.name != label);
+        Ok(())
+    }
+
+    async fn list_applied_labels(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<Vec<Label>, merge_warden_developer_platforms::errors::Error> {
+        Ok(self.applied_labels.lock().unwrap().clone())
+    }
+
+    async fn update_pr_check_status(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        _conclusion: &str,
+        _title: &str,
+        _summary: &str,
+        _text: &str,
+    ) -> Result<(), merge_warden_developer_platforms::errors::Error> {
+        unimplemented!("Not needed for this test")
+    }
+
+    async fn list_pr_reviews(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<Vec<Review>, merge_warden_developer_platforms::errors::Error> {
+        unimplemented!("Not needed for this test")
+    }
+
+    async fn get_pull_request_files(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<
+        Vec<merge_warden_developer_platforms::models::PullRequestFile>,
+        merge_warden_developer_platforms::errors::Error,
+    > {
+        unimplemented!("Not needed for this test")
+    }
+}
+
+/// Helper: build a full set of size/* repository labels for discovery.
+fn standard_size_repo_labels() -> Vec<Label> {
+    vec![
+        make_label("size/XS"),
+        make_label("size/S"),
+        make_label("size/M"),
+        make_label("size/L"),
+        make_label("size/XL"),
+        make_label("size/XXL"),
+    ]
+}
+
+#[tokio::test]
+async fn test_manage_size_labels_skips_api_calls_when_correct_label_already_applied() {
+    // When the PR already carries the exact size label that would be applied,
+    // manage_size_labels must return immediately without calling add_labels or
+    // remove_label to avoid noise on the PR timeline.
+    use crate::labels::manage_size_labels;
+    use crate::size::{PrSizeCategory, PrSizeInfo, SizeThresholds};
+
+    // PR already has "size/S" applied; S category matches 25 changed lines.
+    let provider =
+        SizeLabelMockProvider::new(standard_size_repo_labels(), vec![make_label("size/S")]);
+
+    let size_info = PrSizeInfo::new(
+        vec![merge_warden_developer_platforms::models::PullRequestFile {
+            filename: "src/lib.rs".to_string(),
+            additions: 15,
+            deletions: 10,
+            changes: 25,
+            status: "modified".to_string(),
+        }],
+        vec![],
+        &SizeThresholds::default(),
+    );
+    assert_eq!(size_info.size_category, PrSizeCategory::S);
+
+    let result = manage_size_labels(&provider, "owner", "repo", 1, &size_info)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result.as_deref(),
+        Some("size/S"),
+        "Expected the existing label name to be returned"
+    );
+    assert!(
+        provider.get_add_calls().is_empty(),
+        "add_labels must not be called when the correct label is already applied"
+    );
+    assert!(
+        provider.get_remove_calls().is_empty(),
+        "remove_label must not be called when the correct label is already applied"
+    );
+}
+
+#[tokio::test]
+async fn test_manage_size_labels_removes_stale_and_adds_new_when_category_changes() {
+    // When the PR has a stale size label (wrong category), the old label must be
+    // removed and the new one added.
+    use crate::labels::manage_size_labels;
+    use crate::size::{PrSizeCategory, PrSizeInfo, SizeThresholds};
+
+    // PR currently has "size/S" but the new size is M (75 lines).
+    let provider =
+        SizeLabelMockProvider::new(standard_size_repo_labels(), vec![make_label("size/S")]);
+
+    let size_info = PrSizeInfo::new(
+        vec![merge_warden_developer_platforms::models::PullRequestFile {
+            filename: "src/lib.rs".to_string(),
+            additions: 50,
+            deletions: 25,
+            changes: 75,
+            status: "modified".to_string(),
+        }],
+        vec![],
+        &SizeThresholds::default(),
+    );
+    assert_eq!(size_info.size_category, PrSizeCategory::M);
+
+    let result = manage_size_labels(&provider, "owner", "repo", 1, &size_info)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result.as_deref(),
+        Some("size/M"),
+        "Expected the new size/M label to be returned"
+    );
+    assert_eq!(
+        provider.get_remove_calls(),
+        vec!["size/S"],
+        "Stale size/S label must be removed"
+    );
+    assert!(
+        provider
+            .get_add_calls()
+            .iter()
+            .any(|batch| batch.contains(&"size/M".to_string())),
+        "New size/M label must be added"
+    );
+}
+
+#[tokio::test]
+async fn test_manage_size_labels_removes_all_stale_and_adds_new_when_multiple_size_labels_present()
+{
+    // If the PR somehow accumulated multiple size labels, all stale ones must be
+    // removed before the correct one is applied.
+    use crate::labels::manage_size_labels;
+    use crate::size::{PrSizeCategory, PrSizeInfo, SizeThresholds};
+
+    // PR has both "size/XS" and "size/S" applied; new category is M.
+    let provider = SizeLabelMockProvider::new(
+        standard_size_repo_labels(),
+        vec![make_label("size/XS"), make_label("size/S")],
+    );
+
+    let size_info = PrSizeInfo::new(
+        vec![merge_warden_developer_platforms::models::PullRequestFile {
+            filename: "src/lib.rs".to_string(),
+            additions: 60,
+            deletions: 40,
+            changes: 100,
+            status: "modified".to_string(),
+        }],
+        vec![],
+        &SizeThresholds::default(),
+    );
+    assert_eq!(size_info.size_category, PrSizeCategory::M);
+
+    manage_size_labels(&provider, "owner", "repo", 1, &size_info)
+        .await
+        .unwrap();
+
+    let removals = provider.get_remove_calls();
+    assert!(
+        removals.contains(&"size/XS".to_string()),
+        "size/XS must be removed; got: {:?}",
+        removals
+    );
+    assert!(
+        removals.contains(&"size/S".to_string()),
+        "size/S must be removed; got: {:?}",
+        removals
+    );
+    assert!(
+        provider
+            .get_add_calls()
+            .iter()
+            .any(|batch| batch.contains(&"size/M".to_string())),
+        "size/M must be added"
+    );
+}

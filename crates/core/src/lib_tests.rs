@@ -4,8 +4,8 @@ use crate::{
         BypassRule, BypassRules, ChangeTypeLabelConfig, ConventionalCommitMappings,
         CurrentPullRequestValidationConfiguration, FallbackLabelSettings, IssuePropagationConfig,
         LabelDetectionStrategy, WipCheckConfig, CONVENTIONAL_COMMIT_REGEX, MISSING_WORK_ITEM_LABEL,
-        TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL, WIP_COMMENT_MARKER, WORK_ITEM_COMMENT_MARKER,
-        WORK_ITEM_REGEX,
+        SIZE_COMMENT_MARKER, TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL, WIP_COMMENT_MARKER,
+        WORK_ITEM_COMMENT_MARKER, WORK_ITEM_REGEX,
     },
     validation_result::{BypassRuleType, ValidationResult},
     MergeWarden,
@@ -18,7 +18,9 @@ use std::{
 use tokio::test;
 use tracing::info;
 
-use merge_warden_developer_platforms::models::{Comment, Label, PullRequest, Review};
+use merge_warden_developer_platforms::models::{
+    Comment, Label, PullRequest, PullRequestFile, Review,
+};
 use merge_warden_developer_platforms::PullRequestProvider;
 use merge_warden_developer_platforms::{errors::Error, models::User};
 
@@ -2746,8 +2748,9 @@ async fn test_propagate_issue_metadata_empty_body_skips_propagation() {
 }
 
 #[tokio::test]
-async fn test_propagate_issue_metadata_no_closing_keyword_skips_propagation() {
-    // "References #10" is informational only — not a closing keyword.
+async fn test_propagate_issue_metadata_references_keyword_triggers_propagation() {
+    // "References #10" is an informational keyword but should still trigger
+    // milestone/project propagation — an issue can require multiple PRs.
     let warden = warden_with_issue_propagation(true, false);
     let issue_provider = MockIssueProvider::new().with_metadata(IssueMetadata {
         milestone: Some(IssueMilestone {
@@ -2762,7 +2765,40 @@ async fn test_propagate_issue_metadata_no_closing_keyword_skips_propagation() {
         .propagate_issue_metadata("owner", "repo", &pr, &issue_provider)
         .await;
 
-    assert!(issue_provider.milestone_calls().is_empty());
+    // Milestone should be set because 'references' now triggers propagation.
+    let calls = issue_provider.milestone_calls();
+    assert_eq!(
+        calls.len(),
+        1,
+        "Expected milestone to be set via 'references' keyword"
+    );
+    assert_eq!(calls[0], (42, Some(7)));
+}
+
+#[tokio::test]
+async fn test_propagate_issue_metadata_relates_to_keyword_triggers_propagation() {
+    // "Relates to #10" should also trigger propagation.
+    let warden = warden_with_issue_propagation(true, false);
+    let issue_provider = MockIssueProvider::new().with_metadata(IssueMetadata {
+        milestone: Some(IssueMilestone {
+            number: 7,
+            title: "v1.0".to_string(),
+        }),
+        projects: vec![],
+    });
+
+    let pr = make_pr(Some("This PR relates to #10"), None);
+    warden
+        .propagate_issue_metadata("owner", "repo", &pr, &issue_provider)
+        .await;
+
+    let calls = issue_provider.milestone_calls();
+    assert_eq!(
+        calls.len(),
+        1,
+        "Expected milestone to be set via 'relates to' keyword"
+    );
+    assert_eq!(calls[0], (42, Some(7)));
 }
 
 #[tokio::test]
@@ -3506,5 +3542,420 @@ async fn test_identical_title_comment_is_not_reposted() {
     assert_eq!(
         comment_count_after_second_run, 1,
         "second run with identical title should not create a duplicate comment"
+    );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Draft PR processing tests
+//
+// Draft PRs must run full validation so authors see issues early, but the
+// check conclusion must be "neutral" (non-blocking) rather than "failure" to
+// avoid hard-blocking the PR while it is actively being worked on.
+// ──────────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn test_process_pull_request_draft_with_invalid_title_yields_neutral_check_conclusion() {
+    // A draft PR with an invalid title must still be validated, but the
+    // resulting check status must use "neutral" (not "failure") so the PR
+    // is never hard-blocked while in draft mode.
+    let mut provider = DynamicMockGitProvider::new();
+    provider.add_pull_request(PullRequest {
+        number: 1,
+        title: "invalid title format".to_string(), // does not match conventional commit
+        draft: true,
+        body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    });
+
+    let warden = MergeWarden::new(provider);
+    let result = warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    assert!(
+        !result.title_valid,
+        "Validation must still run for draft PRs; title should be invalid"
+    );
+
+    let updates = warden.provider.get_check_status_updates();
+    assert_eq!(updates.len(), 1, "Expected one check status update");
+    assert_eq!(
+        updates[0].conclusion, "neutral",
+        "Draft PRs with failures must use 'neutral' conclusion, got: {}",
+        updates[0].conclusion
+    );
+    assert!(
+        updates[0].summary.contains("Draft mode"),
+        "Check summary should mention draft mode, got: {}",
+        updates[0].summary
+    );
+}
+
+#[tokio::test]
+async fn test_process_pull_request_draft_with_valid_pr_yields_success_check_conclusion() {
+    // A draft PR that passes all validations must still produce "success",
+    // not "neutral" — "neutral" is only for draft + failures.
+    let mut provider = DynamicMockGitProvider::new();
+    provider.add_pull_request(PullRequest {
+        number: 2,
+        title: "feat: add login".to_string(),
+        draft: true,
+        body: Some("Fixes #456".to_string()),
+        author: Some(User {
+            id: 2,
+            login: "dev2".to_string(),
+        }),
+        milestone_number: None,
+    });
+
+    let warden = MergeWarden::new(provider);
+    let result = warden
+        .process_pull_request("owner", "repo", 2)
+        .await
+        .unwrap();
+
+    assert!(result.title_valid, "Title should be valid");
+    assert!(
+        result.work_item_referenced,
+        "Work item should be referenced"
+    );
+
+    let updates = warden.provider.get_check_status_updates();
+    assert_eq!(updates.len(), 1, "Expected one check status update");
+    assert_eq!(
+        updates[0].conclusion, "success",
+        "Draft PR that passes all validations should yield 'success', got: {}",
+        updates[0].conclusion
+    );
+}
+
+// ──────────────────────────────────────────────────────────────────────────────
+// Oversized PR comment deduplication tests
+//
+// When a PR is oversized and already has a size comment with the same body,
+// communicate_pr_size_status must not post a duplicate. When the PR shrinks
+// below the oversized threshold the existing size comment must be removed.
+// ──────────────────────────────────────────────────────────────────────────────
+
+/// Mock provider for size-comment tests: supports configurable PR files and
+/// tracks comments and check status updates.
+#[derive(Debug)]
+struct SizeMockGitProvider {
+    pull_request: PullRequest,
+    pr_files: Arc<Mutex<Vec<PullRequestFile>>>,
+    labels: Arc<Mutex<Vec<Label>>>,
+    comments: Arc<Mutex<Vec<Comment>>>,
+    check_status_updates: Arc<Mutex<Vec<CheckStatusUpdate>>>,
+}
+
+impl SizeMockGitProvider {
+    fn new(pull_request: PullRequest, files: Vec<PullRequestFile>) -> Self {
+        Self {
+            pull_request,
+            pr_files: Arc::new(Mutex::new(files)),
+            labels: Arc::new(Mutex::new(Vec::new())),
+            comments: Arc::new(Mutex::new(Vec::new())),
+            check_status_updates: Arc::new(Mutex::new(Vec::new())),
+        }
+    }
+
+    fn set_pr_files(&self, files: Vec<PullRequestFile>) {
+        *self.pr_files.lock().unwrap() = files;
+    }
+
+    fn get_comments(&self) -> Vec<Comment> {
+        self.comments.lock().unwrap().clone()
+    }
+
+    #[allow(dead_code)]
+    fn get_check_status_updates(&self) -> Vec<CheckStatusUpdate> {
+        self.check_status_updates.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl merge_warden_developer_platforms::PullRequestProvider for SizeMockGitProvider {
+    async fn get_pull_request(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<PullRequest, merge_warden_developer_platforms::errors::Error> {
+        Ok(self.pull_request.clone())
+    }
+
+    async fn add_comment(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        comment: &str,
+    ) -> Result<(), merge_warden_developer_platforms::errors::Error> {
+        let mut comments = self.comments.lock().unwrap();
+        let id = comments.len() as u64 + 1;
+        comments.push(Comment {
+            id,
+            body: comment.to_string(),
+            user: User {
+                id: 10,
+                login: "bot".to_string(),
+            },
+        });
+        Ok(())
+    }
+
+    async fn delete_comment(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        comment_id: u64,
+    ) -> Result<(), merge_warden_developer_platforms::errors::Error> {
+        self.comments.lock().unwrap().retain(|c| c.id != comment_id);
+        Ok(())
+    }
+
+    async fn list_comments(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<Vec<Comment>, merge_warden_developer_platforms::errors::Error> {
+        Ok(self.comments.lock().unwrap().clone())
+    }
+
+    async fn add_labels(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        labels: &[String],
+    ) -> Result<(), merge_warden_developer_platforms::errors::Error> {
+        let mut current = self.labels.lock().unwrap();
+        for l in labels {
+            current.push(Label {
+                name: l.clone(),
+                description: None,
+            });
+        }
+        Ok(())
+    }
+
+    async fn remove_label(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        label: &str,
+    ) -> Result<(), merge_warden_developer_platforms::errors::Error> {
+        self.labels.lock().unwrap().retain(|l| l.name != label);
+        Ok(())
+    }
+
+    async fn list_applied_labels(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<Vec<Label>, merge_warden_developer_platforms::errors::Error> {
+        Ok(self.labels.lock().unwrap().clone())
+    }
+
+    async fn list_available_labels(
+        &self,
+        _owner: &str,
+        _repo: &str,
+    ) -> Result<Vec<Label>, merge_warden_developer_platforms::errors::Error> {
+        Ok(Vec::new())
+    }
+
+    async fn update_pr_check_status(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr_number: u64,
+        conclusion: &str,
+        output_title: &str,
+        output_summary: &str,
+        output_text: &str,
+    ) -> Result<(), merge_warden_developer_platforms::errors::Error> {
+        let mut updates = self.check_status_updates.lock().unwrap();
+        updates.push(CheckStatusUpdate {
+            repo_owner: repo_owner.to_string(),
+            repo_name: repo_name.to_string(),
+            pr_number,
+            conclusion: conclusion.to_string(),
+            title: output_title.to_string(),
+            summary: output_summary.to_string(),
+            text: output_text.to_string(),
+        });
+        Ok(())
+    }
+
+    async fn get_pull_request_files(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<Vec<PullRequestFile>, merge_warden_developer_platforms::errors::Error> {
+        Ok(self.pr_files.lock().unwrap().clone())
+    }
+
+    async fn list_pr_reviews(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<
+        Vec<merge_warden_developer_platforms::models::Review>,
+        merge_warden_developer_platforms::errors::Error,
+    > {
+        Ok(vec![])
+    }
+}
+
+/// Build a `PullRequestFile` that contributes the given number of changed lines.
+fn make_pr_file(filename: &str, changes: u32) -> PullRequestFile {
+    PullRequestFile {
+        filename: filename.to_string(),
+        additions: changes,
+        deletions: 0,
+        changes,
+        status: "modified".to_string(),
+    }
+}
+
+/// Build an oversized-PR config (size check enabled, comment enabled, not hard-failing).
+fn size_check_config() -> CurrentPullRequestValidationConfiguration {
+    CurrentPullRequestValidationConfiguration {
+        pr_size_check: crate::config::PrSizeCheckConfig {
+            enabled: true,
+            add_comment: true,
+            fail_on_oversized: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn test_identical_size_comment_is_not_reposted_when_pr_remains_oversized() {
+    // When a PR is oversized and processed twice without any change, the second
+    // run must not add a duplicate size comment (idempotent behaviour matching
+    // the title/work-item comment deduplication).
+    let pr = PullRequest {
+        number: 1,
+        title: "feat: add new feature".to_string(),
+        draft: false,
+        body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+
+    // 600 changes → XXL (oversized with default thresholds where XL threshold = 500).
+    let provider = SizeMockGitProvider::new(pr, vec![make_pr_file("src/main.rs", 600)]);
+
+    let warden = MergeWarden::with_config(provider, size_check_config());
+
+    // First run — size comment should be created.
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let count_after_first = warden
+        .provider
+        .get_comments()
+        .iter()
+        .filter(|c| c.body.contains(SIZE_COMMENT_MARKER))
+        .count();
+    assert_eq!(
+        count_after_first, 1,
+        "first run should produce exactly one size comment"
+    );
+
+    // Second run with the same oversized PR — comment body is identical, must not duplicate.
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let count_after_second = warden
+        .provider
+        .get_comments()
+        .iter()
+        .filter(|c| c.body.contains(SIZE_COMMENT_MARKER))
+        .count();
+    assert_eq!(
+        count_after_second, 1,
+        "second run with identical oversized PR must not create a duplicate size comment"
+    );
+}
+
+#[tokio::test]
+async fn test_size_comment_is_removed_when_pr_becomes_non_oversized() {
+    // When a previously oversized PR is later reduced below the XXL threshold,
+    // the existing size comment must be cleaned up automatically.
+    let pr = PullRequest {
+        number: 1,
+        title: "feat: add feature".to_string(),
+        draft: false,
+        body: Some("Fixes #999".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+
+    // Start oversized: 600 changes.
+    let provider = SizeMockGitProvider::new(pr, vec![make_pr_file("src/main.rs", 600)]);
+
+    let warden = MergeWarden::with_config(provider, size_check_config());
+
+    // First run — oversized, comment added.
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let count_after_first = warden
+        .provider
+        .get_comments()
+        .iter()
+        .filter(|c| c.body.contains(SIZE_COMMENT_MARKER))
+        .count();
+    assert_eq!(
+        count_after_first, 1,
+        "first run should produce a size comment"
+    );
+
+    // Author reduces the PR: 5 changes → XS (well below oversized threshold).
+    warden
+        .provider
+        .set_pr_files(vec![make_pr_file("src/main.rs", 5)]);
+
+    // Second run — PR is no longer oversized; comment must be removed.
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let count_after_second = warden
+        .provider
+        .get_comments()
+        .iter()
+        .filter(|c| c.body.contains(SIZE_COMMENT_MARKER))
+        .count();
+    assert_eq!(
+        count_after_second, 0,
+        "size comment must be removed when PR is no longer oversized"
     );
 }

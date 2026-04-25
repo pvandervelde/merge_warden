@@ -66,7 +66,7 @@
 //! }
 //! ```
 
-use checks::extract_closing_issue_reference;
+use checks::extract_any_issue_reference;
 use indoc::formatdoc;
 use merge_warden_developer_platforms::models::{Installation, PullRequest, Repository, Review};
 use merge_warden_developer_platforms::{IssueMetadataProvider, PullRequestProvider};
@@ -74,6 +74,7 @@ use merge_warden_developer_platforms::{IssueMetadataProvider, PullRequestProvide
 pub mod checks;
 pub mod config;
 use config::CurrentPullRequestValidationConfiguration;
+use config::SIZE_COMMENT_MARKER;
 use config::TITLE_COMMENT_MARKER;
 use config::WIP_COMMENT_MARKER;
 use config::WORK_ITEM_COMMENT_MARKER;
@@ -495,7 +496,7 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
 
             "⛔ **WIP Detected**: This pull request is marked as Work In Progress and cannot be merged. Remove all WIP markers from the title or description to proceed.".to_string()
         } else {
-            // Remove WIP comment if present
+            // Remove ALL WIP comments (no break — clean up any duplicates too).
             let comments = self
                 .provider
                 .list_comments(repo_owner, repo_name, pr.number)
@@ -526,7 +527,6 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
                             "Failed to remove WIP blocking comment from pull request"
                         );
                     }
-                    break;
                 }
             }
 
@@ -647,12 +647,15 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
                 .await)
                 .unwrap_or_default();
 
-            // Find any existing comment with TITLE_COMMENT_MARKER (capture id + body so we
-            // can replace it when the diagnosis changes between two invalid push events).
-            let existing_comment = comments
+            // Collect ALL existing bot comments with TITLE_COMMENT_MARKER so we can
+            // enforce the invariant: at most one such comment exists at any time.
+            // Using find() (first-only) would leave any extra copies behind; using
+            // filter() here means we can delete every stale instance in one pass.
+            let existing_title_comments: Vec<(u64, String)> = comments
                 .iter()
-                .find(|c| c.body.contains(TITLE_COMMENT_MARKER))
-                .map(|c| (c.id, c.body.clone()));
+                .filter(|c| c.body.contains(TITLE_COMMENT_MARKER))
+                .map(|c| (c.id, c.body.clone()))
+                .collect();
 
             // Add comment with diagnosis and format reminder
             let format_reminder = "\
@@ -690,51 +693,58 @@ Please update the PR title to match the conventional commit message guidelines."
 
             // Post or replace the comment:
             // - No prior comment → add new one.
-            // - Prior comment with different body → delete stale comment then add the updated
-            //   one so the author receives a fresh notification when the diagnosis changes.
-            // - Prior comment with identical body → skip (idempotent, avoids notification spam).
-            let should_post = match &existing_comment {
-                None => true,
-                Some((_, existing_body)) => existing_body != &comment,
-            };
+            // - Exactly one prior comment with identical body → skip (idempotent).
+            // - Any other situation (different body, or multiple copies) → delete ALL
+            //   existing copies then post one fresh comment.
+            let already_up_to_date =
+                existing_title_comments.len() == 1 && existing_title_comments[0].1 == comment;
 
-            if should_post {
-                if let Some((existing_id, _)) = existing_comment {
-                    let del_result = self
+            if !already_up_to_date {
+                // Delete every stale copy. Proceed with posting only when all deletes
+                // succeed; if any fails we skip the new post to avoid accumulating more
+                // duplicate comments.
+                let mut all_deleted = true;
+                for (existing_id, _) in &existing_title_comments {
+                    if self
                         .provider
-                        .delete_comment(repo_owner, repo_name, existing_id)
-                        .await;
-                    if del_result.is_err() {
+                        .delete_comment(repo_owner, repo_name, *existing_id)
+                        .await
+                        .is_err()
+                    {
                         warn!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
-                            "Failed to delete stale title validation comment before posting updated one."
+                            comment_id = existing_id,
+                            "Failed to delete stale title validation comment; skipping re-post to prevent duplicate."
                         );
+                        all_deleted = false;
                     }
                 }
 
-                let result = self
-                    .provider
-                    .add_comment(repo_owner, repo_name, pr.number, &comment)
-                    .await;
+                if all_deleted {
+                    let result = self
+                        .provider
+                        .add_comment(repo_owner, repo_name, pr.number, &comment)
+                        .await;
 
-                if result.is_ok() {
-                    info!(
-                        repository_owner = repo_owner,
-                        repository = repo_name,
-                        pull_request = pr.number,
-                        "The pull request title is invalid. Added a comment to indicate the issue."
-                    );
-                } else {
-                    let e = result.unwrap_err();
-                    warn!(
-                        repository_owner = repo_owner,
-                        repository = repo_name,
-                        pull_request = pr.number,
-                        error = e.to_string(),
-                        "The pull request title is invalid. Failed to add a comment to indicate the issue."
-                    );
+                    if result.is_ok() {
+                        info!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr.number,
+                            "The pull request title is invalid. Added a comment to indicate the issue."
+                        );
+                    } else {
+                        let e = result.unwrap_err();
+                        warn!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr.number,
+                            error = e.to_string(),
+                            "The pull request title is invalid. Failed to add a comment to indicate the issue."
+                        );
+                    }
                 }
             }
 
@@ -787,7 +797,9 @@ Please update the PR title to match the conventional commit message guidelines."
                 }
             }
 
-            // Find and remove any existing invalid title comments
+            // Find and remove ALL existing invalid title comments.
+            // Iterating the full list (no break) ensures duplicates accumulated from
+            // prior bug runs are fully cleaned up, not just the first copy.
             let comments = (self
                 .provider
                 .list_comments(repo_owner, repo_name, pr.number)
@@ -818,7 +830,6 @@ Please update the PR title to match the conventional commit message guidelines."
                             "Failed to remove existing title validation comment."
                         );
                     }
-                    break;
                 }
             }
 
@@ -994,13 +1005,13 @@ Please update the PR title to match the conventional commit message guidelines."
                 .await)
                 .unwrap_or_default();
 
-            let mut has_comment = false;
-            for comment in comments {
-                if comment.body.contains(WORK_ITEM_COMMENT_MARKER) {
-                    has_comment = true;
-                    break;
-                }
-            }
+            // Collect ALL existing work item comments for the same reason as the title
+            // comment case: enforce at-most-one invariant.
+            let existing_work_item_comments: Vec<(u64, String)> = comments
+                .iter()
+                .filter(|c| c.body.contains(WORK_ITEM_COMMENT_MARKER))
+                .map(|c| (c.id, c.body.clone()))
+                .collect();
 
             let comment_text = r#"
 The pull request body needs improvement:
@@ -1022,30 +1033,54 @@ Please update the PR body to include a valid work item reference."#;
                 prefix = WORK_ITEM_COMMENT_MARKER,
                 text = comment_text,
             );
-            if !has_comment {
-                // Add comment with suggestions
 
-                let result = self
-                    .provider
-                    .add_comment(repo_owner, repo_name, pr.number, &comment)
-                    .await;
+            // Same logic as title: skip only when exactly one identical comment exists.
+            let already_up_to_date = existing_work_item_comments.len() == 1
+                && existing_work_item_comments[0].1 == comment;
 
-                if result.is_ok() {
-                    info!(
-                        repository_owner = repo_owner,
-                        repository = repo_name,
-                        pull_request = pr.number,
-                        "The pull request does not have a work item reference. Added a comment to indicate the issue."
-                    );
-                } else {
-                    let e = result.unwrap_err();
-                    warn!(
-                        repository_owner = repo_owner,
-                        repository = repo_name,
-                        pull_request = pr.number,
-                        error = e.to_string(),
-                        "The pull request does not have a work item reference. Failed to add a comment to indicate the issue."
-                    );
+            if !already_up_to_date {
+                let mut all_deleted = true;
+                for (existing_id, _) in &existing_work_item_comments {
+                    if self
+                        .provider
+                        .delete_comment(repo_owner, repo_name, *existing_id)
+                        .await
+                        .is_err()
+                    {
+                        warn!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr.number,
+                            comment_id = existing_id,
+                            "Failed to delete stale work item validation comment; skipping re-post to prevent duplicate."
+                        );
+                        all_deleted = false;
+                    }
+                }
+
+                if all_deleted {
+                    let result = self
+                        .provider
+                        .add_comment(repo_owner, repo_name, pr.number, &comment)
+                        .await;
+
+                    if result.is_ok() {
+                        info!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr.number,
+                            "The pull request does not have a work item reference. Added a comment to indicate the issue."
+                        );
+                    } else {
+                        let e = result.unwrap_err();
+                        warn!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr.number,
+                            error = e.to_string(),
+                            "The pull request does not have a work item reference. Failed to add a comment to indicate the issue."
+                        );
+                    }
                 }
             }
 
@@ -1099,7 +1134,7 @@ Please update the PR body to include a valid work item reference."#;
                 }
             }
 
-            // Find and remove any existing missing work item comments
+            // Find and remove ALL existing work item comments (no break).
             let comments = (self
                 .provider
                 .list_comments(repo_owner, repo_name, pr.number)
@@ -1130,7 +1165,6 @@ Please update the PR body to include a valid work item reference."#;
                             "Failed to remove existing work item validation comment."
                         );
                     }
-                    break;
                 }
             }
 
@@ -1255,31 +1289,100 @@ Please update the PR body to include a valid work item reference."#;
             _ => {}
         }
 
-        // Add comment for oversized PRs if configured
-        if self.config.pr_size_check.add_comment && size_info.is_oversized() {
-            let comment = labels::generate_oversized_pr_comment(&size_info);
+        // Add comment for oversized PRs if configured, with deduplication to avoid
+        // repeating the same comment on each PR update.
+        if self.config.pr_size_check.add_comment {
+            let existing_size_comments: Vec<(u64, String)> = {
+                let comments = self
+                    .provider
+                    .list_comments(repo_owner, repo_name, pr_number)
+                    .await
+                    .unwrap_or_default();
+                comments
+                    .iter()
+                    .filter(|c| c.body.contains(SIZE_COMMENT_MARKER))
+                    .map(|c| (c.id, c.body.clone()))
+                    .collect()
+            };
 
-            match self
-                .provider
-                .add_comment(repo_owner, repo_name, pr_number, &comment)
-                .await
-            {
-                Ok(_) => {
-                    info!(
-                        repository_owner = repo_owner,
-                        repository = repo_name,
-                        pull_request = pr_number,
-                        "Added oversized PR comment"
-                    );
+            if size_info.is_oversized() {
+                let comment_body = labels::generate_oversized_pr_comment(&size_info);
+                let comment = format!("{}{}", SIZE_COMMENT_MARKER, comment_body);
+
+                let already_up_to_date =
+                    existing_size_comments.len() == 1 && existing_size_comments[0].1 == comment;
+
+                if !already_up_to_date {
+                    // Delete stale copies then post a fresh one.
+                    let mut all_deleted = true;
+                    for (existing_id, _) in &existing_size_comments {
+                        if self
+                            .provider
+                            .delete_comment(repo_owner, repo_name, *existing_id)
+                            .await
+                            .is_err()
+                        {
+                            warn!(
+                                repository_owner = repo_owner,
+                                repository = repo_name,
+                                pull_request = pr_number,
+                                comment_id = existing_id,
+                                "Failed to delete stale size comment; skipping re-post"
+                            );
+                            all_deleted = false;
+                        }
+                    }
+
+                    if all_deleted {
+                        match self
+                            .provider
+                            .add_comment(repo_owner, repo_name, pr_number, &comment)
+                            .await
+                        {
+                            Ok(_) => {
+                                info!(
+                                    repository_owner = repo_owner,
+                                    repository = repo_name,
+                                    pull_request = pr_number,
+                                    "Added oversized PR comment"
+                                );
+                            }
+                            Err(e) => {
+                                warn!(
+                                    repository_owner = repo_owner,
+                                    repository = repo_name,
+                                    pull_request = pr_number,
+                                    error = e.to_string(),
+                                    "Failed to add oversized PR comment"
+                                );
+                            }
+                        }
+                    }
                 }
-                Err(e) => {
-                    warn!(
-                        repository_owner = repo_owner,
-                        repository = repo_name,
-                        pull_request = pr_number,
-                        error = e.to_string(),
-                        "Failed to add oversized PR comment"
-                    );
+            } else {
+                // PR is no longer oversized — remove any existing size comments.
+                for (existing_id, _) in &existing_size_comments {
+                    if let Err(e) = self
+                        .provider
+                        .delete_comment(repo_owner, repo_name, *existing_id)
+                        .await
+                    {
+                        warn!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr_number,
+                            comment_id = existing_id,
+                            error = e.to_string(),
+                            "Failed to remove stale oversized PR comment"
+                        );
+                    } else {
+                        info!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr_number,
+                            "Removed stale oversized PR comment"
+                        );
+                    }
                 }
             }
         }
@@ -1446,14 +1549,14 @@ Please update the PR body to include a valid work item reference."#;
             }
         };
 
-        let reference = match extract_closing_issue_reference(body) {
+        let reference = match extract_any_issue_reference(body) {
             Some(r) => r,
             None => {
                 debug!(
                     owner = repo_owner,
                     repo = repo_name,
                     pr = pr.number,
-                    "No closing-keyword issue reference found in PR body"
+                    "No issue reference found in PR body; skipping propagation"
                 );
                 return;
             }
@@ -1600,11 +1703,16 @@ Please update the PR body to include a valid work item reference."#;
         issue_provider: &dyn IssueMetadataProvider,
     ) {
         if metadata.projects.is_empty() {
-            debug!(
+            info!(
                 owner = repo_owner,
                 repo = repo_name,
                 pr = pr.number,
-                "Issue has no linked projects; skipping project propagation"
+                "Issue has no linked projects; skipping project propagation. \
+                If you expect projects to be propagated: (1) verify the GitHub App has \
+                the organisation-level 'Projects: Read & Write' permission (distinct from \
+                the repository-level Projects permission), and (2) note that Projects v2 \
+                propagation is only supported for organisation-owned repositories — \
+                personal repositories cannot be used with this feature."
             );
             return;
         }
@@ -1820,42 +1928,16 @@ Please update the PR body to include a valid work item reference."#;
         self.communicate_pr_state_labels(repo_owner, repo_name, &pr)
             .await;
 
-        // If the pull request is a draft then we don't review it initially. We wait until it is ready for review
+        // If the pull request is a draft then we still run validation so developers can
+        // correct title and description issues before they come out of draft mode.
+        // The check status is set to "neutral" (non-blocking) when validation fails in
+        // draft mode, so the PR is never hard-blocked while actively being worked on.
         let check_title = "Merge Warden";
         if pr.draft {
-            info!(message = "Pull request is in draft mode. Will not review pull request until it is marked as ready for review.");
-
-            self.provider
-                .update_pr_check_status(
-                    repo_owner,
-                    repo_name,
-                    pr_number,
-                    "skipped",
-                    check_title,
-                    "Pull request is in draft mode. Will not review pull request until it is marked as ready for review.",
-                    "",
-                )
-                .await
-                .map_err(|e| {
-                    error!(
-                        repository_owner = repo_owner,
-                        repository = repo_name,
-                        pull_request = pr_number,
-                        error = e.to_string(),
-                        "Failed to add or update GitHub check run"
-                    );
-                    MergeWardenError::FailedToUpdatePullRequest(
-                        "Failed to add or update GitHub check run".to_string(),
-                    )
-                })?;
-            return Ok(CheckResult {
-                title_valid: true,
-                work_item_referenced: true,
-                size_valid: true,
-                wip_detected: false,
-                labels: Vec::<String>::new(),
-                bypasses_used: Vec::new(),
-            });
+            info!(
+                pull_request = pr.number,
+                "Pull request is in draft mode; running validation in non-blocking mode"
+            );
         }
 
         // Check if PR is marked as WIP — runs before all other validations and cannot be bypassed
@@ -1879,6 +1961,11 @@ Please update the PR body to include a valid work item reference."#;
                         repo_owner,
                         repo_name,
                         pr_number,
+                        // WIP is always hard-blocking regardless of draft status. Unlike the
+                        // invalid-title or missing-work-item checks (which use "neutral" for
+                        // drafts), WIP blocking is an explicit developer signal that merge must
+                        // be prevented. Respecting pr.draft here would let draft PRs silently
+                        // bypass WIP enforcement, defeating its purpose.
                         "failure",
                         check_title,
                         "Pull request is marked as WIP (Work In Progress). Remove WIP markers to allow merging.",
@@ -1905,6 +1992,11 @@ Please update the PR body to include a valid work item reference."#;
                     wip_detected: true,
                     labels: Vec::new(),
                     bypasses_used: Vec::new(),
+                    // NOTE: issue metadata propagation (milestone / project sync) is
+                    // intentionally skipped for WIP PRs. The PR is not ready for merge,
+                    // so propagating metadata at this point could apply a milestone that
+                    // the author has not yet confirmed. Propagation will run on the next
+                    // event after the WIP marker is removed.
                 });
             } else {
                 // PR is not WIP. Only run cleanup if there is stale WIP state to remove
@@ -2092,7 +2184,11 @@ Please update the PR body to include a valid work item reference."#;
             String::new()
         };
 
-        // Determine check conclusion - fail if any validation fails or if size is oversized and fail_on_oversized is true
+        // Determine check conclusion:
+        // - "success" when all validations pass
+        // - "neutral" when a draft PR has validation failures (non-blocking — developers
+        //   can correct issues before converting to ready-for-review)
+        // - "failure" for non-draft PRs with validation failures
         let should_fail_on_size = if let Some(files) = &pr_files {
             let size_info = crate::size::PrSizeInfo::from_files_with_exclusions(
                 files,
@@ -2104,17 +2200,21 @@ Please update the PR body to include a valid work item reference."#;
             false
         };
 
-        let check_conclusion =
-            if is_title_valid && is_work_item_referenced && (is_size_valid || !should_fail_on_size)
-            {
-                "success"
-            } else {
-                "failure"
-            };
+        let all_valid =
+            is_title_valid && is_work_item_referenced && (is_size_valid || !should_fail_on_size);
+        let check_conclusion = if all_valid {
+            "success"
+        } else if pr.draft {
+            // Draft PRs are never hard-blocked: use "neutral" so required checks don't
+            // prevent the PR from being ready-for-review once the author fixes the issues.
+            "neutral"
+        } else {
+            "failure"
+        };
 
         // Enhanced check summary that includes all validation results and bypass information
         let check_summary = if is_title_valid && is_work_item_referenced && is_size_valid {
-            if bypasses_used.is_empty() {
+            let base = if bypasses_used.is_empty() {
                 "All PR requirements satisfied.".to_string()
             } else {
                 match bypasses_used.len() {
@@ -2124,6 +2224,11 @@ Please update the PR body to include a valid work item reference."#;
                         n
                     ),
                 }
+            };
+            if pr.draft {
+                format!("{base} (Draft mode \u{2014} validation is non-blocking.)")
+            } else {
+                base
             }
         } else {
             let mut issues = Vec::new();
@@ -2137,10 +2242,15 @@ Please update the PR body to include a valid work item reference."#;
                 issues.push("PR size exceeds threshold");
             }
 
-            match issues.len() {
+            let issue_text = match issues.len() {
                 1 => format!("PR {}.", issues[0]),
                 2 => format!("PR {} and {}.", issues[0], issues[1]),
                 _ => format!("PR {}, {}, and {}.", issues[0], issues[1], issues[2]),
+            };
+            if pr.draft {
+                format!("{issue_text} (Draft mode \u{2014} issues shown for early feedback; validation is non-blocking.)")
+            } else {
+                issue_text
             }
         };
 

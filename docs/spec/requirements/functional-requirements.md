@@ -283,10 +283,18 @@ docs = ["documentation"]
 
 **GitHub App Permissions:**
 
+Repository permissions:
+
 - **Pull requests**: Read/Write (for status checks and comments)
 - **Issues**: Read (for work item validation)
 - **Metadata**: Read (for repository information)
 - **Contents**: Read (for configuration file access)
+
+Organisation permissions:
+
+- **Projects**: Read & Write (required for Projects v2 propagation — reading which projects an issue belongs to, and adding the pull request to those projects; this must be the *organisation-level* Projects permission, not the repository-level one)
+
+> **Limitation:** `sync_project_from_issue` only works for repositories owned by a GitHub organisation. Personal (user-owned) repositories are not supported because the GitHub API does not allow GitHub App tokens to write to user-scoped Projects v2.
 
 ### Azure Services Integration
 

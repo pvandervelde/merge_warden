@@ -300,7 +300,8 @@ impl PullRequestProvider for GitHubProvider {
         comment: &str,
     ) -> Result<(), Error> {
         self.client
-            .create_issue_comment(
+            .issues()
+            .create_comment(
                 repo_owner,
                 repo_name,
                 pr_number,
@@ -349,7 +350,8 @@ impl PullRequestProvider for GitHubProvider {
         labels: &[String],
     ) -> Result<(), Error> {
         self.client
-            .add_labels_to_pull_request(repo_owner, repo_name, pr_number, labels.to_vec())
+            .pull_requests()
+            .add_labels(repo_owner, repo_name, pr_number, labels.to_vec())
             .await
             .map(|_| ())
             .map_err(|e| {
@@ -389,7 +391,8 @@ impl PullRequestProvider for GitHubProvider {
         comment_id: u64,
     ) -> Result<(), Error> {
         self.client
-            .delete_issue_comment(repo_owner, repo_name, comment_id)
+            .issues()
+            .delete_comment(repo_owner, repo_name, comment_id)
             .await
             .map_err(|e| {
                 warn!(
@@ -431,7 +434,8 @@ impl PullRequestProvider for GitHubProvider {
     ) -> Result<PullRequest, Error> {
         let pr = self
             .client
-            .get_pull_request(repo_owner, repo_name, pr_number)
+            .pull_requests()
+            .get(repo_owner, repo_name, pr_number)
             .await
             .map_err(|e| {
                 error!(
@@ -561,7 +565,8 @@ impl PullRequestProvider for GitHubProvider {
     ) -> Result<Vec<Label>, Error> {
         let pr = self
             .client
-            .get_pull_request(repo_owner, repo_name, pr_number)
+            .pull_requests()
+            .get(repo_owner, repo_name, pr_number)
             .await
             .map_err(|e| {
                 error!(
@@ -607,7 +612,8 @@ impl PullRequestProvider for GitHubProvider {
         repo_name: &str,
     ) -> Result<Vec<Label>, Error> {
         self.client
-            .list_labels(repo_owner, repo_name)
+            .labels()
+            .list(repo_owner, repo_name)
             .await
             .map(|labels| {
                 labels
@@ -646,7 +652,8 @@ impl PullRequestProvider for GitHubProvider {
         pr_number: u64,
     ) -> Result<Vec<Comment>, Error> {
         self.client
-            .list_issue_comments(repo_owner, repo_name, pr_number)
+            .issues()
+            .list_comments(repo_owner, repo_name, pr_number)
             .await
             .map(|comments| {
                 comments
@@ -689,8 +696,10 @@ impl PullRequestProvider for GitHubProvider {
         label: &str,
     ) -> Result<(), Error> {
         self.client
-            .remove_label_from_pull_request(repo_owner, repo_name, pr_number, label)
+            .pull_requests()
+            .remove_label(repo_owner, repo_name, pr_number, label)
             .await
+            .map(|_| ())
             .map_err(|e| {
                 warn!(
                     owner = repo_owner,
@@ -741,7 +750,8 @@ impl PullRequestProvider for GitHubProvider {
         // Fetch the PR to get the head commit SHA for the check run.
         let pr = self
             .client
-            .get_pull_request(repo_owner, repo_name, pr_number)
+            .pull_requests()
+            .get(repo_owner, repo_name, pr_number)
             .await
             .map_err(|e| {
                 error!(
@@ -924,9 +934,8 @@ impl IssueMetadataProvider for GitHubProvider {
     /// Fetches milestone metadata for a single issue.
     ///
     /// Calls `GET /repos/{owner}/{repo}/issues/{number}` and maps the milestone
-    /// field to [`IssueMilestone`]. Project metadata is not yet available because
-    /// the github-bot-sdk GraphQL project operations are unimplemented; the
-    /// `projects` field is always returned as an empty `Vec`.
+    /// field to [`IssueMilestone`]. The `projects` field is always returned as an
+    /// empty `Vec` until `get_issue_linked_projects` is available in the SDK.
     ///
     /// Returns `Ok(None)` when the issue does not exist (404).
     ///
@@ -943,7 +952,8 @@ impl IssueMetadataProvider for GitHubProvider {
     ) -> Result<Option<IssueMetadata>, Error> {
         let issue = match self
             .client
-            .get_issue(repo_owner, repo_name, issue_number)
+            .issues()
+            .get(repo_owner, repo_name, issue_number)
             .await
         {
             Ok(i) => i,
@@ -978,7 +988,8 @@ impl IssueMetadataProvider for GitHubProvider {
         // milestone propagation still proceeds when project lookup fails.
         let projects = match self
             .client
-            .get_issue_linked_projects(repo_owner, repo_name, issue_number)
+            .projects()
+            .list_for_issue(repo_owner, repo_name, issue_number)
             .await
         {
             Ok(linked) => linked
@@ -1033,7 +1044,8 @@ impl IssueMetadataProvider for GitHubProvider {
         milestone_number: Option<u64>,
     ) -> Result<(), Error> {
         self.client
-            .set_pull_request_milestone(repo_owner, repo_name, pr_number, milestone_number)
+            .pull_requests()
+            .set_milestone(repo_owner, repo_name, pr_number, milestone_number)
             .await
             .map(|_| ())
             .map_err(|e| {
@@ -1074,7 +1086,8 @@ impl IssueMetadataProvider for GitHubProvider {
         // Fetch the PR to obtain its global node ID required by the GraphQL mutation.
         let pr = match self
             .client
-            .get_pull_request(repo_owner, repo_name, pr_number)
+            .pull_requests()
+            .get(repo_owner, repo_name, pr_number)
             .await
         {
             Ok(pr) => pr,
@@ -1094,7 +1107,8 @@ impl IssueMetadataProvider for GitHubProvider {
 
         match self
             .client
-            .add_item_to_project(project_owner_login, project_number, &pr_node_id)
+            .projects()
+            .add_item(project_owner_login, project_number, &pr_node_id)
             .await
         {
             Ok(_) => {

@@ -7,7 +7,7 @@ use merge_warden_developer_platforms::models::{PullRequest, User};
 
 use crate::{
     checks::{
-        check_pr_title, check_work_item_reference, diagnose_pr_title,
+        check_pr_title, check_work_item_reference, diagnose_pr_title, extract_any_issue_reference,
         extract_closing_issue_reference, IssueReference, TitleDiagnosis, TitleIssue,
         TitleValidationResult,
     },
@@ -1228,6 +1228,107 @@ fn should_construct_title_issue_unrecognized_type_without_nearest_valid() {
     );
 }
 
+// ── Tests for extract_any_issue_reference ─────────────────────────────────
+
+/// Assertion: 'references' keyword yields a same-repo reference.
+#[test]
+fn any_ref_should_match_references_keyword() {
+    let result = extract_any_issue_reference("references #42");
+    assert_eq!(result, Some(IssueReference::SameRepo { issue_number: 42 }));
+}
+
+/// Assertion: 'relates to' keyword yields a same-repo reference.
+#[test]
+fn any_ref_should_match_relates_to_keyword() {
+    let result = extract_any_issue_reference("relates to #99");
+    assert_eq!(result, Some(IssueReference::SameRepo { issue_number: 99 }));
+}
+
+/// Assertion: closing keyword 'fixes' is also matched.
+#[test]
+fn any_ref_should_match_fixes_keyword() {
+    let result = extract_any_issue_reference("fixes #7");
+    assert_eq!(result, Some(IssueReference::SameRepo { issue_number: 7 }));
+}
+
+/// Assertion: closing keyword 'closes' is also matched.
+#[test]
+fn any_ref_should_match_closes_keyword() {
+    let result = extract_any_issue_reference("closes #3");
+    assert_eq!(result, Some(IssueReference::SameRepo { issue_number: 3 }));
+}
+
+/// Assertion: closing keyword 'resolves' is also matched.
+#[test]
+fn any_ref_should_match_resolves_keyword() {
+    let result = extract_any_issue_reference("resolves #15");
+    assert_eq!(result, Some(IssueReference::SameRepo { issue_number: 15 }));
+}
+
+/// Assertion: GH-prefixed reference with 'references' keyword.
+#[test]
+fn any_ref_should_match_gh_prefix_with_references_keyword() {
+    let result = extract_any_issue_reference("references GH-200");
+    assert_eq!(result, Some(IssueReference::SameRepo { issue_number: 200 }));
+}
+
+/// Assertion: cross-repo owner/repo#NNN with 'references' keyword.
+#[test]
+fn any_ref_should_match_cross_repo_with_references_keyword() {
+    let result = extract_any_issue_reference("references owner/repo#55");
+    assert_eq!(
+        result,
+        Some(IssueReference::CrossRepo {
+            owner: "owner".to_string(),
+            repo: "repo".to_string(),
+            issue_number: 55,
+        })
+    );
+}
+
+/// Assertion: full GitHub URL with 'relates to' keyword.
+#[test]
+fn any_ref_should_match_full_url_with_relates_to_keyword() {
+    let result = extract_any_issue_reference("relates to https://github.com/owner/repo/issues/88");
+    assert_eq!(
+        result,
+        Some(IssueReference::CrossRepo {
+            owner: "owner".to_string(),
+            repo: "repo".to_string(),
+            issue_number: 88,
+        })
+    );
+}
+
+/// Assertion: keyword matching is case-insensitive.
+#[test]
+fn any_ref_should_be_case_insensitive() {
+    let result = extract_any_issue_reference("REFERENCES #10");
+    assert_eq!(result, Some(IssueReference::SameRepo { issue_number: 10 }));
+}
+
+/// Assertion: empty string returns None.
+#[test]
+fn any_ref_should_return_none_for_empty_body() {
+    assert_eq!(extract_any_issue_reference(""), None);
+}
+
+/// Assertion: body with no issue references returns None.
+#[test]
+fn any_ref_should_return_none_when_no_references_present() {
+    assert_eq!(
+        extract_any_issue_reference("This PR adds a new feature"),
+        None
+    );
+}
+
+/// Assertion: first reference is returned when multiple exist.
+#[test]
+fn any_ref_should_return_first_of_multiple_references() {
+    let result = extract_any_issue_reference("references #10\nfixes #20");
+    assert_eq!(result, Some(IssueReference::SameRepo { issue_number: 10 }));
+}
+
 #[test]
 fn should_construct_title_issue_uppercase_type() {
     let issue = TitleIssue::UppercaseType {
@@ -1738,5 +1839,97 @@ fn should_return_diagnosis_none_when_check_pr_title_with_bypassed_user() {
     assert!(
         result.diagnosis.is_none(),
         "Expected None diagnosis when bypassed"
+    );
+}
+
+// ── diagnose_pr_title: 3.14 EmptyScope ────────────────────────────────────
+
+#[test]
+fn should_construct_title_issue_empty_scope() {
+    let issue = TitleIssue::EmptyScope;
+    assert_eq!(issue, TitleIssue::EmptyScope);
+}
+
+#[test]
+fn should_display_empty_scope_message_with_guidance_to_add_or_remove_parentheses() {
+    let issue = TitleIssue::EmptyScope;
+    let display = format!("{issue}");
+    assert!(
+        display.contains("empty"),
+        "Display should mention 'empty', got: {display}"
+    );
+    // Guidance to either add a scope name or remove the parentheses
+    assert!(
+        display.contains("scope") || display.contains("parentheses"),
+        "Display should mention 'scope' or 'parentheses', got: {display}"
+    );
+}
+
+#[test]
+fn should_detect_empty_scope_and_suggest_removing_parentheses() {
+    let diagnosis = diagnose_pr_title("feat(): add login");
+    assert!(
+        diagnosis.issues.contains(&TitleIssue::EmptyScope),
+        "Expected EmptyScope in issues: {:?}",
+        diagnosis.issues
+    );
+    assert_eq!(
+        diagnosis.suggested_fix.as_deref(),
+        Some("feat: add login"),
+        "Expected empty parentheses removed in suggested_fix"
+    );
+}
+
+#[test]
+fn should_detect_empty_scope_with_breaking_change_marker_and_suggest_removing_parentheses() {
+    let diagnosis = diagnose_pr_title("feat()!: add login");
+    assert!(
+        diagnosis.issues.contains(&TitleIssue::EmptyScope),
+        "Expected EmptyScope in issues for breaking change with empty scope: {:?}",
+        diagnosis.issues
+    );
+    assert_eq!(
+        diagnosis.suggested_fix.as_deref(),
+        Some("feat!: add login"),
+        "Expected empty parentheses removed, breaking change marker preserved"
+    );
+}
+
+#[test]
+fn should_return_invalid_when_title_has_empty_scope() {
+    let user = create_user(123, "developer");
+    let pr = create_pull_request(1, "feat(): add login service", None, Some(user));
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_default_config();
+
+    let result = check_pr_title(&pr, &bypass_rule, &config);
+
+    assert!(!result.is_valid());
+    assert!(!result.was_bypassed());
+    assert!(result.bypass_info().is_none());
+}
+
+#[test]
+fn should_return_invalid_with_empty_scope_in_diagnosis_when_title_has_empty_scope() {
+    let user = create_user(123, "developer");
+    let pr = create_pull_request(1, "feat(): add login service", None, Some(user));
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_default_config();
+
+    let result = check_pr_title(&pr, &bypass_rule, &config);
+
+    assert!(
+        !result.is_valid(),
+        "Expected invalid result for empty scope"
+    );
+    assert!(
+        result.diagnosis.is_some(),
+        "Expected Some(diagnosis) for empty scope"
+    );
+    let diagnosis = result.diagnosis.unwrap();
+    assert!(
+        diagnosis.issues.contains(&TitleIssue::EmptyScope),
+        "Expected EmptyScope issue in diagnosis, got: {:?}",
+        diagnosis.issues
     );
 }

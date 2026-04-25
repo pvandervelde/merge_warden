@@ -42,3 +42,4 @@ configs/az_func/local.settings.json
 .llm/
 .aider*
 
+logs/

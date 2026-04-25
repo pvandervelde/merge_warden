@@ -262,6 +262,9 @@ impl MergeWardenWebhookHandler {
                     bypass_rules: self.policies.bypass_rules.clone(),
                     wip_check: self.policies.wip_check.clone(),
                     pr_state_labels: self.policies.pr_state_labels.clone(),
+                    // When the per-repo config file cannot be loaded, issue propagation
+                    // is disabled by default. Configure it in .github/merge-warden.toml
+                    // under [policies.pullRequests.issuePropagation] to enable it.
                     issue_propagation: Default::default(),
                 }
             }

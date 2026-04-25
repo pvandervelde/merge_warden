@@ -697,42 +697,82 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
             .collect::<Vec<_>>()
     );
 
-    // Step 3: Remove any existing size labels (exclusive labeling)
-    debug!("Step 3: Removing any existing size labels from PR");
+    // Step 3: Determine the new size label to apply, then skip redundant API calls
+    // when the PR already has exactly the correct label.
+    debug!(
+        "Step 3: Determining new size label for category: {}",
+        size_info.size_category.as_str()
+    );
+    let new_label_name =
+        if let Some(name) = discovered_labels.get_label_for_category(&size_info.size_category) {
+            name.clone()
+        } else {
+            // Fallback: standard "size: <category>" format
+            format!("size: {}", size_info.size_category.as_str())
+        };
+
+    // Collect the discovered size labels that are currently applied to the PR.
+    let existing_size_labels: Vec<String> = current_pr_labels
+        .iter()
+        .filter(|l| discovered_labels.all_discovered_labels().contains(&&l.name))
+        .map(|l| l.name.clone())
+        .collect();
+
+    // Do nothing when the PR already has exactly the right label and no others to clean up.
+    // This avoids spurious remove + re-add events that create noise in the PR activity log.
+    if existing_size_labels.len() == 1 && existing_size_labels[0] == new_label_name {
+        debug!(
+            repository_owner = owner,
+            repository = repo,
+            pr_number = pr_number,
+            label = %new_label_name,
+            "PR already has the correct size label; skipping remove/re-add"
+        );
+        return Ok(Some(new_label_name));
+    }
+
+    // Step 4: Remove existing size labels that differ from the new label (exclusive labeling)
+    debug!("Step 4: Removing stale size labels from PR");
     let mut removed_labels = Vec::new();
-    for existing_label in &current_pr_labels {
-        // Check if this label is one of our discovered size labels
-        if discovered_labels
-            .all_discovered_labels()
-            .contains(&&existing_label.name)
-        {
-            debug!("Removing existing size label: {}", existing_label.name);
+    for existing_label in &existing_size_labels {
+        // Only remove labels that are NOT the one we are about to apply.
+        if existing_label != &new_label_name {
+            debug!("Removing stale size label: {}", existing_label);
             provider
-                .remove_label(owner, repo, pr_number, &existing_label.name)
+                .remove_label(owner, repo, pr_number, existing_label)
                 .await
                 .map_err(|_| {
                     MergeWardenError::FailedToUpdatePullRequest(
                         "Failed to remove existing size label".to_string(),
                     )
                 })?;
-            removed_labels.push(&existing_label.name);
+            removed_labels.push(existing_label.clone());
         }
     }
     if !removed_labels.is_empty() {
         info!(
-            "Removed {} existing size labels: {:?}",
+            "Removed {} stale size labels: {:?}",
             removed_labels.len(),
             removed_labels
         );
     } else {
-        debug!("No existing size labels found to remove");
+        debug!("No stale size labels found to remove");
     }
 
-    // Step 4: Apply the new size label
-    debug!(
-        "Step 4: Applying new size label for category: {}",
-        size_info.size_category.as_str()
-    );
+    // Step 5: Apply the new size label (only if not already present after cleanup)
+    let already_applied = existing_size_labels.contains(&new_label_name);
+    if already_applied {
+        debug!(
+            repository_owner = owner,
+            repository = repo,
+            pr_number = pr_number,
+            label = %new_label_name,
+            "New size label already present; skipping add"
+        );
+        return Ok(Some(new_label_name));
+    }
+
+    debug!("Step 5: Applying new size label: {}", new_label_name);
     if let Some(label_name) = discovered_labels.get_label_for_category(&size_info.size_category) {
         // Use discovered label
         info!(
@@ -758,18 +798,13 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
         info!("Successfully applied size label: {}", label_name);
         Ok(Some(label_name.clone()))
     } else {
-        // Fallback: create new label with standard format
-        let fallback_label = format!("size: {}", size_info.size_category.as_str());
-
-        // Log that we're falling back to creating a new label
-        // In a real implementation, we might want to check if the repository allows
-        // label creation or provide more sophisticated fallback logic
+        // Fallback: create new label with standard format (new_label_name already computed above)
         warn!(
             "No existing size label found for category '{}' in repository {}/{}. Using fallback label: '{}'",
             size_info.size_category.as_str(),
             owner,
             repo,
-            fallback_label
+            new_label_name
         );
 
         provider
@@ -777,7 +812,7 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
                 owner,
                 repo,
                 pr_number,
-                std::slice::from_ref(&fallback_label),
+                std::slice::from_ref(&new_label_name),
             )
             .await
             .map_err(|e| {
@@ -785,7 +820,7 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
                     repository_owner = owner,
                     repository = repo,
                     pr_number = pr_number,
-                    fallback_label = fallback_label,
+                    fallback_label = new_label_name,
                     error = %e,
                     "Failed to add fallback size label to pull request"
                 );
@@ -796,9 +831,9 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
 
         info!(
             "Successfully applied fallback size label: {}",
-            fallback_label
+            new_label_name
         );
-        Ok(Some(fallback_label))
+        Ok(Some(new_label_name))
     }
 }
 
@@ -1525,7 +1560,7 @@ impl LabelDetector {
         let prefix_patterns = vec![
             format!("{}:", commit_type),
             format!("{}-", commit_type),
-            format!("{}_{}", commit_type, ""),
+            format!("{}_", commit_type), // matches "feat_<anything>" labels
             format!("type: {}", commit_type),
             format!("type-{}", commit_type),
             format!("type_{}", commit_type),

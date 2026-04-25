@@ -1,121 +1,149 @@
-# Azure Function Configuration Samples
+# Samples
 
-This directory contains sample configuration files for deploying the Merge Warden Azure Function. These files are **not included** in the deployment package and must be configured by users according to their specific requirements.
+This directory contains sample files and scripts for working with merge-warden-server.
 
-## Required Configuration Files
+| File | Purpose |
+|---|---|
+| `app-config.sample.toml` | Annotated **app-level** policy defaults (loaded via `MERGE_WARDEN_CONFIG_FILE`) |
+| `merge-warden.sample.toml` | Annotated **per-repository** policy configuration (placed at `.github/merge-warden.toml` in each repo) |
+| `run-local.ps1` | PowerShell script to run the server locally and test it with live GitHub webhooks |
 
-When deploying the Merge Warden Azure Function, you need to create the following configuration files in your Azure Function App:
+---
 
-### 1. host.json (Required)
+## app-config.sample.toml — app-level defaults
 
-**Sample file**: `host.json`
+This file is loaded by the server via the `MERGE_WARDEN_CONFIG_FILE` environment
+variable. It defines the **application-level** policy defaults that apply to every
+repository handled by this server instance.
 
-The `host.json` file configures the Azure Functions runtime. Place this file in the root directory of your Azure Function App.
+> **Important:** This file uses different field names to `merge-warden.sample.toml`.
+> `MERGE_WARDEN_CONFIG_FILE` expects `ApplicationDefaults` fields (e.g.
+> `enforceTitleValidation`, `titlePattern`). The per-repo config uses a different
+> structure (`[policies.pullRequests.prTitle]`). Pointing `MERGE_WARDEN_CONFIG_FILE`
+> at the per-repo sample will silently produce no enforcement.
 
-**Key configuration areas:**
+Pass it to `run-local.ps1` with:
 
-- **Logging levels**: Configure what level of detail you want in logs
-- **Application Insights**: Set up telemetry and monitoring (optional)
-- **Extension bundles**: Specify which Azure Functions extensions to use
-- **Custom handler**: Configuration for the merge_warden binary (required)
-
-**Customization options:**
-
-- Set `logging.logLevel.default` to control verbosity (`Trace`, `Debug`, `Information`, `Warning`, `Error`)
-- Configure Application Insights sampling and excluded request types
-- Adjust extension bundle versions based on your Azure environment
-
-### 2. function.json (Required)
-
-**Sample file**: `function.json`
-
-The `function.json` file defines the HTTP trigger configuration. Place this file in a subdirectory named after your function app, e.g. `your-function-app/`, within your Function App directory.
-
-**Directory structure in your Function App:**
-
-```
-/
-├── host.json
-├── az_handler (binary, included in deployment package)
-└── your-function-app/
-    └── function.json
+```powershell
+.\samples\run-local.ps1 -Repo "owner/repo" -AppConfigFile ".\samples\app-config.sample.toml"
 ```
 
-**Key configuration areas:**
+---
 
-- **Authentication level**: Currently set to `anonymous` but you may want to configure function-level security
-- **HTTP methods**: Configured for `GET` and `POST` to handle GitHub webhooks
-- **Trigger bindings**: HTTP input and output bindings
+## merge-warden.sample.toml — per-repository config
 
-**Customization options:**
+This is the per-repository configuration file. When merge-warden processes a pull
+request event it fetches `.github/merge-warden.toml` from the target repository
+via the GitHub API and uses it to determine which policies to enforce.
 
-- Change `authLevel` from `anonymous` to `function`, `admin`, or use Azure AD authentication
-- Modify allowed HTTP methods if needed
-- Add additional bindings for integration with other Azure services
+To use it in your test repository:
 
-## Deployment Instructions
+```powershell
+# Copy to your test repo
+Copy-Item samples\merge-warden.sample.toml path\to\your-test-repo\.github\merge-warden.toml
+```
 
-1. **Download the deployment binary** from the [GitHub releases](https://github.com/pvandervelde/merge_warden/releases) (example: replace with your repository's releases page if using a fork or alternate deployment)
+Then commit it on the default branch. Subsequent PR events will pick up the
+configuration automatically — no server restart required.
 
-2. **Create your configuration files** based on the samples in this directory:
+> **Note:** If a repository has no `.github/merge-warden.toml`, the server falls
+> back to compiled-in defaults. Both title and work-item validation are **disabled**
+> by default, so the bot will run without enforcing any policies.
 
-   ```bash
-   # Copy and customize the host.json
-   cp samples/host.json ./host.json
+---
 
-   # Create the function directory and copy function.json
-   mkdir merge_warden
-   cp samples/function.json ./merge_warden/function.json
-   ```
+## run-local.ps1 — local development script
 
-3. **Customize the configuration** according to your requirements:
-   - Edit logging levels in `host.json`
-   - Configure Application Insights connection if desired
-   - Set authentication level in `function.json`
+Builds the Docker image, starts the server, and forwards live GitHub webhook events
+to it using the GitHub CLI. Press Ctrl+C to stop; the container is cleaned up
+automatically.
 
-4. **Deploy to Azure Functions**:
+### Prerequisites
 
-   ```bash
-   # Create deployment directory
-   mkdir function-app
+- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (running)
+- [Node.js](https://nodejs.org/) — provides `npx` to run `smee-client` on demand. Or install globally once:
 
-   # Copy the binary (make it executable)
-   cp az_handler function-app/
-   chmod +x function-app/az_handler
+  ```powershell
+  npm install --global smee-client
+  ```
 
-   # Copy your configuration files
-   cp host.json function-app/
-   cp -r merge_warden/ function-app/
+### GitHub App setup
 
-   # Create deployment package
-   cd function-app
-   zip -r ../function-app.zip .
-   cd ..
+Create a GitHub App (Settings → Developer settings → GitHub Apps → New GitHub App)
+with the following permissions:
 
-   # Deploy using Azure CLI
-   az functionapp deployment source config-zip \
-     --resource-group your-rg \
-     --name your-function-app \
-     --src function-app.zip
-   ```
+| Permission | Level |
+|---|---|
+| Pull requests | Read & Write |
+| Issues | Read |
+| Contents | Read |
+| Checks | Write |
+| Metadata | Read (required) |
 
-## Security Considerations
+The following **organisation** permission is also required (listed under *Organization permissions*, not *Repository permissions*):
 
-- **Authentication**: Consider using function-level or Azure AD authentication instead of anonymous access
-- **CORS**: Configure CORS settings if your function will be called from web applications
-- **IP restrictions**: Use Azure Function App access restrictions to limit access to specific IP ranges
-- **Secrets**: Store sensitive configuration in Azure Key Vault and reference via Azure App Configuration
+| Organisation Permission | Level |
+|---|---|
+| Projects | Read & Write |
 
-## Monitoring and Troubleshooting
+> **Note:** Projects v2 propagation only works for repositories belonging to a **GitHub organisation**. Personal repositories cannot use the Projects v2 GraphQL API with GitHub App tokens, so `sync_project_from_issue` will have no effect when the repository is owned by an individual user.
 
-- **Application Insights**: Enable Application Insights for comprehensive monitoring and logging
-- **Log streaming**: Use `az functionapp log tail` to view real-time logs during development
-- **Diagnostic settings**: Configure diagnostic settings to send logs to Log Analytics or Storage
+Subscribe to events: **Pull request**, **Pull request review**.
 
-## Support
+1. Create a free channel at [smee.io](https://smee.io) and copy the URL (e.g. `https://smee.io/abc123`).
+2. Set your GitHub App's **Webhook URL** to that smee URL.
+3. Set a **Webhook secret** and note the value.
+4. Download the **private key** PEM and install the App on your test repository.
 
-For configuration questions and deployment issues:
+### Usage
 
-1. Check the [deployment documentation](../docs/deployment/azure/README.md)
-2. Review the Azure Functions documentation for host.json and function.json configuration options
+```powershell
+# 1. Load credentials into the current session
+$env:GITHUB_APP_ID          = "123456"           # numeric App ID from GitHub App settings
+$env:GITHUB_APP_PRIVATE_KEY = Get-Content "path\to\app.private-key.pem" -Raw
+$env:GITHUB_WEBHOOK_SECRET  = "your-webhook-secret"
+
+# 2. Run (builds image, starts container, begins relaying)
+.\samples\run-local.ps1 -SmeeUrl "https://smee.io/abc123"
+
+# Supply an app-level config file (mounted into the container as MERGE_WARDEN_CONFIG_FILE)
+.\samples\run-local.ps1 -SmeeUrl "https://smee.io/abc123" -AppConfigFile ".\samples\app-config.sample.toml"
+
+# On subsequent runs you can skip the Docker build
+.\samples\run-local.ps1 -SmeeUrl "https://smee.io/abc123" -SkipBuild
+```
+
+### Parameters
+
+| Parameter | Required | Default | Description |
+|---|---|---|---|
+| `-SmeeUrl` | Yes | — | smee.io channel URL (must match your GitHub App's Webhook URL) |
+| `-Port` | No | `3000` | Host port to bind the server on |
+| `-ImageTag` | No | `merge-warden-server:local` | Docker image tag to build and run |
+| `-AppConfigFile` | No | — | Path to an app-level TOML defaults file (e.g. `samples/app-config.sample.toml`). Mounted into the container and set as `MERGE_WARDEN_CONFIG_FILE`. Applies app-level policy defaults to all repositories that have no per-repo `.github/merge-warden.toml`. Must use `ApplicationDefaults` field names — **not** the per-repo format. |
+| `-SkipBuild` | No | off | Skip `docker build` and use the existing local image |
+
+### Testing the running server
+
+Once the script reports *"Server is ready"* and *"Relaying webhooks"*:
+
+```powershell
+# Health check
+Invoke-RestMethod http://localhost:3000/api/merge_warden
+# Returns: HTTP 200 OK
+
+# Trigger a real event — open or update a PR in your test repo
+# The smee-client output will show each incoming event
+# The server logs (via docker logs <container-id>) show processing details
+```
+
+### How smee relay works
+
+`smee-client` subscribes to your smee channel using Server-Sent Events (SSE).
+When GitHub delivers a webhook to the smee URL, smee stores it and the client
+forwards it — headers and body verbatim — to the local server. The original
+HMAC-SHA256 signature computed by GitHub is forwarded unchanged, so the server's
+signature validation passes correctly. Unlike `gh webhook forward`, no re-signing
+occurs and the full App webhook payload — including the `installation` object —
+is preserved.
 3. Open an issue in the [merge_warden repository](https://github.com/pvandervelde/merge_warden/issues)
