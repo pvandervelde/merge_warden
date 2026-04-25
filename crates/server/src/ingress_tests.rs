@@ -173,13 +173,10 @@ async fn webhook_ingress_ack_is_noop() {
 
 #[test]
 fn webhook_queue_message_round_trip_serde() {
-    // NOTE: installation_id: kept here only so the file compiles while the field
-    // still exists on the struct. The Coder will remove it in the GREEN phase.
     let original = WebhookQueueMessage {
         schema_version: 1,
         event_type: "pull_request".to_string(),
         delivery_id: "abc-123".to_string(),
-        installation_id: 99,
         received_at: Utc::now(),
         raw_payload: r#"{"action":"opened"}"#.to_string(),
     };
@@ -205,13 +202,10 @@ fn webhook_queue_message_round_trip_serde() {
 
 #[test]
 fn webhook_queue_message_json_contains_required_fields() {
-    // NOTE: installation_id: kept here only so the file compiles while the field
-    // still exists on the struct. The Coder will remove it in the GREEN phase.
     let msg = WebhookQueueMessage {
         schema_version: 1,
         event_type: "push".to_string(),
         delivery_id: "delivery-xyz".to_string(),
-        installation_id: 42,
         received_at: Utc::now(),
         raw_payload: "{}".to_string(),
     };
@@ -277,7 +271,6 @@ async fn queue_ingress_yields_enqueued_event() {
         schema_version: 1,
         event_type: "pull_request".to_string(),
         delivery_id: "del-001".to_string(),
-        installation_id: 1,
         received_at: Utc::now(),
         raw_payload: minimal_pr_payload(7),
     };
@@ -299,7 +292,6 @@ async fn queue_ingress_dead_letters_unknown_schema_version() {
         schema_version: 99,
         event_type: "pull_request".to_string(),
         delivery_id: "del-bad".to_string(),
-        installation_id: 1,
         received_at: Utc::now(),
         raw_payload: minimal_pr_payload(1),
     };
@@ -310,7 +302,6 @@ async fn queue_ingress_dead_letters_unknown_schema_version() {
         schema_version: 1,
         event_type: "pull_request".to_string(),
         delivery_id: "del-good".to_string(),
-        installation_id: 1,
         received_at: Utc::now(),
         raw_payload: minimal_pr_payload(2),
     };
@@ -344,7 +335,6 @@ async fn queue_ingress_dead_letters_malformed_body() {
         schema_version: 1,
         event_type: "pull_request".to_string(),
         delivery_id: "del-good".to_string(),
-        installation_id: 1,
         received_at: Utc::now(),
         raw_payload: minimal_pr_payload(2),
     };
@@ -364,7 +354,6 @@ async fn queue_ingress_ack_complete_succeeds() {
         schema_version: 1,
         event_type: "pull_request".to_string(),
         delivery_id: "del-ack".to_string(),
-        installation_id: 1,
         received_at: Utc::now(),
         raw_payload: minimal_pr_payload(5),
     };
@@ -386,7 +375,6 @@ async fn queue_ingress_ack_reject_sends_to_dlq() {
         schema_version: 1,
         event_type: "pull_request".to_string(),
         delivery_id: "del-reject".to_string(),
-        installation_id: 1,
         received_at: Utc::now(),
         raw_payload: minimal_pr_payload(6),
     };
