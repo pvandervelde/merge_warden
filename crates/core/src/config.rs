@@ -1148,8 +1148,10 @@ impl Default for PrStateLabelsConfig {
 pub(crate) fn pattern_matches(pattern: &str, file_path: &str) -> bool {
     // Convert glob pattern to regex-like matching
     if pattern.contains('*') {
-        // Simple implementation: convert * to .* for regex-style matching
-        let regex_pattern = pattern.replace("*", ".*");
+        // Escape all regex metacharacters in the literal parts of the pattern
+        // first, then replace the escaped `\*` with `.*` so that only `*`
+        // acts as a wildcard and characters like `.` are treated literally.
+        let regex_pattern = regex::escape(pattern).replace(r"\*", ".*");
         if let Ok(regex) = regex::Regex::new(&format!("^{}$", regex_pattern)) {
             return regex.is_match(file_path);
         }
@@ -1594,6 +1596,7 @@ pub struct ChangeTypeLabelConfig {
 }
 
 impl ChangeTypeLabelConfig {
+    /// Returns `true` — change-type label checks are enabled by default.
     fn default_enabled() -> bool {
         true
     }
@@ -1638,6 +1641,7 @@ pub struct ConventionalCommitMappings {
 }
 
 impl ConventionalCommitMappings {
+    /// Default repository label names for the `feat` commit type.
     fn default_feat() -> Vec<String> {
         vec![
             "enhancement".to_string(),
@@ -1645,15 +1649,19 @@ impl ConventionalCommitMappings {
             "new feature".to_string(),
         ]
     }
+    /// Default repository label names for the `fix` commit type.
     fn default_fix() -> Vec<String> {
         vec!["bug".to_string(), "bugfix".to_string(), "fix".to_string()]
     }
+    /// Default repository label names for the `docs` commit type.
     fn default_docs() -> Vec<String> {
         vec!["documentation".to_string(), "docs".to_string()]
     }
+    /// Default repository label names for the `style` commit type.
     fn default_style() -> Vec<String> {
         vec!["style".to_string(), "formatting".to_string()]
     }
+    /// Default repository label names for the `refactor` commit type.
     fn default_refactor() -> Vec<String> {
         vec![
             "refactor".to_string(),
@@ -1661,9 +1669,11 @@ impl ConventionalCommitMappings {
             "code quality".to_string(),
         ]
     }
+    /// Default repository label names for the `perf` commit type.
     fn default_perf() -> Vec<String> {
         vec!["performance".to_string(), "optimization".to_string()]
     }
+    /// Default repository label names for the `test` commit type.
     fn default_test() -> Vec<String> {
         vec![
             "test".to_string(),
@@ -1671,6 +1681,7 @@ impl ConventionalCommitMappings {
             "testing".to_string(),
         ]
     }
+    /// Default repository label names for the `chore` commit type.
     fn default_chore() -> Vec<String> {
         vec![
             "chore".to_string(),
@@ -1678,6 +1689,7 @@ impl ConventionalCommitMappings {
             "housekeeping".to_string(),
         ]
     }
+    /// Default repository label names for the `ci` commit type.
     fn default_ci() -> Vec<String> {
         vec![
             "ci".to_string(),
@@ -1685,9 +1697,11 @@ impl ConventionalCommitMappings {
             "build".to_string(),
         ]
     }
+    /// Default repository label names for the `build` commit type.
     fn default_build() -> Vec<String> {
         vec!["build".to_string(), "dependencies".to_string()]
     }
+    /// Default repository label names for the `revert` commit type.
     fn default_revert() -> Vec<String> {
         vec!["revert".to_string()]
     }
@@ -1708,12 +1722,15 @@ pub struct FallbackLabelSettings {
 }
 
 impl FallbackLabelSettings {
+    /// Default label name format: `"type: {change_type}"`.
     fn default_name_format() -> String {
         "type: {change_type}".to_string()
     }
+    /// Returns `true` — fallback labels are created when none are found by default.
     fn default_create_if_missing() -> bool {
         true
     }
+    /// Default colour scheme for fallback labels, taken from `FallbackLabelSettings::default()`.
     fn default_color_scheme() -> HashMap<String, String> {
         FallbackLabelSettings::default().color_scheme
     }
@@ -1737,9 +1754,11 @@ pub struct LabelDetectionStrategy {
 }
 
 impl LabelDetectionStrategy {
+    /// Returns `true` — all label detection modes are enabled by default.
     fn default_true() -> bool {
         true
     }
+    /// Default set of label name prefixes used for prefix matching.
     fn default_common_prefixes() -> Vec<String> {
         vec![
             "type:".to_string(),

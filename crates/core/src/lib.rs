@@ -1961,6 +1961,11 @@ Please update the PR body to include a valid work item reference."#;
                         repo_owner,
                         repo_name,
                         pr_number,
+                        // WIP is always hard-blocking regardless of draft status. Unlike the
+                        // invalid-title or missing-work-item checks (which use "neutral" for
+                        // drafts), WIP blocking is an explicit developer signal that merge must
+                        // be prevented. Respecting pr.draft here would let draft PRs silently
+                        // bypass WIP enforcement, defeating its purpose.
                         "failure",
                         check_title,
                         "Pull request is marked as WIP (Work In Progress). Remove WIP markers to allow merging.",
@@ -1987,6 +1992,11 @@ Please update the PR body to include a valid work item reference."#;
                     wip_detected: true,
                     labels: Vec::new(),
                     bypasses_used: Vec::new(),
+                    // NOTE: issue metadata propagation (milestone / project sync) is
+                    // intentionally skipped for WIP PRs. The PR is not ready for merge,
+                    // so propagating metadata at this point could apply a milestone that
+                    // the author has not yet confirmed. Propagation will run on the next
+                    // event after the WIP marker is removed.
                 });
             } else {
                 // PR is not WIP. Only run cleanup if there is stale WIP state to remove
