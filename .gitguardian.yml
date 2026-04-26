@@ -1,0 +1,7 @@
+version: 2
+ignore-detectors:
+  - name: RSA Private Key
+    paths:
+      # 2048-bit RSA key used exclusively for unit tests (no production use).
+      # Identical key is also shipped in the github-bot-sdk crate (jwt_tests.rs).
+      - crates/developer_platforms/testdata/test-rsa-key.pem

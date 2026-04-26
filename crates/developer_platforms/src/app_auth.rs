@@ -42,6 +42,7 @@ use github_bot_sdk::{
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
+use urlencoding;
 use tokio::sync::RwLock;
 use tracing::{debug, error, instrument, warn};
 
@@ -233,6 +234,14 @@ impl AppAuthProvider {
     /// - GitHub returns a non-2xx status code
     /// - The response JSON is missing the `"id"` field or it is not a `u64`
     ///
+    /// # Note — sentinel installation ID in errors
+    ///
+    /// All three error paths above construct `AuthError::TokenExchangeFailed` with
+    /// `installation_id: InstallationId::new(0)`. This is a **sentinel value**: at
+    /// the point of failure the real installation ID is not yet known, but the SDK
+    /// error type requires one. Callers should treat `InstallationId::new(0)` as
+    /// "unknown" in this context and **must not** use it as an actual ID.
+    ///
     /// # Examples
     ///
     /// ```rust,no_run
@@ -252,7 +261,12 @@ impl AppAuthProvider {
     ) -> Result<InstallationId, AuthError> {
         let jwt = self.generate_app_jwt().await?;
 
-        let url = format!("{}/repos/{}/{}/installation", self.api_url, owner, repo);
+        let url = format!(
+            "{}/repos/{}/{}/installation",
+            self.api_url,
+            urlencoding::encode(owner),
+            urlencoding::encode(repo)
+        );
 
         debug!(owner, repo, "Resolving GitHub App installation ID");
 

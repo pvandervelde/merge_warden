@@ -17,15 +17,15 @@ defaults). The binary fails fast with code 1 if any **required** variable is abs
 |---|---|---|
 | `MERGE_WARDEN_GITHUB_APP_ID` | `u64` | `ServerSecrets.github_app_id` |
 | `MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY` | PEM string | `ServerSecrets.github_app_private_key` |
-| `GITHUB_WEBHOOK_SECRET` | string | `ServerSecrets.github_webhook_secret` |
 
 ### Optional
 
 | Variable | Default | Used by |
 |---|---|---|
+| `GITHUB_WEBHOOK_SECRET` | none | `ServerSecrets.github_webhook_secret` — required in `webhook` mode for HMAC signature validation; absent in `queue` mode |
 | `MERGE_WARDEN_PORT` | `3000` | `ServerConfig.port` |
 | `MERGE_WARDEN_RECEIVER_MODE` | `webhook` | `ServerConfig.receiver_mode` |
-| `MERGE_WARDEN_CONFIG_FILE` | none | `ServerConfig.config_file_path` |
+| `MERGE_WARDEN_CONFIG_FILE` | none | loads policy TOML; not stored on `ServerConfig` |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | none | `TelemetryConfig.otlp_endpoint` |
 | `OTEL_SERVICE_NAME` | `merge-warden` | `TelemetryConfig.service_name` |
 | `OTEL_SERVICE_VERSION` | from `CARGO_PKG_VERSION` | `TelemetryConfig.service_version` |
@@ -90,7 +90,7 @@ must not be implemented (caller must explicitly call `.expose()`).
 pub struct ServerSecrets {
     pub github_app_id: u64,
     pub github_app_private_key: SecretString,
-    pub github_webhook_secret: SecretString,
+    pub github_webhook_secret: Option<SecretString>,
 }
 ```
 
@@ -154,7 +154,6 @@ pub struct QueueServerConfig {
 pub struct ServerConfig {
     pub port: u16,
     pub receiver_mode: ReceiverMode,
-    pub config_file_path: Option<std::path::PathBuf>,
     pub application_defaults: merge_warden_core::config::ApplicationDefaults,
     pub queue: Option<QueueServerConfig>,
 }
@@ -172,7 +171,6 @@ pub struct ServerConfig {
 /// - `ServerError::InvalidEnvVar { name: "MERGE_WARDEN_GITHUB_APP_ID", .. }` if the value
 ///   cannot be parsed as `u64`.
 /// - `ServerError::MissingEnvVar("MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY")` if absent.
-/// - `ServerError::MissingEnvVar("GITHUB_WEBHOOK_SECRET")` if absent.
 ///
 /// # Guarantees
 /// This function performs no network I/O.

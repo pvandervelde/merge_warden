@@ -19,6 +19,8 @@ mutants.out.old/
 .env.test
 .merge-warden.toml
 *.pem
+# Allow the test RSA key used by developer_platforms tests (see .gitguardian.yml for allowlist)
+!crates/developer_platforms/testdata/test-rsa-key.pem
 
 # Hide the LLM memory bank
 memory-bank/
