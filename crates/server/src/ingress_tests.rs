@@ -189,8 +189,7 @@ fn webhook_queue_message_round_trip_serde() {
     assert_eq!(decoded.delivery_id, original.delivery_id);
     assert_eq!(decoded.raw_payload, original.raw_payload);
 
-    // installation_id must NOT appear in the serialised output.
-    // RED until the field is removed from WebhookQueueMessage.
+    // installation_id must not appear in the serialised output — regression guard.
     let json_value: serde_json::Value =
         serde_json::from_str(&json_str).expect("parse json for field check");
     assert!(
@@ -218,8 +217,7 @@ fn webhook_queue_message_json_contains_required_fields() {
     assert_eq!(json["delivery_id"], "delivery-xyz");
     assert!(json.get("received_at").is_some());
     assert_eq!(json["raw_payload"], "{}");
-    // installation_id must NOT be serialised into the queue message.
-    // RED until the field is removed from WebhookQueueMessage.
+    // installation_id must not be serialised — regression guard.
     assert!(
         json.get("installation_id").is_none(),
         "installation_id must not appear in serialised output: found {:?}",
