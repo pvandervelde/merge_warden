@@ -113,11 +113,13 @@ ignore = [
 allow = [
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
     "BSD-3-Clause",
     "ISC",
     "MIT",
     "MPL-2.0",
     "Unicode-3.0",
+    "Zlib",
 ]
 
 # The confidence threshold for detecting a license from license text.
@@ -150,6 +152,12 @@ exceptions = [
     { name = "tiny-keccak", allow = [
         "CC0-1.0",
     ] },
+    # webpki-roots is a transitive dependency via
+    # queue-runtime -> async-nats -> tokio-websockets -> webpki-roots.
+    # CDLA-Permissive-2.0 is a permissive data license that imposes no restrictions on software use.
+    { name = "webpki-roots", allow = [
+        "CDLA-Permissive-2.0",
+    ] },
 ]
 
 # Some crates don't have (easily) machine readable licensing information,
@@ -173,10 +181,7 @@ license-files = [
 [[licenses.clarify]]
 name = "rustls-webpki"
 expression = "ISC AND BSD-3-Clause"
-license-files = [
-    { path = "LICENSE", hash = 0x001c7e6c },
-    { path = "third-party/chromium/LICENSE", hash = 0x001c7e6c },
-]
+license-files = [{ path = "LICENSE", hash = 0x001c7e6c }]
 
 [licenses.private]
 # If true, ignores workspace crates that aren't published, or are only
