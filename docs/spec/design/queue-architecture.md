@@ -366,6 +366,6 @@ Key metrics to emit (via `tracing` structured events, exportable via OTLP):
 
 | Decision | Status |
 |---|---|
-| `queue-runtime` version: git or crates.io? | Same as `github-bot-sdk` — git pin until crates.io release |
+| `queue-runtime` version: git or crates.io? | **Resolved**: published `v0.2.0` on crates.io — switched from git pin (`ac848ff`) to `"0.2.0"` in `Cargo.toml` |
 | Session worker concurrency: single session at a time or multiple parallel sessions? | Start with configurable concurrency (default: 4 parallel sessions); `MERGE_WARDEN_QUEUE_CONCURRENCY` |
 | Phase 2 canary: dual-process routing or explicit repo list? | Recommend explicit repo list (`MERGE_WARDEN_QUEUE_REPOS`) — simpler and no DNS routing change needed |
