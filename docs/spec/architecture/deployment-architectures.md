@@ -807,12 +807,12 @@ spec:
         ports:
         - containerPort: 8080
         env:
-        - name: GITHUB_APP_ID
+        - name: MERGE_WARDEN_GITHUB_APP_ID
           valueFrom:
             secretKeyRef:
               name: github-app
               key: app-id
-        - name: GITHUB_PRIVATE_KEY
+        - name: MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY
           valueFrom:
             secretKeyRef:
               name: github-app
