@@ -91,7 +91,7 @@ Platform-specific and security-sensitive configuration:
 ```bash
 # Azure Functions
 APP_CONFIG_ENDPOINT=https://merge-warden-config.azconfig.io
-GITHUB_APP_ID=123456
+MERGE_WARDEN_GITHUB_APP_ID=123456
 GITHUB_WEBHOOK_SECRET=secret
 
 # CLI

@@ -15,8 +15,8 @@ defaults). The binary fails fast with code 1 if any **required** variable is abs
 
 | Variable | Type | Used by |
 |---|---|---|
-| `GITHUB_APP_ID` | `u64` | `ServerSecrets.github_app_id` |
-| `GITHUB_APP_PRIVATE_KEY` | PEM string | `ServerSecrets.github_app_private_key` |
+| `MERGE_WARDEN_GITHUB_APP_ID` | `u64` | `ServerSecrets.MERGE_WARDEN_GITHUB_APP_ID` |
+| `MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY` | PEM string | `ServerSecrets.MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY` |
 | `GITHUB_WEBHOOK_SECRET` | string | `ServerSecrets.github_webhook_secret` |
 
 ### Optional
@@ -84,12 +84,12 @@ must not be implemented (caller must explicitly call `.expose()`).
 /// and into the `GitHubClient` builder (task 1.0).
 ///
 /// # Environment Variables
-/// - `GITHUB_APP_ID` → `github_app_id`
-/// - `GITHUB_APP_PRIVATE_KEY` → `github_app_private_key`
+/// - `MERGE_WARDEN_GITHUB_APP_ID` → `MERGE_WARDEN_GITHUB_APP_ID`
+/// - `MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY` → `MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY`
 /// - `GITHUB_WEBHOOK_SECRET` → `github_webhook_secret`
 pub struct ServerSecrets {
-    pub github_app_id: u64,
-    pub github_app_private_key: SecretString,
+    pub MERGE_WARDEN_GITHUB_APP_ID: u64,
+    pub MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY: SecretString,
     pub github_webhook_secret: SecretString,
 }
 ```
@@ -168,10 +168,10 @@ pub struct ServerConfig {
 /// Reads the three required GitHub secrets from environment variables.
 ///
 /// # Errors
-/// - `ServerError::MissingEnvVar("GITHUB_APP_ID")` if the variable is absent.
-/// - `ServerError::InvalidEnvVar { name: "GITHUB_APP_ID", .. }` if the value
+/// - `ServerError::MissingEnvVar("MERGE_WARDEN_GITHUB_APP_ID")` if the variable is absent.
+/// - `ServerError::InvalidEnvVar { name: "MERGE_WARDEN_GITHUB_APP_ID", .. }` if the value
 ///   cannot be parsed as `u64`.
-/// - `ServerError::MissingEnvVar("GITHUB_APP_PRIVATE_KEY")` if absent.
+/// - `ServerError::MissingEnvVar("MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY")` if absent.
 /// - `ServerError::MissingEnvVar("GITHUB_WEBHOOK_SECRET")` if absent.
 ///
 /// # Guarantees

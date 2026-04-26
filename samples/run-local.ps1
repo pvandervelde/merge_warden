@@ -57,8 +57,8 @@
 
 .EXAMPLE
     # 1. Set required credentials
-    $env:GITHUB_APP_ID          = "123456"
-    $env:GITHUB_APP_PRIVATE_KEY = Get-Content ".\my-app.private-key.pem" -Raw
+    $env:MERGE_WARDEN_GITHUB_APP_ID          = "123456"
+    $env:MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY = Get-Content ".\my-app.private-key.pem" -Raw
     $env:GITHUB_WEBHOOK_SECRET  = "my-local-webhook-secret"
 
     # 2. Run and relay webhooks
@@ -84,8 +84,8 @@
 
     Required environment variables
     --------------------------------
-    GITHUB_APP_ID           Numeric GitHub App ID (from your App settings page).
-    GITHUB_APP_PRIVATE_KEY  Full PEM content of the RSA private key downloaded
+    MERGE_WARDEN_GITHUB_APP_ID           Numeric GitHub App ID (from your App settings page).
+    MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY  Full PEM content of the RSA private key downloaded
                             from your GitHub App settings. Newlines must be
                             preserved — use 'Get-Content ... -Raw'.
     GITHUB_WEBHOOK_SECRET   Webhook signing secret set in your GitHub App.
@@ -144,21 +144,21 @@ $logJob = $null
 # Validate required environment variables
 # ---------------------------------------------------------------------------
 
-$appId = $env:GITHUB_APP_ID
-$privateKey = $env:GITHUB_APP_PRIVATE_KEY
+$appId = $env:MERGE_WARDEN_GITHUB_APP_ID
+$privateKey = $env:MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY
 $webhookSecret = $env:GITHUB_WEBHOOK_SECRET
 
 if (-not $appId)
 {
-    throw "GITHUB_APP_ID environment variable is not set.`n" +
+    throw "MERGE_WARDEN_GITHUB_APP_ID environment variable is not set.`n" +
     "Set it to the numeric App ID from your GitHub App settings page."
 }
 
 if (-not $privateKey)
 {
-    throw "GITHUB_APP_PRIVATE_KEY environment variable is not set.`n" +
+    throw "MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY environment variable is not set.`n" +
     "Set it to the full PEM content of your GitHub App private key:`n" +
-    '  $env:GITHUB_APP_PRIVATE_KEY = Get-Content "path\to\app.private-key.pem" -Raw'
+    '  $env:MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY = Get-Content "path\to\app.private-key.pem" -Raw'
 }
 
 if (-not $webhookSecret)
@@ -245,7 +245,7 @@ else
 # variable inheritance (-e VAR without =value) is the most reliable way to
 # preserve them through Docker on Windows.
 #
-$env:GITHUB_APP_PRIVATE_KEY = $privateKey
+$env:MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY = $privateKey
 
 Write-Host ""
 Write-Host "Starting container on port $Port ..."
@@ -259,8 +259,8 @@ Write-Host "Starting container on port $Port ..."
 $dockerRunArgs = @(
     '-d',
     '-p', "${Port}:3000",
-    '-e', 'GITHUB_APP_ID',
-    '-e', 'GITHUB_APP_PRIVATE_KEY',
+    '-e', 'MERGE_WARDEN_GITHUB_APP_ID',
+    '-e', 'MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY',
     '-e', 'GITHUB_WEBHOOK_SECRET',
     '-e', 'MERGE_WARDEN_RECEIVER_MODE=webhook',
     '-e', 'RUST_LOG=merge_warden_core=debug,merge_warden_server=debug,merge_warden_developer_platforms=debug,info'
@@ -318,8 +318,8 @@ if ($containerState -ne 'running')
     docker rm $containerId | Out-Null
     throw "Container crashed at startup — see logs above.`n" +
     "Common causes:`n" +
-    "  - GITHUB_APP_ID / GITHUB_APP_PRIVATE_KEY / GITHUB_WEBHOOK_SECRET not set`n" +
-    "  - GITHUB_APP_PRIVATE_KEY contains an invalid RSA PEM`n" +
+    "  - MERGE_WARDEN_GITHUB_APP_ID / MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY / GITHUB_WEBHOOK_SECRET not set`n" +
+    "  - MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY contains an invalid RSA PEM`n" +
     "  - MERGE_WARDEN_CONFIG_FILE points to a file the server cannot parse"
 }
 

@@ -20,8 +20,8 @@ The server receives GitHub webhook POSTs directly. Validated events are forwarde
 |----------|-------------|--------|
 | `MERGE_WARDEN_RECEIVER_MODE` | Receiver mode | `webhook` |
 | `GITHUB_WEBHOOK_SECRET` | HMAC-SHA256 webhook signing secret | required |
-| `GITHUB_APP_ID` | GitHub App numeric ID | required |
-| `GITHUB_APP_PRIVATE_KEY` | GitHub App PEM private key | required |
+| `MERGE_WARDEN_GITHUB_APP_ID` | GitHub App numeric ID | required |
+| `MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY` | GitHub App PEM private key | required |
 | `MERGE_WARDEN_PORT` | TCP port to listen on | `3000` |
 
 ### Queue Mode
@@ -91,8 +91,8 @@ services:
     image: ghcr.io/pvandervelde/merge-warden-server:latest
     environment:
       MERGE_WARDEN_RECEIVER_MODE: queue
-      GITHUB_APP_ID: ${GITHUB_APP_ID}
-      GITHUB_APP_PRIVATE_KEY: ${GITHUB_APP_PRIVATE_KEY}
+      MERGE_WARDEN_GITHUB_APP_ID: ${MERGE_WARDEN_GITHUB_APP_ID}
+      MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY: ${MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY}
       MERGE_WARDEN_QUEUE_PROVIDER: azure
       MERGE_WARDEN_QUEUE_NAME: merge-warden-events
       MERGE_WARDEN_QUEUE_CONCURRENCY: "4"
