@@ -42,9 +42,9 @@ use github_bot_sdk::{
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use urlencoding;
 use tokio::sync::RwLock;
 use tracing::{debug, error, instrument, warn};
+use urlencoding;
 
 /// JSON response from GitHub's create installation access token endpoint.
 ///

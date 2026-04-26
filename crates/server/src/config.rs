@@ -211,7 +211,9 @@ pub fn load_secrets() -> Result<ServerSecrets, ServerError> {
 
     let github_app_private_key = std::env::var("MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY")
         .map(SecretString::new)
-        .map_err(|_| ServerError::MissingEnvVar("MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY".to_string()))?;
+        .map_err(|_| {
+            ServerError::MissingEnvVar("MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY".to_string())
+        })?;
 
     let github_webhook_secret = std::env::var("GITHUB_WEBHOOK_SECRET")
         .map(SecretString::new)
