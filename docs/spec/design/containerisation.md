@@ -61,8 +61,8 @@ let secret  = get_secret_from_keyvault(url, "GithubWebhookSecret").await?;
 
 | Secret | Environment variable |
 |---|---|
-| GitHub App ID | `GITHUB_APP_ID` |
-| GitHub App private key (PEM) | `GITHUB_APP_PRIVATE_KEY` (inline PEM string) |
+| GitHub App ID | `MERGE_WARDEN_GITHUB_APP_ID` |
+| GitHub App private key (PEM) | `MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY` (inline PEM string) |
 | GitHub webhook secret | `GITHUB_WEBHOOK_SECRET` |
 
 The entire `app_config_client.rs`, `get_secret_from_keyvault`, and associated Azure
@@ -249,7 +249,7 @@ main()
   │
   ├── init_logging()              telemetry.rs (console + optional OTLP)
   │
-  ├── read_env_secrets()          GITHUB_APP_ID, GITHUB_APP_PRIVATE_KEY,
+  ├── read_env_secrets()          MERGE_WARDEN_GITHUB_APP_ID, MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY,
   │                               GITHUB_WEBHOOK_SECRET  (fail-fast if missing)
   │
   ├── load_config()               MERGE_WARDEN_CONFIG_FILE or env vars or defaults
@@ -288,7 +288,7 @@ fails fast with clear error if required secrets are absent.
 ## Behavioral Assertions
 
 1. **Missing required env var must cause immediate exit**
-   - Given: `GITHUB_APP_ID` not set
+   - Given: `MERGE_WARDEN_GITHUB_APP_ID` not set
    - When: binary starts
    - Then: logs clear error, exits with code 1 before binding the port
 

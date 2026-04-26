@@ -187,8 +187,6 @@ pub struct WebhookQueueMessage {
     pub event_type: String,
     /// X-GitHub-Delivery UUID string.
     pub delivery_id: String,
-    /// GitHub App installation id.
-    pub installation_id: u64,
     /// UTC timestamp at which the webhook POST was received by the server.
     pub received_at: chrono::DateTime<chrono::Utc>,
     /// Raw JSON body (string-encoded so binary brokers can store it verbatim).

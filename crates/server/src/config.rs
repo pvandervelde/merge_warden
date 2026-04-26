@@ -56,9 +56,9 @@ impl fmt::Display for SecretString {
 /// See docs/spec/interfaces/server-config.md — `ServerSecrets`
 #[derive(Debug)]
 pub struct ServerSecrets {
-    /// Numeric GitHub App ID from `GITHUB_APP_ID`.
+    /// Numeric GitHub App ID from `MERGE_WARDEN_GITHUB_APP_ID`.
     pub github_app_id: u64,
-    /// PEM-encoded private key from `GITHUB_APP_PRIVATE_KEY`.
+    /// PEM-encoded private key from `MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY`.
     pub github_app_private_key: SecretString,
     /// Webhook signing secret from `GITHUB_WEBHOOK_SECRET`.
     ///
@@ -199,19 +199,21 @@ pub struct ServerConfig {
 ///
 /// # Errors
 /// - [`ServerError::MissingEnvVar`] when any required variable is absent.
-/// - [`ServerError::InvalidEnvVar`] when `GITHUB_APP_ID` is not a valid `u64`.
+/// - [`ServerError::InvalidEnvVar`] when `MERGE_WARDEN_GITHUB_APP_ID` is not a valid `u64`.
 pub fn load_secrets() -> Result<ServerSecrets, ServerError> {
-    let app_id_str = std::env::var("GITHUB_APP_ID")
-        .map_err(|_| ServerError::MissingEnvVar("GITHUB_APP_ID".to_string()))?;
+    let app_id_str = std::env::var("MERGE_WARDEN_GITHUB_APP_ID")
+        .map_err(|_| ServerError::MissingEnvVar("MERGE_WARDEN_GITHUB_APP_ID".to_string()))?;
 
     let github_app_id: u64 = app_id_str.parse().map_err(|e| ServerError::InvalidEnvVar {
-        name: "GITHUB_APP_ID".to_string(),
+        name: "MERGE_WARDEN_GITHUB_APP_ID".to_string(),
         message: format!("Expected an unsigned integer: {}", e),
     })?;
 
-    let github_app_private_key = std::env::var("GITHUB_APP_PRIVATE_KEY")
+    let github_app_private_key = std::env::var("MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY")
         .map(SecretString::new)
-        .map_err(|_| ServerError::MissingEnvVar("GITHUB_APP_PRIVATE_KEY".to_string()))?;
+        .map_err(|_| {
+            ServerError::MissingEnvVar("MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY".to_string())
+        })?;
 
     let github_webhook_secret = std::env::var("GITHUB_WEBHOOK_SECRET")
         .map(SecretString::new)

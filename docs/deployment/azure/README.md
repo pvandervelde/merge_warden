@@ -46,8 +46,8 @@ az containerapp create \
     "app-key=keyvaultref:<KEY_VAULT_SECRET_URI_FOR_KEY>,identityref:<MANAGED_IDENTITY_ID>" \
     "webhook-secret=keyvaultref:<KEY_VAULT_SECRET_URI_FOR_WEBHOOK>,identityref:<MANAGED_IDENTITY_ID>" \
   --env-vars \
-    "GITHUB_APP_ID=secretref:app-id" \
-    "GITHUB_APP_PRIVATE_KEY=secretref:app-key" \
+    "MERGE_WARDEN_GITHUB_APP_ID=secretref:app-id" \
+    "MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY=secretref:app-key" \
     "GITHUB_WEBHOOK_SECRET=secretref:webhook-secret" \
     "OTEL_EXPORTER_OTLP_ENDPOINT=http://your-otel-collector:4318"
 ```
@@ -152,12 +152,12 @@ variable "location" {
 }
 
 # GitHub App Configuration
-variable "github_app_id" {
+variable "MERGE_WARDEN_GITHUB_APP_ID" {
   description = "GitHub App ID"
   type        = string
 }
 
-variable "github_app_private_key" {
+variable "MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY" {
   description = "GitHub App private key content"
   type        = string
   sensitive   = true

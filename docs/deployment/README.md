@@ -31,8 +31,8 @@ clear error message if any required variable is absent.
 
 | Variable | Description |
 |---|---|
-| `GITHUB_APP_ID` | Numeric GitHub App ID |
-| `GITHUB_APP_PRIVATE_KEY` | Full PEM-encoded private key (inline string, not a file path) |
+| `MERGE_WARDEN_GITHUB_APP_ID` | Numeric GitHub App ID |
+| `MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY` | Full PEM-encoded private key (inline string, not a file path) |
 | `GITHUB_WEBHOOK_SECRET` | Webhook signing secret configured in GitHub |
 
 ### Optional — Server behaviour
@@ -89,8 +89,8 @@ always override defaults with their own `.github/merge-warden.toml` file.
 
 ```bash
 docker run --rm \
-  -e GITHUB_APP_ID=12345 \
-  -e GITHUB_APP_PRIVATE_KEY="$(cat /path/to/private-key.pem)" \
+  -e MERGE_WARDEN_GITHUB_APP_ID=12345 \
+  -e MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY="$(cat /path/to/private-key.pem)" \
   -e GITHUB_WEBHOOK_SECRET=supersecret \
   -p 3000:3000 \
   ghcr.io/pvandervelde/merge-warden-server:latest
@@ -143,8 +143,8 @@ docker build -f crates/server/Dockerfile -t merge_warden_server:local .
 
 # Run with local secrets
 docker run --rm \
-  -e GITHUB_APP_ID=12345 \
-  -e GITHUB_APP_PRIVATE_KEY="$(cat private-key.pem)" \
+  -e MERGE_WARDEN_GITHUB_APP_ID=12345 \
+  -e MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY="$(cat private-key.pem)" \
   -e GITHUB_WEBHOOK_SECRET=supersecret \
   -p 3000:3000 \
   merge_warden_server:local

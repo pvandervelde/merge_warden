@@ -177,19 +177,26 @@ fn webhook_queue_message_round_trip_serde() {
         schema_version: 1,
         event_type: "pull_request".to_string(),
         delivery_id: "abc-123".to_string(),
-        installation_id: 99,
         received_at: Utc::now(),
         raw_payload: r#"{"action":"opened"}"#.to_string(),
     };
 
-    let json = serde_json::to_string(&original).expect("serialise");
-    let decoded: WebhookQueueMessage = serde_json::from_str(&json).expect("deserialise");
+    let json_str = serde_json::to_string(&original).expect("serialise");
+    let decoded: WebhookQueueMessage = serde_json::from_str(&json_str).expect("deserialise");
 
     assert_eq!(decoded.schema_version, original.schema_version);
     assert_eq!(decoded.event_type, original.event_type);
     assert_eq!(decoded.delivery_id, original.delivery_id);
-    assert_eq!(decoded.installation_id, original.installation_id);
     assert_eq!(decoded.raw_payload, original.raw_payload);
+
+    // installation_id must not appear in the serialised output — regression guard.
+    let json_value: serde_json::Value =
+        serde_json::from_str(&json_str).expect("parse json for field check");
+    assert!(
+        json_value.get("installation_id").is_none(),
+        "installation_id must not be serialised: found {:?}",
+        json_value.get("installation_id")
+    );
 }
 
 #[test]
@@ -198,7 +205,6 @@ fn webhook_queue_message_json_contains_required_fields() {
         schema_version: 1,
         event_type: "push".to_string(),
         delivery_id: "delivery-xyz".to_string(),
-        installation_id: 42,
         received_at: Utc::now(),
         raw_payload: "{}".to_string(),
     };
@@ -209,9 +215,45 @@ fn webhook_queue_message_json_contains_required_fields() {
     assert_eq!(json["schema_version"], 1);
     assert_eq!(json["event_type"], "push");
     assert_eq!(json["delivery_id"], "delivery-xyz");
-    assert_eq!(json["installation_id"], 42);
     assert!(json.get("received_at").is_some());
     assert_eq!(json["raw_payload"], "{}");
+    // installation_id must not be serialised — regression guard.
+    assert!(
+        json.get("installation_id").is_none(),
+        "installation_id must not appear in serialised output: found {:?}",
+        json.get("installation_id")
+    );
+}
+
+/// Regression guard: messages produced before the `installation_id` field was
+/// removed must still deserialise correctly. serde ignores unknown fields by
+/// default, so this test passes both BEFORE and AFTER the field is removed.
+/// It prevents any future addition of `#[serde(deny_unknown_fields)]` from
+/// silently breaking backwards-compatibility with old queue messages.
+#[test]
+fn webhook_queue_message_deserialises_legacy_json_with_installation_id() {
+    let legacy_json = r#"{
+        "schema_version": 1,
+        "event_type": "pull_request",
+        "delivery_id": "legacy-del-001",
+        "installation_id": 42,
+        "received_at": "2024-01-15T10:30:00Z",
+        "raw_payload": "{\"action\":\"opened\"}"
+    }"#;
+
+    let result: Result<WebhookQueueMessage, _> = serde_json::from_str(legacy_json);
+
+    assert!(
+        result.is_ok(),
+        "legacy JSON containing installation_id must deserialise successfully \
+         (backwards-compatibility): {:?}",
+        result.err()
+    );
+    let msg = result.unwrap();
+    assert_eq!(msg.schema_version, 1);
+    assert_eq!(msg.event_type, "pull_request");
+    assert_eq!(msg.delivery_id, "legacy-del-001");
+    assert_eq!(msg.raw_payload, r#"{"action":"opened"}"#);
 }
 
 // ---------------------------------------------------------------------------
@@ -227,7 +269,6 @@ async fn queue_ingress_yields_enqueued_event() {
         schema_version: 1,
         event_type: "pull_request".to_string(),
         delivery_id: "del-001".to_string(),
-        installation_id: 1,
         received_at: Utc::now(),
         raw_payload: minimal_pr_payload(7),
     };
@@ -249,7 +290,6 @@ async fn queue_ingress_dead_letters_unknown_schema_version() {
         schema_version: 99,
         event_type: "pull_request".to_string(),
         delivery_id: "del-bad".to_string(),
-        installation_id: 1,
         received_at: Utc::now(),
         raw_payload: minimal_pr_payload(1),
     };
@@ -260,7 +300,6 @@ async fn queue_ingress_dead_letters_unknown_schema_version() {
         schema_version: 1,
         event_type: "pull_request".to_string(),
         delivery_id: "del-good".to_string(),
-        installation_id: 1,
         received_at: Utc::now(),
         raw_payload: minimal_pr_payload(2),
     };
@@ -294,7 +333,6 @@ async fn queue_ingress_dead_letters_malformed_body() {
         schema_version: 1,
         event_type: "pull_request".to_string(),
         delivery_id: "del-good".to_string(),
-        installation_id: 1,
         received_at: Utc::now(),
         raw_payload: minimal_pr_payload(2),
     };
@@ -314,7 +352,6 @@ async fn queue_ingress_ack_complete_succeeds() {
         schema_version: 1,
         event_type: "pull_request".to_string(),
         delivery_id: "del-ack".to_string(),
-        installation_id: 1,
         received_at: Utc::now(),
         raw_payload: minimal_pr_payload(5),
     };
@@ -336,7 +373,6 @@ async fn queue_ingress_ack_reject_sends_to_dlq() {
         schema_version: 1,
         event_type: "pull_request".to_string(),
         delivery_id: "del-reject".to_string(),
-        installation_id: 1,
         received_at: Utc::now(),
         raw_payload: minimal_pr_payload(6),
     };

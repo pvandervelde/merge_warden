@@ -44,11 +44,11 @@ aws secretsmanager create-secret \
       "portMappings": [{ "containerPort": 3000 }],
       "secrets": [
         {
-          "name": "GITHUB_APP_ID",
+          "name": "MERGE_WARDEN_GITHUB_APP_ID",
           "valueFrom": "arn:aws:secretsmanager:<region>:<account>:secret:merge-warden/github-app-id"
         },
         {
-          "name": "GITHUB_APP_PRIVATE_KEY",
+          "name": "MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY",
           "valueFrom": "arn:aws:secretsmanager:<region>:<account>:secret:merge-warden/github-app-key"
         },
         {
@@ -73,7 +73,7 @@ aws secretsmanager create-secret \
 ```
 
 ECS injects each `secrets` entry as the named environment variable at runtime, so
-the binary receives `GITHUB_APP_ID`, `GITHUB_APP_PRIVATE_KEY`, and
+the binary receives `MERGE_WARDEN_GITHUB_APP_ID`, `MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY`, and
 `GITHUB_WEBHOOK_SECRET` directly.
 
 ### OTLP telemetry on AWS

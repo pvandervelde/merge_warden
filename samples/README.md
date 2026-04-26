@@ -99,8 +99,8 @@ Subscribe to events: **Pull request**, **Pull request review**.
 
 ```powershell
 # 1. Load credentials into the current session
-$env:GITHUB_APP_ID          = "123456"           # numeric App ID from GitHub App settings
-$env:GITHUB_APP_PRIVATE_KEY = Get-Content "path\to\app.private-key.pem" -Raw
+$env:MERGE_WARDEN_GITHUB_APP_ID          = "123456"           # numeric App ID from GitHub App settings
+$env:MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY = Get-Content "path\to\app.private-key.pem" -Raw
 $env:GITHUB_WEBHOOK_SECRET  = "your-webhook-secret"
 
 # 2. Run (builds image, starts container, begins relaying)

@@ -70,11 +70,13 @@ fn load_secrets_succeeds_when_all_vars_present() {
     let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     let _env = EnvGuard::prepare(
         &[
-            ("GITHUB_APP_ID", "42"),
-            ("GITHUB_APP_PRIVATE_KEY", "pem-content"),
+            ("MERGE_WARDEN_GITHUB_APP_ID", "42"),
+            ("MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY", "pem-content"),
             ("GITHUB_WEBHOOK_SECRET", "hook-secret"),
         ],
         &[
+            "MERGE_WARDEN_GITHUB_APP_ID",
+            "MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY",
             "GITHUB_APP_ID",
             "GITHUB_APP_PRIVATE_KEY",
             "GITHUB_WEBHOOK_SECRET",
@@ -102,10 +104,12 @@ fn load_secrets_errors_when_app_id_missing() {
     let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     let _env = EnvGuard::prepare(
         &[
-            ("GITHUB_APP_PRIVATE_KEY", "k"),
+            ("MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY", "k"),
             ("GITHUB_WEBHOOK_SECRET", "s"),
         ],
         &[
+            "MERGE_WARDEN_GITHUB_APP_ID",
+            "MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY",
             "GITHUB_APP_ID",
             "GITHUB_APP_PRIVATE_KEY",
             "GITHUB_WEBHOOK_SECRET",
@@ -114,8 +118,8 @@ fn load_secrets_errors_when_app_id_missing() {
 
     let r = load_secrets();
     assert!(
-        matches!(&r, Err(ServerError::MissingEnvVar(n)) if n == "GITHUB_APP_ID"),
-        "Expected MissingEnvVar(GITHUB_APP_ID), got: {:?}",
+        matches!(&r, Err(ServerError::MissingEnvVar(n)) if n == "MERGE_WARDEN_GITHUB_APP_ID"),
+        "Expected MissingEnvVar(MERGE_WARDEN_GITHUB_APP_ID), got: {:?}",
         r
     );
 }
@@ -125,11 +129,13 @@ fn load_secrets_errors_when_app_id_is_not_numeric() {
     let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     let _env = EnvGuard::prepare(
         &[
-            ("GITHUB_APP_ID", "not-a-number"),
-            ("GITHUB_APP_PRIVATE_KEY", "k"),
+            ("MERGE_WARDEN_GITHUB_APP_ID", "not-a-number"),
+            ("MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY", "k"),
             ("GITHUB_WEBHOOK_SECRET", "s"),
         ],
         &[
+            "MERGE_WARDEN_GITHUB_APP_ID",
+            "MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY",
             "GITHUB_APP_ID",
             "GITHUB_APP_PRIVATE_KEY",
             "GITHUB_WEBHOOK_SECRET",
@@ -138,8 +144,8 @@ fn load_secrets_errors_when_app_id_is_not_numeric() {
 
     let r = load_secrets();
     assert!(
-        matches!(&r, Err(ServerError::InvalidEnvVar { name, .. }) if name == "GITHUB_APP_ID"),
-        "Expected InvalidEnvVar(GITHUB_APP_ID), got: {:?}",
+        matches!(&r, Err(ServerError::InvalidEnvVar { name, .. }) if name == "MERGE_WARDEN_GITHUB_APP_ID"),
+        "Expected InvalidEnvVar(MERGE_WARDEN_GITHUB_APP_ID), got: {:?}",
         r
     );
 }
@@ -148,8 +154,13 @@ fn load_secrets_errors_when_app_id_is_not_numeric() {
 fn load_secrets_errors_when_private_key_missing() {
     let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     let _env = EnvGuard::prepare(
-        &[("GITHUB_APP_ID", "1"), ("GITHUB_WEBHOOK_SECRET", "s")],
         &[
+            ("MERGE_WARDEN_GITHUB_APP_ID", "1"),
+            ("GITHUB_WEBHOOK_SECRET", "s"),
+        ],
+        &[
+            "MERGE_WARDEN_GITHUB_APP_ID",
+            "MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY",
             "GITHUB_APP_ID",
             "GITHUB_APP_PRIVATE_KEY",
             "GITHUB_WEBHOOK_SECRET",
@@ -158,8 +169,8 @@ fn load_secrets_errors_when_private_key_missing() {
 
     let r = load_secrets();
     assert!(
-        matches!(&r, Err(ServerError::MissingEnvVar(n)) if n == "GITHUB_APP_PRIVATE_KEY"),
-        "Expected MissingEnvVar(GITHUB_APP_PRIVATE_KEY), got: {:?}",
+        matches!(&r, Err(ServerError::MissingEnvVar(n)) if n == "MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY"),
+        "Expected MissingEnvVar(MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY), got: {:?}",
         r
     );
 }
@@ -168,8 +179,13 @@ fn load_secrets_errors_when_private_key_missing() {
 fn load_secrets_returns_none_webhook_secret_when_var_absent() {
     let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
     let _env = EnvGuard::prepare(
-        &[("GITHUB_APP_ID", "1"), ("GITHUB_APP_PRIVATE_KEY", "k")],
         &[
+            ("MERGE_WARDEN_GITHUB_APP_ID", "1"),
+            ("MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY", "k"),
+        ],
+        &[
+            "MERGE_WARDEN_GITHUB_APP_ID",
+            "MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY",
             "GITHUB_APP_ID",
             "GITHUB_APP_PRIVATE_KEY",
             "GITHUB_WEBHOOK_SECRET",
