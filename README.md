@@ -82,7 +82,7 @@ significant change.
 ## License
 
 [MIT](LICENSE)
-* Use `RUST_LOG=debug` for more verbose output
+- Use `RUST_LOG=debug` for more verbose output
 
 ### Change Type Label Detection
 
@@ -228,18 +228,18 @@ The Azure Function can be configured via Azure App Configuration to control chan
 
 The Azure Function automatically:
 
-* Loads Azure App Configuration settings on startup
-* Merges repository configuration when available
-* Falls back gracefully to Azure App Configuration when repository config is missing or invalid
-* Uses hardcoded defaults if Azure App Configuration is unavailable
+- Loads Azure App Configuration settings on startup
+- Merges repository configuration when available
+- Falls back gracefully to Azure App Configuration when repository config is missing or invalid
+- Uses hardcoded defaults if Azure App Configuration is unavailable
 
 #### Behavior
 
-* **Repository-first**: Uses existing repository labels when possible
-* **Consistent styling**: Respects repository's existing label colors and naming
-* **Fallback creation**: Creates standardized labels only when none exist
-* **Configurable**: Both application and repository-level configuration
-* **Non-blocking**: Label failures don't block PR processing
+- **Repository-first**: Uses existing repository labels when possible
+- **Consistent styling**: Respects repository's existing label colors and naming
+- **Fallback creation**: Creates standardized labels only when none exist
+- **Configurable**: Both application and repository-level configuration
+- **Non-blocking**: Label failures don't block PR processing
 
 #### Repository Configuration Options
 
