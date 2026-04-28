@@ -1,0 +1,88 @@
+site_name: Merge Warden
+site_description: Enforce pull request policies and automate workflows via GitHub webhooks.
+site_url: https://pvandervelde.github.io/merge_warden/
+repo_url: https://github.com/pvandervelde/merge_warden
+repo_name: pvandervelde/merge_warden
+edit_uri: edit/master/docs/user/
+
+docs_dir: docs/user
+site_dir: site
+
+theme:
+  name: material
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+
+plugins:
+  - search
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - tables
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Tutorials:
+      - Your first deployment: tutorials/01-getting-started.md
+      - Enforce your first policy: tutorials/02-add-first-policy.md
+  - How-to guides:
+      - Deployment:
+          - Deploy on Azure: how-to/deploy-on-azure.md
+          - Deploy on AWS: how-to/deploy-on-aws.md
+          - Run locally: how-to/run-locally.md
+          - Test with smee: how-to/test-with-smee.md
+          - Set app-level defaults: how-to/set-app-level-defaults.md
+      - Configuration:
+          - PR title validation: how-to/configure-pr-title-validation.md
+          - Work-item validation: how-to/configure-work-item-validation.md
+          - PR size labels: how-to/configure-pr-size-labels.md
+          - WIP detection: how-to/configure-wip-detection.md
+          - PR state labels: how-to/configure-pr-state-labels.md
+          - Issue propagation: how-to/configure-issue-propagation.md
+          - Change-type labels: how-to/configure-change-type-labels.md
+          - Bypass rules: how-to/configure-bypass-rules.md
+  - Reference:
+      - Per-repo config: reference/per-repo-config.md
+      - App-level config: reference/app-config.md
+      - Environment variables: reference/environment-variables.md
+      - HTTP endpoints: reference/http-endpoints.md
+      - CLI: reference/cli.md
+      - GitHub App permissions: reference/github-app-permissions.md
+  - Explanation:
+      - How Merge Warden works: explanation/how-merge-warden-works.md
+      - Webhook vs queue modes: explanation/receiver-modes.md
+      - Configuration precedence: explanation/config-precedence.md
+      - Two config files: explanation/two-config-files.md
+      - Bypass rules: explanation/bypass-rules.md
