@@ -140,6 +140,8 @@ Each bypass section has the same shape. Three bypass policies are available:
 **Example:**
 
 ```toml
+schemaVersion = 1
+
 [policies.bypassRules.title_convention]
 enabled = true
 users   = ["release-bot", "dependabot[bot]"]
@@ -207,8 +209,8 @@ Hex colour codes used when creating fallback labels. One entry per commit type.
 
 ## Complete example
 
-See [`samples/merge-warden.sample.toml`](../../../samples/merge-warden.sample.toml) in the
-repository for a fully annotated example configuration.
+See [`samples/merge-warden.sample.toml`](https://github.com/pvandervelde/merge_warden/blob/master/samples/merge-warden.sample.toml)
+in the repository for a fully annotated example configuration.
 
 ---
 

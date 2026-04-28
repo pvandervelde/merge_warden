@@ -55,7 +55,8 @@ merge-warden checkpr --provider github --config /path/to/config.toml
 The server listens on `http://localhost:3000` by default. Configure your GitHub App webhook
 URL (or smee relay target) to `http://localhost:3000/api/merge_warden`.
 
-**Log level:** Controlled by the `MERGE_WARDEN_LOG` environment variable (not `RUST_LOG`).
+**Log level:** Controlled by the `MERGE_WARDEN_LOG` environment variable. The server
+container uses `RUST_LOG`; the CLI binary uses `MERGE_WARDEN_LOG`. See [Environment variables](environment-variables.md).
 
 ---
 

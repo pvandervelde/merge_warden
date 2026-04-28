@@ -16,8 +16,8 @@ See [Configuration precedence](../explanation/config-precedence.md).
 > table in each section below links the equivalent per-repo field. Pointing
 > `MERGE_WARDEN_CONFIG_FILE` at a per-repo sample file will silently produce no enforcement.
 
-See [`samples/app-config.sample.toml`](../../../samples/app-config.sample.toml) for a
-fully annotated example.
+See [`samples/app-config.sample.toml`](https://github.com/pvandervelde/merge_warden/blob/master/samples/app-config.sample.toml)
+for a fully annotated example.
 
 ---
 
@@ -67,6 +67,19 @@ Top-level policy defaults.
 | `draft_label` | string | *(none)* | Label for draft PRs. |
 | `review_label` | string | *(none)* | Label for PRs awaiting review. |
 | `approved_label` | string | *(none)* | Label for approved PRs. |
+
+---
+
+## Issue propagation
+
+Issue propagation (`sync_milestone_from_issue`, `sync_project_from_issue`) has no
+application-level equivalent. These settings are only configurable in the
+per-repository `.github/merge-warden.toml` file under
+`[policies.pullRequests.issuePropagation]`. There is no server-wide default for
+issue propagation.
+
+See [Per-repository configuration schema](per-repo-config.md#policiespullrequestsissuepropagation)
+for details.
 
 ---
 

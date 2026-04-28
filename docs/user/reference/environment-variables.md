@@ -34,7 +34,7 @@ clear error message if a required variable is absent.
 
 | Variable | Default | Description |
 | :--- | :--- | :--- |
-| `RUST_LOG` | `info` | Log level filter. Accepted values: `error`, `warn`, `info`, `debug`, `trace`. Can be scoped per module (e.g. `merge_warden=debug`). |
+| `RUST_LOG` | `info` | Log level filter for the **server container**. Accepted values: `error`, `warn`, `info`, `debug`, `trace`. Can be scoped per module (e.g. `merge_warden=debug`). |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | *(none)* | OTLP HTTP endpoint URL. When set, structured traces are exported to this collector. When unset, traces are written to stdout only. |
 | `OTEL_SERVICE_NAME` | `merge-warden` | Service name reported in traces and spans. |
 | `OTEL_SERVICE_VERSION` | *(binary version)* | Service version reported in traces. Defaults to the compiled-in binary version. |
@@ -46,6 +46,8 @@ clear error message if a required variable is absent.
 - `MERGE_WARDEN_GITHUB_APP_PRIVATE_KEY` must be the full PEM content as a multi-line string,
   not a file path. When using shell expansion, use `$(cat /path/to/key.pem)` to inline
   the file.
+- The **CLI binary** uses `MERGE_WARDEN_LOG` instead of `RUST_LOG` for its log level.
+  All other environment variables above apply only to the server container.
 - Setting `RUST_LOG=debug` or `RUST_LOG=trace` significantly increases log volume. Use these
   levels only for troubleshooting.
 - When `OTEL_EXPORTER_OTLP_ENDPOINT` is not set, no external trace export occurs even if
