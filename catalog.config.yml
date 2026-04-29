@@ -80,6 +80,28 @@ languages:
         pattern: "pub type $NAME = $$$"
         tags: []
 
+  python:
+    extensions: [ ".py" ]
+    exclude_patterns:
+      - "**/__pycache__/**"
+      - "**/test_*.py"
+      - "**/*_test.py"
+      - "**/tests/**"
+      - "**/conftest.py"
+    symbols:
+      - kind: fn
+        pattern: "def $NAME($$$):"
+        tags: []
+        filter: "not_private"
+      - kind: fn
+        pattern: "async def $NAME($$$):"
+        tags: [ async ]
+        filter: "not_private"
+      - kind: class
+        pattern: "class $NAME"
+        tags: []
+        filter: "not_private"
+
 # ── Domain definitions ────────────────────────────────────────────────────────
 #
 # Order matters — first match wins.
