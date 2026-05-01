@@ -5,6 +5,75 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-05-01
+
+### <!-- 0 -->⛰️  Features
+
+- Add deterministic codebase catalog generator ([#230](https://github.com/pvandervelde/merge_warden/issues/230))
+- Add catalog generator script and per-domain documentation
+- Harden installation ID resolution and clean up credential env var names ([#225](https://github.com/pvandervelde/merge_warden/issues/225))
+- Rename GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY env vars to MERGE_WARDEN_ prefix
+- Add resolve_installation_id to AppAuthProvider
+- Propagate issue metadata for all reference keywords
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- Address PR review issues in catalog generator
+- Allow BSD-2-Clause and Zlib licenses from queue-runtime transitive deps
+- Address PR review comments
+- Resolve five runtime bugs in validation, labels, and issue propagation ([#223](https://github.com/pvandervelde/merge_warden/issues/223))
+- Add missing docs to serde defaults and fix pattern_matches escaping
+- Resolve test failures, unused import, and security advisories
+- Correct serde defaults, TOML config, and GitHub App permissions for issue propagation
+- Migrate to github-bot-sdk sub-client API
+- Address five bugs found during testing
+- Restructure release workflow and rename container image ([#218](https://github.com/pvandervelde/merge_warden/issues/218))
+- Replace ls with find in artifact count check
+- Address release workflow security and reliability issues
+- Restructure publish workflow and rename container image
+
+### <!-- 2 -->🚜 Refactor
+
+- Remove dead installation_id field from WebhookQueueMessage
+
+### <!-- 3 -->📚 Documentation
+
+- Add complete user documentation site with GitHub Pages deployment ([#229](https://github.com/pvandervelde/merge_warden/issues/229))
+- Address PR review comments on documentation content
+- Further changes to the repo README
+- Rewrite README to reflect current architecture and link to docs site
+- Add MkDocs config and GitHub Pages deployment workflow
+- Add conceptual explanation pages
+- Add reference documentation
+- Add policy configuration how-to guides
+- Add deployment and server setup how-to guides
+- Add getting-started and first-policy tutorials
+- Add user documentation landing page and structure plan
+- Fix over-renamed Rust field names in server-config interface spec
+- Fix stale Kubernetes env var names in deployment-architectures spec
+- Update deployment docs and samples for MERGE_WARDEN_ env var prefix rename
+- Remove installation_id from WebhookQueueMessage interface spec
+
+### <!-- 6 -->🧪 Testing
+
+- Update config tests for MERGE_WARDEN_ env var prefix rename
+- Update ingress tests to assert installation_id absent from WebhookQueueMessage
+- Add WireMock tests for resolve_installation_id
+- Add tests covering the five bug fixes
+
+### <!-- 7 -->⚙️ Miscellaneous Tasks
+
+- Adding the new icons for the app ([#231](https://github.com/pvandervelde/merge_warden/issues/231))
+- Adding the new icons for the app
+- Address PR review comments on workflow
+- Trigger deployment on version tag, not every master push
+- Fix Rust formatting
+- Remove stale TDD scaffolding comments from ingress_tests
+- Ignore the logs folder
+- Upgrade to distroless/cc-debian13 and update samples
+
+
+
 ## [0.3.0] - 2026-04-12
 
 ### <!-- 0 -->⛰️  Features
