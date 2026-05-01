@@ -181,11 +181,25 @@ jobs:
     timeout-minutes: 60
 
     steps:
+      - name: Validate dispatch version input
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+        run: |
+          if ! [[ "${DISPATCH_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: version input '${DISPATCH_VERSION}' does not match expected format N.N.N"
+            exit 1
+          fi
+
       - name: Resolve checkout ref
         id: ref
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "REF=${{ inputs.version }}" >> "${GITHUB_OUTPUT}"
+            # On dispatch, DISPATCH_VERSION is used as a git tag ref.
+            # The tag must already exist (created by publish-release in a prior partial run).
+            echo "REF=${DISPATCH_VERSION}" >> "${GITHUB_OUTPUT}"
           else
             echo "REF=${{ github.event.pull_request.base.ref }}" >> "${GITHUB_OUTPUT}"
           fi
@@ -342,9 +356,11 @@ jobs:
     steps:
       - name: Resolve release version
         id: version
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
         run: |
           if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "RELEASE_VERSION=${{ inputs.version }}" >> "${GITHUB_OUTPUT}"
+            echo "RELEASE_VERSION=${DISPATCH_VERSION}" >> "${GITHUB_OUTPUT}"
           else
             echo "RELEASE_VERSION=${{ needs.determine-version.outputs.release_version }}" >> "${GITHUB_OUTPUT}"
           fi
