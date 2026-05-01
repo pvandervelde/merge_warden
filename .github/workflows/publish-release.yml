@@ -157,6 +157,79 @@ jobs:
           path: ${{ env.ARCHIVE }}
           retention-days: 1
 
+  build-server:
+    name: Build Server - ${{ matrix.target }}
+    needs: determine-version
+    # Run for normal PR-triggered releases, or for workflow_dispatch recovery
+    # (determine-version is skipped on workflow_dispatch, so always() is required).
+    if: |
+      always() && (
+        needs.determine-version.result == 'success' ||
+        github.event_name == 'workflow_dispatch'
+      )
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            arch: amd64
+          - target: aarch64-unknown-linux-gnu
+            arch: arm64
+    timeout-minutes: 60
+
+    steps:
+      - name: Resolve checkout ref
+        id: ref
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "REF=${{ inputs.version }}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "REF=${{ github.event.pull_request.base.ref }}" >> "${GITHUB_OUTPUT}"
+          fi
+
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ steps.ref.outputs.REF }}
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install system dependencies (native amd64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libssl-dev
+
+      - uses: taiki-e/install-action@92f69c195229fe62d58b4d697ab4bc75def98e76 # v2
+        with:
+          tool: cross
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
+
+      - name: Build server binary (native amd64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: cargo build --release --target ${{ matrix.target }} -p merge_warden_server
+        env:
+          OPENSSL_STATIC: "1"
+
+      - name: Build server binary (cross aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: cross build --release --target ${{ matrix.target }} -p merge_warden_server
+
+      - name: Upload server artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: server-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/merge_warden_server
+          retention-days: 1
+
   publish-release:
     name: Publish Release
     needs: [ determine-version, build-cli ]
@@ -250,17 +323,21 @@ jobs:
 
   publish-container:
     name: Publish Container Image
-    needs: [ determine-version, publish-release ]
+    needs: [ determine-version, publish-release, build-server ]
     # Run after a successful PR-triggered publish, or standalone for workflow_dispatch recovery.
     # Jobs skipped due to their own 'if' conditions count as 'skipped', not 'failure',
     # so always() is required to allow this job to run when upstream jobs were skipped.
+    # build-server must succeed in both paths — it compiles the binaries that
+    # the Dockerfile COPYs; there is nothing to push without them.
     if: |
       always() && (
-        needs.publish-release.result == 'success' ||
-        github.event_name == 'workflow_dispatch'
+        (needs.publish-release.result == 'success' && needs.build-server.result == 'success') ||
+        (github.event_name == 'workflow_dispatch' && needs.build-server.result == 'success')
       )
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    # No Rust compilation happens here — the job only stages pre-built binaries
+    # and runs a COPY-only Docker build, so 20 minutes is a generous bound.
+    timeout-minutes: 20
 
     steps:
       - name: Resolve release version
@@ -277,15 +354,26 @@ jobs:
         with:
           ref: ${{ steps.version.outputs.RELEASE_VERSION }}
 
+      - name: Download server artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: server-*
+          path: server-artifacts
+          merge-multiple: false
+
+      - name: Stage binaries for Docker build
+        run: |
+          mkdir -p binaries/amd64 binaries/arm64
+          cp server-artifacts/server-x86_64-unknown-linux-gnu/merge_warden_server binaries/amd64/merge_warden_server
+          cp server-artifacts/server-aarch64-unknown-linux-gnu/merge_warden_server binaries/arm64/merge_warden_server
+          chmod +x binaries/amd64/merge_warden_server binaries/arm64/merge_warden_server
+
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up QEMU (for multi-arch builds)
-        uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0

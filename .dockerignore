@@ -3,7 +3,8 @@
 .gitignore
 .gitattributes
 
-# Exclude build artifacts — the builder stage recompiles from source
+# Exclude Rust build artifacts — binaries are pre-compiled in CI and
+# staged under binaries/<arch>/ before the Docker build runs
 target
 
 # Exclude documentation and non-Rust files that are not part of the build
