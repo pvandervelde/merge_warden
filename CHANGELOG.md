@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.1] - 2026-05-02
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- Pre-build server binaries natively to eliminate QEMU timeout ([#232](https://github.com/pvandervelde/merge_warden/issues/232))
+- Move audit.toml to .cargo/audit.toml so cargo audit reads it
+- Move cargo audit ignores to audit.toml for local and CI parity
+- Stage pre-built binary in CI Docker validate, harden workflow dispatch inputs
+- Pre-build server binaries natively to eliminate QEMU timeout
+- Split Docker build into own job with 90min timeout and add recovery dispatch
+
+
+
 ## [0.4.0] - 2026-05-01
 
 ### <!-- 0 -->⛰️  Features
