@@ -1,0 +1,27 @@
+# cargo-audit configuration
+# https://docs.rs/cargo-audit/latest/cargo_audit/config/index.html
+#
+# All ignored advisories are transitive dependencies pulled in by queue-runtime
+# or github-bot-sdk. Neither package has released a version that resolves these
+# advisories, so there is no upgrade path available in this workspace.
+
+[advisories]
+ignore = [
+    # rsa Marvin Attack timing side-channel — transitive via github-bot-sdk -> jsonwebtoken -> rsa.
+    # No fixed version of rsa is available upstream.
+    "RUSTSEC-2023-0071",
+    # instant is unmaintained — transitive via queue-runtime -> azure_core -> http-types -> futures-lite -> fastrand.
+    "RUSTSEC-2024-0384",
+    # paste is unmaintained — transitive via queue-runtime -> azure_core.
+    "RUSTSEC-2024-0436",
+    # rand unsoundness with custom logger — affects rand 0.7.x, 0.8.x, 0.9.x.
+    # Transitive via queue-runtime (azure_core, async-nats) and github-bot-sdk (rsa, jsonwebtoken).
+    # The unsoundness only triggers when a custom logger calls rand::rng() during reseeding,
+    # which does not apply to this application's logging configuration.
+    "RUSTSEC-2026-0097",
+    # hickory-proto CPU exhaustion O(n²) name compression — transitive via queue-runtime -> async-rs -> hickory-resolver 0.26.0.
+    # Fix exists in hickory >= 0.26.1 but async-rs 0.8.4 pins hickory-resolver 0.26.0.
+    "RUSTSEC-2026-0119",
+    # hickory-net unbounded NSEC3 loop on cross-zone responses — same transitive chain as RUSTSEC-2026-0119.
+    "RUSTSEC-2026-0120",
+]

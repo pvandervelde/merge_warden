@@ -95,6 +95,12 @@ ignore = [
     # The unsoundness only triggers when a custom logger calls rand::rng() during
     # reseeding, which does not apply to this application's logging configuration.
     { id = "RUSTSEC-2026-0097", reason = "transitive via queue-runtime and github-bot-sdk git deps; rand 0.7/0.8/0.9 required by azure_core, jsonwebtoken, oauth2, rsa; no upgrade path without upstream changes" },
+    # hickory-proto CPU exhaustion O(n²) name compression — transitive via queue-runtime -> async-rs -> hickory-resolver 0.26.0.
+    # Fix exists in hickory >= 0.26.1 but async-rs 0.8.4 pins hickory-resolver 0.26.0;
+    # cannot be upgraded without a queue-runtime release that bumps async-rs.
+    { id = "RUSTSEC-2026-0119", reason = "transitive via queue-runtime -> async-rs -> hickory-resolver 0.26.0; no upgrade path without upstream queue-runtime update" },
+    # hickory-net unbounded NSEC3 loop — same transitive chain as RUSTSEC-2026-0119.
+    { id = "RUSTSEC-2026-0120", reason = "transitive via queue-runtime -> async-rs -> hickory-resolver 0.26.0; no upgrade path without upstream queue-runtime update" },
 ]
 
 # If this is true, then cargo deny will use the git executable to fetch advisory database.

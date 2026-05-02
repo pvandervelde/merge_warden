@@ -32,6 +32,12 @@ opentelemetry_sdk = { workspace = true }
 [target.x86_64-unknown-linux-musl.dependencies]
 openssl = { version = "0.10.72", features = ["vendored"] }
 
+# For cross-compiled aarch64 builds (used in the Docker image), compile
+# OpenSSL from source so the binary is fully self-contained and does not
+# depend on system libssl — matching the distroless runtime image.
+[target.aarch64-unknown-linux-gnu.dependencies]
+openssl = { version = "0.10.72", features = ["vendored"] }
+
 [[bin]]
 name = "merge_warden_server"
 path = "src/main.rs"
