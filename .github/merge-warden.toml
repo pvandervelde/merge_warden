@@ -40,7 +40,7 @@ add_comment = true
 excluded_file_patterns = ["*.md", "*.txt", "docs/**", "**/*.lock"]
 
 # Optional: override the default size tier line-count boundaries.
-# [policies.pullRequests.prSize.thresholds]
+[policies.pullRequests.prSize.thresholds]
 xs = 10
 s = 50
 m = 100

@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft — awaiting implementation (Phase 2.0)
+Implemented
 
 ## Context
 
@@ -167,7 +167,7 @@ COPY . .
 RUN cargo build --release -p merge_warden_server
 
 # Runtime stage
-FROM gcr.io/distroless/cc-debian12
+FROM gcr.io/distroless/cc-debian13
 COPY --from=builder /app/target/release/merge_warden_server /merge_warden_server
 EXPOSE 3000
 ENTRYPOINT ["/merge_warden_server"]
@@ -175,7 +175,7 @@ ENTRYPOINT ["/merge_warden_server"]
 
 **Health check** — delegated to the orchestrator's external HTTP probe:
 
-The runtime image is `gcr.io/distroless/cc-debian12`, which contains no shell or
+The runtime image is `gcr.io/distroless/cc-debian13`, which contains no shell or
 HTTP client. A Dockerfile `HEALTHCHECK CMD` cannot be used. Instead, configure the
 container orchestrator to probe:
 
