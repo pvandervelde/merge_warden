@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-05-07
+
+### <!-- 1 -->🐛 Bug Fixes
+
+- Replace /api/merge_warden with /health and /api/github/webhook ([#235](https://github.com/pvandervelde/merge_warden/issues/235))
+- Address PR review comments
+
+### <!-- 2 -->🚜 Refactor
+
+- Split health and webhook onto separate, conventional routes
+
+### <!-- 6 -->🧪 Testing
+
+- Fix expected default webhook URL in config test
+
+
+
 ## [0.4.1] - 2026-05-02
 
 ### <!-- 1 -->🐛 Bug Fixes
