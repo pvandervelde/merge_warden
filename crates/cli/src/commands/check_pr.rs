@@ -462,7 +462,7 @@ pub async fn execute(args: CheckPrArgs) -> Result<(), CliError> {
     });
 
     let app = Router::new()
-        .route("/api/merge_warden", post(handle_webhook))
+        .route("/api/github/webhook", post(handle_webhook))
         .with_state(state);
     let listener = tokio::net::TcpListener::bind(addr.clone()).await.unwrap();
 

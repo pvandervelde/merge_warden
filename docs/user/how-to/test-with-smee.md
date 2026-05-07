@@ -41,14 +41,14 @@ and passes verification. No re-signing occurs.
 ```bash
 npx smee-client \
   --url https://smee.io/AbCdEfGhIj123456 \
-  --target http://localhost:3000/api/merge_warden
+  --target http://localhost:3000/api/github/webhook
 ```
 
 ### Global installation
 
 ```bash
 npm install --global smee-client
-smee --url https://smee.io/AbCdEfGhIj123456 --target http://localhost:3000/api/merge_warden
+smee --url https://smee.io/AbCdEfGhIj123456 --target http://localhost:3000/api/github/webhook
 ```
 
 Leave the client running in its own terminal while you test.
@@ -61,9 +61,9 @@ Trigger a webhook by opening a pull request in your test repository. The smee-cl
 terminal will display something like:
 
 ```
-Forwarding https://smee.io/AbCdEfGhIj123456 to http://localhost:3000/api/merge_warden
+Forwarding https://smee.io/AbCdEfGhIj123456 to http://localhost:3000/api/github/webhook
 Connected https://smee.io/AbCdEfGhIj123456
-POST http://localhost:3000/api/merge_warden - 202
+POST http://localhost:3000/api/github/webhook - 202
 ```
 
 The **202** response comes from the local Merge Warden server confirming the event was

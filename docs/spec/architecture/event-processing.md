@@ -43,7 +43,7 @@ server and the same processing pipeline; only the channel between them differs.
 ```
 GitHub
   │
-  │  POST /api/merge_warden
+  │  POST /api/github/webhook
   ▼
 Axum handler
   │  Calls WebhookReceiver::receive_webhook() [github-bot-sdk]
@@ -113,7 +113,7 @@ run_event_processor loop
   (see Processing Pipeline below)
 ```
 
-In queue mode the Axum server only exposes a health-check endpoint (`GET /api/merge_warden`).
+In queue mode the Axum server only exposes a health-check endpoint (`GET /health`).
 `GITHUB_WEBHOOK_SECRET` is not required and is ignored if set.
 
 **Key properties:**

@@ -60,10 +60,10 @@ When `OTEL_EXPORTER_OTLP_ENDPOINT` is not set, traces are written to stdout only
 
 | Method | Path | Description |
 |---|---|---|
-| `GET` | `/api/merge_warden` | Health check — returns `200 OK` |
-| `POST` | `/api/merge_warden` | GitHub webhook receiver |
+| `GET` | `/health` | Health check — returns `200 OK` |
+| `POST` | `/api/github/webhook` | GitHub webhook receiver |
 
-Configure your GitHub App webhook URL to `https://<host>/api/merge_warden` and set
+Configure your GitHub App webhook URL to `https://<host>/api/github/webhook` and set
 the content type to `application/json`.
 
 ---
@@ -99,7 +99,7 @@ docker run --rm \
 Verify the server is healthy:
 
 ```bash
-curl http://localhost:3000/api/merge_warden
+curl http://localhost:3000/health
 # HTTP 200
 ```
 
@@ -122,7 +122,7 @@ GitHub sends a webhook POST directly to the server. The HMAC signature is verifi
 and the event is processed inline before the response is returned.
 
 ```
-GitHub → POST /api/merge_warden → verify HMAC → process PR → 202 Accepted
+GitHub → POST /api/github/webhook → verify HMAC → process PR → 202 Accepted
 ```
 
 ### `queue`

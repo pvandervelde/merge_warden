@@ -61,7 +61,7 @@ aws secretsmanager create-secret \
         { "name": "OTEL_EXPORTER_OTLP_ENDPOINT", "value": "http://adot-collector:4318" }
       ],
       "healthCheck": {
-        "command": ["CMD-SHELL", "curl -f http://localhost:3000/api/merge_warden || exit 1"],
+        "command": ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"],
         "interval": 30,
         "timeout": 5,
         "retries": 3,
@@ -90,7 +90,7 @@ metrics to CloudWatch or X-Ray.
 Configure the ALB target group health check to:
 
 - **Protocol**: HTTP
-- **Path**: `/api/merge_warden`
+- **Path**: `/health`
 - **Success codes**: `200`
 
 ---
@@ -100,7 +100,7 @@ Configure the ALB target group health check to:
 After the ALB is provisioned, configure the GitHub App webhook to:
 
 ```
-https://<alb-dns-name>/api/merge_warden
+https://<alb-dns-name>/api/github/webhook
 ```
 
 Set **Content type** to `application/json` and use the value from

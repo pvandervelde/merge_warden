@@ -129,7 +129,7 @@ Once the script reports *"Server is ready"* and *"Relaying webhooks"*:
 
 ```powershell
 # Health check
-Invoke-RestMethod http://localhost:3000/api/merge_warden
+Invoke-RestMethod http://localhost:3000/health
 # Returns: HTTP 200 OK
 
 # Trigger a real event — open or update a PR in your test repo

@@ -2,7 +2,7 @@
 
 ## Status
 
-Draft — awaiting implementation (Phase 2.0)
+Implemented
 
 ## Context
 
@@ -148,7 +148,7 @@ topologies.
 ## What Does Not Change
 
 - Axum as the HTTP server framework
-- Route structure: `GET /api/merge_warden` (health), `POST /api/merge_warden` (webhook)
+- Route structure: `GET /health` (health), `POST /api/github/webhook` (webhook)
 - `core` crate — zero changes
 - `developer_platforms` crate — internal SDK migration is task 0.1; public traits unchanged
 - `cli` crate — zero changes
@@ -167,7 +167,7 @@ COPY . .
 RUN cargo build --release -p merge_warden_server
 
 # Runtime stage
-FROM gcr.io/distroless/cc-debian12
+FROM gcr.io/distroless/cc-debian13
 COPY --from=builder /app/target/release/merge_warden_server /merge_warden_server
 EXPOSE 3000
 ENTRYPOINT ["/merge_warden_server"]
@@ -175,12 +175,12 @@ ENTRYPOINT ["/merge_warden_server"]
 
 **Health check** — delegated to the orchestrator's external HTTP probe:
 
-The runtime image is `gcr.io/distroless/cc-debian12`, which contains no shell or
+The runtime image is `gcr.io/distroless/cc-debian13`, which contains no shell or
 HTTP client. A Dockerfile `HEALTHCHECK CMD` cannot be used. Instead, configure the
 container orchestrator to probe:
 
 ```
-GET http://<container>:3000/api/merge_warden  → 200 OK
+GET http://<container>:3000/health  → 200 OK
 ```
 
 The Dockerfile therefore declares `HEALTHCHECK NONE` explicitly, and the binary does
@@ -188,9 +188,9 @@ not implement a `--health-check` CLI flag.
 
 Orchestrator-specific configuration:
 
-- **ECS**: set `healthCheck.command` in the task definition to `curl -f http://localhost:3000/api/merge_warden`
-- **Azure Container Apps**: configure the liveness probe to HTTP GET `/api/merge_warden` on port 3000
-- **Kubernetes**: use an `httpGet` liveness/readiness probe on path `/api/merge_warden`, port 3000
+- **ECS**: set `healthCheck.command` in the task definition to `curl -f http://localhost:3000/health`
+- **Azure Container Apps**: configure the liveness probe to HTTP GET `/health` on port 3000
+- **Kubernetes**: use an `httpGet` liveness/readiness probe on path `/health`, port 3000
 
 ---
 
@@ -299,7 +299,7 @@ fails fast with clear error if required secrets are absent.
 
 3. **Health endpoint must respond 200 before processing any webhook**
    - Given: binary has started and is listening
-   - When: `GET /api/merge_warden`
+   - When: `GET /health`
    - Then: HTTP 200 OK
 
 4. **OTLP layer must be inactive when endpoint env var is absent**
@@ -310,7 +310,7 @@ fails fast with clear error if required secrets are absent.
 5. **Docker image must pass health check within 30s of start**
    - Given: all required env vars set; no network access needed for startup
    - When: container starts
-   - Then: `GET /api/merge_warden` returns 200 within health check window
+   - Then: `GET /health` returns 200 within health check window
 
 ---
 

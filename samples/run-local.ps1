@@ -327,7 +327,7 @@ if ($containerState -ne 'running')
 # Health check — wait until the server is ready
 # ---------------------------------------------------------------------------
 
-$healthUrl = "http://localhost:$Port/api/merge_warden"
+$healthUrl = "http://localhost:$Port/health"
 $maxRetries = 20
 $attempt = 0
 $ready = $false

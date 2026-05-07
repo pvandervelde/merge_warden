@@ -35,7 +35,7 @@ docker run --rm \
 Then verify:
 
 ```bash
-curl http://localhost:3000/api/merge_warden
+curl http://localhost:3000/health
 # HTTP 200 OK
 ```
 

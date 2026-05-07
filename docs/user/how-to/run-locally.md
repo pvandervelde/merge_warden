@@ -67,7 +67,7 @@ Wait until the script reports **"Server is ready"** and **"Relaying webhooks"**.
 ## 4 — Verify the server
 
 ```powershell
-Invoke-RestMethod http://localhost:3000/api/merge_warden
+Invoke-RestMethod http://localhost:3000/health
 # Returns: HTTP 200 OK
 ```
 

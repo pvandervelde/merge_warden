@@ -112,7 +112,7 @@ impl IntegrationTestEnvironment {
     /// - `GITHUB_TEST_ORGANIZATION`: Target organization (default: "glitchgrove")
     /// - `TEST_TIMEOUT_SECONDS`: Operation timeout (default: 30)
     /// - `TEST_CLEANUP_ENABLED`: Enable automatic cleanup (default: true)
-    /// - `LOCAL_WEBHOOK_ENDPOINT`: Local webhook endpoint (default: "http://localhost:7071/api/webhook")
+    /// - `LOCAL_WEBHOOK_ENDPOINT`: Local webhook endpoint (default: "http://localhost:3000/api/github/webhook")
     /// - `USE_MOCK_SERVICES`: Use mock Azure services (default: true)
     /// - `TEST_REPOSITORY_PREFIX`: Repository name prefix (default: "merge-warden-test")
     ///
@@ -705,7 +705,7 @@ impl TestConfig {
     ///   - Must be a positive integer between 1 and 300 seconds
     /// - `TEST_CLEANUP_ENABLED`: Enable automatic cleanup (default: "true")
     ///   - Must be "true" or "false" (case insensitive)
-    /// - `LOCAL_WEBHOOK_ENDPOINT`: Local webhook endpoint (default: "http://localhost:7071/api/webhook")
+    /// - `LOCAL_WEBHOOK_ENDPOINT`: Local webhook endpoint (default: "http://localhost:3000/api/github/webhook")
     ///   - Must be a valid HTTP or HTTPS URL
     ///   - Should be accessible from the test environment
     /// - `USE_MOCK_SERVICES`: Use mock Azure services (default: "true")
@@ -843,7 +843,7 @@ impl TestConfig {
         let local_webhook_endpoint = env::var("LOCAL_WEBHOOK_ENDPOINT")
             .ok()
             .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| "http://localhost:7071/api/webhook".to_string());
+            .unwrap_or_else(|| "http://localhost:3000/api/github/webhook".to_string());
 
         let use_mock_services = env::var("USE_MOCK_SERVICES")
             .map(|s| s.to_lowercase())
@@ -948,7 +948,7 @@ impl TestConfig {
     ///         repository_prefix: "merge-warden-test".to_string(),
     ///         default_timeout: Duration::from_secs(30),
     ///         cleanup_enabled: true,
-    ///         local_webhook_endpoint: "http://localhost:7071/api/webhook".to_string(),
+    ///         local_webhook_endpoint: "http://localhost:3000/api/github/webhook".to_string(),
     ///         use_mock_services: true,
     ///         additional_config: HashMap::new(),
     ///     };
@@ -969,7 +969,7 @@ impl TestConfig {
     ///         repository_prefix: "test".to_string(),
     ///         default_timeout: Duration::from_secs(30),
     ///         cleanup_enabled: true,
-    ///         local_webhook_endpoint: "http://localhost:7071/api/webhook".to_string(),
+    ///         local_webhook_endpoint: "http://localhost:3000/api/github/webhook".to_string(),
     ///         use_mock_services: true,
     ///         additional_config: HashMap::new(),
     ///     };
@@ -990,7 +990,7 @@ impl TestConfig {
     ///         repository_prefix: "test".to_string(),
     ///         default_timeout: Duration::from_secs(500), // Too large
     ///         cleanup_enabled: true,
-    ///         local_webhook_endpoint: "http://localhost:7071/api/webhook".to_string(),
+    ///         local_webhook_endpoint: "http://localhost:3000/api/github/webhook".to_string(),
     ///         use_mock_services: true,
     ///         additional_config: HashMap::new(),
     ///     };

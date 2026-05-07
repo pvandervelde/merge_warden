@@ -72,7 +72,7 @@ sequentially while different PRs may be processed in parallel.
 - Multi-arch image: `linux/amd64` and `linux/arm64` in the same manifest
 - Configuration entirely via environment variables
 - Supports Webhook mode and Queue mode (see [Receiver Modes](#receiver-modes) above)
-- Health check: `GET /api/merge_warden` → `200 OK`
+- Health check: `GET /health` → `200 OK`
 
 **Deployment Pipeline:**
 
