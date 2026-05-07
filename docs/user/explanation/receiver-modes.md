@@ -17,7 +17,7 @@ the HTTP response is returned — all within the same request.
 
 ```
 GitHub
-  POST /api/merge_warden
+  POST /api/github/webhook
       ↓
   HMAC verification
       ↓
@@ -48,7 +48,7 @@ payload. A separate consumer task processes events from the queue asynchronously
 
 ```
 GitHub
-  POST /api/merge_warden
+  POST /api/github/webhook
       ↓
   HMAC verification
       ↓

@@ -348,7 +348,7 @@ impl WebhookHandler for ChannelForwardingHandler {
 // HTTP route handlers
 // ---------------------------------------------------------------------------
 
-/// `POST /api/merge_warden` — receives a raw GitHub webhook POST.
+/// `POST /api/github/webhook` — receives a raw GitHub webhook POST.
 ///
 /// The SDK [`WebhookReceiver`] validates the HMAC-SHA256 signature and
 /// dispatches the event asynchronously. Only active in webhook mode;
@@ -399,7 +399,7 @@ pub async fn handle_webhook(
     }
 }
 
-/// `GET /api/merge_warden` — liveness probe for container orchestrators.
+/// `GET /health` — liveness probe for container orchestrators.
 ///
 /// Returns `200 OK` without checking external dependencies (GitHub API, queue).
 ///
@@ -415,14 +415,14 @@ pub async fn health_check() -> impl IntoResponse {
 /// Builds the Axum [`Router`] for **webhook mode**.
 ///
 /// Routes:
-/// - `GET  /api/merge_warden` → [`health_check`]
-/// - `POST /api/merge_warden` → [`handle_webhook`]
+/// - `GET  /health`               → [`health_check`]
+/// - `POST /api/github/webhook`   → [`handle_webhook`]
 ///
 /// See docs/spec/design/containerisation.md — HTTP routes
 pub fn build_router(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/merge_warden", get(health_check))
-        .route("/api/merge_warden", post(handle_webhook))
+        .route("/health", get(health_check))
+        .route("/api/github/webhook", post(handle_webhook))
         .with_state(state)
 }
 
@@ -432,12 +432,12 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 /// a pure queue consumer and does not receive GitHub webhook POSTs.
 ///
 /// Routes:
-/// - `GET /api/merge_warden` → [`health_check`]
+/// - `GET /health` → [`health_check`]
 ///
 /// See docs/spec/design/containerisation.md — HTTP routes
 pub fn build_queue_router(state: Arc<AppState>) -> Router {
     Router::new()
-        .route("/api/merge_warden", get(health_check))
+        .route("/health", get(health_check))
         .with_state(state)
 }
 

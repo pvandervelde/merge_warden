@@ -100,7 +100,7 @@ Keep this URL — you need it in steps 3 and 4.
 Open a terminal and run:
 
 ```bash
-npx smee-client --url https://smee.io/AbCdEfGhIj123456 --target http://localhost:3000/api/merge_warden
+npx smee-client --url https://smee.io/AbCdEfGhIj123456 --target http://localhost:3000/api/github/webhook
 ```
 
 Replace the smee URL with your own channel URL. Leave this terminal running.
@@ -131,7 +131,7 @@ docker run --rm \
 Verify the server is healthy:
 
 ```bash
-curl http://localhost:3000/api/merge_warden
+curl http://localhost:3000/health
 # Expected: HTTP 200 OK
 ```
 

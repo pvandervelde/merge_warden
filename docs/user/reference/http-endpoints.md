@@ -9,7 +9,7 @@ The Merge Warden server exposes two HTTP endpoints on the configured port (defau
 
 ---
 
-## `GET /api/merge_warden` — Health check
+## `GET /health` — Health check
 
 Returns `200 OK` when the server is running and ready to accept requests. Use this endpoint
 for load balancer health probes, container readiness checks, and manual verification.
@@ -25,13 +25,13 @@ for load balancer health probes, container readiness checks, and manual verifica
 **Example:**
 
 ```bash
-curl -i http://localhost:3000/api/merge_warden
+curl -i http://localhost:3000/health
 # HTTP/1.1 200 OK
 ```
 
 ---
 
-## `POST /api/merge_warden` — GitHub webhook receiver
+## `POST /api/github/webhook` — GitHub webhook receiver
 
 Receives and processes GitHub webhook events. This is the URL to configure as the
 **Webhook URL** in your GitHub App settings.

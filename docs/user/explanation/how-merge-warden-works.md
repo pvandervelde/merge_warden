@@ -18,7 +18,7 @@ looks like this:
 ```
 GitHub repository
     ↓  PR opened / edited / synchronised / ready_for_review / reopened / reviewed
-GitHub App delivers webhook POST to /api/merge_warden
+GitHub App delivers webhook POST to /api/github/webhook
     ↓
 HMAC-SHA256 signature verification
     ↓  (rejected with 401 if signature is invalid)

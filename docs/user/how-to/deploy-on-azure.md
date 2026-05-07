@@ -141,7 +141,7 @@ az containerapp create \
 2. In your GitHub App settings, set the **Webhook URL** to:
 
    ```
-   https://<fqdn>/api/merge_warden
+   https://<fqdn>/api/github/webhook
    ```
 
 3. Set **Content type** to `application/json`.
@@ -156,7 +156,7 @@ FQDN=$(az containerapp show \
   --resource-group rg-merge-warden \
   --query properties.configuration.ingress.fqdn -o tsv)
 
-curl https://$FQDN/api/merge_warden
+curl https://$FQDN/health
 # Expected: HTTP 200 OK
 ```
 
@@ -166,7 +166,7 @@ curl https://$FQDN/api/merge_warden
 
 Azure Container Apps supports HTTP liveness and readiness probes. Add them with
 `--health-check` flags or by editing the container app's YAML. Point both probes to
-`GET /api/merge_warden` on port `3000`.
+`GET /health` on port `3000`.
 
 ---
 

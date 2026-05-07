@@ -62,7 +62,7 @@ Subscribe the GitHub App to the following events:
 Set the **Webhook URL** to:
 
 ```
-https://<your-server-hostname>/api/merge_warden
+https://<your-server-hostname>/api/github/webhook
 ```
 
 Set **Content type** to `application/json`.

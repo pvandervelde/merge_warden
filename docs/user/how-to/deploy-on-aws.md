@@ -113,7 +113,7 @@ your values:
         { "name": "RUST_LOG", "value": "info" }
       ],
       "healthCheck": {
-        "command": ["CMD-SHELL", "curl -f http://localhost:3000/api/merge_warden || exit 1"],
+        "command": ["CMD-SHELL", "curl -f http://localhost:3000/health || exit 1"],
         "interval": 30,
         "timeout": 5,
         "retries": 3,
@@ -160,7 +160,7 @@ aws ecs create-service \
 In the AWS console or CLI, configure the ALB target group to check:
 
 - **Protocol**: HTTP
-- **Path**: `/api/merge_warden`
+- **Path**: `/health`
 - **Success codes**: `200`
 
 ---
@@ -178,7 +178,7 @@ In the AWS console or CLI, configure the ALB target group to check:
 2. In your GitHub App settings, set the **Webhook URL** to:
 
    ```
-   https://<alb-dns-name>/api/merge_warden
+   https://<alb-dns-name>/api/github/webhook
    ```
 
 3. Set **Content type** to `application/json`.

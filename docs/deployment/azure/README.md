@@ -55,7 +55,7 @@ az containerapp create \
 ### Health probe
 
 Azure Container Apps supports HTTP liveness and readiness probes. Configure them to
-use `GET /api/merge_warden` on port `3000`.
+use `GET /health` on port `3000`.
 
 ### OTLP telemetry on Azure
 

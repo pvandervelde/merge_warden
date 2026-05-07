@@ -85,7 +85,7 @@ pub enum ReceiverMode {
     ///
     /// A separate receiver service is responsible for webhook reception, HMAC
     /// validation, and enqueueing. The Axum server exposes a health-check
-    /// endpoint only (`GET /api/merge_warden`); no POST endpoint is registered.
+    /// endpoint only (`GET /health`); no POST endpoint is registered.
     Queue,
 }
 

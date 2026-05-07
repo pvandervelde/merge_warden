@@ -18,7 +18,7 @@ EXPOSE 3000
 # The distroless runtime image contains no shell or HTTP client, so a
 # Dockerfile-native HEALTHCHECK cannot run curl/wget. Container orchestrators
 # (ECS, Azure Container Apps, Kubernetes) must configure an external HTTP
-# liveness/readiness probe targeting GET /api/merge_warden on port 3000.
+# liveness/readiness probe targeting GET /health on port 3000.
 # This explicit NONE makes the intent clear rather than leaving it absent.
 HEALTHCHECK NONE
 ENTRYPOINT ["/merge_warden_server"]
