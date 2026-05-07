@@ -71,7 +71,7 @@ mod config_loading_tests {
         assert!(config.cleanup_enabled); // Default value
         assert_eq!(
             config.local_webhook_endpoint,
-            "http://localhost:7071/api/webhook"
+            "http://localhost:3000/api/github/webhook"
         ); // Default value
         assert!(config.use_mock_services); // Default value
 
