@@ -183,50 +183,6 @@ jobs:
 
 ## Changelog Management
 
-### Automated Generation
-
-**Configuration (cliff.toml):**
-
-```toml
-[changelog]
-header = """
-# Changelog
-
-All notable changes to this project will be documented in this file.
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-"""
-
-body = """
-{% for group, commits in commits | group_by(attribute="group") %}
-    ### {{ group | striptags | trim | upper_first }}
-    {% for commit in commits %}
-        - {{ commit.message | upper_first }}
-    {% endfor %}
-{% endfor %}
-"""
-
-[git]
-conventional_commits = true
-filter_unconventional = true
-split_commits = false
-commit_preprocessors = [
-    { pattern = '\((\w+\s)?#([0-9]+)\)', replace = "([#${2}](https://github.com/pvandervelde/merge_warden/issues/${2}))"}
-]
-commit_parsers = [
-    { message = "^feat", group = "Features" },
-    { message = "^fix", group = "Bug Fixes" },
-    { message = "^doc", group = "Documentation" },
-    { message = "^perf", group = "Performance" },
-    { message = "^refactor", group = "Refactoring" },
-    { message = "^style", group = "Styling" },
-    { message = "^test", group = "Testing" },
-    { message = "^chore\\(release\\):", skip = true },
-    { message = "^chore", group = "Miscellaneous Tasks" },
-    { body = ".*security", group = "Security" },
-]
-```
-
 ### Release Notes Structure
 
 **Standard Format:**
