@@ -77,144 +77,56 @@ edition.workspace = true
 
 **Tools:**
 
-- **knope**: Version calculation based on conventional commits
-- **git-cliff**: Changelog generation from commit history
-- **Custom workflows**: GitHub Actions orchestration
+- **release-regent**: Version calculation, changelog generation, and release PR creation
+- **conventional commits**: Commit message convention driving version bumps
 
 ## Automated Release Workflows
 
 ### Release Preparation Workflow
 
-**Trigger:** Push to `master` branch (excluding release commits)
+**Trigger:** Push to `master` branch (handled by release-regent GitHub App)
+
+Release PR creation and manifest version updates are managed by [release-regent](https://github.com/pvandervelde/release_regent), configured in `release-regent.toml` at the repository root.
 
 **Process:**
 
 ```mermaid
 graph TD
-    A[Push to master] --> B{Check commit message}
-    B -->|Not release commit| C[Setup tools]
-    B -->|Release commit| X[Skip workflow]
-    C --> D[Calculate next version]
-    D --> E[Clean up stale release branches]
-    E --> F[Generate changelog section]
-    F --> G[Update Cargo.toml version]
-    G --> H[Commit changes]
-    H --> I[Create/update release branch]
-    I --> J[Create/update release PR]
+    A[Push to master] --> B{release-regent}
+    B --> C[Calculate next version via conventional commits]
+    C --> D[Update workspace.package.version in Cargo.toml]
+    D --> E[Generate changelog section]
+    E --> F[Create/update release branch release/{version}]
+    F --> G[Create/update release PR]
 ```
 
-**Implementation:**
+**Key configuration** (`release-regent.toml`):
 
-```yaml
-name: Prepare Release
-on:
-  push:
-    branches: [master]
-
-jobs:
-  prepare-release:
-    if: "!startsWith(github.event.head_commit.message, 'chore(release):')"
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Setup Rust
-        uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-
-      - name: Install tools
-        run: |
-          cargo install knope
-          cargo install git-cliff
-
-      - name: Calculate next version
-        id: version
-        run: |
-          NEXT_VERSION=$(knope --dry-run | grep "Next version:" | cut -d' ' -f3)
-          echo "next_version=$NEXT_VERSION" >> $GITHUB_OUTPUT
-
-      - name: Clean stale release branches
-        run: ./scripts/cleanup-stale-releases.sh ${{ steps.version.outputs.next_version }}
-
-      - name: Generate changelog
-        run: |
-          git-cliff --tag v${{ steps.version.outputs.next_version }} --prepend CHANGELOG.md
-
-      - name: Update version
-        run: |
-          knope prepare-release --version ${{ steps.version.outputs.next_version }}
-
-      - name: Create release PR
-        uses: peter-evans/create-pull-request@v5
-        with:
-          branch: release/v${{ steps.version.outputs.next_version }}
-          title: "chore(release): v${{ steps.version.outputs.next_version }}"
-          body-path: .github/pull_request_template.md
-```
+- `version_prefix = ""` — tags use bare version numbers, e.g. `0.5.0`
+- `tag_pattern = "[0-9]*"` — matches existing tag format
+- `manifest_files` — explicitly targets `workspace.package.version` in root `Cargo.toml`
+- `[releases]` section omitted — GitHub release creation is handled by `publish-release.yml`
 
 ### Release Publication Workflow
 
-**Trigger:** Release PR merged to `master`
+**Trigger:** Release PR merged to `master` (branch pattern `release/*`)
 
 **Process:**
 
 ```mermaid
 graph TD
     A[Release PR merged] --> B[Checkout master]
-    B --> C[Extract version from Cargo.toml]
-    C --> D[Create Git tag]
-    D --> E[Push tag to origin]
-    E --> F[Extract release notes]
-    F --> G[Create GitHub release]
-    G --> H[Trigger deployment workflows]
+    B --> C[Calculate version from conventional commits]
+    C --> D[Assert version matches release branch name]
+    D --> E[Create Git tag]
+    E --> F[Push tag to origin]
+    F --> G[Build CLI binaries]
+    G --> H[Create GitHub release with binaries]
 ```
 
-**Implementation:**
+**Implementation:** `.github/workflows/publish-release.yml`
 
-```yaml
-name: Publish Release
-on:
-  pull_request:
-    types: [closed]
-    branches: [master]
-
-jobs:
-  publish-release:
-    if: github.event.pull_request.merged == true && startsWith(github.head_ref, 'release/v')
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Extract version
-        id: version
-        run: |
-          VERSION=$(grep "^version" Cargo.toml | head -1 | cut -d'"' -f2)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-
-      - name: Create and push tag
-        run: |
-          git tag -a v${{ steps.version.outputs.version }} -m "Release v${{ steps.version.outputs.version }}"
-          git push origin v${{ steps.version.outputs.version }}
-
-      - name: Extract release notes
-        id: notes
-        run: |
-          ./scripts/extract-release-notes.sh ${{ steps.version.outputs.version }} > release-notes.md
-
-      - name: Create GitHub release
-        uses: softprops/action-gh-release@v1
-        with:
-          tag_name: v${{ steps.version.outputs.version }}
-          name: Release v${{ steps.version.outputs.version }}
-          body_path: release-notes.md
-          draft: false
-          prerelease: false
-```
+Tags use bare version numbers (no `v` prefix), e.g. `0.5.0`, matching `version_prefix = ""` in `release-regent.toml`.
 
 ## Release Coordination
 
@@ -270,50 +182,6 @@ jobs:
 - User acceptance validation
 
 ## Changelog Management
-
-### Automated Generation
-
-**Configuration (cliff.toml):**
-
-```toml
-[changelog]
-header = """
-# Changelog
-
-All notable changes to this project will be documented in this file.
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-"""
-
-body = """
-{% for group, commits in commits | group_by(attribute="group") %}
-    ### {{ group | striptags | trim | upper_first }}
-    {% for commit in commits %}
-        - {{ commit.message | upper_first }}
-    {% endfor %}
-{% endfor %}
-"""
-
-[git]
-conventional_commits = true
-filter_unconventional = true
-split_commits = false
-commit_preprocessors = [
-    { pattern = '\((\w+\s)?#([0-9]+)\)', replace = "([#${2}](https://github.com/pvandervelde/merge_warden/issues/${2}))"}
-]
-commit_parsers = [
-    { message = "^feat", group = "Features" },
-    { message = "^fix", group = "Bug Fixes" },
-    { message = "^doc", group = "Documentation" },
-    { message = "^perf", group = "Performance" },
-    { message = "^refactor", group = "Refactoring" },
-    { message = "^style", group = "Styling" },
-    { message = "^test", group = "Testing" },
-    { message = "^chore\\(release\\):", skip = true },
-    { message = "^chore", group = "Miscellaneous Tasks" },
-    { body = ".*security", group = "Security" },
-]
-```
 
 ### Release Notes Structure
 
