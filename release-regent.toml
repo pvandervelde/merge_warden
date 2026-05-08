@@ -87,26 +87,20 @@ auto_detect_manifests = true
 # Uncomment and adjust paths/formats as required.
 # Supported formats: "toml", "json", "plain_text"
 #
-# Note: If auto_detect_manifests does not handle the workspace.package.version
-# key correctly, uncomment and use the explicit entry below instead:
-# manifest_files = [
-#   { path = "Cargo.toml", format = "toml", version_key = "workspace.package.version" },
-# ]
+# This workspace uses [workspace.package] version rather than [package] version.
+# Auto-detect targets [package] and will not update the workspace manifest.
+# The explicit entry below ensures the correct key is updated.
+manifest_files = [
+  { path = "Cargo.toml", format = "toml", version_key = "workspace.package.version" },
+]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # GitHub releases
 # ─────────────────────────────────────────────────────────────────────────────
-
-[releases]
-# Publish GitHub releases as drafts (not publicly visible until manually
-# published).
-draft = false
-
-# Mark releases as pre-releases on GitHub.
-prerelease = false
-
-# Auto-generate release notes from merged PRs in addition to the changelog.
-generate_notes = true
+# NOTE: The [releases] section is intentionally omitted.
+# publish-release.yml handles tagging and GitHub release creation when a
+# release/* PR is merged. Enabling release-regent's release creation here
+# would race with that workflow and cause duplicate-release errors.
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Changelog
@@ -139,10 +133,13 @@ protect_breaking_commits = true
 trim = true
 
 # Pattern used to identify release tags.
-tag_pattern = "v[0-9]*"
+# Existing repo tags use no 'v' prefix (e.g. 0.0.0, 0.1.0, 0.5.0), matching
+# version_prefix = "" in [core].
+tag_pattern = "[0-9]*"
 
 # Skip pre-release tags when building the changelog.
-# skip_tags = "v.*-beta.*|v.*-alpha.*|v.*-rc.*"
+# Uncomment if pre-release tags are ever cut (allow_prerelease = true above).
+# skip_tags = ".*-beta.*|.*-alpha.*|.*-rc.*"
 
 # Changelog header (written once, above all release sections).
 header = """
