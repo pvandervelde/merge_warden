@@ -90,9 +90,9 @@ auto_detect_manifests = true
 # This workspace uses [workspace.package] version rather than [package] version.
 # Auto-detect targets [package] and will not update the workspace manifest.
 # The explicit entry below ensures the correct key is updated.
-manifest_files = [
-  { path = "Cargo.toml", format = "toml", version_key = "workspace.package.version" },
-]
+# manifest_files = [
+#   { path = "Cargo.toml", format = "toml", version_key = "workspace.package.version" },
+# ]
 
 # ─────────────────────────────────────────────────────────────────────────────
 # GitHub releases
