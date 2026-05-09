@@ -242,53 +242,35 @@ pub static WORK_ITEM_REGEX: &str = r"(?i)(fixes|closes|resolves|references|relat
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ApplicationDefaults {
     /// Whether the pull request title should follow a convention
-    #[serde(
-        rename = "enforceTitleValidation",
-        default = "ApplicationDefaults::default_title_required"
-    )]
+    #[serde(default = "ApplicationDefaults::default_title_required")]
     pub enable_title_validation: bool,
 
     /// Default regex pattern for validating pull request titles
-    #[serde(
-        rename = "titlePattern",
-        default = "ApplicationDefaults::default_title_pattern"
-    )]
+    #[serde(default = "ApplicationDefaults::default_title_pattern")]
     pub default_title_pattern: String,
 
     /// Default label to apply when title validation fails
-    #[serde(
-        rename = "labelIfTitleInvalid",
-        default = "ApplicationDefaults::default_title_invalid_label"
-    )]
+    #[serde(default = "ApplicationDefaults::default_title_invalid_label")]
     pub default_invalid_title_label: Option<String>,
 
     /// Whether work item reference validation is enabled by default
-    #[serde(
-        rename = "enforceWorkItemValidation",
-        default = "ApplicationDefaults::default_work_item_required"
-    )]
+    #[serde(default = "ApplicationDefaults::default_work_item_required")]
     pub enable_work_item_validation: bool,
 
     /// Default regex pattern for validating work item references
-    #[serde(
-        rename = "workItemPattern",
-        default = "ApplicationDefaults::default_work_item_pattern"
-    )]
+    #[serde(default = "ApplicationDefaults::default_work_item_pattern")]
     pub default_work_item_pattern: String,
 
     /// Default label to apply when work item reference is missing
-    #[serde(
-        rename = "labelIfWorkItemMissing",
-        default = "ApplicationDefaults::default_work_item_missing_label"
-    )]
+    #[serde(default = "ApplicationDefaults::default_work_item_missing_label")]
     pub default_missing_work_item_label: Option<String>,
 
     /// Bypass rules for allowing specific users to skip validation
-    #[serde(rename = "bypassRules", default)]
+    #[serde(default)]
     pub bypass_rules: BypassRules,
 
     /// Configuration for PR size checking
-    #[serde(rename = "prSize", default)]
+    #[serde(default)]
     pub pr_size_check: PrSizeCheckConfig,
 
     /// Configuration for change type label detection
@@ -296,11 +278,11 @@ pub struct ApplicationDefaults {
     pub change_type_labels: ChangeTypeLabelConfig,
 
     /// Application-level defaults for WIP detection and blocking
-    #[serde(rename = "wip", default)]
+    #[serde(default)]
     pub wip_check: WipCheckConfig,
 
     /// Application-level defaults for state-based PR lifecycle labels
-    #[serde(rename = "prState", default)]
+    #[serde(default)]
     pub pr_state_labels: PrStateLabelsConfig,
 }
 

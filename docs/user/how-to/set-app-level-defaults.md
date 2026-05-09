@@ -67,12 +67,12 @@ per-repository config. The most common ones:
 
 | Application config field | Per-repo equivalent | Purpose |
 | :--- | :--- | :--- |
-| `enforceTitleValidation` | `required` (under `prTitle`) | Enable title validation |
-| `titlePattern` | `pattern` (under `prTitle`) | Title regex |
-| `labelIfTitleInvalid` | `label_if_missing` (under `prTitle`) | Label when title invalid |
-| `enforceWorkItemValidation` | `required` (under `workItem`) | Enable work item validation |
-| `workItemPattern` | `pattern` (under `workItem`) | Work item reference regex |
-| `labelIfWorkItemMissing` | `label_if_missing` (under `workItem`) | Label when work item missing |
+| `enable_title_validation` | `required` (under `prTitle`) | Enable title validation |
+| `default_title_pattern` | `pattern` (under `prTitle`) | Title regex |
+| `default_invalid_title_label` | `label_if_missing` (under `prTitle`) | Label when title invalid |
+| `enable_work_item_validation` | `required` (under `workItem`) | Enable work item validation |
+| `default_work_item_pattern` | `pattern` (under `workItem`) | Work item reference regex |
+| `default_missing_work_item_label` | `label_if_missing` (under `workItem`) | Label when work item missing |
 
 For the complete field list, see [Application configuration schema](../reference/app-config.md).
 
