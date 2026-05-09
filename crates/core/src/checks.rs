@@ -1034,6 +1034,7 @@ pub fn check_pr_size(
         pr_files,
         &config.pr_size_check.get_effective_thresholds(),
         &config.pr_size_check.excluded_file_patterns,
+        config.pr_size_check.ignore_deletions,
     );
 
     // Check if we should fail for oversized PRs

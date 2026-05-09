@@ -475,22 +475,20 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
                     .add_comment(repo_owner, repo_name, pr.number, &comment)
                     .await;
 
-                if result.is_ok() {
-                    info!(
+                match result {
+                    Ok(_) => info!(
                         repository_owner = repo_owner,
                         repository = repo_name,
                         pull_request = pr.number,
                         "Added WIP blocking comment to pull request"
-                    );
-                } else {
-                    let e = result.unwrap_err();
-                    warn!(
+                    ),
+                    Err(e) => warn!(
                         repository_owner = repo_owner,
                         repository = repo_name,
                         pull_request = pr.number,
                         error = e.to_string(),
                         "Failed to add WIP blocking comment to pull request"
-                    );
+                    ),
                 }
             }
 
@@ -510,22 +508,20 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
                         .delete_comment(repo_owner, repo_name, comment.id)
                         .await;
 
-                    if result.is_ok() {
-                        info!(
+                    match result {
+                        Ok(_) => info!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
                             "Removed WIP blocking comment from pull request"
-                        );
-                    } else {
-                        let e = result.unwrap_err();
-                        warn!(
+                        ),
+                        Err(e) => warn!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
                             error = e.to_string(),
                             "Failed to remove WIP blocking comment from pull request"
-                        );
+                        ),
                     }
                 }
             }
@@ -621,22 +617,20 @@ impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
                         .add_labels(repo_owner, repo_name, pr.number, &[title_label.to_string()])
                         .await;
 
-                    if result.is_ok() {
-                        info!(
+                    match result {
+                        Ok(_) => info!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
                             "The pull request title is invalid. Added a label to indicate the issue."
-                        );
-                    } else {
-                        let e = result.unwrap_err();
-                        warn!(
+                        ),
+                        Err(e) => warn!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
                             error = e.to_string(),
                             "The pull request title is invalid. Failed to add a label to indicate the issue."
-                        );
+                        ),
                     }
                 }
             }
@@ -728,22 +722,20 @@ Please update the PR title to match the conventional commit message guidelines."
                         .add_comment(repo_owner, repo_name, pr.number, &comment)
                         .await;
 
-                    if result.is_ok() {
-                        info!(
+                    match result {
+                        Ok(_) => info!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
                             "The pull request title is invalid. Added a comment to indicate the issue."
-                        );
-                    } else {
-                        let e = result.unwrap_err();
-                        warn!(
+                        ),
+                        Err(e) => warn!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
                             error = e.to_string(),
                             "The pull request title is invalid. Failed to add a comment to indicate the issue."
-                        );
+                        ),
                     }
                 }
             }
@@ -777,22 +769,20 @@ Please update the PR title to match the conventional commit message guidelines."
                         .remove_label(repo_owner, repo_name, pr.number, title_label)
                         .await;
 
-                    if result.is_ok() {
-                        info!(
+                    match result {
+                        Ok(_) => info!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
                             "The pull request title is valid. Removed a label that was indicating the issue."
-                        );
-                    } else {
-                        let e = result.unwrap_err();
-                        warn!(
+                        ),
+                        Err(e) => warn!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
                             error = e.to_string(),
                             "The pull request title is valid. Failed to remove a label that was indicating the issue."
-                        );
+                        ),
                     }
                 }
             }
@@ -813,22 +803,20 @@ Please update the PR title to match the conventional commit message guidelines."
                         .delete_comment(repo_owner, repo_name, comment.id)
                         .await;
 
-                    if result.is_ok() {
-                        info!(
+                    match result {
+                        Ok(_) => info!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
                             "Removed existing title validation comment."
-                        );
-                    } else {
-                        let e = result.unwrap_err();
-                        warn!(
+                        ),
+                        Err(e) => warn!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
                             error = e.to_string(),
                             "Failed to remove existing title validation comment."
-                        );
+                        ),
                     }
                 }
             }
@@ -866,23 +854,21 @@ Please update the PR title to match the conventional commit message guidelines."
                         .add_comment(repo_owner, repo_name, pr.number, &comment)
                         .await;
 
-                    if result.is_ok() {
-                        info!(
+                    match result {
+                        Ok(_) => info!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
                             user = bypass_info.user,
                             "Added bypass notification comment for title validation."
-                        );
-                    } else {
-                        let e = result.unwrap_err();
-                        warn!(
+                        ),
+                        Err(e) => warn!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
                             error = e.to_string(),
                             "Failed to add bypass notification comment."
-                        );
+                        ),
                     }
 
                     return bypass_comment_text;
@@ -979,22 +965,20 @@ Please update the PR title to match the conventional commit message guidelines."
                             &[work_item_label.to_string()],
                         )
                         .await;
-                    if result.is_ok() {
-                        info!(
+                    match result {
+                        Ok(_) => info!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
                             "The pull request does not have a work item reference. Added a label to indicate the issue."
-                        );
-                    } else {
-                        let e = result.unwrap_err();
-                        warn!(
+                        ),
+                        Err(e) => warn!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
                             error = e.to_string(),
                             "The pull request does not have a work item reference. Failed to add a label to indicate the issue."
-                        );
+                        ),
                     }
                 }
             }
@@ -1064,22 +1048,20 @@ Please update the PR body to include a valid work item reference."#;
                         .add_comment(repo_owner, repo_name, pr.number, &comment)
                         .await;
 
-                    if result.is_ok() {
-                        info!(
+                    match result {
+                        Ok(_) => info!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
                             "The pull request does not have a work item reference. Added a comment to indicate the issue."
-                        );
-                    } else {
-                        let e = result.unwrap_err();
-                        warn!(
+                        ),
+                        Err(e) => warn!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
                             error = e.to_string(),
                             "The pull request does not have a work item reference. Failed to add a comment to indicate the issue."
-                        );
+                        ),
                     }
                 }
             }
@@ -1114,22 +1096,20 @@ Please update the PR body to include a valid work item reference."#;
                         .remove_label(repo_owner, repo_name, pr.number, work_item_label)
                         .await;
 
-                    if result.is_ok() {
-                        info!(
+                    match result {
+                        Ok(_) => info!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
                             "The pull request has a work item reference. Removed a label that was indicating the issue."
-                        );
-                    } else {
-                        let e = result.unwrap_err();
-                        warn!(
+                        ),
+                        Err(e) => warn!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
                             error = e.to_string(),
                             "The pull request has a work item reference. Failed to remove a label that was indicating the issue."
-                        );
+                        ),
                     }
                 }
             }
@@ -1148,22 +1128,20 @@ Please update the PR body to include a valid work item reference."#;
                         .delete_comment(repo_owner, repo_name, comment.id)
                         .await;
 
-                    if result.is_ok() {
-                        info!(
+                    match result {
+                        Ok(_) => info!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
                             "Removed existing work item validation comment."
-                        );
-                    } else {
-                        let e = result.unwrap_err();
-                        warn!(
+                        ),
+                        Err(e) => warn!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
                             error = e.to_string(),
                             "Failed to remove existing work item validation comment."
-                        );
+                        ),
                     }
                 }
             }
@@ -1197,23 +1175,21 @@ Please update the PR body to include a valid work item reference."#;
                         .add_comment(repo_owner, repo_name, pr.number, &comment)
                         .await;
 
-                    if result.is_ok() {
-                        info!(
+                    match result {
+                        Ok(_) => info!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
                             user = bypass_info.user,
                             "Added bypass notification comment for work item validation."
-                        );
-                    } else {
-                        let e = result.unwrap_err();
-                        warn!(
+                        ),
+                        Err(e) => warn!(
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr.number,
                             error = e.to_string(),
                             "Failed to add bypass notification comment."
-                        );
+                        ),
                     }
 
                     return bypass_comment_text;
@@ -1255,6 +1231,7 @@ Please update the PR body to include a valid work item reference."#;
             pr_files,
             &self.config.pr_size_check.get_effective_thresholds(),
             &self.config.pr_size_check.excluded_file_patterns,
+            self.config.pr_size_check.ignore_deletions,
         );
 
         // Apply size label
@@ -2194,6 +2171,7 @@ Please update the PR body to include a valid work item reference."#;
                 files,
                 &self.config.pr_size_check.get_effective_thresholds(),
                 &self.config.pr_size_check.excluded_file_patterns,
+                self.config.pr_size_check.ignore_deletions,
             );
             self.config.pr_size_check.fail_on_oversized && size_info.is_oversized()
         } else {

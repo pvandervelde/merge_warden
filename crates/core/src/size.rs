@@ -294,7 +294,12 @@ impl SizeThresholds {
 /// ```
 #[derive(Debug, Clone)]
 pub struct PrSizeInfo {
-    /// Total lines changed (additions + deletions) excluding filtered files
+    /// Total lines counted for size categorisation, excluding filtered files.
+    ///
+    /// When `ignore_deletions` is `false` (the default), this is the sum of
+    /// `additions + deletions` (`f.changes`) across all included files.
+    /// When `ignore_deletions` is `true`, this holds additions only (`f.additions`);
+    /// deleted lines and wholly-removed files contribute 0.
     pub total_lines_changed: u32,
 
     /// List of files included in the size calculation
@@ -318,6 +323,7 @@ impl PrSizeInfo {
     /// * `included_files` - Files to include in size calculation
     /// * `excluded_files` - Files excluded from size calculation
     /// * `thresholds` - Size category thresholds to use
+    /// * `ignore_deletions` - When `true`, count only additions; when `false`, count additions + deletions
     ///
     /// # Examples
     ///
@@ -338,7 +344,8 @@ impl PrSizeInfo {
     /// let size_info = PrSizeInfo::new(
     ///     files,
     ///     vec![],
-    ///     &SizeThresholds::default()
+    ///     &SizeThresholds::default(),
+    ///     false,
     /// );
     ///
     /// assert_eq!(size_info.total_lines_changed, 15);
@@ -347,8 +354,13 @@ impl PrSizeInfo {
         included_files: Vec<PullRequestFile>,
         excluded_files: Vec<PullRequestFile>,
         thresholds: &SizeThresholds,
+        ignore_deletions: bool,
     ) -> Self {
-        let total_lines_changed: u32 = included_files.iter().map(|f| f.changes).sum();
+        let total_lines_changed: u32 = if ignore_deletions {
+            included_files.iter().map(|f| f.additions).sum()
+        } else {
+            included_files.iter().map(|f| f.changes).sum()
+        };
         let size_category =
             PrSizeCategory::from_line_count_with_thresholds(total_lines_changed, thresholds);
 
@@ -370,6 +382,7 @@ impl PrSizeInfo {
     /// * `all_files` - All files changed in the pull request
     /// * `thresholds` - Size category thresholds to use
     /// * `exclusion_patterns` - Patterns for files to exclude from size calculation
+    /// * `ignore_deletions` - When `true`, count only additions; when `false`, count additions + deletions
     ///
     /// # Examples
     ///
@@ -398,7 +411,8 @@ impl PrSizeInfo {
     /// let size_info = PrSizeInfo::from_files_with_exclusions(
     ///     &files,
     ///     &SizeThresholds::default(),
-    ///     &exclusion_patterns
+    ///     &exclusion_patterns,
+    ///     false,
     /// );
     ///
     /// assert_eq!(size_info.total_lines_changed, 15); // Only src/lib.rs counted
@@ -409,10 +423,11 @@ impl PrSizeInfo {
         all_files: &[merge_warden_developer_platforms::models::PullRequestFile],
         thresholds: &SizeThresholds,
         exclusion_patterns: &[String],
+        ignore_deletions: bool,
     ) -> Self {
         let (included_files, excluded_files) =
             filter_files_by_patterns(all_files, exclusion_patterns);
-        Self::new(included_files, excluded_files, thresholds)
+        Self::new(included_files, excluded_files, thresholds, ignore_deletions)
     }
 
     /// Check if this PR is considered oversized based on its category.
@@ -463,7 +478,8 @@ impl PrSizeInfo {
     /// let size_info = PrSizeInfo::new(
     ///     files,
     ///     vec![],
-    ///     &merge_warden_core::size::SizeThresholds::default()
+    ///     &merge_warden_core::size::SizeThresholds::default(),
+    ///     false,
     /// );
     ///
     /// assert_eq!(size_info.included_file_count(), 2);
@@ -493,7 +509,8 @@ impl PrSizeInfo {
     /// let size_info = PrSizeInfo::new(
     ///     vec![],
     ///     excluded,
-    ///     &merge_warden_core::size::SizeThresholds::default()
+    ///     &merge_warden_core::size::SizeThresholds::default(),
+    ///     false,
     /// );
     ///
     /// assert_eq!(size_info.excluded_file_count(), 1);

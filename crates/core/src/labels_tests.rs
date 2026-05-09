@@ -2949,6 +2949,7 @@ async fn test_manage_size_labels_skips_api_calls_when_correct_label_already_appl
         }],
         vec![],
         &SizeThresholds::default(),
+        false,
     );
     assert_eq!(size_info.size_category, PrSizeCategory::S);
 
@@ -2992,6 +2993,7 @@ async fn test_manage_size_labels_removes_stale_and_adds_new_when_category_change
         }],
         vec![],
         &SizeThresholds::default(),
+        false,
     );
     assert_eq!(size_info.size_category, PrSizeCategory::M);
 
@@ -3042,6 +3044,7 @@ async fn test_manage_size_labels_removes_all_stale_and_adds_new_when_multiple_si
         }],
         vec![],
         &SizeThresholds::default(),
+        false,
     );
     assert_eq!(size_info.size_category, PrSizeCategory::M);
 

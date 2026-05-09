@@ -762,6 +762,7 @@ fn test_pr_size_check_config_effective_thresholds() {
         excluded_file_patterns: vec![],
         label_prefix: "size/".to_string(),
         add_comment: true,
+        ignore_deletions: false,
     };
     assert_eq!(
         config_with_custom.get_effective_thresholds(),
@@ -782,6 +783,7 @@ fn test_pr_size_check_file_exclusion_patterns() {
         ],
         label_prefix: "size/".to_string(),
         add_comment: true,
+        ignore_deletions: false,
     };
 
     // Test exclusion patterns
@@ -840,6 +842,7 @@ fn test_pr_size_config_serialization() {
         excluded_file_patterns: vec!["*.md".to_string(), "docs/*".to_string()],
         label_prefix: "pr-size/".to_string(),
         add_comment: false,
+        ignore_deletions: false,
     };
 
     // Test that serialization works (this is important for TOML config)
@@ -859,6 +862,42 @@ fn test_pr_size_config_serialization() {
     assert_eq!(
         config.get_effective_thresholds(),
         deserialized.get_effective_thresholds()
+    );
+}
+
+#[test]
+fn test_pr_size_check_config_ignore_deletions_round_trip() {
+    // Verify that ignore_deletions = true survives a TOML serialize → deserialize cycle.
+    let config = PrSizeCheckConfig {
+        enabled: true,
+        thresholds: None,
+        fail_on_oversized: false,
+        excluded_file_patterns: vec![],
+        label_prefix: "size/".to_string(),
+        add_comment: true,
+        ignore_deletions: true,
+    };
+
+    let serialized = toml::to_string(&config).expect("Should serialize");
+
+    // The serialized TOML must contain the snake_case key name.
+    assert!(
+        serialized.contains("ignore_deletions"),
+        "Expected 'ignore_deletions' in serialized TOML, got: {serialized}"
+    );
+
+    let deserialized: PrSizeCheckConfig = toml::from_str(&serialized).expect("Should deserialize");
+
+    assert!(deserialized.ignore_deletions);
+
+    // Also verify that omitting the field from TOML yields the default (false).
+    let minimal_toml = "[pr_size_check]\nenabled = true\n";
+    let minimal: PrSizeCheckConfig =
+        toml::from_str(minimal_toml).expect("Should deserialize minimal TOML");
+
+    assert!(
+        !minimal.ignore_deletions,
+        "ignore_deletions should default to false when absent from TOML"
     );
 }
 
@@ -915,6 +954,7 @@ fn test_validation_config_includes_pr_size() {
                     excluded_file_patterns: vec!["*.md".to_string()],
                     label_prefix: "custom/".to_string(),
                     add_comment: false,
+                    ignore_deletions: false,
                 },
                 ..Default::default()
             },

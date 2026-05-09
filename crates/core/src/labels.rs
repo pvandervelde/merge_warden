@@ -632,7 +632,7 @@ pub async fn manage_wip_labels<P: PullRequestProvider>(
 ///         },
 ///     ];
 ///     let thresholds = SizeThresholds::default();
-///     let size_info = PrSizeInfo::from_files_with_exclusions(&files, &thresholds, &[]);
+///     let size_info = PrSizeInfo::from_files_with_exclusions(&files, &thresholds, &[], false);
 ///
 ///     let label = manage_size_labels(
 ///         provider,
@@ -868,7 +868,7 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
 ///     },
 /// ];
 /// let thresholds = SizeThresholds::default();
-/// let size_info = PrSizeInfo::from_files_with_exclusions(&files, &thresholds, &[]);
+/// let size_info = PrSizeInfo::from_files_with_exclusions(&files, &thresholds, &[], false);
 ///
 /// let comment = generate_oversized_pr_comment(&size_info);
 /// assert!(comment.contains("XXL"));

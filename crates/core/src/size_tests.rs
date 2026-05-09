@@ -175,7 +175,7 @@ fn test_size_thresholds_custom() {
 
 #[test]
 fn test_pr_size_info_new_empty() {
-    let size_info = PrSizeInfo::new(vec![], vec![], &SizeThresholds::default());
+    let size_info = PrSizeInfo::new(vec![], vec![], &SizeThresholds::default(), false);
 
     assert_eq!(size_info.total_lines_changed, 0);
     assert_eq!(size_info.size_category, PrSizeCategory::XS);
@@ -194,7 +194,7 @@ fn test_pr_size_info_new_single_file() {
         status: "modified".to_string(),
     };
 
-    let size_info = PrSizeInfo::new(vec![file], vec![], &SizeThresholds::default());
+    let size_info = PrSizeInfo::new(vec![file], vec![], &SizeThresholds::default(), false);
 
     assert_eq!(size_info.total_lines_changed, 20);
     assert_eq!(size_info.size_category, PrSizeCategory::S);
@@ -229,7 +229,7 @@ fn test_pr_size_info_new_multiple_files() {
         },
     ];
 
-    let size_info = PrSizeInfo::new(files, vec![], &SizeThresholds::default());
+    let size_info = PrSizeInfo::new(files, vec![], &SizeThresholds::default(), false);
 
     assert_eq!(size_info.total_lines_changed, 85); // 20 + 40 + 25
     assert_eq!(size_info.size_category, PrSizeCategory::M);
@@ -265,7 +265,12 @@ fn test_pr_size_info_new_with_excluded_files() {
         },
     ];
 
-    let size_info = PrSizeInfo::new(included_files, excluded_files, &SizeThresholds::default());
+    let size_info = PrSizeInfo::new(
+        included_files,
+        excluded_files,
+        &SizeThresholds::default(),
+        false,
+    );
 
     // Should only count included files
     assert_eq!(size_info.total_lines_changed, 15);
@@ -285,7 +290,7 @@ fn test_pr_size_info_oversized() {
         status: "modified".to_string(),
     }];
 
-    let size_info = PrSizeInfo::new(files, vec![], &SizeThresholds::default());
+    let size_info = PrSizeInfo::new(files, vec![], &SizeThresholds::default(), false);
 
     assert_eq!(size_info.total_lines_changed, 600);
     assert_eq!(size_info.size_category, PrSizeCategory::XXL);
@@ -311,7 +316,7 @@ fn test_pr_size_info_with_custom_thresholds() {
         status: "modified".to_string(),
     }];
 
-    let size_info = PrSizeInfo::new(files, vec![], &custom_thresholds);
+    let size_info = PrSizeInfo::new(files, vec![], &custom_thresholds, false);
 
     assert_eq!(size_info.total_lines_changed, 30);
     assert_eq!(size_info.size_category, PrSizeCategory::M); // Exactly at the M threshold
@@ -427,7 +432,7 @@ fn test_pr_size_info_zero_changes_file() {
         },
     ];
 
-    let size_info = PrSizeInfo::new(files, vec![], &SizeThresholds::default());
+    let size_info = PrSizeInfo::new(files, vec![], &SizeThresholds::default(), false);
 
     assert_eq!(size_info.total_lines_changed, 7); // Only the modified file counts
     assert_eq!(size_info.size_category, PrSizeCategory::XS);
@@ -458,6 +463,7 @@ fn test_pr_size_info_from_files_with_exclusions() {
         &files,
         &SizeThresholds::default(),
         &exclusion_patterns,
+        false,
     );
 
     // Only the main.rs file should be included in size calculation
@@ -487,7 +493,8 @@ fn test_pr_size_info_no_exclusions() {
         },
     ];
 
-    let size_info = PrSizeInfo::from_files_with_exclusions(&files, &SizeThresholds::default(), &[]);
+    let size_info =
+        PrSizeInfo::from_files_with_exclusions(&files, &SizeThresholds::default(), &[], false);
 
     // All files should be included
     assert_eq!(size_info.total_lines_changed, 45); // 15 + 30
@@ -505,9 +512,139 @@ fn test_size_category_determination() {
         status: "modified".to_string(),
     }];
 
-    let size_info = PrSizeInfo::from_files_with_exclusions(&files, &SizeThresholds::default(), &[]);
+    let size_info =
+        PrSizeInfo::from_files_with_exclusions(&files, &SizeThresholds::default(), &[], false);
 
     // 800 lines should be XXL with default thresholds
     assert!(size_info.is_oversized());
     assert_eq!(size_info.size_category, PrSizeCategory::XXL);
+}
+
+// ── ignore_deletions tests ────────────────────────────────────────────────────
+
+#[test]
+fn test_pr_size_info_ignore_deletions_false_uses_changes() {
+    // When ignore_deletions is false (default), f.changes (additions + deletions) is used.
+    // This test documents the current behaviour and ensures it is not broken.
+    let file = PullRequestFile {
+        filename: "src/main.rs".to_string(),
+        additions: 10,
+        deletions: 500,
+        changes: 510,
+        status: "modified".to_string(),
+    };
+
+    let size_info = PrSizeInfo::new(vec![file], vec![], &SizeThresholds::default(), false);
+
+    assert_eq!(size_info.total_lines_changed, 510);
+}
+
+#[test]
+fn test_pr_size_info_ignore_deletions_true_uses_additions_only() {
+    // When ignore_deletions is true, only f.additions is counted.
+    // A large deletion must not inflate the size category.
+    let file = PullRequestFile {
+        filename: "src/main.rs".to_string(),
+        additions: 10,
+        deletions: 500,
+        changes: 510,
+        status: "modified".to_string(),
+    };
+
+    let size_info = PrSizeInfo::new(vec![file], vec![], &SizeThresholds::default(), true);
+
+    assert_eq!(size_info.total_lines_changed, 10);
+    assert_eq!(size_info.size_category, PrSizeCategory::XS);
+}
+
+#[test]
+fn test_pr_size_info_wholly_deleted_file_contributes_zero_when_ignore_deletions() {
+    // A file with status "removed" has additions=0 and deletions > 0.
+    // When ignore_deletions is true, it contributes 0 lines.
+    let deleted_file = PullRequestFile {
+        filename: "src/old_module.rs".to_string(),
+        additions: 0,
+        deletions: 2000,
+        changes: 2000,
+        status: "removed".to_string(),
+    };
+    let new_file = PullRequestFile {
+        filename: "src/new_module.rs".to_string(),
+        additions: 25,
+        deletions: 0,
+        changes: 25,
+        status: "added".to_string(),
+    };
+
+    let size_info = PrSizeInfo::new(
+        vec![deleted_file, new_file],
+        vec![],
+        &SizeThresholds::default(),
+        true,
+    );
+
+    // Only the 25 additions from new_module.rs count; the removed file contributes 0.
+    assert_eq!(size_info.total_lines_changed, 25);
+    assert_eq!(size_info.size_category, PrSizeCategory::S);
+}
+
+#[test]
+fn test_pr_size_info_mixed_pr_ignore_deletions_true() {
+    // Multiple files — only additions are summed when ignore_deletions is true.
+    let files = vec![
+        PullRequestFile {
+            filename: "src/feature.rs".to_string(),
+            additions: 50,
+            deletions: 20,
+            changes: 70,
+            status: "modified".to_string(),
+        },
+        PullRequestFile {
+            filename: "src/cleanup.rs".to_string(),
+            additions: 5,
+            deletions: 300,
+            changes: 305,
+            status: "modified".to_string(),
+        },
+    ];
+
+    let size_info_with = PrSizeInfo::new(files.clone(), vec![], &SizeThresholds::default(), true);
+    let size_info_without = PrSizeInfo::new(files, vec![], &SizeThresholds::default(), false);
+
+    assert_eq!(size_info_with.total_lines_changed, 55); // 50 + 5 additions only
+    assert_eq!(size_info_without.total_lines_changed, 375); // 70 + 305 changes
+}
+
+#[test]
+fn test_pr_size_info_from_files_with_exclusions_ignore_deletions_true() {
+    // The ignore_deletions flag threads through from_files_with_exclusions to new().
+    let files = vec![
+        PullRequestFile {
+            filename: "src/main.rs".to_string(),
+            additions: 15,
+            deletions: 200,
+            changes: 215,
+            status: "modified".to_string(),
+        },
+        PullRequestFile {
+            filename: "package-lock.json".to_string(),
+            additions: 1000,
+            deletions: 500,
+            changes: 1500,
+            status: "modified".to_string(),
+        },
+    ];
+    let exclusion_patterns = vec!["package-lock.json".to_string()];
+
+    let size_info = PrSizeInfo::from_files_with_exclusions(
+        &files,
+        &SizeThresholds::default(),
+        &exclusion_patterns,
+        true,
+    );
+
+    // package-lock.json is excluded; only main.rs additions (15) count.
+    assert_eq!(size_info.total_lines_changed, 15);
+    assert_eq!(size_info.included_files.len(), 1);
+    assert_eq!(size_info.excluded_files.len(), 1);
 }
