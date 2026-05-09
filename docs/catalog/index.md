@@ -33,7 +33,7 @@
 | `BypassRule` | struct | `crates/core/src/config.rs:385` | struct in crates/core/src/config.rs | core, validation |
 | `BypassRules` | struct | `crates/core/src/config.rs:491` | struct in crates/core/src/config.rs | core, validation |
 | `BypassRuleType` | enum | `crates/core/src/validation_result.rs:108` | enum in crates/core/src/validation_result.rs | core, validation |
-| `ChangeTypeLabelConfig` | struct | `crates/core/src/config.rs:1583` | struct in crates/core/src/config.rs | core, validation |
+| `ChangeTypeLabelConfig` | struct | `crates/core/src/config.rs:1583` | Smart change-type label detection config; includes `keyword_labels: KeywordLabelsConfig` for keyword-triggered label name overrides | core, validation, labels |
 | `CheckResult` | struct | `crates/core/src/lib.rs:104` | struct in crates/core/src/lib.rs | core, validation |
 | `ConfigLoadError` | enum | `crates/core/src/errors.rs:5` | enum in crates/core/src/errors.rs | core, validation |
 | `ConventionalCommitMappings` | struct | `crates/core/src/config.rs:1607` | struct in crates/core/src/config.rs | core, validation |
@@ -47,6 +47,7 @@
 | `LabelDetector` | struct | `crates/core/src/labels.rs:992` | struct in crates/core/src/labels.rs | core, validation |
 | `LabelManagementResult` | struct | `crates/core/src/labels.rs:1662` | struct in crates/core/src/labels.rs | core, validation |
 | `LabelManager` | struct | `crates/core/src/labels.rs:1724` | struct in crates/core/src/labels.rs | core, validation |
+| `KeywordLabelsConfig` | struct | `crates/core/src/config.rs:1757` | Optional overrides for the four keyword-triggered labels (`breaking_change`, `security`, `hotfix`, `tech_debt`); absent or empty fields fall back to hard-coded defaults | core, validation, labels, config |
 | `MergeWarden` | struct | `crates/core/src/lib.rs:192` | struct in crates/core/src/lib.rs | core, validation |
 | `MergeWardenError` | enum | `crates/core/src/errors.rs:47` | enum in crates/core/src/errors.rs | core, validation |
 | `PoliciesConfig` | struct | `crates/core/src/config.rs:698` | struct in crates/core/src/config.rs | core, validation |
