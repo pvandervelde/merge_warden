@@ -1586,12 +1586,16 @@ pub struct ChangeTypeLabelConfig {
     /// Mappings from conventional commit types to repository label names
     #[serde(default)]
     pub conventional_commit_mappings: ConventionalCommitMappings,
-    /// Settings for creating fallback labels when none exist
-    #[serde(default)]
-    pub fallback_label_settings: FallbackLabelSettings,
     /// Configuration for the label detection strategy
     #[serde(default)]
     pub detection_strategy: LabelDetectionStrategy,
+    /// Settings for creating fallback labels when none exist
+    #[serde(default)]
+    pub fallback_label_settings: FallbackLabelSettings,
+    /// Configuration for keyword-triggered labels (breaking change, security, hotfix, tech debt).
+    /// When absent all keyword labels use their built-in defaults.
+    #[serde(default)]
+    pub keyword_labels: KeywordLabelsConfig,
 }
 
 impl ChangeTypeLabelConfig {
@@ -1735,6 +1739,74 @@ impl FallbackLabelSettings {
     }
 }
 
+/// Configuration for keyword-triggered labels automatically applied based on PR title/body content.
+///
+/// Each field names the repository label to apply when the corresponding keyword is detected. When
+/// a field is absent or set to an empty string the hard-coded default is used so existing configs
+/// require no changes.
+///
+/// # Defaults
+///
+/// | Field | Default label |
+/// |---|---|
+/// | `breaking_change` | `"breaking-change"` |
+/// | `security` | `"security"` |
+/// | `hotfix` | `"hotfix"` |
+/// | `tech_debt` | `"tech-debt"` |
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct KeywordLabelsConfig {
+    /// Label applied when the PR title contains `!:` or the phrase "breaking change".
+    /// Defaults to `"breaking-change"` when absent or empty.
+    #[serde(default)]
+    pub breaking_change: Option<String>,
+
+    /// Label applied when the PR body contains "security" or "vulnerability".
+    /// Defaults to `"security"` when absent or empty.
+    #[serde(default)]
+    pub security: Option<String>,
+
+    /// Label applied when the PR body contains "hotfix".
+    /// Defaults to `"hotfix"` when absent or empty.
+    #[serde(default)]
+    pub hotfix: Option<String>,
+
+    /// Label applied when the PR body contains "technical debt" or "tech debt".
+    /// Defaults to `"tech-debt"` when absent or empty.
+    #[serde(default)]
+    pub tech_debt: Option<String>,
+}
+
+impl KeywordLabelsConfig {
+    /// Returns the effective label for breaking-change detection, falling back to the default.
+    #[must_use]
+    pub fn breaking_change_label(&self) -> &str {
+        Self::resolve(self.breaking_change.as_deref(), "breaking-change")
+    }
+
+    /// Returns the effective label for hotfix detection, falling back to the default.
+    #[must_use]
+    pub fn hotfix_label(&self) -> &str {
+        Self::resolve(self.hotfix.as_deref(), "hotfix")
+    }
+
+    /// Returns the effective label for security/vulnerability detection, falling back to the default.
+    #[must_use]
+    pub fn security_label(&self) -> &str {
+        Self::resolve(self.security.as_deref(), "security")
+    }
+
+    /// Returns the effective label for tech-debt detection, falling back to the default.
+    #[must_use]
+    pub fn tech_debt_label(&self) -> &str {
+        Self::resolve(self.tech_debt.as_deref(), "tech-debt")
+    }
+
+    /// Resolves a configured label name, falling back to `default` when the value is absent or empty.
+    fn resolve<'a>(configured: Option<&'a str>, default: &'a str) -> &'a str {
+        configured.filter(|s| !s.is_empty()).unwrap_or(default)
+    }
+}
+
 /// Configuration for the label detection strategy
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct LabelDetectionStrategy {
@@ -1772,8 +1844,9 @@ impl Default for ChangeTypeLabelConfig {
         Self {
             enabled: true,
             conventional_commit_mappings: ConventionalCommitMappings::default(),
-            fallback_label_settings: FallbackLabelSettings::default(),
             detection_strategy: LabelDetectionStrategy::default(),
+            fallback_label_settings: FallbackLabelSettings::default(),
+            keyword_labels: KeywordLabelsConfig::default(),
         }
     }
 }
