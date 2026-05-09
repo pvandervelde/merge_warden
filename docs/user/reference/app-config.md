@@ -131,11 +131,11 @@ approved_label = "status: approved"
 enabled = false
 users   = []
 
-[policies.bypassRules.work_items]
+[policies.bypass_rules.work_items]
 enabled = false
 users   = []
 
-[policies.bypassRules.size]
+[policies.bypass_rules.size]
 enabled = false
 users   = []
 ```
