@@ -729,10 +729,10 @@ fn test_application_defaults_bypass_rules_serialization() {
     let parsed: serde_json::Value =
         serde_json::from_str(&serialized).expect("Failed to parse JSON");
 
-    assert_eq!(parsed["enforceTitleValidation"], true);
-    assert_eq!(parsed["bypassRules"]["title_convention"]["enabled"], true);
+    assert_eq!(parsed["enable_title_validation"], true);
+    assert_eq!(parsed["bypass_rules"]["title_convention"]["enabled"], true);
     assert_eq!(
-        parsed["bypassRules"]["title_convention"]["users"][0],
+        parsed["bypass_rules"]["title_convention"]["users"][0],
         "admin"
     );
 }
@@ -1290,5 +1290,107 @@ sync_project_from_issue = true
     assert!(
         validation.issue_propagation.sync_project_from_issue,
         "to_validation_config should forward sync_project_from_issue = true"
+    );
+}
+
+// ── ApplicationDefaults snake_case TOML key tests ────────────────────────────
+
+#[test]
+fn test_application_defaults_new_field_names_round_trip_toml() {
+    // Round-trip using the new snake_case TOML keys (post-rename).
+    let toml_input = r#"
+enable_title_validation = true
+default_title_pattern = "my-title-pattern"
+default_invalid_title_label = "bad-title"
+enable_work_item_validation = true
+default_work_item_pattern = "my-work-item-pattern"
+default_missing_work_item_label = "missing-work-item"
+"#;
+
+    let defaults: ApplicationDefaults =
+        toml::from_str(toml_input).expect("Should deserialize from snake_case keys");
+
+    assert!(defaults.enable_title_validation);
+    assert_eq!(defaults.default_title_pattern, "my-title-pattern");
+    assert_eq!(
+        defaults.default_invalid_title_label,
+        Some("bad-title".to_string())
+    );
+    assert!(defaults.enable_work_item_validation);
+    assert_eq!(defaults.default_work_item_pattern, "my-work-item-pattern");
+    assert_eq!(
+        defaults.default_missing_work_item_label,
+        Some("missing-work-item".to_string())
+    );
+
+    // Serialize back to TOML and verify snake_case keys are present.
+    let serialized = toml::to_string(&defaults).expect("Should serialize");
+    assert!(
+        serialized.contains("enable_title_validation"),
+        "Serialized TOML must use 'enable_title_validation', got:\n{serialized}"
+    );
+    assert!(
+        !serialized.contains("enforceTitleValidation"),
+        "Serialized TOML must NOT contain legacy key 'enforceTitleValidation'"
+    );
+    assert!(
+        serialized.contains("enable_work_item_validation"),
+        "Serialized TOML must use 'enable_work_item_validation'"
+    );
+    assert!(
+        !serialized.contains("enforceWorkItemValidation"),
+        "Serialized TOML must NOT contain legacy key 'enforceWorkItemValidation'"
+    );
+
+    // Deserialize again to confirm full round-trip correctness.
+    let roundtripped: ApplicationDefaults =
+        toml::from_str(&serialized).expect("Should deserialize after serialization");
+    assert_eq!(
+        roundtripped.enable_title_validation,
+        defaults.enable_title_validation
+    );
+    assert_eq!(
+        roundtripped.default_title_pattern,
+        defaults.default_title_pattern
+    );
+    assert_eq!(
+        roundtripped.default_invalid_title_label,
+        defaults.default_invalid_title_label
+    );
+    assert_eq!(
+        roundtripped.enable_work_item_validation,
+        defaults.enable_work_item_validation
+    );
+    assert_eq!(
+        roundtripped.default_work_item_pattern,
+        defaults.default_work_item_pattern
+    );
+    assert_eq!(
+        roundtripped.default_missing_work_item_label,
+        defaults.default_missing_work_item_label
+    );
+}
+
+#[test]
+fn test_application_defaults_camelcase_keys_no_longer_deserialize() {
+    // After the rename, camelCase keys in TOML should be ignored (serde skips unknown fields),
+    // so the fields fall back to their #[serde(default)] values.
+    let toml_camel = r#"
+enforceTitleValidation = true
+titlePattern = "some-pattern"
+"#;
+
+    let defaults: ApplicationDefaults =
+        toml::from_str(toml_camel).expect("Should succeed (unknown keys are ignored)");
+
+    // Because the keys are now unknown to serde, defaults apply.
+    assert!(
+        !defaults.enable_title_validation,
+        "enforceTitleValidation is no longer a recognised key; default (false) must be used"
+    );
+    assert_eq!(
+        defaults.default_title_pattern,
+        CONVENTIONAL_COMMIT_REGEX.to_string(),
+        "titlePattern is no longer a recognised key; default pattern must be used"
     );
 }

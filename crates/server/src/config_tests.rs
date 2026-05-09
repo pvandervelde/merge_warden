@@ -426,7 +426,7 @@ fn load_config_reads_application_defaults_from_toml_file() {
     // Write a minimal TOML file with one overridden field.
     let mut path = std::env::temp_dir();
     path.push("merge_warden_server_load_config_test.toml");
-    std::fs::write(&path, "[policies]\nenforceTitleValidation = true\n").unwrap();
+    std::fs::write(&path, "[policies]\nenable_title_validation = true\n").unwrap();
 
     let _env = EnvGuard::prepare(
         &[("MERGE_WARDEN_CONFIG_FILE", path.to_str().unwrap())],
@@ -443,7 +443,7 @@ fn load_config_reads_application_defaults_from_toml_file() {
     assert!(r.is_ok(), "{:?}", r);
     assert!(
         r.unwrap().application_defaults.enable_title_validation,
-        "Expected enforceTitleValidation = true from TOML"
+        "Expected enable_title_validation = true from TOML"
     );
 }
 
