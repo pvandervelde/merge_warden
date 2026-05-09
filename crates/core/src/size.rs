@@ -349,9 +349,13 @@ impl PrSizeInfo {
         included_files: Vec<PullRequestFile>,
         excluded_files: Vec<PullRequestFile>,
         thresholds: &SizeThresholds,
-        _ignore_deletions: bool,
+        ignore_deletions: bool,
     ) -> Self {
-        let total_lines_changed: u32 = included_files.iter().map(|f| f.changes).sum();
+        let total_lines_changed: u32 = if ignore_deletions {
+            included_files.iter().map(|f| f.additions).sum()
+        } else {
+            included_files.iter().map(|f| f.changes).sum()
+        };
         let size_category =
             PrSizeCategory::from_line_count_with_thresholds(total_lines_changed, thresholds);
 
