@@ -12,9 +12,9 @@ The application-level configuration file is loaded by the server via the
 Per-repository `.github/merge-warden.toml` files take precedence over these defaults.
 See [Configuration precedence](../explanation/config-precedence.md).
 
-> **Important:** This file uses different field names to the per-repository config. The
-> table in each section below links the equivalent per-repo field. Pointing
-> `MERGE_WARDEN_CONFIG_FILE` at a per-repo sample file will silently produce no enforcement.
+> **Note:** This file uses the same snake_case field name convention as the per-repository
+> config. Pointing `MERGE_WARDEN_CONFIG_FILE` at a per-repo sample file will silently
+> produce no enforcement because the top-level structures differ.
 
 See [`samples/app-config.sample.toml`](https://github.com/pvandervelde/merge_warden/blob/master/samples/app-config.sample.toml)
 for a fully annotated example.
@@ -27,16 +27,16 @@ Top-level policy defaults.
 
 | Field | Type | Default | Per-repo equivalent |
 | :--- | :--- | :--- | :--- |
-| `enforceTitleValidation` | bool | `false` | `[prTitle] required` |
-| `titlePattern` | string | *(conventional commits)* | `[prTitle] pattern` |
-| `labelIfTitleInvalid` | string | *(none)* | `[prTitle] label_if_missing` |
-| `enforceWorkItemValidation` | bool | `false` | `[workItem] required` |
-| `workItemPattern` | string | *(GitHub issue patterns)* | `[workItem] pattern` |
-| `labelIfWorkItemMissing` | string | *(none)* | `[workItem] label_if_missing` |
+| `enable_title_validation` | bool | `false` | `[prTitle] required` |
+| `default_title_pattern` | string | *(conventional commits)* | `[prTitle] pattern` |
+| `default_invalid_title_label` | string | *(none)* | `[prTitle] label_if_missing` |
+| `enable_work_item_validation` | bool | `false` | `[workItem] required` |
+| `default_work_item_pattern` | string | *(GitHub issue patterns)* | `[workItem] pattern` |
+| `default_missing_work_item_label` | string | *(none)* | `[workItem] label_if_missing` |
 
 ---
 
-## `[policies.prSize]`
+## `[policies.pr_size_check]`
 
 | Field | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -48,7 +48,7 @@ Top-level policy defaults.
 
 ---
 
-## `[policies.wip]`
+## `[policies.wip_check]`
 
 | Field | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -59,7 +59,7 @@ Top-level policy defaults.
 
 ---
 
-## `[policies.prState]`
+## `[policies.pr_state_labels]`
 
 | Field | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
@@ -83,7 +83,7 @@ for details.
 
 ---
 
-## `[policies.bypassRules.*]`
+## `[policies.bypass_rules.*]`
 
 Three bypass sections are available: `title_convention`, `work_items`, `size`.
 
@@ -103,31 +103,31 @@ overridden by per-repo configs.
 
 ```toml
 [policies]
-enforceTitleValidation    = true
-labelIfTitleInvalid       = "pr-issue: invalid-title-format"
+enable_title_validation       = true
+default_invalid_title_label   = "pr-issue: invalid-title-format"
 
-enforceWorkItemValidation = true
-labelIfWorkItemMissing    = "pr-issue: missing-work-item"
+enable_work_item_validation      = true
+default_missing_work_item_label  = "pr-issue: missing-work-item"
 
-[policies.prSize]
+[policies.pr_size_check]
 enabled          = false
 fail_on_oversized = false
 label_prefix     = "size/"
 add_comment      = true
 
-[policies.wip]
+[policies.wip_check]
 enforce_wip_blocking  = true
 wip_label             = "WIP"
 wip_title_patterns    = ["WIP", "wip:", "[wip]", "draft:", "Draft:"]
 wip_description_patterns = []
 
-[policies.prState]
+[policies.pr_state_labels]
 enabled        = true
 draft_label    = "status: draft"
 review_label   = "status: in-review"
 approved_label = "status: approved"
 
-[policies.bypassRules.title_convention]
+[policies.bypass_rules.title_convention]
 enabled = false
 users   = []
 

@@ -53,7 +53,7 @@ See [Per-repository configuration schema](../reference/per-repo-config.md).
 
 ## Field-level override
 
-Precedence operates at the field level, not the file level. If `enforceTitleValidation` is
+Precedence operates at the field level, not the file level. If `enable_title_validation` is
 set in the application config but `.github/merge-warden.toml` does not include a
 `[policies.pullRequests.prTitle]` section, the application-level setting applies.
 
@@ -68,8 +68,8 @@ Assume the application config sets:
 
 ```toml
 [policies]
-enforceTitleValidation    = true
-enforceWorkItemValidation = true
+enable_title_validation      = true
+enable_work_item_validation  = true
 ```
 
 And a repository's `.github/merge-warden.toml` contains:

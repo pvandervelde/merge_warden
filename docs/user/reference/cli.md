@@ -186,7 +186,7 @@ port = 3000
 
 [policies]
 # Application-level policy defaults — see app-config reference
-enforceTitleValidation = true
+enable_title_validation = true
 ```
 
 ---

@@ -16,11 +16,11 @@ This file is loaded by the server via the `MERGE_WARDEN_CONFIG_FILE` environment
 variable. It defines the **application-level** policy defaults that apply to every
 repository handled by this server instance.
 
-> **Important:** This file uses different field names to `merge-warden.sample.toml`.
-> `MERGE_WARDEN_CONFIG_FILE` expects `ApplicationDefaults` fields (e.g.
-> `enforceTitleValidation`, `titlePattern`). The per-repo config uses a different
-> structure (`[policies.pullRequests.prTitle]`). Pointing `MERGE_WARDEN_CONFIG_FILE`
-> at the per-repo sample will silently produce no enforcement.
+> **Note:** This file uses the same snake_case convention as `merge-warden.sample.toml`
+> but a different top-level structure. `MERGE_WARDEN_CONFIG_FILE` expects `ApplicationDefaults`
+> fields (e.g. `enable_title_validation`). The per-repo config uses a different structure
+> (`[policies.pullRequests.prTitle]`). Pointing `MERGE_WARDEN_CONFIG_FILE` at the per-repo
+> sample will silently produce no enforcement.
 
 Pass it to `run-local.ps1` with:
 

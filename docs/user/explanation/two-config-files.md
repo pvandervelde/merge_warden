@@ -18,7 +18,7 @@ common source of confusion. This page explains why they exist and how they diffe
 | **Scope** | All repositories on the server | One specific repository |
 | **Who controls it** | Operator (platform team) | Repository maintainer |
 | **Schema** | `ApplicationDefaults` | `policies.*` |
-| **Example field** | `enforceTitleValidation` | `[prTitle] required` |
+| **Example field** | `enable_title_validation` | `[prTitle] required` |
 
 ---
 
@@ -28,7 +28,8 @@ The two files were designed for different audiences with different mental models
 
 **Operators** think in terms of broad organisational defaults: "I want all repositories to
 have title validation enabled unless a team explicitly opts out." The `ApplicationDefaults`
-schema reflects this with simple boolean flags at the top level.
+schema reflects this with simple boolean fields at the top level, using snake_case names
+consistent with the per-repository config.
 
 **Repository maintainers** think in terms of specific policies with detailed settings: "I
 want title validation with this pattern and this failure label." The `policies.*` schema
@@ -54,14 +55,16 @@ Always use:
 
 ### Field name mapping
 
+Both files now use snake_case field names. The structural differences remain:
+
 | Application config field | Per-repo equivalent |
 | :--- | :--- |
-| `enforceTitleValidation` | `[prTitle] required` |
-| `enforceWorkItemValidation` | `[workItem] required` |
-| `titlePattern` | `[prTitle] pattern` |
-| `labelIfTitleInvalid` | `[prTitle] label_if_missing` |
-| `workItemPattern` | `[workItem] pattern` |
-| `labelIfWorkItemMissing` | `[workItem] label_if_missing` |
+| `enable_title_validation` | `[prTitle] required` |
+| `enable_work_item_validation` | `[workItem] required` |
+| `default_title_pattern` | `[prTitle] pattern` |
+| `default_invalid_title_label` | `[prTitle] label_if_missing` |
+| `default_work_item_pattern` | `[workItem] pattern` |
+| `default_missing_work_item_label` | `[workItem] label_if_missing` |
 
 For the complete mapping, see [Application configuration schema](../reference/app-config.md).
 
