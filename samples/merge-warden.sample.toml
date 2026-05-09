@@ -35,6 +35,9 @@ fail_on_oversized = false
 # File patterns to exclude from size calculations (supports glob patterns)
 excluded_file_patterns = ["*.md", "*.txt", "docs/*"]
 
+# When true, only additions are counted; deleted lines do not inflate the PR size.
+ignore_deletions = false
+
 # Prefix for size labels (will create labels like "size/XS", "size/S", etc.)
 label_prefix = "size/"
 

@@ -26,6 +26,8 @@ default_missing_work_item_label = "pr-issue: missing-work-item"
 enabled = false
 fail_on_oversized = false
 excluded_file_patterns = ["*.md", "*.txt", "docs/*"]
+# When true, only additions are counted; deleted lines do not inflate the PR size.
+ignore_deletions = false
 label_prefix = "size/"
 add_comment = true
 

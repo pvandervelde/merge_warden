@@ -63,6 +63,7 @@ Controls automatic PR size labeling.
 | `enabled` | bool | `false` | When `true`, size labels are applied on every PR event. |
 | `fail_on_oversized` | bool | `false` | When `true`, the check fails for XXL PRs (above the `xl` threshold). |
 | `excluded_file_patterns` | array of strings | `[]` | Glob patterns for files to exclude from the line count. |
+| `ignore_deletions` | bool | `false` | When `true`, only additions are counted; deleted lines do not contribute to the PR size. |
 | `label_prefix` | string | `"size/"` | Prefix prepended to size tier names to form the label (e.g. `size/XS`). |
 | `add_comment` | bool | `true` | When `true`, an educational comment is posted on XXL PRs. |
 

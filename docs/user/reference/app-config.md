@@ -43,6 +43,7 @@ Top-level policy defaults.
 | `enabled` | bool | `false` | Enable PR size labeling for all repositories. |
 | `fail_on_oversized` | bool | `false` | Fail the check for XXL PRs. |
 | `excluded_file_patterns` | array of strings | `[]` | Glob patterns excluded from line counts. |
+| `ignore_deletions` | bool | `false` | When `true`, only additions are counted; deleted lines do not contribute to the PR size. |
 | `label_prefix` | string | `"size/"` | Label prefix (e.g. `size/XS`). |
 | `add_comment` | bool | `true` | Post a comment on oversized PRs. |
 
