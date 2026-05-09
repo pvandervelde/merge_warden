@@ -927,6 +927,17 @@ pub struct PrSizeCheckConfig {
     /// Whether to add educational comments for oversized PRs
     #[serde(default = "PrSizeCheckConfig::default_add_comment")]
     pub add_comment: bool,
+
+    /// Whether to ignore deleted lines when calculating PR size.
+    ///
+    /// When `true`, only additions are counted towards the PR size category. This
+    /// prevents large file deletions (e.g., removing a generated file) from
+    /// inflating the size category unfairly.
+    ///
+    /// Defaults to `false` (additions + deletions counted, preserving historical
+    /// behaviour).
+    #[serde(default = "PrSizeCheckConfig::default_ignore_deletions")]
+    pub ignore_deletions: bool,
 }
 
 impl PrSizeCheckConfig {
@@ -948,6 +959,11 @@ impl PrSizeCheckConfig {
     /// Default value for adding educational comments (true)
     fn default_add_comment() -> bool {
         true
+    }
+
+    /// Default value for ignore_deletions (false — count both additions and deletions)
+    fn default_ignore_deletions() -> bool {
+        false
     }
 
     /// Get the effective size thresholds, using defaults if not configured
@@ -980,6 +996,7 @@ impl Default for PrSizeCheckConfig {
             excluded_file_patterns: Vec::new(),
             label_prefix: Self::default_label_prefix(),
             add_comment: Self::default_add_comment(),
+            ignore_deletions: Self::default_ignore_deletions(),
         }
     }
 }

@@ -1255,6 +1255,7 @@ Please update the PR body to include a valid work item reference."#;
             pr_files,
             &self.config.pr_size_check.get_effective_thresholds(),
             &self.config.pr_size_check.excluded_file_patterns,
+            false,
         );
 
         // Apply size label
@@ -2194,6 +2195,7 @@ Please update the PR body to include a valid work item reference."#;
                 files,
                 &self.config.pr_size_check.get_effective_thresholds(),
                 &self.config.pr_size_check.excluded_file_patterns,
+                false,
             );
             self.config.pr_size_check.fail_on_oversized && size_info.is_oversized()
         } else {
