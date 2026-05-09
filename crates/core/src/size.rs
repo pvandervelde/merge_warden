@@ -294,7 +294,12 @@ impl SizeThresholds {
 /// ```
 #[derive(Debug, Clone)]
 pub struct PrSizeInfo {
-    /// Total lines changed (additions + deletions) excluding filtered files
+    /// Total lines counted for size categorisation, excluding filtered files.
+    ///
+    /// When `ignore_deletions` is `false` (the default), this is the sum of
+    /// `additions + deletions` (`f.changes`) across all included files.
+    /// When `ignore_deletions` is `true`, this holds additions only (`f.additions`);
+    /// deleted lines and wholly-removed files contribute 0.
     pub total_lines_changed: u32,
 
     /// List of files included in the size calculation
