@@ -1206,7 +1206,7 @@ impl LabelDetector {
 
     /// Find exact size match: size/XS, size/S, etc.
     fn find_exact_size_match<'a>(&self, labels: &'a [Label], category: &str) -> Option<&'a Label> {
-        let pattern = format!(r"^size/{}$", regex::escape(category));
+        let pattern = format!(r"(?i)^size/{}$", regex::escape(category));
         let regex = Regex::new(&pattern).ok()?;
 
         debug!(
@@ -1237,7 +1237,7 @@ impl LabelDetector {
         labels: &'a [Label],
         category: &str,
     ) -> Option<&'a Label> {
-        let pattern = format!(r"^size[_\-:\s]+{}$", regex::escape(category));
+        let pattern = format!(r"(?i)^size[_\-:\s]+{}$", regex::escape(category));
         let regex = Regex::new(&pattern).ok()?;
 
         debug!(
