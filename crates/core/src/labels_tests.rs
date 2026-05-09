@@ -1109,6 +1109,10 @@ async fn test_label_detector_size_labels_separator_match_lowercase() {
         name: "size:xl".to_string(),
         description: Some("Extra large PR".to_string()),
     });
+    provider.add_repository_label(Label {
+        name: "size:xxl".to_string(),
+        description: Some("Extra extra large PR".to_string()),
+    });
 
     let detector = LabelDetector::new_for_size_labels();
     let discovered = detector
@@ -1121,6 +1125,53 @@ async fn test_label_detector_size_labels_separator_match_lowercase() {
     assert_eq!(discovered.m, Some("size:m".to_string()));
     assert_eq!(discovered.l, Some("size:l".to_string()));
     assert_eq!(discovered.xl, Some("size:xl".to_string()));
+    assert_eq!(discovered.xxl, Some("size:xxl".to_string()));
+}
+
+#[test]
+async fn test_label_detector_size_labels_exact_match_lowercase() {
+    // Regression test: lowercase slash-variant labels like "size/l" must be
+    // discovered correctly. find_exact_size_match received the same (?i) fix as
+    // find_size_with_separator, so this test verifies that path.
+    let provider = SmartMockGitProvider::new();
+
+    provider.add_repository_label(Label {
+        name: "size/xs".to_string(),
+        description: Some("Extra small PR".to_string()),
+    });
+    provider.add_repository_label(Label {
+        name: "size/s".to_string(),
+        description: Some("Small PR".to_string()),
+    });
+    provider.add_repository_label(Label {
+        name: "size/m".to_string(),
+        description: Some("Medium PR".to_string()),
+    });
+    provider.add_repository_label(Label {
+        name: "size/l".to_string(),
+        description: Some("Large PR".to_string()),
+    });
+    provider.add_repository_label(Label {
+        name: "size/xl".to_string(),
+        description: Some("Extra large PR".to_string()),
+    });
+    provider.add_repository_label(Label {
+        name: "size/xxl".to_string(),
+        description: Some("Extra extra large PR".to_string()),
+    });
+
+    let detector = LabelDetector::new_for_size_labels();
+    let discovered = detector
+        .discover_size_labels(&provider, "owner", "repo")
+        .await
+        .unwrap();
+
+    assert_eq!(discovered.xs, Some("size/xs".to_string()));
+    assert_eq!(discovered.s, Some("size/s".to_string()));
+    assert_eq!(discovered.m, Some("size/m".to_string()));
+    assert_eq!(discovered.l, Some("size/l".to_string()));
+    assert_eq!(discovered.xl, Some("size/xl".to_string()));
+    assert_eq!(discovered.xxl, Some("size/xxl".to_string()));
 }
 
 #[test]
