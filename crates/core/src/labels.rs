@@ -11,14 +11,44 @@
 
 use crate::config::{
     ChangeTypeLabelConfig, CurrentPullRequestValidationConfiguration, KeywordLabelsConfig,
-    PrStateLabelsConfig, CONVENTIONAL_COMMIT_REGEX,
+    PrStateLabelsConfig, CONVENTIONAL_COMMIT_REGEX, KEYWORD_LABEL_COMMENT_MARKER,
 };
 use crate::errors::MergeWardenError;
 use crate::size::{PrSizeCategory, PrSizeInfo};
-use merge_warden_developer_platforms::models::{Label, PullRequest};
+use lazy_static::lazy_static;
+use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
 use merge_warden_developer_platforms::PullRequestProvider;
 use regex::Regex;
+use std::collections::HashMap;
 use tracing::{debug, info, warn};
+
+lazy_static! {
+    /// Word-boundary regex for detecting "breaking change" / "breaking-change" keywords.
+    static ref BREAKING_CHANGE_KEYWORD_RE: Regex =
+        Regex::new(r"(?i)\bbreaking[\s\-]+change\b").unwrap();
+
+    /// Word-boundary regex for detecting "security" or "vulnerability" keywords.
+    static ref SECURITY_KEYWORD_RE: Regex =
+        Regex::new(r"(?i)\b(security|vulnerability)\b").unwrap();
+
+    /// Word-boundary regex for detecting "hotfix" keyword.
+    static ref HOTFIX_KEYWORD_RE: Regex =
+        Regex::new(r"(?i)\bhotfix\b").unwrap();
+
+    /// Word-boundary regex for detecting "tech debt" / "technical debt" keywords.
+    static ref TECH_DEBT_KEYWORD_RE: Regex =
+        Regex::new(r"(?i)\btech(?:nical)?[\s\-]+debt\b").unwrap();
+}
+
+/// Single-word negation tokens that, when found in the 5-word window immediately
+/// before a keyword match, indicate the keyword phrase is negated.
+const NEGATION_SINGLE_WORDS: &[&str] = &[
+    "no", "not", "never", "without",
+    // Contractions (with and without apostrophe, since punctuation stripping may vary)
+    "don't", "dont", "doesn't", "doesnt",
+    "isn't", "isnt", "aren't", "arent",
+    "won't", "wont",
+];
 
 /// Common WIP label names used for discovery and cleanup.
 ///
@@ -367,6 +397,62 @@ fn add_hardcoded_type_label(labels: &mut Vec<String>, pr_type: &str) {
         "revert" => labels.push("revert".to_string()),
         _ => {}
     }
+}
+
+/// Determines whether a keyword match within `text` is negated by a preceding negation word.
+///
+/// Uses clause-boundary detection (`.`, `!`, `?`, `;`, `\n`) to scope the look-back,
+/// then inspects the 5-word window immediately before `keyword_span` for any word
+/// from [`NEGATION_SINGLE_WORDS`].
+///
+/// # Arguments
+///
+/// * `text` - The full text (lowercased) being searched.
+/// * `keyword_span` - The byte-range of the keyword match within `text`.
+///
+/// # Returns
+///
+/// `true` when a negation word appears within the 5-word window before the keyword
+/// and within the same clause; `false` otherwise.
+fn is_keyword_negated(text: &str, keyword_span: std::ops::Range<usize>) -> bool {
+    todo!("implement negation-aware keyword detection")
+}
+
+/// Parses label suppression commands from a list of PR comments.
+///
+/// A suppression command is a line of the form:
+/// ```text
+/// <bot_mention> suppress: <label-name>
+/// ```
+/// The bot mention prefix comparison is case-insensitive.  Unknown commands are
+/// silently ignored.
+///
+/// # Arguments
+///
+/// * `comments` - All comments fetched from the pull request.
+/// * `bot_mention` - The bot mention prefix configured for this installation.
+///
+/// # Returns
+///
+/// A map from label name (trimmed, lowercase) to the login of the first commenter
+/// who issued the suppression command for that label.
+fn parse_suppressed_labels(comments: &[Comment], bot_mention: &str) -> HashMap<String, String> {
+    todo!("implement comment-based label suppression parsing")
+}
+
+/// Builds the body of an explanation comment for a keyword-triggered label.
+///
+/// The comment begins with a unique per-label HTML marker
+/// (`KEYWORD_LABEL_COMMENT_MARKER + label_name + " -->"`) so it can be found and
+/// managed idempotently.  It includes a human-readable explanation naming the label,
+/// stating that keywords triggered it, and showing the exact suppress command.
+///
+/// # Arguments
+///
+/// * `label_name` - The resolved label name (e.g. `"breaking-change"`).
+/// * `bot_mention` - The bot mention prefix (e.g. `"@merge-warden"`).
+fn build_keyword_label_comment(label_name: &str, bot_mention: &str) -> String {
+    todo!("implement keyword label explanation comment builder")
 }
 
 /// Discovers the WIP label name in use in a repository.

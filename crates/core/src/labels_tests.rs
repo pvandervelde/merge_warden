@@ -4,7 +4,7 @@ use merge_warden_developer_platforms::errors::Error;
 use std::sync::{Arc, Mutex};
 use tokio::test;
 
-use merge_warden_developer_platforms::models::{Comment, Label, PullRequest, Review, User};
+use merge_warden_developer_platforms::models::{Comment, Label, PullRequest, PullRequestFile, Review, User};
 use merge_warden_developer_platforms::PullRequestProvider;
 
 // ── WIP label test helpers ───────────────────────────────────────────────────
@@ -191,7 +191,7 @@ impl PullRequestProvider for MockGitProvider {
         _pr_number: u64,
         _comment: &str,
     ) -> Result<(), Error> {
-        unimplemented!("Not needed for this test")
+        Ok(())
     }
 
     async fn delete_comment(
@@ -200,7 +200,7 @@ impl PullRequestProvider for MockGitProvider {
         _repo_name: &str,
         _comment_id: u64,
     ) -> Result<(), Error> {
-        unimplemented!("Not needed for this test")
+        Ok(())
     }
 
     async fn list_comments(
@@ -209,7 +209,7 @@ impl PullRequestProvider for MockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
     ) -> Result<Vec<Comment>, Error> {
-        unimplemented!("Not needed for this test")
+        Ok(vec![])
     }
 
     async fn list_available_labels(
@@ -308,7 +308,7 @@ impl PullRequestProvider for ErrorMockGitProvider {
         _pr_number: u64,
         _comment: &str,
     ) -> Result<(), Error> {
-        unimplemented!("Not needed for this test")
+        Ok(())
     }
 
     async fn delete_comment(
@@ -317,7 +317,7 @@ impl PullRequestProvider for ErrorMockGitProvider {
         _repo_name: &str,
         _comment_id: u64,
     ) -> Result<(), Error> {
-        unimplemented!("Not needed for this test")
+        Ok(())
     }
 
     async fn list_comments(
@@ -326,7 +326,7 @@ impl PullRequestProvider for ErrorMockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
     ) -> Result<Vec<Comment>, Error> {
-        unimplemented!("Not needed for this test")
+        Ok(vec![])
     }
 
     async fn add_labels(
@@ -852,10 +852,12 @@ async fn test_determine_labels_with_scope() {
 use crate::config::{
     ChangeTypeLabelConfig, ConventionalCommitMappings, CurrentPullRequestValidationConfiguration,
     FallbackLabelSettings, KeywordLabelsConfig, LabelDetectionStrategy,
+    KEYWORD_LABEL_COMMENT_MARKER,
 };
 use crate::labels::{
     set_pull_request_labels_with_config, LabelDetector, LabelManagementResult, LabelManager,
 };
+use super::{build_keyword_label_comment, is_keyword_negated, parse_suppressed_labels};
 use std::collections::HashMap;
 
 // Enhanced mock provider that supports repository labels for smart detection testing
@@ -3334,5 +3336,887 @@ async fn test_keyword_labels_no_config_uses_defaults() {
         labels.contains(&"tech-debt".to_string()),
         "Default 'tech-debt' must be used when no config provided; got: {:?}",
         labels
+    );
+}
+
+
+// ── Full-featured mock for negation / suppression / explanation tests ────────
+
+struct KeywordLabelMockProvider {
+    /// Comments pre-loaded on the PR (returned by list_comments).
+    comments: Vec<Comment>,
+    /// Labels currently applied to the PR.
+    applied_labels: Arc<Mutex<Vec<Label>>>,
+    /// Bodies of all add_comment calls, in order.
+    add_comment_calls: Arc<Mutex<Vec<String>>>,
+    /// IDs of all delete_comment calls, in order.
+    delete_comment_calls: Arc<Mutex<Vec<u64>>>,
+    /// Names of all remove_label calls, in order.
+    remove_label_calls: Arc<Mutex<Vec<String>>>,
+    /// Names of all add_labels calls (flattened), in order.
+    add_label_calls: Arc<Mutex<Vec<String>>>,
+    /// Whether list_comments should return an error.
+    list_comments_fails: bool,
+}
+
+impl KeywordLabelMockProvider {
+    fn new(comments: Vec<Comment>, applied_labels: Vec<Label>) -> Self {
+        Self {
+            comments,
+            applied_labels: Arc::new(Mutex::new(applied_labels)),
+            add_comment_calls: Arc::new(Mutex::new(Vec::new())),
+            delete_comment_calls: Arc::new(Mutex::new(Vec::new())),
+            remove_label_calls: Arc::new(Mutex::new(Vec::new())),
+            add_label_calls: Arc::new(Mutex::new(Vec::new())),
+            list_comments_fails: false,
+        }
+    }
+
+    fn with_failing_list_comments(mut self) -> Self {
+        self.list_comments_fails = true;
+        self
+    }
+
+    fn added_labels(&self) -> Vec<String> {
+        self.add_label_calls.lock().unwrap().clone()
+    }
+
+    fn removed_labels(&self) -> Vec<String> {
+        self.remove_label_calls.lock().unwrap().clone()
+    }
+
+    fn posted_comments(&self) -> Vec<String> {
+        self.add_comment_calls.lock().unwrap().clone()
+    }
+
+    fn deleted_comment_ids(&self) -> Vec<u64> {
+        self.delete_comment_calls.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl PullRequestProvider for KeywordLabelMockProvider {
+    async fn get_pull_request(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<PullRequest, Error> {
+        unimplemented!("Not needed for this test")
+    }
+
+    async fn add_comment(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        comment: &str,
+    ) -> Result<(), Error> {
+        self.add_comment_calls
+            .lock()
+            .unwrap()
+            .push(comment.to_string());
+        Ok(())
+    }
+
+    async fn delete_comment(&self, _owner: &str, _repo: &str, id: u64) -> Result<(), Error> {
+        self.delete_comment_calls.lock().unwrap().push(id);
+        Ok(())
+    }
+
+    async fn list_comments(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<Vec<Comment>, Error> {
+        if self.list_comments_fails {
+            return Err(Error::FailedToUpdatePullRequest(
+                "list_comments failed".to_string(),
+            ));
+        }
+        Ok(self.comments.clone())
+    }
+
+    async fn list_available_labels(&self, _owner: &str, _repo: &str) -> Result<Vec<Label>, Error> {
+        Ok(vec![])
+    }
+
+    async fn add_labels(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        labels: &[String],
+    ) -> Result<(), Error> {
+        self.add_label_calls
+            .lock()
+            .unwrap()
+            .extend(labels.iter().cloned());
+        Ok(())
+    }
+
+    async fn remove_label(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        label: &str,
+    ) -> Result<(), Error> {
+        self.remove_label_calls
+            .lock()
+            .unwrap()
+            .push(label.to_string());
+        Ok(())
+    }
+
+    async fn list_applied_labels(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<Vec<Label>, Error> {
+        Ok(self.applied_labels.lock().unwrap().clone())
+    }
+
+    async fn update_pr_check_status(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        _conclusion: &str,
+        _title: &str,
+        _summary: &str,
+        _text: &str,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn list_pr_reviews(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<Vec<Review>, Error> {
+        Ok(vec![])
+    }
+
+    async fn get_pull_request_files(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<Vec<PullRequestFile>, Error> {
+        Ok(vec![])
+    }
+}
+
+// ── Helper functions ─────────────────────────────────────────────────────────
+
+fn make_comment(id: u64, login: &str, body: &str) -> Comment {
+    Comment {
+        id,
+        body: body.to_string(),
+        user: User {
+            id: id * 100,
+            login: login.to_string(),
+        },
+    }
+}
+
+/// Returns the byte range of `keyword` within `text`.  Panics when not found.
+fn find_span(text: &str, keyword: &str) -> std::ops::Range<usize> {
+    let start = text.find(keyword).unwrap_or_else(|| {
+        panic!("keyword '{keyword}' not found in text: '{text}'")
+    });
+    start..start + keyword.len()
+}
+
+// ── is_keyword_negated tests ─────────────────────────────────────────────────
+
+#[test]
+async fn test_negated_no_immediately_before_keyword() {
+    let text = "no breaking change";
+    let span = find_span(text, "breaking change");
+    assert!(
+        super::is_keyword_negated(text, span),
+        "'no' immediately before keyword must negate it"
+    );
+}
+
+#[test]
+async fn test_negated_not_in_window() {
+    let text = "this is not a breaking change";
+    let span = find_span(text, "breaking change");
+    assert!(
+        super::is_keyword_negated(text, span),
+        "'not' in 5-word window must negate the keyword"
+    );
+}
+
+#[test]
+async fn test_negated_without_before_keyword() {
+    let text = "merged without any breaking change";
+    let span = find_span(text, "breaking change");
+    assert!(
+        super::is_keyword_negated(text, span),
+        "'without' must negate the keyword"
+    );
+}
+
+#[test]
+async fn test_negated_never_before_keyword() {
+    let text = "there is never a breaking change here";
+    let span = find_span(text, "breaking change");
+    assert!(
+        super::is_keyword_negated(text, span),
+        "'never' must negate the keyword"
+    );
+}
+
+#[test]
+async fn test_negated_contraction_dont() {
+    let text = "we don't have a breaking change";
+    let span = find_span(text, "breaking change");
+    assert!(
+        super::is_keyword_negated(text, span),
+        "'don't' must negate the keyword"
+    );
+}
+
+#[test]
+async fn test_negated_contraction_doesnt() {
+    let text = "this pr doesn't introduce a breaking change";
+    let span = find_span(text, "breaking change");
+    assert!(
+        super::is_keyword_negated(text, span),
+        "'doesn't' must negate the keyword"
+    );
+}
+
+#[test]
+async fn test_not_negated_when_no_negation_word_present() {
+    let text = "this introduces a breaking change";
+    let span = find_span(text, "breaking change");
+    assert!(
+        !super::is_keyword_negated(text, span),
+        "no negation word must NOT negate"
+    );
+}
+
+#[test]
+async fn test_not_negated_when_negation_word_outside_5_word_window() {
+    // "no" is the first of 7 tokens before keyword — outside the 5-word window
+    let text = "no word1 word2 word3 word4 word5 breaking change";
+    let span = find_span(text, "breaking change");
+    assert!(
+        !super::is_keyword_negated(text, span),
+        "'no' more than 5 words before keyword must NOT negate"
+    );
+}
+
+#[test]
+async fn test_not_negated_non_negation_word_containing_negation_substring() {
+    // "annotated" contains "not" as a substring but is not a negation word
+    let text = "annotated breaking change";
+    let span = find_span(text, "breaking change");
+    assert!(
+        !super::is_keyword_negated(text, span),
+        "'annotated' must not be treated as a negation word"
+    );
+}
+
+#[test]
+async fn test_not_negated_clause_boundary_before_negation_word() {
+    // "no" is in a prior sentence; "breaking change" is in the next clause
+    let text = "there are no issues. this introduces a breaking change.";
+    let span = find_span(text, "breaking change");
+    assert!(
+        !super::is_keyword_negated(text, span),
+        "'no' from a previous clause must not cross a clause boundary"
+    );
+}
+
+// ── parse_suppressed_labels tests ────────────────────────────────────────────
+
+#[test]
+async fn test_parse_suppressed_single_command() {
+    let comments = vec![make_comment(1, "alice", "@merge-warden suppress: breaking-change")];
+    let result = super::parse_suppressed_labels(&comments, "@merge-warden");
+    assert!(
+        result.contains_key("breaking-change"),
+        "should contain 'breaking-change'"
+    );
+    assert_eq!(result["breaking-change"], "alice");
+}
+
+#[test]
+async fn test_parse_suppressed_two_labels_same_comment() {
+    let body = "@merge-warden suppress: breaking-change\n@merge-warden suppress: security";
+    let comments = vec![make_comment(1, "bob", body)];
+    let result = super::parse_suppressed_labels(&comments, "@merge-warden");
+    assert!(result.contains_key("breaking-change"));
+    assert!(result.contains_key("security"));
+}
+
+#[test]
+async fn test_parse_suppressed_two_labels_across_comments() {
+    let comments = vec![
+        make_comment(1, "alice", "@merge-warden suppress: hotfix"),
+        make_comment(2, "bob", "@merge-warden suppress: tech-debt"),
+    ];
+    let result = super::parse_suppressed_labels(&comments, "@merge-warden");
+    assert!(result.contains_key("hotfix"));
+    assert!(result.contains_key("tech-debt"));
+}
+
+#[test]
+async fn test_parse_suppressed_unknown_command_ignored() {
+    let comments = vec![make_comment(1, "alice", "@merge-warden unknown: breaking-change")];
+    let result = super::parse_suppressed_labels(&comments, "@merge-warden");
+    assert!(result.is_empty(), "unknown commands must be ignored");
+}
+
+#[test]
+async fn test_parse_suppressed_non_mention_line_ignored() {
+    let comments = vec![make_comment(1, "alice", "just a normal comment")];
+    let result = super::parse_suppressed_labels(&comments, "@merge-warden");
+    assert!(
+        result.is_empty(),
+        "line not starting with bot_mention must be ignored"
+    );
+}
+
+#[test]
+async fn test_parse_suppressed_case_insensitive_bot_mention() {
+    let comments = vec![make_comment(1, "carol", "@MERGE-WARDEN suppress: security")];
+    let result = super::parse_suppressed_labels(&comments, "@merge-warden");
+    assert!(
+        result.contains_key("security"),
+        "bot_mention comparison must be case-insensitive"
+    );
+}
+
+#[test]
+async fn test_parse_suppressed_custom_bot_mention() {
+    let comments = vec![make_comment(1, "dave", "@acme-bot suppress: hotfix")];
+    let result = super::parse_suppressed_labels(&comments, "@acme-bot");
+    assert!(result.contains_key("hotfix"));
+}
+
+// ── build_keyword_label_comment tests ────────────────────────────────────────
+
+#[test]
+async fn test_build_keyword_label_comment_marker_present() {
+    let body = super::build_keyword_label_comment("breaking-change", "@merge-warden");
+    let expected_marker = format!("{}breaking-change -->", KEYWORD_LABEL_COMMENT_MARKER);
+    assert!(
+        body.contains(&expected_marker),
+        "comment must contain the per-label marker; got:\n{body}"
+    );
+}
+
+#[test]
+async fn test_build_keyword_label_comment_label_name_present() {
+    let body = super::build_keyword_label_comment("security", "@merge-warden");
+    assert!(
+        body.contains("security"),
+        "comment must mention the label name; got:\n{body}"
+    );
+}
+
+#[test]
+async fn test_build_keyword_label_comment_suppress_command_present() {
+    let body = super::build_keyword_label_comment("hotfix", "@merge-warden");
+    assert!(
+        body.contains("@merge-warden suppress: hotfix"),
+        "comment must include the suppress command; got:\n{body}"
+    );
+}
+
+#[test]
+async fn test_build_keyword_label_comment_custom_bot_mention() {
+    let body = super::build_keyword_label_comment("tech-debt", "@acme-bot");
+    assert!(
+        body.contains("@acme-bot suppress: tech-debt"),
+        "custom bot_mention must appear in suppress command; got:\n{body}"
+    );
+}
+
+// ── Negation-aware detection integration tests ───────────────────────────────
+
+#[test]
+async fn test_negation_breaking_change_in_body_not_applied() {
+    let provider = KeywordLabelMockProvider::new(vec![], vec![]);
+    let pr = PullRequest {
+        number: 10,
+        title: "fix: cleanup api".to_string(),
+        draft: false,
+        body: Some("This PR introduces no breaking changes.".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
+        .await
+        .unwrap();
+    assert!(
+        !labels.contains(&"breaking-change".to_string()),
+        "'no breaking changes' must not trigger label; got: {:?}",
+        labels
+    );
+}
+
+#[test]
+async fn test_affirmative_breaking_change_in_body_applied() {
+    let provider = KeywordLabelMockProvider::new(vec![], vec![]);
+    let pr = PullRequest {
+        number: 11,
+        title: "feat: remove api".to_string(),
+        draft: false,
+        body: Some("Breaking change: removed the old API endpoint.".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
+        .await
+        .unwrap();
+    assert!(
+        labels.contains(&"breaking-change".to_string()),
+        "affirmative breaking change must apply label; got: {:?}",
+        labels
+    );
+}
+
+#[test]
+async fn test_exclamation_colon_always_triggers_breaking_change() {
+    let provider = KeywordLabelMockProvider::new(vec![], vec![]);
+    let pr = PullRequest {
+        number: 12,
+        title: "feat!: remove public api".to_string(),
+        draft: false,
+        body: Some("no breaking changes in the description".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
+        .await
+        .unwrap();
+    assert!(
+        labels.contains(&"breaking-change".to_string()),
+        "'!:' in title must always trigger breaking-change; got: {:?}",
+        labels
+    );
+}
+
+#[test]
+async fn test_negation_security_in_body_not_applied() {
+    let provider = KeywordLabelMockProvider::new(vec![], vec![]);
+    let pr = PullRequest {
+        number: 13,
+        title: "fix: dep update".to_string(),
+        draft: false,
+        body: Some("There are no security vulnerabilities introduced.".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
+        .await
+        .unwrap();
+    assert!(
+        !labels.contains(&"security".to_string()),
+        "'no security vulnerabilities' must not trigger label; got: {:?}",
+        labels
+    );
+}
+
+#[test]
+async fn test_affirmative_security_in_body_applied() {
+    let provider = KeywordLabelMockProvider::new(vec![], vec![]);
+    let pr = PullRequest {
+        number: 14,
+        title: "fix: patch cve".to_string(),
+        draft: false,
+        body: Some("security: addresses cve-2025-1234".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
+        .await
+        .unwrap();
+    assert!(
+        labels.contains(&"security".to_string()),
+        "affirmative security mention must apply label; got: {:?}",
+        labels
+    );
+}
+
+#[test]
+async fn test_negation_hotfix_in_body_not_applied() {
+    let provider = KeywordLabelMockProvider::new(vec![], vec![]);
+    let pr = PullRequest {
+        number: 15,
+        title: "fix: routine".to_string(),
+        draft: false,
+        body: Some("There is no hotfix required.".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
+        .await
+        .unwrap();
+    assert!(
+        !labels.contains(&"hotfix".to_string()),
+        "'no hotfix required' must not trigger label; got: {:?}",
+        labels
+    );
+}
+
+#[test]
+async fn test_affirmative_hotfix_in_body_applied() {
+    let provider = KeywordLabelMockProvider::new(vec![], vec![]);
+    let pr = PullRequest {
+        number: 16,
+        title: "fix: crash".to_string(),
+        draft: false,
+        body: Some("This is a hotfix for the production crash.".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
+        .await
+        .unwrap();
+    assert!(
+        labels.contains(&"hotfix".to_string()),
+        "affirmative hotfix mention must apply label; got: {:?}",
+        labels
+    );
+}
+
+#[test]
+async fn test_negation_tech_debt_in_body_not_applied() {
+    let provider = KeywordLabelMockProvider::new(vec![], vec![]);
+    let pr = PullRequest {
+        number: 17,
+        title: "refactor: cleanup".to_string(),
+        draft: false,
+        body: Some("not tech debt, this is a refactor.".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
+        .await
+        .unwrap();
+    assert!(
+        !labels.contains(&"tech-debt".to_string()),
+        "'not tech debt' must not trigger label; got: {:?}",
+        labels
+    );
+}
+
+#[test]
+async fn test_affirmative_tech_debt_reduces_applied() {
+    let provider = KeywordLabelMockProvider::new(vec![], vec![]);
+    let pr = PullRequest {
+        number: 18,
+        title: "refactor: reduce complexity".to_string(),
+        draft: false,
+        body: Some("reduces tech debt by cleaning up the module.".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
+        .await
+        .unwrap();
+    assert!(
+        labels.contains(&"tech-debt".to_string()),
+        "'reduces tech debt' is still about tech debt; got: {:?}",
+        labels
+    );
+}
+
+// ── Suppression integration tests ────────────────────────────────────────────
+
+#[test]
+async fn test_suppression_skips_label_application() {
+    let suppress_comment = make_comment(1, "alice", "@merge-warden suppress: breaking-change");
+    let provider = KeywordLabelMockProvider::new(vec![suppress_comment], vec![]);
+    let config = CurrentPullRequestValidationConfiguration {
+        bot_mention: "@merge-warden".to_string(),
+        ..Default::default()
+    };
+    let pr = PullRequest {
+        number: 20,
+        title: "feat!: remove endpoint".to_string(),
+        draft: false,
+        body: None,
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config))
+        .await
+        .unwrap();
+    assert!(
+        !labels.contains(&"breaking-change".to_string()),
+        "suppressed label must not be applied; got: {:?}",
+        labels
+    );
+    assert!(
+        !provider.added_labels().contains(&"breaking-change".to_string()),
+        "suppressed label must not be passed to add_labels"
+    );
+}
+
+#[test]
+async fn test_suppression_removes_existing_label() {
+    let suppress_comment = make_comment(1, "alice", "@merge-warden suppress: security");
+    let existing_security_label = Label {
+        name: "security".to_string(),
+        description: None,
+    };
+    let provider = KeywordLabelMockProvider::new(vec![suppress_comment], vec![existing_security_label]);
+    let config = CurrentPullRequestValidationConfiguration {
+        bot_mention: "@merge-warden".to_string(),
+        ..Default::default()
+    };
+    let pr = PullRequest {
+        number: 21,
+        title: "fix: patch".to_string(),
+        draft: false,
+        body: Some("security: addresses cve-2025-0001".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config))
+        .await
+        .unwrap();
+    assert!(
+        provider.removed_labels().contains(&"security".to_string()),
+        "suppressed label already on PR must be removed; removed: {:?}",
+        provider.removed_labels()
+    );
+}
+
+#[test]
+async fn test_suppression_multi_label() {
+    let body = "@merge-warden suppress: hotfix\n@merge-warden suppress: tech-debt";
+    let suppress_comment = make_comment(1, "alice", body);
+    let provider = KeywordLabelMockProvider::new(vec![suppress_comment], vec![]);
+    let config = CurrentPullRequestValidationConfiguration {
+        bot_mention: "@merge-warden".to_string(),
+        ..Default::default()
+    };
+    let pr = PullRequest {
+        number: 22,
+        title: "fix: urgent cleanup".to_string(),
+        draft: false,
+        body: Some("this is a hotfix that also reduces tech debt".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config))
+        .await
+        .unwrap();
+    assert!(
+        !labels.contains(&"hotfix".to_string()),
+        "suppressed hotfix must not be applied; got: {:?}",
+        labels
+    );
+    assert!(
+        !labels.contains(&"tech-debt".to_string()),
+        "suppressed tech-debt must not be applied; got: {:?}",
+        labels
+    );
+}
+
+#[test]
+async fn test_suppression_list_comments_failure_falls_back_gracefully() {
+    let provider = KeywordLabelMockProvider::new(vec![], vec![]).with_failing_list_comments();
+    let config = CurrentPullRequestValidationConfiguration {
+        bot_mention: "@merge-warden".to_string(),
+        ..Default::default()
+    };
+    let pr = PullRequest {
+        number: 23,
+        title: "fix: crash".to_string(),
+        draft: false,
+        body: Some("This is a hotfix for production.".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config))
+        .await
+        .unwrap();
+    assert!(
+        labels.contains(&"hotfix".to_string()),
+        "when list_comments fails, label must still be applied; got: {:?}",
+        labels
+    );
+}
+
+// ── Explanation comment lifecycle tests ──────────────────────────────────────
+
+#[test]
+async fn test_explanation_comment_posted_when_label_triggered() {
+    let provider = KeywordLabelMockProvider::new(vec![], vec![]);
+    let config = CurrentPullRequestValidationConfiguration {
+        bot_mention: "@merge-warden".to_string(),
+        ..Default::default()
+    };
+    let pr = PullRequest {
+        number: 30,
+        title: "fix: crash".to_string(),
+        draft: false,
+        body: Some("This is a hotfix for the server crash.".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config))
+        .await
+        .unwrap();
+    let posted = provider.posted_comments();
+    let hotfix_marker = format!("{}hotfix -->", KEYWORD_LABEL_COMMENT_MARKER);
+    assert!(
+        posted.iter().any(|c| c.contains(&hotfix_marker)),
+        "an explanation comment for 'hotfix' must be posted; posted: {:?}",
+        posted
+    );
+}
+
+#[test]
+async fn test_explanation_comment_idempotent_when_identical_exists() {
+    let expected_body = super::build_keyword_label_comment("hotfix", "@merge-warden");
+    let existing = make_comment(99, "merge-warden[bot]", &expected_body);
+    let provider = KeywordLabelMockProvider::new(vec![existing], vec![]);
+    let config = CurrentPullRequestValidationConfiguration {
+        bot_mention: "@merge-warden".to_string(),
+        ..Default::default()
+    };
+    let pr = PullRequest {
+        number: 31,
+        title: "fix: crash".to_string(),
+        draft: false,
+        body: Some("This is a hotfix for the server crash.".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config))
+        .await
+        .unwrap();
+    assert!(
+        provider.posted_comments().is_empty(),
+        "identical existing comment must not trigger re-post; posted: {:?}",
+        provider.posted_comments()
+    );
+    assert!(
+        provider.deleted_comment_ids().is_empty(),
+        "identical existing comment must not be deleted; deleted: {:?}",
+        provider.deleted_comment_ids()
+    );
+}
+
+#[test]
+async fn test_explanation_comment_deleted_when_detection_clears() {
+    let hotfix_marker = format!("{}hotfix -->", KEYWORD_LABEL_COMMENT_MARKER);
+    let stale = make_comment(50, "bot", &format!("{} stale body", hotfix_marker));
+    let provider = KeywordLabelMockProvider::new(vec![stale], vec![]);
+    let config = CurrentPullRequestValidationConfiguration {
+        bot_mention: "@merge-warden".to_string(),
+        ..Default::default()
+    };
+    // PR body no longer mentions hotfix -> detection does not fire
+    let pr = PullRequest {
+        number: 32,
+        title: "fix: unrelated".to_string(),
+        draft: false,
+        body: Some("This PR fixes an unrelated issue.".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config))
+        .await
+        .unwrap();
+    assert!(
+        provider.deleted_comment_ids().contains(&50),
+        "stale explanation comment must be deleted when detection clears; deleted: {:?}",
+        provider.deleted_comment_ids()
+    );
+}
+
+#[test]
+async fn test_explanation_comment_deleted_when_label_suppressed() {
+    let hotfix_marker = format!("{}hotfix -->", KEYWORD_LABEL_COMMENT_MARKER);
+    let explanation = make_comment(60, "bot", &format!("{} hotfix explanation", hotfix_marker));
+    let suppress = make_comment(61, "alice", "@merge-warden suppress: hotfix");
+    let provider = KeywordLabelMockProvider::new(vec![explanation, suppress], vec![]);
+    let config = CurrentPullRequestValidationConfiguration {
+        bot_mention: "@merge-warden".to_string(),
+        ..Default::default()
+    };
+    let pr = PullRequest {
+        number: 33,
+        title: "fix: crash".to_string(),
+        draft: false,
+        body: Some("This is a hotfix for production.".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config))
+        .await
+        .unwrap();
+    assert!(
+        provider.deleted_comment_ids().contains(&60),
+        "explanation comment must be deleted when label is suppressed; deleted: {:?}",
+        provider.deleted_comment_ids()
     );
 }

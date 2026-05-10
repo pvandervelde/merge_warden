@@ -217,6 +217,7 @@ impl WebhookHandler for MergeWardenWebhookHandler {
                     wip_check: self.config.policies.wip_check.clone(),
                     pr_state_labels: self.config.policies.pr_state_labels.clone(),
                     issue_propagation: Default::default(),
+                    bot_mention: self.config.policies.bot_mention.clone(),
                 }
             }
         };
