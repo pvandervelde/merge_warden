@@ -4,7 +4,9 @@ use merge_warden_developer_platforms::errors::Error;
 use std::sync::{Arc, Mutex};
 use tokio::test;
 
-use merge_warden_developer_platforms::models::{Comment, Label, PullRequest, PullRequestFile, Review, User};
+use merge_warden_developer_platforms::models::{
+    Comment, Label, PullRequest, PullRequestFile, Review, User,
+};
 use merge_warden_developer_platforms::PullRequestProvider;
 
 // ── WIP label test helpers ───────────────────────────────────────────────────
@@ -849,6 +851,7 @@ async fn test_determine_labels_with_scope() {
 }
 
 // Additional imports for smart label detection tests
+use super::{build_keyword_label_comment, is_keyword_negated, parse_suppressed_labels};
 use crate::config::{
     ChangeTypeLabelConfig, ConventionalCommitMappings, CurrentPullRequestValidationConfiguration,
     FallbackLabelSettings, KeywordLabelsConfig, LabelDetectionStrategy,
@@ -857,7 +860,6 @@ use crate::config::{
 use crate::labels::{
     set_pull_request_labels_with_config, LabelDetector, LabelManagementResult, LabelManager,
 };
-use super::{build_keyword_label_comment, is_keyword_negated, parse_suppressed_labels};
 use std::collections::HashMap;
 
 // Enhanced mock provider that supports repository labels for smart detection testing
@@ -909,7 +911,7 @@ impl PullRequestProvider for SmartMockGitProvider {
         _pr_number: u64,
         _comment: &str,
     ) -> Result<(), Error> {
-        unimplemented!("Not needed for this test")
+        Ok(())
     }
 
     async fn delete_comment(
@@ -918,7 +920,7 @@ impl PullRequestProvider for SmartMockGitProvider {
         _repo_name: &str,
         _comment_id: u64,
     ) -> Result<(), Error> {
-        unimplemented!("Not needed for this test")
+        Ok(())
     }
 
     async fn list_comments(
@@ -927,7 +929,7 @@ impl PullRequestProvider for SmartMockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
     ) -> Result<Vec<Comment>, Error> {
-        unimplemented!("Not needed for this test")
+        Ok(vec![])
     }
 
     async fn list_available_labels(
@@ -963,7 +965,7 @@ impl PullRequestProvider for SmartMockGitProvider {
         _pr_number: u64,
         _label: &str,
     ) -> Result<(), Error> {
-        unimplemented!("Not needed for this test")
+        Ok(())
     }
 
     async fn list_applied_labels(
@@ -986,7 +988,7 @@ impl PullRequestProvider for SmartMockGitProvider {
         _output_summary: &str,
         _output_text: &str,
     ) -> Result<(), Error> {
-        unimplemented!("Not needed for this test")
+        Ok(())
     }
 
     async fn list_pr_reviews(
@@ -995,7 +997,7 @@ impl PullRequestProvider for SmartMockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
     ) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> {
-        unimplemented!("Not needed for this test")
+        Ok(vec![])
     }
 
     async fn get_pull_request_files(
@@ -1004,7 +1006,7 @@ impl PullRequestProvider for SmartMockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
     ) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> {
-        unimplemented!("Not needed for this test")
+        Ok(vec![])
     }
 }
 
@@ -3339,7 +3341,6 @@ async fn test_keyword_labels_no_config_uses_defaults() {
     );
 }
 
-
 // ── Full-featured mock for negation / suppression / explanation tests ────────
 
 struct KeywordLabelMockProvider {
@@ -3526,9 +3527,9 @@ fn make_comment(id: u64, login: &str, body: &str) -> Comment {
 
 /// Returns the byte range of `keyword` within `text`.  Panics when not found.
 fn find_span(text: &str, keyword: &str) -> std::ops::Range<usize> {
-    let start = text.find(keyword).unwrap_or_else(|| {
-        panic!("keyword '{keyword}' not found in text: '{text}'")
-    });
+    let start = text
+        .find(keyword)
+        .unwrap_or_else(|| panic!("keyword '{keyword}' not found in text: '{text}'"));
     start..start + keyword.len()
 }
 
@@ -3641,7 +3642,11 @@ async fn test_not_negated_clause_boundary_before_negation_word() {
 
 #[test]
 async fn test_parse_suppressed_single_command() {
-    let comments = vec![make_comment(1, "alice", "@merge-warden suppress: breaking-change")];
+    let comments = vec![make_comment(
+        1,
+        "alice",
+        "@merge-warden suppress: breaking-change",
+    )];
     let result = super::parse_suppressed_labels(&comments, "@merge-warden");
     assert!(
         result.contains_key("breaking-change"),
@@ -3672,7 +3677,11 @@ async fn test_parse_suppressed_two_labels_across_comments() {
 
 #[test]
 async fn test_parse_suppressed_unknown_command_ignored() {
-    let comments = vec![make_comment(1, "alice", "@merge-warden unknown: breaking-change")];
+    let comments = vec![make_comment(
+        1,
+        "alice",
+        "@merge-warden unknown: breaking-change",
+    )];
     let result = super::parse_suppressed_labels(&comments, "@merge-warden");
     assert!(result.is_empty(), "unknown commands must be ignored");
 }
@@ -3991,7 +4000,9 @@ async fn test_suppression_skips_label_application() {
         labels
     );
     assert!(
-        !provider.added_labels().contains(&"breaking-change".to_string()),
+        !provider
+            .added_labels()
+            .contains(&"breaking-change".to_string()),
         "suppressed label must not be passed to add_labels"
     );
 }
@@ -4003,7 +4014,8 @@ async fn test_suppression_removes_existing_label() {
         name: "security".to_string(),
         description: None,
     };
-    let provider = KeywordLabelMockProvider::new(vec![suppress_comment], vec![existing_security_label]);
+    let provider =
+        KeywordLabelMockProvider::new(vec![suppress_comment], vec![existing_security_label]);
     let config = CurrentPullRequestValidationConfiguration {
         bot_mention: "@merge-warden".to_string(),
         ..Default::default()

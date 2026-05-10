@@ -306,37 +306,110 @@ pub async fn set_pull_request_labels_with_config<P: PullRequestProvider>(
     let hotfix_label = keyword_labels.hotfix_label().to_string();
     let tech_debt_label = keyword_labels.tech_debt_label().to_string();
 
-    // Collect additional labels that need to be applied
+    let bot_mention = config
+        .map(|c| c.bot_mention.as_str())
+        .unwrap_or("@merge-warden");
+
+    // Fetch PR comments for suppression and explanation-comment management.
+    // If list_comments fails we gracefully continue with no suppression in effect.
+    let pr_comments = match provider.list_comments(owner, repo, pr.number).await {
+        Ok(comments) => comments,
+        Err(e) => {
+            warn!(
+                repository_owner = owner,
+                repository = repo,
+                pr_number = pr.number,
+                error = %e,
+                "Failed to fetch PR comments; proceeding without suppression"
+            );
+            Vec::new()
+        }
+    };
+
+    // Parse which labels have been suppressed by explicit user commands.
+    let suppressed = parse_suppressed_labels(&pr_comments, bot_mention);
+
+    // Fetch labels that are currently applied to the PR so we can remove suppressed ones.
+    let applied_labels = match provider.list_applied_labels(owner, repo, pr.number).await {
+        Ok(l) => l,
+        Err(e) => {
+            warn!(
+                repository_owner = owner,
+                repository = repo,
+                pr_number = pr.number,
+                error = %e,
+                "Failed to fetch applied labels; skipping suppression removal"
+            );
+            Vec::new()
+        }
+    };
+
+    // Determine which keyword labels are triggered using negation-aware detection.
+    let title_lower = pr.title.to_lowercase();
+    let body_lower = pr
+        .body
+        .as_deref()
+        .map(|b| b.to_lowercase())
+        .unwrap_or_default();
+
+    // Breaking change: `!:` in title is unconditional; keyword matches are negation-checked.
+    let breaking_from_exclamation = pr.title.contains("!:");
+    let breaking_from_keyword_title = !breaking_from_exclamation
+        && BREAKING_CHANGE_KEYWORD_RE
+            .find_iter(&title_lower)
+            .any(|m| !is_keyword_negated(&title_lower, m.range()));
+    let breaking_from_keyword_body = BREAKING_CHANGE_KEYWORD_RE
+        .find_iter(&body_lower)
+        .any(|m| !is_keyword_negated(&body_lower, m.range()));
+    let breaking_triggered =
+        breaking_from_exclamation || breaking_from_keyword_title || breaking_from_keyword_body;
+
+    let security_triggered = SECURITY_KEYWORD_RE
+        .find_iter(&body_lower)
+        .any(|m| !is_keyword_negated(&body_lower, m.range()));
+
+    let hotfix_triggered = HOTFIX_KEYWORD_RE
+        .find_iter(&body_lower)
+        .any(|m| !is_keyword_negated(&body_lower, m.range()));
+
+    let tech_debt_triggered = TECH_DEBT_KEYWORD_RE
+        .find_iter(&body_lower)
+        .any(|m| !is_keyword_negated(&body_lower, m.range()));
+
+    // (label_name, triggered) pairs drive both label application and comment lifecycle.
+    let keyword_label_states: Vec<(String, bool)> = vec![
+        (breaking_change_label, breaking_triggered),
+        (security_label, security_triggered),
+        (hotfix_label, hotfix_triggered),
+        (tech_debt_label, tech_debt_triggered),
+    ];
+
+    // Collect additional labels that need to be applied, skipping suppressed ones.
     let mut additional_labels = Vec::new();
 
-    // Check if PR is a breaking change
-    if pr.title.contains("!:") || pr.title.to_lowercase().contains("breaking change") {
-        additional_labels.push(breaking_change_label.clone());
-        labels.push(breaking_change_label.clone());
-    }
+    for (label_name, triggered) in &keyword_label_states {
+        let is_suppressed = suppressed.contains_key(label_name.as_str());
 
-    // Check PR description for keywords
-    if let Some(body) = &pr.body {
-        let body_lower = body.to_lowercase();
-
-        if body_lower.contains("breaking change") && !labels.contains(&breaking_change_label) {
-            additional_labels.push(breaking_change_label.clone());
-            labels.push(breaking_change_label.clone());
-        }
-
-        if body_lower.contains("security") || body_lower.contains("vulnerability") {
-            additional_labels.push(security_label.clone());
-            labels.push(security_label.clone());
-        }
-
-        if body_lower.contains("hotfix") {
-            additional_labels.push(hotfix_label.clone());
-            labels.push(hotfix_label.clone());
-        }
-
-        if body_lower.contains("technical debt") || body_lower.contains("tech debt") {
-            additional_labels.push(tech_debt_label.clone());
-            labels.push(tech_debt_label.clone());
+        if *triggered && !is_suppressed {
+            additional_labels.push(label_name.clone());
+            labels.push(label_name.clone());
+        } else if is_suppressed {
+            // Remove the label from the PR if it is currently applied.
+            if applied_labels.iter().any(|l| &l.name == label_name) {
+                if let Err(e) = provider
+                    .remove_label(owner, repo, pr.number, label_name)
+                    .await
+                {
+                    warn!(
+                        repository_owner = owner,
+                        repository = repo,
+                        pr_number = pr.number,
+                        label = %label_name,
+                        error = %e,
+                        "Failed to remove suppressed keyword label from pull request"
+                    );
+                }
+            }
         }
     }
 
@@ -378,6 +451,77 @@ pub async fn set_pull_request_labels_with_config<P: PullRequestProvider>(
         }
     }
 
+    // Manage explanation comments for each keyword label.
+    // Active (triggered and not suppressed): ensure the explanation comment is present
+    //   and up to date, replacing stale copies if needed.
+    // Inactive (not triggered) or suppressed: delete any stale explanation comment.
+    for (label_name, triggered) in &keyword_label_states {
+        let is_suppressed = suppressed.contains_key(label_name.as_str());
+        let label_marker = format!("{}{} -->", KEYWORD_LABEL_COMMENT_MARKER, label_name);
+
+        // Find all existing explanation comments for this label.
+        let existing: Vec<(u64, String)> = pr_comments
+            .iter()
+            .filter(|c| c.body.contains(&label_marker))
+            .map(|c| (c.id, c.body.clone()))
+            .collect();
+
+        if *triggered && !is_suppressed {
+            let expected_body = build_keyword_label_comment(label_name, bot_mention);
+            let already_up_to_date =
+                existing.len() == 1 && existing[0].1 == expected_body;
+
+            if !already_up_to_date {
+                // Delete all stale copies, then post a fresh one.
+                let mut all_deleted = true;
+                for (id, _) in &existing {
+                    if let Err(e) = provider.delete_comment(owner, repo, *id).await {
+                        warn!(
+                            repository_owner = owner,
+                            repository = repo,
+                            pr_number = pr.number,
+                            comment_id = id,
+                            label = %label_name,
+                            error = %e,
+                            "Failed to delete stale keyword label explanation comment"
+                        );
+                        all_deleted = false;
+                    }
+                }
+                if all_deleted {
+                    if let Err(e) = provider
+                        .add_comment(owner, repo, pr.number, &expected_body)
+                        .await
+                    {
+                        warn!(
+                            repository_owner = owner,
+                            repository = repo,
+                            pr_number = pr.number,
+                            label = %label_name,
+                            error = %e,
+                            "Failed to post keyword label explanation comment"
+                        );
+                    }
+                }
+            }
+        } else {
+            // Label is not active — delete any stale explanation comment.
+            for (id, _) in &existing {
+                if let Err(e) = provider.delete_comment(owner, repo, *id).await {
+                    warn!(
+                        repository_owner = owner,
+                        repository = repo,
+                        pr_number = pr.number,
+                        comment_id = id,
+                        label = %label_name,
+                        error = %e,
+                        "Failed to delete stale keyword label explanation comment"
+                    );
+                }
+            }
+        }
+    }
+
     Ok(labels)
 }
 
@@ -415,7 +559,23 @@ fn add_hardcoded_type_label(labels: &mut Vec<String>, pr_type: &str) {
 /// `true` when a negation word appears within the 5-word window before the keyword
 /// and within the same clause; `false` otherwise.
 fn is_keyword_negated(text: &str, keyword_span: std::ops::Range<usize>) -> bool {
-    todo!("implement negation-aware keyword detection")
+    let before = &text[..keyword_span.start];
+
+    // Restrict look-back to current clause (stop at sentence / clause boundaries).
+    let clause_start = before
+        .rfind(|c| matches!(c, '.' | '!' | '?' | ';' | '\n'))
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let clause_before = &before[clause_start..];
+
+    // Collect up to the last 5 whitespace-delimited tokens in this clause.
+    let tokens: Vec<&str> = clause_before.split_whitespace().collect();
+    let window_start = tokens.len().saturating_sub(5);
+    let window = &tokens[window_start..];
+
+    window
+        .iter()
+        .any(|tok| NEGATION_SINGLE_WORDS.contains(&tok.to_lowercase().as_str()))
 }
 
 /// Parses label suppression commands from a list of PR comments.
@@ -437,7 +597,29 @@ fn is_keyword_negated(text: &str, keyword_span: std::ops::Range<usize>) -> bool 
 /// A map from label name (trimmed, lowercase) to the login of the first commenter
 /// who issued the suppression command for that label.
 fn parse_suppressed_labels(comments: &[Comment], bot_mention: &str) -> HashMap<String, String> {
-    todo!("implement comment-based label suppression parsing")
+    let mut suppressed: HashMap<String, String> = HashMap::new();
+    let prefix = format!("{} suppress:", bot_mention.to_lowercase());
+
+    for comment in comments {
+        // Skip the bot's own explanation comments — they embed the suppress command
+        // as example text for the user, which must not be treated as a real command.
+        if comment.body.contains(KEYWORD_LABEL_COMMENT_MARKER) {
+            continue;
+        }
+
+        let login = comment.user.login.clone();
+        for line in comment.body.lines() {
+            let line_lower = line.trim().to_lowercase();
+            if let Some(rest) = line_lower.strip_prefix(&prefix) {
+                let label_name = rest.trim().to_string();
+                if !label_name.is_empty() {
+                    suppressed.entry(label_name).or_insert(login.clone());
+                }
+            }
+        }
+    }
+
+    suppressed
 }
 
 /// Builds the body of an explanation comment for a keyword-triggered label.
@@ -452,7 +634,18 @@ fn parse_suppressed_labels(comments: &[Comment], bot_mention: &str) -> HashMap<S
 /// * `label_name` - The resolved label name (e.g. `"breaking-change"`).
 /// * `bot_mention` - The bot mention prefix (e.g. `"@merge-warden"`).
 fn build_keyword_label_comment(label_name: &str, bot_mention: &str) -> String {
-    todo!("implement keyword label explanation comment builder")
+    format!(
+        "{label_marker} -->\n\
+         **Merge Warden** automatically applied the `{label}` label because keywords \
+         in this pull request triggered keyword detection.\n\n\
+         To suppress this label, add the following comment:\n\
+         ```\n\
+         {bot} suppress: {label}\n\
+         ```",
+        label_marker = format!("{}{}", KEYWORD_LABEL_COMMENT_MARKER, label_name),
+        label = label_name,
+        bot = bot_mention,
+    )
 }
 
 /// Discovers the WIP label name in use in a repository.
