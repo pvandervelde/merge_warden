@@ -1241,6 +1241,7 @@ Please update the PR body to include a valid work item reference."#;
             repo_name,
             pr_number,
             &size_info,
+            &self.config.pr_size_check.label_prefix,
         )
         .await;
 

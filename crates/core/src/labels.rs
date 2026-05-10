@@ -1062,8 +1062,8 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
         if let Some(name) = discovered_labels.get_label_for_category(&size_info.size_category) {
             name.clone()
         } else {
-            // Fallback: standard "size: <category>" format
-            format!("size: {}", size_info.size_category.as_str())
+            // Fallback: use the configured label_prefix followed by the category name.
+            format!("{}{}", label_prefix, size_info.size_category.as_str())
         };
 
     // Collect the discovered size labels that are currently applied to the PR.
