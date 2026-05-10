@@ -1475,6 +1475,28 @@ pub async fn load_merge_warden_config(
                         .clone();
             }
 
+            // Override keyword label names if repository provides non-empty values
+            if repo_change_type_labels
+                .keyword_labels
+                .breaking_change
+                .is_some()
+            {
+                merged_change_type_labels.keyword_labels.breaking_change =
+                    repo_change_type_labels.keyword_labels.breaking_change.clone();
+            }
+            if repo_change_type_labels.keyword_labels.security.is_some() {
+                merged_change_type_labels.keyword_labels.security =
+                    repo_change_type_labels.keyword_labels.security.clone();
+            }
+            if repo_change_type_labels.keyword_labels.hotfix.is_some() {
+                merged_change_type_labels.keyword_labels.hotfix =
+                    repo_change_type_labels.keyword_labels.hotfix.clone();
+            }
+            if repo_change_type_labels.keyword_labels.tech_debt.is_some() {
+                merged_change_type_labels.keyword_labels.tech_debt =
+                    repo_change_type_labels.keyword_labels.tech_debt.clone();
+            }
+
             config.change_type_labels = Some(merged_change_type_labels);
         }
 

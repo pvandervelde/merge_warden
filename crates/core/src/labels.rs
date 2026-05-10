@@ -10,8 +10,8 @@
 //! - Special labels based on PR description keywords
 
 use crate::config::{
-    ChangeTypeLabelConfig, CurrentPullRequestValidationConfiguration, PrStateLabelsConfig,
-    CONVENTIONAL_COMMIT_REGEX,
+    ChangeTypeLabelConfig, CurrentPullRequestValidationConfiguration, KeywordLabelsConfig,
+    PrStateLabelsConfig, CONVENTIONAL_COMMIT_REGEX,
 };
 use crate::errors::MergeWardenError;
 use crate::size::{PrSizeCategory, PrSizeInfo};
@@ -264,32 +264,17 @@ pub async fn set_pull_request_labels_with_config<P: PullRequestProvider>(
         }
     }
 
-    // Resolve keyword label names from config, falling back to hard-coded defaults when absent
-    // or when the configured value is an empty string.
-    let keyword_config = config
+    // Resolve keyword label names via KeywordLabelsConfig accessors, which apply the
+    // empty-string fallback logic centrally.
+    let default_kw = KeywordLabelsConfig::default();
+    let keyword_labels = config
         .and_then(|c| c.change_type_labels.as_ref())
-        .map(|c| &c.keyword_labels);
+        .map_or(&default_kw, |c| &c.keyword_labels);
 
-    let breaking_change_label = resolve_keyword_label(
-        keyword_config.and_then(|k| k.breaking_change.as_deref()),
-        "breaking-change",
-    )
-    .to_string();
-    let security_label = resolve_keyword_label(
-        keyword_config.and_then(|k| k.security.as_deref()),
-        "security",
-    )
-    .to_string();
-    let hotfix_label = resolve_keyword_label(
-        keyword_config.and_then(|k| k.hotfix.as_deref()),
-        "hotfix",
-    )
-    .to_string();
-    let tech_debt_label = resolve_keyword_label(
-        keyword_config.and_then(|k| k.tech_debt.as_deref()),
-        "tech-debt",
-    )
-    .to_string();
+    let breaking_change_label = keyword_labels.breaking_change_label().to_string();
+    let security_label = keyword_labels.security_label().to_string();
+    let hotfix_label = keyword_labels.hotfix_label().to_string();
+    let tech_debt_label = keyword_labels.tech_debt_label().to_string();
 
     // Collect additional labels that need to be applied
     let mut additional_labels = Vec::new();
@@ -364,14 +349,6 @@ pub async fn set_pull_request_labels_with_config<P: PullRequestProvider>(
     }
 
     Ok(labels)
-}
-
-/// Returns `configured` when it is `Some` and non-empty; otherwise returns `default`.
-///
-/// Used to apply per-label overrides from [`KeywordLabelsConfig`] while preserving
-/// the historical hard-coded label name as the fallback.
-fn resolve_keyword_label<'a>(configured: Option<&'a str>, default: &'a str) -> &'a str {
-    configured.filter(|s| !s.is_empty()).unwrap_or(default)
 }
 
 /// Add hardcoded type-based label mapping (legacy behavior)
