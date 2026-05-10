@@ -394,6 +394,18 @@ pub async fn set_pull_request_labels_with_config<P: PullRequestProvider>(
             additional_labels.push(label_name.clone());
             labels.push(label_name.clone());
         } else if is_suppressed {
+            let commenter = suppressed
+                .get(label_name.as_str())
+                .map(|s| s.as_str())
+                .unwrap_or("unknown");
+            warn!(
+                repository_owner = owner,
+                repository = repo,
+                pr_number = pr.number,
+                label = %label_name,
+                suppressed_by = commenter,
+                "Keyword label suppressed by user comment; skipping label application"
+            );
             // Remove the label from the PR if it is currently applied.
             if applied_labels.iter().any(|l| &l.name == label_name) {
                 if let Err(e) = provider
