@@ -958,6 +958,8 @@ pub async fn manage_wip_labels<P: PullRequestProvider>(
 /// * `repo` - The name of the repository
 /// * `pr_number` - The PR number
 /// * `size_info` - Information about the PR's size and categorization
+/// * `label_prefix` - The prefix to use when constructing a fallback size label (e.g. `"size/"`)
+///   when no matching label already exists in the repository.
 ///
 /// # Returns
 ///
@@ -991,6 +993,7 @@ pub async fn manage_wip_labels<P: PullRequestProvider>(
 ///         "repo",
 ///         123,
 ///         &size_info,
+///         "size/",
 ///     ).await?;
 ///
 ///     println!("Applied size label: {:?}", label);
@@ -1003,6 +1006,7 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
     repo: &str,
     pr_number: u64,
     size_info: &PrSizeInfo,
+    label_prefix: &str,
 ) -> Result<Option<String>, MergeWardenError> {
     info!(
         "Starting size label management for PR {}/{}/{}. Size category: {}, Total changes: {}",
@@ -1058,8 +1062,8 @@ pub async fn manage_size_labels<P: PullRequestProvider>(
         if let Some(name) = discovered_labels.get_label_for_category(&size_info.size_category) {
             name.clone()
         } else {
-            // Fallback: standard "size: <category>" format
-            format!("size: {}", size_info.size_category.as_str())
+            // Fallback: use the configured label_prefix followed by the category name.
+            format!("{}{}", label_prefix, size_info.size_category.as_str())
         };
 
     // Collect the discovered size labels that are currently applied to the PR.

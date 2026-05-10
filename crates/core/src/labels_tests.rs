@@ -2972,7 +2972,7 @@ async fn test_manage_size_labels_skips_api_calls_when_correct_label_already_appl
     );
     assert_eq!(size_info.size_category, PrSizeCategory::S);
 
-    let result = manage_size_labels(&provider, "owner", "repo", 1, &size_info)
+    let result = manage_size_labels(&provider, "owner", "repo", 1, &size_info, "size/")
         .await
         .unwrap();
 
@@ -3016,7 +3016,7 @@ async fn test_manage_size_labels_removes_stale_and_adds_new_when_category_change
     );
     assert_eq!(size_info.size_category, PrSizeCategory::M);
 
-    let result = manage_size_labels(&provider, "owner", "repo", 1, &size_info)
+    let result = manage_size_labels(&provider, "owner", "repo", 1, &size_info, "size/")
         .await
         .unwrap();
 
@@ -3067,7 +3067,7 @@ async fn test_manage_size_labels_removes_all_stale_and_adds_new_when_multiple_si
     );
     assert_eq!(size_info.size_category, PrSizeCategory::M);
 
-    manage_size_labels(&provider, "owner", "repo", 1, &size_info)
+    manage_size_labels(&provider, "owner", "repo", 1, &size_info, "size/")
         .await
         .unwrap();
 
@@ -3088,6 +3088,76 @@ async fn test_manage_size_labels_removes_all_stale_and_adds_new_when_multiple_si
             .iter()
             .any(|batch| batch.contains(&"size/M".to_string())),
         "size/M must be added"
+    );
+}
+
+#[tokio::test]
+async fn test_manage_size_labels_fallback_uses_default_prefix_when_no_repo_labels() {
+    // When no size labels exist in the repository, the fallback label must use
+    // the supplied label_prefix (e.g. "size/") and NOT the old hardcoded "size: " format.
+    use crate::labels::manage_size_labels;
+    use crate::size::{PrSizeCategory, PrSizeInfo, SizeThresholds};
+
+    // No labels in the repository — forces the fallback path.
+    let provider = SizeLabelMockProvider::new(vec![], vec![]);
+
+    let size_info = PrSizeInfo::new(
+        vec![merge_warden_developer_platforms::models::PullRequestFile {
+            filename: "src/lib.rs".to_string(),
+            additions: 50,
+            deletions: 25,
+            changes: 75,
+            status: "modified".to_string(),
+        }],
+        vec![],
+        &SizeThresholds::default(),
+        false,
+    );
+    assert_eq!(size_info.size_category, PrSizeCategory::M);
+
+    let result = manage_size_labels(&provider, "owner", "repo", 1, &size_info, "size/")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result.as_deref(),
+        Some("size/M"),
+        "Fallback label must use the supplied prefix 'size/' (not the legacy 'size: ' format)"
+    );
+}
+
+#[tokio::test]
+async fn test_manage_size_labels_fallback_uses_custom_prefix_when_no_repo_labels() {
+    // Operators who configure label_prefix = "pr-size/" must get "pr-size/M" as
+    // the fallback label, not "size/M" or "size: M".
+    use crate::labels::manage_size_labels;
+    use crate::size::{PrSizeCategory, PrSizeInfo, SizeThresholds};
+
+    // No labels in the repository — forces the fallback path.
+    let provider = SizeLabelMockProvider::new(vec![], vec![]);
+
+    let size_info = PrSizeInfo::new(
+        vec![merge_warden_developer_platforms::models::PullRequestFile {
+            filename: "src/lib.rs".to_string(),
+            additions: 50,
+            deletions: 25,
+            changes: 75,
+            status: "modified".to_string(),
+        }],
+        vec![],
+        &SizeThresholds::default(),
+        false,
+    );
+    assert_eq!(size_info.size_category, PrSizeCategory::M);
+
+    let result = manage_size_labels(&provider, "owner", "repo", 1, &size_info, "pr-size/")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result.as_deref(),
+        Some("pr-size/M"),
+        "Fallback label must use the configured prefix 'pr-size/'"
     );
 }
 
