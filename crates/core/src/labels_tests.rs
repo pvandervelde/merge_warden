@@ -4243,6 +4243,48 @@ async fn test_negation_breaking_change_doesnt_variant_not_applied() {
         .contains(&"breaking-change".to_string()));
 }
 
+// Spec assertion: negation in the PR *title* must suppress breaking-change label.
+// The title "fix: no breaking change to the public api" contains the keyword
+// "breaking change" preceded by "no" — detection must be suppressed.
+#[test]
+async fn test_negation_breaking_change_in_title_not_applied() {
+    let provider = KeywordLabelMockProvider::new(vec![], vec![]);
+    let pr = PullRequest {
+        number: 102,
+        title: "fix: no breaking change to the public api".to_string(),
+        draft: false,
+        body: None,
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
+        .await
+        .unwrap();
+    assert!(
+        !labels.contains(&"breaking-change".to_string()),
+        "'no breaking change' in title must not trigger label; got: {:?}",
+        labels
+    );
+    assert!(
+        !provider
+            .added_labels()
+            .contains(&"breaking-change".to_string()),
+        "add_labels must not be called with 'breaking-change' when negated in title"
+    );
+    // No explanation comment should be posted for breaking-change
+    let marker = format!("{}breaking-change -->", KEYWORD_LABEL_COMMENT_MARKER);
+    assert!(
+        !provider
+            .posted_comments()
+            .iter()
+            .any(|c| c.contains(&marker)),
+        "no breaking-change explanation comment must be posted when title negation suppresses detection"
+    );
+}
+
 #[test]
 async fn test_affirmative_breaking_change_in_body_applied() {
     let provider = KeywordLabelMockProvider::new(vec![], vec![]);
