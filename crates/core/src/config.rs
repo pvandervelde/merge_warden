@@ -782,6 +782,14 @@ impl Default for PullRequestsTitlePolicyConfig {
 /// # Define the label that will be applied to the pull request if it does not contain a work item reference.
 /// # If the label is not specified, no label will be applied.
 /// label_if_missing = "missing-work-item"
+///
+/// # Override the labels that are applied automatically based on keywords found in the PR title or body.
+/// # All fields are optional; omitted fields fall back to the built-in defaults shown below.
+/// [change_type_labels.keyword_labels]
+/// breaking_change = "breaking-change"   # PR title contains `!:` or body contains "breaking change"
+/// security = "security"                 # PR body contains "security" or "vulnerability"
+/// hotfix = "hotfix"                     # PR body contains "hotfix"
+/// tech_debt = "tech-debt"               # PR body contains "technical debt" or "tech debt"
 /// ---- ----------- ----
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct RepositoryProvidedConfig {

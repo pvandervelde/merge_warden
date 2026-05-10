@@ -66,6 +66,14 @@ size_thresholds = { xs = 10, s = 50, m = 100, l = 250, xl = 500 }
 enabled = true
 create_if_missing = true
 
+# Override the labels applied automatically based on keywords in the PR title/body.
+# All fields are optional; omitted fields use the built-in defaults.
+[change_type_labels.keyword_labels]
+breaking_change = "breaking-change"   # title contains `!:` or body contains "breaking change"
+security = "security"                 # body contains "security" or "vulnerability"
+hotfix = "hotfix"                     # body contains "hotfix"
+tech_debt = "tech-debt"               # body contains "technical debt" or "tech debt"
+
 [bypass_rules]
 title_validation = ["admin", "release-manager"]
 work_item_validation = ["hotfix-team"]
