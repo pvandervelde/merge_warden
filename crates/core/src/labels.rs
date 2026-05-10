@@ -42,12 +42,18 @@ lazy_static! {
 
 /// Single-word negation tokens that, when found in the 5-word window immediately
 /// before a keyword match, indicate the keyword phrase is negated.
+///
+/// Punctuation is stripped from each token before comparison (see [`strip_punct`]),
+/// so `"no,"` and `"(no)"` both match `"no"`.
 const NEGATION_SINGLE_WORDS: &[&str] = &[
     "no", "not", "never", "without",
-    // Contractions (with and without apostrophe, since punctuation stripping may vary)
-    "don't", "dont", "doesn't", "doesnt",
-    "isn't", "isnt", "aren't", "arent",
-    "won't", "wont",
+    // Contractions — with and without apostrophe, since lookup happens after
+    // punctuation stripping which preserves `'` and `-`.
+    "don't", "dont", "doesn't", "doesnt", "isn't", "isnt", "aren't", "arent", "won't",
+    "wont",
+    // Note: "cannot", "neither", "nor" are deliberately excluded. "cannot" is
+    // ambiguous ("cannot wait to add a breaking change" is affirmative) and
+    // "neither"/"nor" require correlative context. Track as a future improvement.
 ];
 
 /// Common WIP label names used for discovery and cleanup.
@@ -480,31 +486,41 @@ pub async fn set_pull_request_labels_with_config<P: PullRequestProvider>(
 
         if *triggered && !is_suppressed {
             let expected_body = build_keyword_label_comment(label_name, bot_mention);
-            let already_up_to_date =
-                existing.len() == 1 && existing[0].1 == expected_body;
+            let already_up_to_date = existing.len() == 1 && existing[0].1 == expected_body;
 
             if !already_up_to_date {
-                // Delete all stale copies, then post a fresh one.
-                let mut all_deleted = true;
-                for (id, _) in &existing {
-                    if let Err(e) = provider.delete_comment(owner, repo, *id).await {
-                        warn!(
+                // Post the fresh comment first so the explanation always exists while
+                // the label is active.  This post-first approach ensures the comment
+                // is never permanently lost due to a transient API error that occurs
+                // after stale copies have already been deleted.
+                match provider
+                    .add_comment(owner, repo, pr.number, &expected_body)
+                    .await
+                {
+                    Ok(_) => {
+                        info!(
                             repository_owner = owner,
                             repository = repo,
                             pr_number = pr.number,
-                            comment_id = id,
                             label = %label_name,
-                            error = %e,
-                            "Failed to delete stale keyword label explanation comment"
+                            "Posted keyword label explanation comment"
                         );
-                        all_deleted = false;
+                        // Now that the fresh comment is in place, delete any stale copies.
+                        for (id, _) in &existing {
+                            if let Err(e) = provider.delete_comment(owner, repo, *id).await {
+                                warn!(
+                                    repository_owner = owner,
+                                    repository = repo,
+                                    pr_number = pr.number,
+                                    comment_id = id,
+                                    label = %label_name,
+                                    error = %e,
+                                    "Failed to delete stale keyword label explanation comment"
+                                );
+                            }
+                        }
                     }
-                }
-                if all_deleted {
-                    if let Err(e) = provider
-                        .add_comment(owner, repo, pr.number, &expected_body)
-                        .await
-                    {
+                    Err(e) => {
                         warn!(
                             repository_owner = owner,
                             repository = repo,
@@ -574,10 +590,9 @@ fn is_keyword_negated(text: &str, keyword_span: std::ops::Range<usize>) -> bool 
     let before = &text[..keyword_span.start];
 
     // Restrict look-back to current clause (stop at sentence / clause boundaries).
-    let clause_start = before
-        .rfind(['.', '!', '?', ';', '\n'])
-        .map(|i| i + 1)
-        .unwrap_or(0);
+    // Uses `find_clause_boundary` rather than a plain `rfind` so that `!` followed
+    // by `[` (a Markdown image link) is not treated as a sentence terminator.
+    let clause_start = find_clause_boundary(before).map(|i| i + 1).unwrap_or(0);
     let clause_before = &before[clause_start..];
 
     // Collect up to the last 5 whitespace-delimited tokens in this clause.
@@ -585,9 +600,43 @@ fn is_keyword_negated(text: &str, keyword_span: std::ops::Range<usize>) -> bool 
     let window_start = tokens.len().saturating_sub(5);
     let window = &tokens[window_start..];
 
+    // `text` is always lowercased by callers, so no `.to_lowercase()` allocation is needed.
+    // `strip_punct` removes leading/trailing punctuation so `"no,"` and `"(no)"` both match.
     window
         .iter()
-        .any(|tok| NEGATION_SINGLE_WORDS.contains(&tok.to_lowercase().as_str()))
+        .any(|tok| NEGATION_SINGLE_WORDS.contains(&strip_punct(tok)))
+}
+
+/// Finds the byte index of the rightmost clause-boundary character in `s`.
+///
+/// The characters `.`, `?`, `;`, and `\n` are always treated as clause boundaries.
+/// `!` is treated as a clause boundary **unless** it is immediately followed by `[`,
+/// which is the start of a Markdown image link (`![](url)`) and must not split the clause.
+fn find_clause_boundary(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let len = bytes.len();
+    for i in (0..len).rev() {
+        match bytes[i] {
+            b'.' | b'?' | b';' | b'\n' => return Some(i),
+            b'!' => {
+                // `![` is Markdown image syntax — not a sentence boundary.
+                if i + 1 < len && bytes[i + 1] == b'[' {
+                    continue;
+                }
+                return Some(i);
+            }
+            _ => {}
+        }
+    }
+    None
+}
+
+/// Strips leading and trailing punctuation from a token, preserving apostrophes
+/// and hyphens that appear in negation contractions such as `"don't"` and `"won't"`.
+///
+/// Examples: `"no,"` → `"no"`, `"(no)"` → `"no"`, `"no:"` → `"no"`.
+fn strip_punct(s: &str) -> &str {
+    s.trim_matches(|c: char| !c.is_alphanumeric() && c != '\'' && c != '-')
 }
 
 /// Parses label suppression commands from a list of PR comments.

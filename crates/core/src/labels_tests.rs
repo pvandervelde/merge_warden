@@ -3793,16 +3793,101 @@ async fn test_not_negated_non_negation_word_containing_negation_substring() {
 
 #[test]
 async fn test_not_negated_word_ending_in_not() {
-    // "cannot" ends in "-not" but whole-word check must reject it
+    // "cannot" is NOT in the negation list (see labels.rs comment for rationale).
+    // "we cannot wait to add..." is affirmative — the negation list must not match it.
     let text = "we cannot wait to add a breaking change to the API";
     let span = find_span(text, "breaking change");
     assert!(
         !super::is_keyword_negated(text, span),
-        "'cannot' must not be treated as 'not'"
+        "'cannot' must not be treated as a negation word"
     );
 }
 
-// — Multiple negation words —
+// — Punctuation-attached negation tokens —
+
+#[test]
+async fn test_negated_no_with_trailing_comma() {
+    // "no," must be recognised as negation; punct stripping removes the comma.
+    let text = "no, this pr doesn't introduce a breaking change";
+    let span = find_span(text, "breaking change");
+    assert!(
+        super::is_keyword_negated(text, span),
+        "'no,' (comma-attached) must negate"
+    );
+}
+
+#[test]
+async fn test_negated_no_in_parentheses() {
+    // "(no)" must be recognised as negation; punct stripping removes both parens.
+    let text = "this is (no) breaking change";
+    let span = find_span(text, "breaking change");
+    assert!(
+        super::is_keyword_negated(text, span),
+        "'(no)' (paren-wrapped) must negate"
+    );
+}
+
+#[test]
+async fn test_negated_no_with_trailing_colon() {
+    // "no:" must be recognised as negation; punct stripping removes the colon.
+    let text = "no: breaking change to the public api";
+    let span = find_span(text, "breaking change");
+    assert!(
+        super::is_keyword_negated(text, span),
+        "'no:' (colon-attached) must negate"
+    );
+}
+
+#[test]
+async fn test_negated_contraction_with_trailing_comma() {
+    // "don't," must still be recognised — commas appear after contractions in natural prose.
+    let text = "we don't, and have never, introduced a breaking change";
+    let span = find_span(text, "breaking change");
+    assert!(
+        super::is_keyword_negated(text, span),
+        "'don't,' (comma after contraction) must negate"
+    );
+}
+
+// — Markdown image `!` must not act as a clause boundary —
+
+#[test]
+async fn test_negated_keyword_after_markdown_image_not_split_at_exclamation() {
+    // `!` followed by `[` is a Markdown image link, not a sentence terminator.
+    // The negation word before the image must still be in scope.
+    // Note: the URL must not contain `.` chars (which are sentence boundaries).
+    let text = "no ![screenshot](/img) breaking change";
+    let span = find_span(text, "breaking change");
+    assert!(
+        super::is_keyword_negated(text, span),
+        "'!' in markdown image link must not reset clause; 'no' before the image must negate"
+    );
+}
+
+#[test]
+async fn test_clause_boundary_exclamation_without_bracket_still_splits() {
+    // A bare `!` (not followed by `[`) IS a sentence boundary as before.
+    let text = "great! no breaking change";
+    let span = find_span(text, "breaking change");
+    // "no" is in the clause AFTER `!`, so it should still negate.
+    // The `!` terminates the prior clause — "no" is in the new clause.
+    assert!(
+        super::is_keyword_negated(text, span),
+        "'no' in clause after bare '!' must still negate"
+    );
+}
+
+#[test]
+async fn test_negation_in_prior_clause_before_bare_exclamation_does_not_cross() {
+    // Negation word is in the clause that ends with `!`; keyword is in the next clause.
+    // The `!` boundary must prevent the negation from crossing into the next clause.
+    let text = "no! this introduces a breaking change";
+    let span = find_span(text, "breaking change");
+    assert!(
+        !super::is_keyword_negated(text, span),
+        "'no!' in a prior clause must not negate 'breaking change' across the '!' boundary"
+    );
+}
 
 #[test]
 async fn test_negated_multiple_negation_words_in_window() {
@@ -4992,8 +5077,10 @@ async fn test_explanation_comment_stale_body_replaced_with_fresh_one() {
 }
 
 #[test]
-async fn test_explanation_comment_two_stale_copies_both_deleted_before_repost() {
-    // Two identical stale copies must both be deleted before one fresh comment is posted.
+async fn test_explanation_comment_two_stale_copies_both_replaced_with_fresh_one() {
+    // Two stale copies must both be deleted and exactly one fresh comment posted.
+    // The implementation posts the fresh comment first (post-first-then-delete approach)
+    // so the explanation is never permanently lost due to a transient delete failure.
     let hotfix_marker = format!("{}hotfix -->", KEYWORD_LABEL_COMMENT_MARKER);
     let stale_body = format!("{} old format v1", hotfix_marker);
     let stale1 = make_comment(80, "bot", &stale_body);
