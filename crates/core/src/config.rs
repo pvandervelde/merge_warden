@@ -37,6 +37,13 @@ pub const SIZE_COMMENT_MARKER: &str = "<!-- PR_SIZE_CHECK -->";
 /// HTML comment marker for WIP (Work In Progress) validation comments
 pub const WIP_COMMENT_MARKER: &str = "<!-- PR_WIP_CHECK -->";
 
+/// HTML comment marker prefix for keyword-triggered label explanation comments.
+///
+/// The full per-label marker appends the resolved label name and a closing delimiter,
+/// e.g. `<!-- MERGE_WARDEN_KEYWORD_LABEL:breaking-change -->`.  Searching for this
+/// prefix is sufficient to locate any keyword-label explanation comment.
+pub const KEYWORD_LABEL_COMMENT_MARKER: &str = "<!-- MERGE_WARDEN_KEYWORD_LABEL:";
+
 /// Pre-compiled regex for conventional commit format validation
 ///
 /// This regex enforces the Conventional Commits specification (https://conventionalcommits.org/)
@@ -284,6 +291,15 @@ pub struct ApplicationDefaults {
     /// Application-level defaults for state-based PR lifecycle labels
     #[serde(default)]
     pub pr_state_labels: PrStateLabelsConfig,
+
+    /// Bot mention prefix used for comment-based label suppression.
+    ///
+    /// PR participants post a comment line of the form `<bot_mention> suppress: <label-name>`
+    /// to prevent merge-warden from (re-)applying a keyword-triggered label.  Defaults to
+    /// `"@merge-warden"`.  Operators running a custom GitHub App installation should set this
+    /// to their app's mention handle (e.g. `"@acme-merge-warden[bot]"`).
+    #[serde(default = "ApplicationDefaults::default_bot_mention")]
+    pub bot_mention: String,
 }
 
 impl ApplicationDefaults {
@@ -316,6 +332,11 @@ impl ApplicationDefaults {
     fn default_work_item_required() -> bool {
         false
     }
+
+    /// Default bot mention prefix for comment-based label suppression.
+    fn default_bot_mention() -> String {
+        "@merge-warden".to_string()
+    }
 }
 
 impl Default for ApplicationDefaults {
@@ -332,6 +353,7 @@ impl Default for ApplicationDefaults {
             change_type_labels: ChangeTypeLabelConfig::default(),
             wip_check: WipCheckConfig::default(),
             pr_state_labels: PrStateLabelsConfig::default(),
+            bot_mention: ApplicationDefaults::default_bot_mention(),
         }
     }
 }
@@ -616,6 +638,9 @@ pub struct CurrentPullRequestValidationConfiguration {
 
     /// Configuration for issue metadata propagation.
     pub issue_propagation: IssuePropagationConfig,
+
+    /// Bot mention prefix used to parse label suppression commands from PR comments.
+    pub bot_mention: String,
 }
 
 impl CurrentPullRequestValidationConfiguration {
@@ -652,6 +677,7 @@ impl CurrentPullRequestValidationConfiguration {
             pr_state_labels: PrStateLabelsConfig::default(),
             bypass_rules: bypass_rules.unwrap_or_default(),
             issue_propagation: IssuePropagationConfig::default(),
+            bot_mention: "@merge-warden".to_string(),
         }
     }
 }
@@ -671,6 +697,7 @@ impl Default for CurrentPullRequestValidationConfiguration {
             pr_state_labels: PrStateLabelsConfig::default(),
             bypass_rules: BypassRules::default(),
             issue_propagation: IssuePropagationConfig::default(),
+            bot_mention: "@merge-warden".to_string(),
         }
     }
 }
@@ -804,6 +831,13 @@ pub struct RepositoryProvidedConfig {
     /// Repository-specific change type label configuration overrides
     #[serde(default)]
     pub change_type_labels: Option<ChangeTypeLabelConfig>,
+
+    /// Bot mention prefix resolved from application defaults; not read from TOML.
+    ///
+    /// Set by [`load_merge_warden_config`] after deserialisation, from
+    /// [`ApplicationDefaults::bot_mention`].
+    #[serde(skip)]
+    pub bot_mention: String,
 }
 
 /// Convert a RepositoryConfig (TOML) to a ValidationConfig (runtime enforcement)
@@ -852,6 +886,7 @@ impl RepositoryProvidedConfig {
             pr_state_labels,
             bypass_rules: bypass_rules.clone(),
             issue_propagation: pr_policies.issue_propagation.clone(),
+            bot_mention: self.bot_mention.clone(),
         }
     }
 }
@@ -862,6 +897,7 @@ impl Default for RepositoryProvidedConfig {
             schema_version: 1,
             policies: PoliciesConfig::default(),
             change_type_labels: None,
+            bot_mention: "@merge-warden".to_string(),
         }
     }
 }
@@ -1605,6 +1641,11 @@ pub async fn load_merge_warden_config(
         pr_size_label_prefix = config.policies.pull_requests.size_policies.label_prefix,
         "Configuration loaded"
     );
+
+    // Thread the bot_mention from application defaults into the resolved config
+    // so that CurrentPullRequestValidationConfiguration carries it without requiring
+    // callers to pass it separately.
+    config.bot_mention = app_defaults.bot_mention.clone();
 
     Ok(config)
 }

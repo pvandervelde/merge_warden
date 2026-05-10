@@ -266,6 +266,7 @@ impl MergeWardenWebhookHandler {
                     // is disabled by default. Configure it in .github/merge-warden.toml
                     // under [policies.pullRequests.issuePropagation] to enable it.
                     issue_propagation: Default::default(),
+                    bot_mention: self.policies.bot_mention.clone(),
                 }
             }
         };

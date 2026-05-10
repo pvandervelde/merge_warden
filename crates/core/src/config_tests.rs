@@ -183,6 +183,7 @@ fn test_custom_regex_patterns_are_used() {
             },
         },
         change_type_labels: None,
+        ..Default::default()
     };
     let validation = config.to_validation_config(&BypassRules::default());
     let custom_title = "CUSTOM: test title";
@@ -439,6 +440,7 @@ fn test_merge_warden_config_to_validation_config_conventional_commits_and_work_i
             },
         },
         change_type_labels: None,
+        ..Default::default()
     };
     let validation = config.to_validation_config(&BypassRules::default());
     assert!(validation.enforce_title_convention);
@@ -474,6 +476,7 @@ fn test_merge_warden_config_to_validation_config_non_conventional_commits() {
             },
         },
         change_type_labels: None,
+        ..Default::default()
     };
     let validation = config.to_validation_config(&BypassRules::default());
     assert!(!validation.enforce_title_convention);
@@ -722,6 +725,7 @@ fn test_application_defaults_bypass_rules_serialization() {
         change_type_labels: ChangeTypeLabelConfig::default(),
         wip_check: WipCheckConfig::default(),
         pr_state_labels: crate::config::PrStateLabelsConfig::default(),
+        bot_mention: "@merge-warden".to_string(),
     };
 
     let serialized =
@@ -960,6 +964,7 @@ fn test_validation_config_includes_pr_size() {
             },
         },
         change_type_labels: None,
+        ..Default::default()
     };
 
     let validation = repo_config.to_validation_config(&BypassRules::default());
@@ -1086,6 +1091,7 @@ fn test_to_validation_config_preserves_wip_policies() {
             },
         },
         change_type_labels: None,
+        ..Default::default()
     };
 
     let validation = repo_config.to_validation_config(&BypassRules::default());

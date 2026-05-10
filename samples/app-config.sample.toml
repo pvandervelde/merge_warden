@@ -16,6 +16,11 @@ enable_title_validation = true
 # default_title_pattern = "^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\\([a-z0-9_-]+\\))?!?: .+"
 default_invalid_title_label = "pr-issue: invalid-title-format"
 
+# The mention string that users write in PR comments to issue bot commands.
+# Default: "@merge-warden". Change this if you have deployed the bot under a
+# different GitHub App name (e.g. "@acme-merge-warden").
+# bot_mention = "@merge-warden"
+
 # Require a work-item reference in the pull request description by default.
 enable_work_item_validation = true
 # default_work_item_pattern = "(?i)(fixes|closes|resolves|references|relates to)\\s+(#\\d+|GH-\\d+|https://github\\.com/[^/]+/[^/]+/issues/\\d+|[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+#\\d+)"

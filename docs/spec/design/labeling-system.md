@@ -817,3 +817,150 @@ State labels are orthogonal to all other label categories:
 - [Validation Engine](./validation-engine.md) - How labeling integrates with validation rules
 - [Configuration System](./configuration-system.md) - Labeling configuration management
 - [Platform Integrations](../architecture/platform-integrations.md) - GitHub API integration patterns
+
+## Keyword Labels
+
+### Overview
+
+Several labels are applied when keyword phrases appear in the PR title or body. Because
+natural language frequently negates these phrases ("no breaking change", "doesn't introduce
+any security concerns"), the detection logic is negation-aware: a keyword match is only acted
+upon when it is **not** preceded by a negation word within the same clause.
+
+Keyword detection runs as part of every `set_pull_request_labels_with_config` invocation.
+
+### Detected Keywords and Labels
+
+| Keyword pattern (regex) | Label applied | Negation-aware? |
+| :--- | :--- | :--- |
+| `\bbreaking[\s\-]+change\b` | configured `breaking_change` label | Yes (body); No (title `!:` path) |
+| `\b(security\|vulnerability)\b` | configured `security` label | Yes |
+| `\bhotfix\b` | configured `hotfix` label | Yes |
+| `\btech(?:nical)?[\s\-]+debt\b` | configured `tech_debt` label | Yes |
+
+The `!:` (exclamation-colon) conventional commit footer is a deliberate breaking-change
+signal and is exempted from negation checking — it always triggers the breaking-change label
+regardless of body text.
+
+### Negation Detection
+
+**Algorithm:** `is_keyword_negated(text: &str, keyword_span: Range<usize>) -> bool`
+
+1. Extract the substring of `text` that precedes the keyword span.
+2. Find the rightmost clause boundary (`.`, `!`, `?`, `;`, `\n`) in that prefix.
+   `!` followed immediately by `[` (a Markdown image link) is **not** treated as a boundary.
+3. Tokenise the clause before the keyword using whitespace splits.
+4. Take the last 5 tokens (the look-back window).
+5. For each token, strip leading/trailing punctuation while preserving `'` and `-`
+   (so `"no,"`, `"(no)"`, and `"no:"` all normalise to `"no"`).
+6. Return `true` if any stripped token matches an entry in `NEGATION_SINGLE_WORDS`.
+
+**Negation word list (`NEGATION_SINGLE_WORDS`):**
+
+```
+no, not, never, without,
+don't, dont, doesn't, doesnt, isn't, isnt, aren't, arent, won't, wont
+```
+
+"cannot", "neither", and "nor" are **deliberately excluded**: "cannot" is ambiguous
+("we cannot wait to add a breaking change" is affirmative), and "neither"/"nor" require
+correlative context that a window-based approach cannot reliably evaluate. These may be
+added in a future improvement.
+
+**Clause boundary rationale:** Limiting look-back to the current clause prevents a negation
+in one sentence from suppressing a keyword in the next sentence. For example:
+> "No changes were needed. This introduced a breaking change."
+The "No" before the period does not affect the detection of "breaking change" in the
+following sentence.
+
+### Comment-Based Label Suppression
+
+Users can permanently suppress a keyword-triggered label by posting a PR comment containing
+the following command on its own line:
+
+```
+@merge-warden suppress: <label-name>
+```
+
+The bot mentions prefix is case-insensitive. Unknown commands are silently ignored.
+
+**Parser:** `parse_suppressed_labels(comments: &[Comment], bot_mention: &str) -> HashMap<String, String>`
+
+Returns a map of `label_name → first_commenter_login`. First-commenter-wins: if two users
+suppress the same label, only the first is recorded. Suppression entries are label-scoped —
+suppressing `breaking-change` does not affect any other label.
+
+The bot's own explanation comments (identified by `KEYWORD_LABEL_COMMENT_MARKER`) are
+excluded from suppression parsing, preventing the sample suppress command embedded in those
+comments from being treated as a real command.
+
+**Effect:**
+
+- If a label would be applied **and** is suppressed: it is not applied; any existing
+  instance of that label is removed from the PR.
+- If a label would not be applied: suppression has no effect.
+
+### Explanation Comments
+
+When a keyword label is applied, the bot posts a per-label explanation comment so the PR
+author knows why the label appeared and how to opt out.
+
+**Comment format:** `build_keyword_label_comment(label_name: &str, bot_mention: &str) -> String`
+
+The comment body begins with a unique HTML marker:
+
+```
+<!-- MERGE_WARDEN_KEYWORD_LABEL:<label-name> -->
+```
+
+The marker is used to locate and manage the comment idempotently across PR re-evaluations.
+
+**Lifecycle (managed per-label on every evaluation):**
+
+| Condition | Action |
+| :--- | :--- |
+| Label triggered; no prior comment | Post new comment |
+| Label triggered; existing comment body identical | No action (idempotent) |
+| Label triggered; existing comment body differs | Post fresh comment, then delete stale copies |
+| Label not triggered (or suppressed) | Delete all comments with this label's marker |
+
+The lifecycle uses a **post-first-then-delete** approach when replacing stale comments: the
+fresh comment is posted before stale copies are removed. This ensures an explanation comment
+is never permanently lost due to a transient API failure during deletion.
+
+API failures when posting or deleting explanation comments are logged at `warn!` and do not
+propagate — they do not fail the overall label management step.
+
+### `bot_mention` Configuration
+
+The bot mention prefix used in suppress commands defaults to `"@merge-warden"`. It is
+configurable at the application level via `ApplicationDefaults.bot_mention` in
+`app-config.toml`:
+
+```toml
+bot_mention = "@merge-warden"
+```
+
+**Repository-level override:** The `bot_mention` field is intentionally not configurable per
+repository (it is `#[serde(skip)]` in `RepositoryProvidedConfig`). In a single-tenant
+deployment this is never needed; in multi-tenant deployments all repositories share the same
+bot identity. If per-repository override is required in the future, the `#[serde(skip)]`
+annotation must be replaced with an optional merge that falls back to the application default.
+
+### Behavioural Assertions
+
+1. A keyword match preceded by a negation word within a 5-token, single-clause window does
+   not trigger the corresponding label.
+2. Punctuation attached to a negation token (`"no,"`, `"(no)"`, `"no:"`) is stripped before
+   comparison — these all count as the word `"no"`.
+3. A negation word in a prior clause (before `.`, `!`, `?`, `;`, or `\n`) does not
+   suppress a keyword in the current clause.
+4. `!` immediately followed by `[` (Markdown image link) is not treated as a clause boundary.
+5. A user-posted `<bot_mention> suppress: <label>` comment prevents the label from being
+   applied (or removes it if already present); the explanation comment is also deleted.
+6. The bot's own explanation comment sample text does not self-suppress the label.
+7. Explanation comments are idempotent: re-running on an unchanged PR posts no duplicate.
+8. Clearing a keyword from the PR title/body causes the explanation comment to be deleted
+   on the next evaluation.
+9. Each keyword label's comment lifecycle is independent of the others.
+10. API failures in comment posting/deletion are non-fatal and do not affect label application.
