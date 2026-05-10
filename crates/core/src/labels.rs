@@ -575,7 +575,7 @@ fn is_keyword_negated(text: &str, keyword_span: std::ops::Range<usize>) -> bool 
 
     // Restrict look-back to current clause (stop at sentence / clause boundaries).
     let clause_start = before
-        .rfind(|c| matches!(c, '.' | '!' | '?' | ';' | '\n'))
+        .rfind(['.', '!', '?', ';', '\n'])
         .map(|i| i + 1)
         .unwrap_or(0);
     let clause_before = &before[clause_start..];
@@ -647,14 +647,14 @@ fn parse_suppressed_labels(comments: &[Comment], bot_mention: &str) -> HashMap<S
 /// * `bot_mention` - The bot mention prefix (e.g. `"@merge-warden"`).
 fn build_keyword_label_comment(label_name: &str, bot_mention: &str) -> String {
     format!(
-        "{label_marker} -->\n\
+        "{marker}{label} -->\n\
          **Merge Warden** automatically applied the `{label}` label because keywords \
          in this pull request triggered keyword detection.\n\n\
          To suppress this label, add the following comment:\n\
          ```\n\
          {bot} suppress: {label}\n\
          ```",
-        label_marker = format!("{}{}", KEYWORD_LABEL_COMMENT_MARKER, label_name),
+        marker = KEYWORD_LABEL_COMMENT_MARKER,
         label = label_name,
         bot = bot_mention,
     )
