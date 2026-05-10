@@ -1,7 +1,7 @@
 use crate::config::{
     BypassRule, BypassRules, ChangeTypeLabelConfig, CurrentPullRequestValidationConfiguration,
-    IssuePropagationConfig, PrSizeCheckConfig, WipCheckConfig, CONVENTIONAL_COMMIT_REGEX,
-    WORK_ITEM_REGEX,
+    IssuePropagationConfig, KeywordLabelsConfig, PrSizeCheckConfig, WipCheckConfig,
+    CONVENTIONAL_COMMIT_REGEX, WORK_ITEM_REGEX,
 };
 use crate::size::SizeThresholds;
 use async_trait::async_trait;
@@ -1432,5 +1432,191 @@ titlePattern = "some-pattern"
         defaults.default_title_pattern,
         CONVENTIONAL_COMMIT_REGEX.to_string(),
         "titlePattern is no longer a recognised key; default pattern must be used"
+    );
+}
+
+// ── KeywordLabelsConfig tests ────────────────────────────────────────────────
+
+#[test]
+fn test_keyword_labels_config_defaults() {
+    let cfg = KeywordLabelsConfig::default();
+    assert_eq!(cfg.breaking_change_label(), "breaking-change");
+    assert_eq!(cfg.security_label(), "security");
+    assert_eq!(cfg.hotfix_label(), "hotfix");
+    assert_eq!(cfg.tech_debt_label(), "tech-debt");
+}
+
+#[test]
+fn test_keyword_labels_config_custom_values() {
+    let cfg = KeywordLabelsConfig {
+        breaking_change: Some("semver-major".to_string()),
+        security: Some("security-alert".to_string()),
+        hotfix: Some("urgent".to_string()),
+        tech_debt: Some("cleanup".to_string()),
+    };
+    assert_eq!(cfg.breaking_change_label(), "semver-major");
+    assert_eq!(cfg.security_label(), "security-alert");
+    assert_eq!(cfg.hotfix_label(), "urgent");
+    assert_eq!(cfg.tech_debt_label(), "cleanup");
+}
+
+#[test]
+fn test_keyword_labels_config_empty_string_falls_back_to_default() {
+    let cfg = KeywordLabelsConfig {
+        breaking_change: Some(String::new()),
+        security: Some(String::new()),
+        hotfix: Some(String::new()),
+        tech_debt: Some(String::new()),
+    };
+    assert_eq!(cfg.breaking_change_label(), "breaking-change");
+    assert_eq!(cfg.security_label(), "security");
+    assert_eq!(cfg.hotfix_label(), "hotfix");
+    assert_eq!(cfg.tech_debt_label(), "tech-debt");
+}
+
+#[test]
+fn test_keyword_labels_config_toml_round_trip_with_custom_values() {
+    let toml = r#"
+[keyword_labels]
+breaking_change = "semver-major"
+security = "security-alert"
+hotfix = "urgent"
+tech_debt = "cleanup"
+"#;
+
+    let cfg: ChangeTypeLabelConfig = toml::from_str(toml).expect("Should deserialise successfully");
+    assert_eq!(cfg.keyword_labels.breaking_change_label(), "semver-major");
+    assert_eq!(cfg.keyword_labels.security_label(), "security-alert");
+    assert_eq!(cfg.keyword_labels.hotfix_label(), "urgent");
+    assert_eq!(cfg.keyword_labels.tech_debt_label(), "cleanup");
+
+    // Round-trip: serialise then deserialise
+    let serialised = toml::to_string(&cfg).expect("Should serialise successfully");
+    let round_tripped: ChangeTypeLabelConfig =
+        toml::from_str(&serialised).expect("Round-trip should succeed");
+    assert_eq!(
+        round_tripped.keyword_labels.breaking_change_label(),
+        "semver-major"
+    );
+    assert_eq!(
+        round_tripped.keyword_labels.security_label(),
+        "security-alert"
+    );
+    assert_eq!(round_tripped.keyword_labels.hotfix_label(), "urgent");
+    assert_eq!(round_tripped.keyword_labels.tech_debt_label(), "cleanup");
+}
+
+#[test]
+fn test_keyword_labels_config_toml_absent_section_uses_defaults() {
+    // A ChangeTypeLabelConfig with no keyword_labels section must use hard-coded defaults.
+    let toml = r#"
+enabled = true
+"#;
+    let cfg: ChangeTypeLabelConfig = toml::from_str(toml).expect("Should deserialise successfully");
+    assert_eq!(
+        cfg.keyword_labels.breaking_change_label(),
+        "breaking-change"
+    );
+    assert_eq!(cfg.keyword_labels.security_label(), "security");
+    assert_eq!(cfg.keyword_labels.hotfix_label(), "hotfix");
+    assert_eq!(cfg.keyword_labels.tech_debt_label(), "tech-debt");
+}
+
+#[test]
+fn test_change_type_label_config_default_includes_keyword_labels() {
+    let cfg = ChangeTypeLabelConfig::default();
+    assert_eq!(
+        cfg.keyword_labels.breaking_change_label(),
+        "breaking-change"
+    );
+    assert_eq!(cfg.keyword_labels.security_label(), "security");
+    assert_eq!(cfg.keyword_labels.hotfix_label(), "hotfix");
+    assert_eq!(cfg.keyword_labels.tech_debt_label(), "tech-debt");
+}
+
+// ── Config merge: keyword_labels propagated from repo config ─────────────────
+
+/// Regression test: repo-level keyword_labels were silently dropped during the
+/// change_type_labels merge step.  Every non-None field set by a repository
+/// must survive the merge and override the app-default value.
+#[tokio::test]
+async fn test_load_merge_warden_config_keyword_labels_merged_from_repo() {
+    let toml = r#"
+schemaVersion = 1
+
+[change_type_labels]
+enabled = true
+
+[change_type_labels.keyword_labels]
+breaking_change = "semver-major"
+security = "vulnerability"
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let app_defaults = ApplicationDefaults::default();
+
+    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
+        .await
+        .unwrap();
+
+    let kw = &config
+        .change_type_labels
+        .as_ref()
+        .expect("change_type_labels should be populated after merge")
+        .keyword_labels;
+
+    assert_eq!(
+        kw.breaking_change_label(),
+        "semver-major",
+        "Repo-level breaking_change label should override app default"
+    );
+    assert_eq!(
+        kw.security_label(),
+        "vulnerability",
+        "Repo-level security label should override app default"
+    );
+    // Fields not supplied by the repo should retain the app-default values.
+    assert_eq!(
+        kw.hotfix_label(),
+        "hotfix",
+        "hotfix should keep the app default when not set by repo"
+    );
+    assert_eq!(
+        kw.tech_debt_label(),
+        "tech-debt",
+        "tech_debt should keep the app default when not set by repo"
+    );
+}
+
+/// When the app defaults configure non-standard keyword labels and the repo
+/// does not override them, the app defaults should be preserved.
+#[tokio::test]
+async fn test_load_merge_warden_config_keyword_labels_app_defaults_preserved() {
+    let toml = r#"
+schemaVersion = 1
+
+[change_type_labels]
+enabled = true
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let mut app_defaults = ApplicationDefaults::default();
+    app_defaults
+        .change_type_labels
+        .keyword_labels
+        .breaking_change = Some("breaking".to_string());
+
+    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
+        .await
+        .unwrap();
+
+    let kw = &config
+        .change_type_labels
+        .as_ref()
+        .expect("change_type_labels should be populated after merge")
+        .keyword_labels;
+
+    assert_eq!(
+        kw.breaking_change_label(),
+        "breaking",
+        "App-default breaking_change label should be used when repo does not override it"
     );
 }

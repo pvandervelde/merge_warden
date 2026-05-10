@@ -851,7 +851,7 @@ async fn test_determine_labels_with_scope() {
 // Additional imports for smart label detection tests
 use crate::config::{
     ChangeTypeLabelConfig, ConventionalCommitMappings, CurrentPullRequestValidationConfiguration,
-    FallbackLabelSettings, LabelDetectionStrategy,
+    FallbackLabelSettings, KeywordLabelsConfig, LabelDetectionStrategy,
 };
 use crate::labels::{
     set_pull_request_labels_with_config, LabelDetector, LabelManagementResult, LabelManager,
@@ -1290,8 +1290,9 @@ async fn test_label_detector_change_type_exact_match() {
             docs: vec!["documentation".to_string()],
             ..Default::default()
         },
-        fallback_label_settings: FallbackLabelSettings::default(),
         detection_strategy: LabelDetectionStrategy::default(),
+        fallback_label_settings: FallbackLabelSettings::default(),
+        keyword_labels: KeywordLabelsConfig::default(),
     };
 
     let detector = LabelDetector::new_for_change_type_labels(config);
@@ -1322,13 +1323,14 @@ async fn test_label_detector_change_type_prefix_match() {
     let config = ChangeTypeLabelConfig {
         enabled: true,
         conventional_commit_mappings: ConventionalCommitMappings::default(),
-        fallback_label_settings: FallbackLabelSettings::default(),
         detection_strategy: LabelDetectionStrategy {
             exact_match: true,
             prefix_match: true,
             description_match: true,
             common_prefixes: vec!["type:".to_string(), "kind:".to_string()],
         },
+        fallback_label_settings: FallbackLabelSettings::default(),
+        keyword_labels: KeywordLabelsConfig::default(),
     };
 
     let detector = LabelDetector::new_for_change_type_labels(config);
@@ -1359,8 +1361,9 @@ async fn test_label_detector_change_type_description_match() {
     let config = ChangeTypeLabelConfig {
         enabled: true,
         conventional_commit_mappings: ConventionalCommitMappings::default(),
-        fallback_label_settings: FallbackLabelSettings::default(),
         detection_strategy: LabelDetectionStrategy::default(),
+        fallback_label_settings: FallbackLabelSettings::default(),
+        keyword_labels: KeywordLabelsConfig::default(),
     };
 
     let detector = LabelDetector::new_for_change_type_labels(config);
@@ -1392,6 +1395,7 @@ async fn test_label_detector_change_type_no_match_fallback() {
             ..Default::default()
         },
         detection_strategy: LabelDetectionStrategy::default(),
+        keyword_labels: KeywordLabelsConfig::default(),
     };
 
     let detector = LabelDetector::new_for_change_type_labels(config);
@@ -1435,8 +1439,9 @@ async fn test_label_manager_apply_change_type_label_success() {
             feat: vec!["feature".to_string()],
             ..Default::default()
         },
-        fallback_label_settings: FallbackLabelSettings::default(),
         detection_strategy: LabelDetectionStrategy::default(),
+        fallback_label_settings: FallbackLabelSettings::default(),
+        keyword_labels: KeywordLabelsConfig::default(),
     };
 
     let manager = LabelManager::new(Some(config));
@@ -1460,12 +1465,13 @@ async fn test_label_manager_apply_change_type_label_with_fallback() {
     let config = ChangeTypeLabelConfig {
         enabled: true,
         conventional_commit_mappings: ConventionalCommitMappings::default(),
+        detection_strategy: LabelDetectionStrategy::default(),
         fallback_label_settings: FallbackLabelSettings {
             create_if_missing: true,
             name_format: "type: {change_type}".to_string(),
             color_scheme: HashMap::from([("feat".to_string(), "00ff00".to_string())]),
         },
-        detection_strategy: LabelDetectionStrategy::default(),
+        keyword_labels: KeywordLabelsConfig::default(),
     };
 
     let manager = LabelManager::new(Some(config));
@@ -1614,8 +1620,9 @@ async fn test_smart_labeling_pipeline_end_to_end() {
             feat: vec!["feature".to_string()],
             ..Default::default()
         },
-        fallback_label_settings: FallbackLabelSettings::default(),
         detection_strategy: LabelDetectionStrategy::default(),
+        fallback_label_settings: FallbackLabelSettings::default(),
+        keyword_labels: KeywordLabelsConfig::default(),
     };
 
     let config_wrapper = CurrentPullRequestValidationConfiguration {
@@ -1667,12 +1674,13 @@ async fn test_smart_labeling_pipeline_with_fallback() {
     let config = ChangeTypeLabelConfig {
         enabled: true,
         conventional_commit_mappings: ConventionalCommitMappings::default(),
+        detection_strategy: LabelDetectionStrategy::default(),
         fallback_label_settings: FallbackLabelSettings {
             create_if_missing: true,
             name_format: "type: {change_type}".to_string(),
             color_scheme: HashMap::from([("feat".to_string(), "0366d6".to_string())]),
         },
-        detection_strategy: LabelDetectionStrategy::default(),
+        keyword_labels: KeywordLabelsConfig::default(),
     };
 
     let config_wrapper = CurrentPullRequestValidationConfiguration {
@@ -1736,8 +1744,9 @@ async fn test_smart_labeling_pipeline_disabled() {
     let config = ChangeTypeLabelConfig {
         enabled: false,
         conventional_commit_mappings: ConventionalCommitMappings::default(),
-        fallback_label_settings: FallbackLabelSettings::default(),
         detection_strategy: LabelDetectionStrategy::default(),
+        fallback_label_settings: FallbackLabelSettings::default(),
+        keyword_labels: KeywordLabelsConfig::default(),
     };
 
     let config_wrapper = CurrentPullRequestValidationConfiguration {
@@ -1791,8 +1800,9 @@ async fn test_smart_labeling_pipeline_multiple_keywords() {
             feat: vec!["feature".to_string()],
             ..Default::default()
         },
-        fallback_label_settings: FallbackLabelSettings::default(),
         detection_strategy: LabelDetectionStrategy::default(),
+        fallback_label_settings: FallbackLabelSettings::default(),
+        keyword_labels: KeywordLabelsConfig::default(),
     };
 
     let config_wrapper = CurrentPullRequestValidationConfiguration {
@@ -1840,8 +1850,9 @@ async fn test_smart_labeling_pipeline_error_recovery() {
             feat: vec!["feature".to_string()],
             ..Default::default()
         },
-        fallback_label_settings: FallbackLabelSettings::default(),
         detection_strategy: LabelDetectionStrategy::default(),
+        fallback_label_settings: FallbackLabelSettings::default(),
+        keyword_labels: KeywordLabelsConfig::default(),
     };
 
     let config_wrapper = CurrentPullRequestValidationConfiguration {
@@ -1941,17 +1952,18 @@ async fn test_change_type_label_config_validation() {
             feat: vec!["feature".to_string()],
             ..Default::default()
         },
-        fallback_label_settings: FallbackLabelSettings {
-            create_if_missing: true,
-            name_format: "type: {change_type}".to_string(),
-            color_scheme: HashMap::from([("feat".to_string(), "00ff00".to_string())]),
-        },
         detection_strategy: LabelDetectionStrategy {
             exact_match: true,
             prefix_match: false,
             description_match: false,
             common_prefixes: vec![],
         },
+        fallback_label_settings: FallbackLabelSettings {
+            create_if_missing: true,
+            name_format: "type: {change_type}".to_string(),
+            color_scheme: HashMap::from([("feat".to_string(), "00ff00".to_string())]),
+        },
+        keyword_labels: KeywordLabelsConfig::default(),
     };
 
     // Should be valid (at least one detection method enabled)
@@ -1961,13 +1973,14 @@ async fn test_change_type_label_config_validation() {
     let invalid_config = ChangeTypeLabelConfig {
         enabled: true,
         conventional_commit_mappings: ConventionalCommitMappings::default(),
-        fallback_label_settings: FallbackLabelSettings::default(),
         detection_strategy: LabelDetectionStrategy {
             exact_match: false,
             prefix_match: false,
             description_match: false,
             common_prefixes: vec![],
         },
+        fallback_label_settings: FallbackLabelSettings::default(),
+        keyword_labels: KeywordLabelsConfig::default(),
     };
 
     // Should be invalid (no detection methods enabled)
@@ -2053,12 +2066,13 @@ async fn test_configuration_merge_behavior() {
             feat: vec!["feature".to_string()],
             ..Default::default()
         },
+        detection_strategy: LabelDetectionStrategy::default(),
         fallback_label_settings: FallbackLabelSettings {
             create_if_missing: true,
             name_format: "type: {change_type}".to_string(),
             color_scheme: HashMap::from([("feat".to_string(), "00ff00".to_string())]),
         },
-        detection_strategy: LabelDetectionStrategy::default(),
+        keyword_labels: KeywordLabelsConfig::default(),
     };
 
     let repo_config = ChangeTypeLabelConfig {
@@ -2067,17 +2081,18 @@ async fn test_configuration_merge_behavior() {
             feat: vec!["enhancement".to_string()], // Override: different mapping
             ..Default::default()
         },
-        fallback_label_settings: FallbackLabelSettings {
-            create_if_missing: false, // Override: disable fallback creation
-            name_format: "kind: {change_type}".to_string(), // Override: different format
-            color_scheme: HashMap::from([("feat".to_string(), "ff0000".to_string())]), // Override: different color
-        },
         detection_strategy: LabelDetectionStrategy {
             exact_match: false, // Override: disable exact match
             prefix_match: true,
             description_match: true,
             common_prefixes: vec!["category:".to_string()], // Override: different prefixes
         },
+        fallback_label_settings: FallbackLabelSettings {
+            create_if_missing: false, // Override: disable fallback creation
+            name_format: "kind: {change_type}".to_string(), // Override: different format
+            color_scheme: HashMap::from([("feat".to_string(), "ff0000".to_string())]), // Override: different color
+        },
+        keyword_labels: KeywordLabelsConfig::default(),
     };
 
     // In a real merge scenario, repository config would override application config
@@ -3069,5 +3084,255 @@ async fn test_manage_size_labels_removes_all_stale_and_adds_new_when_multiple_si
             .iter()
             .any(|batch| batch.contains(&"size/M".to_string())),
         "size/M must be added"
+    );
+}
+
+// ── Keyword label customisation tests ────────────────────────────────────────
+
+/// Builds a minimal `CurrentPullRequestValidationConfiguration` with a
+/// `ChangeTypeLabelConfig` that carries the supplied `KeywordLabelsConfig`.
+fn make_config_with_keyword_labels(
+    keyword_labels: KeywordLabelsConfig,
+) -> CurrentPullRequestValidationConfiguration {
+    let mut change_type = ChangeTypeLabelConfig::default();
+    change_type.keyword_labels = keyword_labels;
+    CurrentPullRequestValidationConfiguration {
+        change_type_labels: Some(change_type),
+        ..CurrentPullRequestValidationConfiguration::default()
+    }
+}
+
+#[test]
+async fn test_keyword_labels_default_breaking_change_title() {
+    let provider = MockGitProvider::new();
+    let pr = PullRequest {
+        number: 1,
+        title: "feat!: remove deprecated API".to_string(),
+        draft: false,
+        body: Some("Removes the v1 API.".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+
+    // No config → hard-coded default "breaking-change"
+    let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
+        .await
+        .unwrap();
+
+    assert!(
+        labels.contains(&"breaking-change".to_string()),
+        "Expected 'breaking-change' by default; got: {:?}",
+        labels
+    );
+}
+
+#[test]
+async fn test_keyword_labels_custom_breaking_change() {
+    let provider = MockGitProvider::new();
+    let pr = PullRequest {
+        number: 2,
+        title: "feat!: remove deprecated API".to_string(),
+        draft: false,
+        body: Some("Removes the v1 API.".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    let config = make_config_with_keyword_labels(KeywordLabelsConfig {
+        breaking_change: Some("semver-major".to_string()),
+        ..KeywordLabelsConfig::default()
+    });
+
+    let labels =
+        set_pull_request_labels_with_config(&provider, "owner", "repo", &pr, Some(&config))
+            .await
+            .unwrap();
+
+    assert!(
+        labels.contains(&"semver-major".to_string()),
+        "Expected custom 'semver-major'; got: {:?}",
+        labels
+    );
+    assert!(
+        !labels.contains(&"breaking-change".to_string()),
+        "Default 'breaking-change' must not appear when overridden; got: {:?}",
+        labels
+    );
+}
+
+#[test]
+async fn test_keyword_labels_custom_security() {
+    let provider = MockGitProvider::new();
+    let pr = PullRequest {
+        number: 3,
+        title: "fix: patch auth".to_string(),
+        draft: false,
+        body: Some("Fixes a security vulnerability in auth.".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    let config = make_config_with_keyword_labels(KeywordLabelsConfig {
+        security: Some("security-alert".to_string()),
+        ..KeywordLabelsConfig::default()
+    });
+
+    let labels =
+        set_pull_request_labels_with_config(&provider, "owner", "repo", &pr, Some(&config))
+            .await
+            .unwrap();
+
+    assert!(
+        labels.contains(&"security-alert".to_string()),
+        "Expected custom 'security-alert'; got: {:?}",
+        labels
+    );
+    assert!(
+        !labels.contains(&"security".to_string()),
+        "Default 'security' must not appear when overridden; got: {:?}",
+        labels
+    );
+}
+
+#[test]
+async fn test_keyword_labels_custom_hotfix() {
+    let provider = MockGitProvider::new();
+    let pr = PullRequest {
+        number: 4,
+        title: "fix: production outage".to_string(),
+        draft: false,
+        body: Some("This is a hotfix for the production issue.".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    let config = make_config_with_keyword_labels(KeywordLabelsConfig {
+        hotfix: Some("urgent".to_string()),
+        ..KeywordLabelsConfig::default()
+    });
+
+    let labels =
+        set_pull_request_labels_with_config(&provider, "owner", "repo", &pr, Some(&config))
+            .await
+            .unwrap();
+
+    assert!(
+        labels.contains(&"urgent".to_string()),
+        "Expected custom 'urgent'; got: {:?}",
+        labels
+    );
+    assert!(
+        !labels.contains(&"hotfix".to_string()),
+        "Default 'hotfix' must not appear when overridden; got: {:?}",
+        labels
+    );
+}
+
+#[test]
+async fn test_keyword_labels_custom_tech_debt() {
+    let provider = MockGitProvider::new();
+    let pr = PullRequest {
+        number: 5,
+        title: "refactor: clean up module".to_string(),
+        draft: false,
+        body: Some("This addresses some technical debt in the codebase.".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    let config = make_config_with_keyword_labels(KeywordLabelsConfig {
+        tech_debt: Some("cleanup".to_string()),
+        ..KeywordLabelsConfig::default()
+    });
+
+    let labels =
+        set_pull_request_labels_with_config(&provider, "owner", "repo", &pr, Some(&config))
+            .await
+            .unwrap();
+
+    assert!(
+        labels.contains(&"cleanup".to_string()),
+        "Expected custom 'cleanup'; got: {:?}",
+        labels
+    );
+    assert!(
+        !labels.contains(&"tech-debt".to_string()),
+        "Default 'tech-debt' must not appear when overridden; got: {:?}",
+        labels
+    );
+}
+
+#[test]
+async fn test_keyword_labels_empty_string_falls_back_to_default() {
+    let provider = MockGitProvider::new();
+    let pr = PullRequest {
+        number: 6,
+        title: "fix: patch auth".to_string(),
+        draft: false,
+        body: Some("Fixes a security vulnerability.".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+    // Empty string must fall back to built-in default label name.
+    let config = make_config_with_keyword_labels(KeywordLabelsConfig {
+        security: Some(String::new()),
+        ..KeywordLabelsConfig::default()
+    });
+
+    let labels =
+        set_pull_request_labels_with_config(&provider, "owner", "repo", &pr, Some(&config))
+            .await
+            .unwrap();
+
+    assert!(
+        labels.contains(&"security".to_string()),
+        "Empty string must fall back to 'security'; got: {:?}",
+        labels
+    );
+}
+
+#[test]
+async fn test_keyword_labels_no_config_uses_defaults() {
+    // When no config is provided at all the hard-coded defaults apply (existing behaviour).
+    let provider = MockGitProvider::new();
+    let pr = PullRequest {
+        number: 7,
+        title: "fix: urgent".to_string(),
+        draft: false,
+        body: Some("This is a hotfix that addresses technical debt.".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+    };
+
+    let labels = set_pull_request_labels_with_config(&provider, "owner", "repo", &pr, None)
+        .await
+        .unwrap();
+
+    assert!(
+        labels.contains(&"hotfix".to_string()),
+        "Default 'hotfix' must be used when no config provided; got: {:?}",
+        labels
+    );
+    assert!(
+        labels.contains(&"tech-debt".to_string()),
+        "Default 'tech-debt' must be used when no config provided; got: {:?}",
+        labels
     );
 }

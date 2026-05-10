@@ -3,9 +3,9 @@ use crate::{
     config::{
         BypassRule, BypassRules, ChangeTypeLabelConfig, ConventionalCommitMappings,
         CurrentPullRequestValidationConfiguration, FallbackLabelSettings, IssuePropagationConfig,
-        LabelDetectionStrategy, WipCheckConfig, CONVENTIONAL_COMMIT_REGEX, MISSING_WORK_ITEM_LABEL,
-        SIZE_COMMENT_MARKER, TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL, WIP_COMMENT_MARKER,
-        WORK_ITEM_COMMENT_MARKER, WORK_ITEM_REGEX,
+        KeywordLabelsConfig, LabelDetectionStrategy, WipCheckConfig, CONVENTIONAL_COMMIT_REGEX,
+        MISSING_WORK_ITEM_LABEL, SIZE_COMMENT_MARKER, TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL,
+        WIP_COMMENT_MARKER, WORK_ITEM_COMMENT_MARKER, WORK_ITEM_REGEX,
     },
     validation_result::{BypassRuleType, ValidationResult},
     MergeWarden,
@@ -1846,6 +1846,12 @@ async fn test_process_pull_request_smart_label_detection() {
             build: vec!["build".to_string()],
             revert: vec!["revert".to_string()],
         },
+        detection_strategy: LabelDetectionStrategy {
+            exact_match: true,
+            prefix_match: true,
+            description_match: true,
+            common_prefixes: vec!["type:".to_string(), "kind:".to_string()],
+        },
         fallback_label_settings: FallbackLabelSettings {
             name_format: "type: {change_type}".to_string(),
             color_scheme: HashMap::from([
@@ -1854,12 +1860,7 @@ async fn test_process_pull_request_smart_label_detection() {
             ]),
             create_if_missing: true,
         },
-        detection_strategy: LabelDetectionStrategy {
-            exact_match: true,
-            prefix_match: true,
-            description_match: true,
-            common_prefixes: vec!["type:".to_string(), "kind:".to_string()],
-        },
+        keyword_labels: KeywordLabelsConfig::default(),
     };
 
     let config = CurrentPullRequestValidationConfiguration {
@@ -1942,6 +1943,17 @@ async fn test_process_pull_request_smart_label_detection_with_audit_logging() {
             build: vec!["build".to_string(), "build-system".to_string()],
             revert: vec!["revert".to_string(), "rollback".to_string()],
         },
+        detection_strategy: LabelDetectionStrategy {
+            exact_match: true,
+            prefix_match: true,
+            description_match: true,
+            common_prefixes: vec![
+                "type:".to_string(),
+                "kind:".to_string(),
+                "category:".to_string(),
+                "tag:".to_string(),
+            ],
+        },
         fallback_label_settings: FallbackLabelSettings {
             name_format: "type: {change_type}".to_string(),
             color_scheme: HashMap::from([
@@ -1959,17 +1971,7 @@ async fn test_process_pull_request_smart_label_detection_with_audit_logging() {
             ]),
             create_if_missing: true,
         },
-        detection_strategy: LabelDetectionStrategy {
-            exact_match: true,
-            prefix_match: true,
-            description_match: true,
-            common_prefixes: vec![
-                "type:".to_string(),
-                "kind:".to_string(),
-                "category:".to_string(),
-                "tag:".to_string(),
-            ],
-        },
+        keyword_labels: KeywordLabelsConfig::default(),
     };
 
     let config = CurrentPullRequestValidationConfiguration {

@@ -10,8 +10,8 @@
 //! - Special labels based on PR description keywords
 
 use crate::config::{
-    ChangeTypeLabelConfig, CurrentPullRequestValidationConfiguration, PrStateLabelsConfig,
-    CONVENTIONAL_COMMIT_REGEX,
+    ChangeTypeLabelConfig, CurrentPullRequestValidationConfiguration, KeywordLabelsConfig,
+    PrStateLabelsConfig, CONVENTIONAL_COMMIT_REGEX,
 };
 use crate::errors::MergeWardenError;
 use crate::size::{PrSizeCategory, PrSizeInfo};
@@ -264,11 +264,22 @@ pub async fn set_pull_request_labels_with_config<P: PullRequestProvider>(
         }
     }
 
+    // Resolve keyword label names via KeywordLabelsConfig accessors, which apply the
+    // empty-string fallback logic centrally.
+    let default_kw = KeywordLabelsConfig::default();
+    let keyword_labels = config
+        .and_then(|c| c.change_type_labels.as_ref())
+        .map_or(&default_kw, |c| &c.keyword_labels);
+
+    let breaking_change_label = keyword_labels.breaking_change_label().to_string();
+    let security_label = keyword_labels.security_label().to_string();
+    let hotfix_label = keyword_labels.hotfix_label().to_string();
+    let tech_debt_label = keyword_labels.tech_debt_label().to_string();
+
     // Collect additional labels that need to be applied
     let mut additional_labels = Vec::new();
 
     // Check if PR is a breaking change
-    let breaking_change_label = "breaking-change".to_string();
     if pr.title.contains("!:") || pr.title.to_lowercase().contains("breaking change") {
         additional_labels.push(breaking_change_label.clone());
         labels.push(breaking_change_label.clone());
@@ -284,18 +295,18 @@ pub async fn set_pull_request_labels_with_config<P: PullRequestProvider>(
         }
 
         if body_lower.contains("security") || body_lower.contains("vulnerability") {
-            additional_labels.push("security".to_string());
-            labels.push("security".to_string());
+            additional_labels.push(security_label.clone());
+            labels.push(security_label.clone());
         }
 
         if body_lower.contains("hotfix") {
-            additional_labels.push("hotfix".to_string());
-            labels.push("hotfix".to_string());
+            additional_labels.push(hotfix_label.clone());
+            labels.push(hotfix_label.clone());
         }
 
         if body_lower.contains("technical debt") || body_lower.contains("tech debt") {
-            additional_labels.push("tech-debt".to_string());
-            labels.push("tech-debt".to_string());
+            additional_labels.push(tech_debt_label.clone());
+            labels.push(tech_debt_label.clone());
         }
     }
 
