@@ -1481,8 +1481,10 @@ pub async fn load_merge_warden_config(
                 .breaking_change
                 .is_some()
             {
-                merged_change_type_labels.keyword_labels.breaking_change =
-                    repo_change_type_labels.keyword_labels.breaking_change.clone();
+                merged_change_type_labels.keyword_labels.breaking_change = repo_change_type_labels
+                    .keyword_labels
+                    .breaking_change
+                    .clone();
             }
             if repo_change_type_labels.keyword_labels.security.is_some() {
                 merged_change_type_labels.keyword_labels.security =
