@@ -705,6 +705,13 @@ impl Default for CurrentPullRequestValidationConfiguration {
 /// Policies configuration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct PoliciesConfig {
+    /// Bypass rules for policy validation, parsed from the repository's `merge-warden.toml`.
+    ///
+    /// When `Some`, these override the server-level [`ApplicationDefaults::bypass_rules`].
+    /// When `None`, the server-level bypass rules are used as a fallback.
+    #[serde(default, rename = "bypassRules")]
+    pub bypass_rules: Option<BypassRules>,
+
     /// Configuration for pull request validation policies
     #[serde(default, rename = "pullRequests")]
     pub pull_requests: PullRequestsPoliciesConfig,
@@ -884,7 +891,11 @@ impl RepositoryProvidedConfig {
             change_type_labels: self.change_type_labels.clone(),
             wip_check,
             pr_state_labels,
-            bypass_rules: bypass_rules.clone(),
+            bypass_rules: self
+                .policies
+                .bypass_rules
+                .clone()
+                .unwrap_or_else(|| bypass_rules.clone()),
             issue_propagation: pr_policies.issue_propagation.clone(),
             bot_mention: self.bot_mention.clone(),
         }

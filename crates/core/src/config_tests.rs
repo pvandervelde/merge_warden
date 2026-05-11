@@ -181,6 +181,7 @@ fn test_custom_regex_patterns_are_used() {
                 size_policies: PrSizeCheckConfig::default(),
                 ..Default::default()
             },
+            ..Default::default()
         },
         change_type_labels: None,
         ..Default::default()
@@ -438,6 +439,7 @@ fn test_merge_warden_config_to_validation_config_conventional_commits_and_work_i
                 size_policies: PrSizeCheckConfig::default(),
                 ..Default::default()
             },
+            ..Default::default()
         },
         change_type_labels: None,
         ..Default::default()
@@ -474,6 +476,7 @@ fn test_merge_warden_config_to_validation_config_non_conventional_commits() {
                 size_policies: PrSizeCheckConfig::default(),
                 ..Default::default()
             },
+            ..Default::default()
         },
         change_type_labels: None,
         ..Default::default()
@@ -962,6 +965,7 @@ fn test_validation_config_includes_pr_size() {
                 },
                 ..Default::default()
             },
+            ..Default::default()
         },
         change_type_labels: None,
         ..Default::default()
@@ -1089,6 +1093,7 @@ fn test_to_validation_config_preserves_wip_policies() {
                 },
                 ..Default::default()
             },
+            ..Default::default()
         },
         change_type_labels: None,
         ..Default::default()
@@ -1624,5 +1629,265 @@ enabled = true
         kw.breaking_change_label(),
         "breaking",
         "App-default breaking_change label should be used when repo does not override it"
+    );
+}
+
+// ── Bypass-rule precedence tests ──────────────────────────────────────────────
+
+#[test]
+fn test_to_validation_config_uses_repo_bypass_rules_over_server_defaults() {
+    // Repo TOML specifies bypass rules → they should take precedence over whatever
+    // the caller passes in as the server-level defaults.
+    let repo_bypass = BypassRules::new_with_size(
+        BypassRule::new(true, vec!["repo-title-bot".to_string()]),
+        BypassRule::new(true, vec!["repo-workitem-bot".to_string()]),
+        BypassRule::new(true, vec!["repo-size-bot".to_string()]),
+    );
+    let server_bypass = BypassRules::new_with_size(
+        BypassRule::new(true, vec!["server-title-bot".to_string()]),
+        BypassRule::new(true, vec!["server-workitem-bot".to_string()]),
+        BypassRule::new(true, vec!["server-size-bot".to_string()]),
+    );
+
+    let config = RepositoryProvidedConfig {
+        schema_version: 1,
+        policies: PoliciesConfig {
+            bypass_rules: Some(repo_bypass.clone()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let validation = config.to_validation_config(&server_bypass);
+
+    // Repo bypass users are present.
+    assert!(
+        validation
+            .bypass_rules
+            .title_convention()
+            .users()
+            .contains(&"repo-title-bot"),
+        "repo title-bypass user should be present"
+    );
+    assert!(
+        validation
+            .bypass_rules
+            .work_item_convention()
+            .users()
+            .contains(&"repo-workitem-bot"),
+        "repo work-item bypass user should be present"
+    );
+    assert!(
+        validation
+            .bypass_rules
+            .size()
+            .users()
+            .contains(&"repo-size-bot"),
+        "repo size-bypass user should be present"
+    );
+
+    // Server bypass users are NOT used.
+    assert!(
+        !validation
+            .bypass_rules
+            .title_convention()
+            .users()
+            .contains(&"server-title-bot"),
+        "server title-bypass user should not leak into repo config"
+    );
+    assert!(
+        !validation
+            .bypass_rules
+            .work_item_convention()
+            .users()
+            .contains(&"server-workitem-bot"),
+        "server work-item bypass user should not leak into repo config"
+    );
+}
+
+#[test]
+fn test_to_validation_config_falls_back_to_server_bypass_rules_when_repo_has_none() {
+    // Repo TOML does not specify bypass rules (bypass_rules is None) → fall back to
+    // the server-level BypassRules that are passed into to_validation_config.
+    let server_bypass = BypassRules::new_with_size(
+        BypassRule::new(true, vec!["server-title-bot".to_string()]),
+        BypassRule::new(true, vec!["server-workitem-bot".to_string()]),
+        BypassRule::new(true, vec!["server-size-bot".to_string()]),
+    );
+
+    let config = RepositoryProvidedConfig {
+        schema_version: 1,
+        policies: PoliciesConfig {
+            bypass_rules: None,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let validation = config.to_validation_config(&server_bypass);
+
+    assert!(
+        validation
+            .bypass_rules
+            .title_convention()
+            .users()
+            .contains(&"server-title-bot"),
+        "server title-bypass user should be used when repo has no bypass rules"
+    );
+    assert!(
+        validation
+            .bypass_rules
+            .work_item_convention()
+            .users()
+            .contains(&"server-workitem-bot"),
+        "server work-item bypass user should be used when repo has no bypass rules"
+    );
+    assert!(
+        validation
+            .bypass_rules
+            .size()
+            .users()
+            .contains(&"server-size-bot"),
+        "server size-bypass user should be used when repo has no bypass rules"
+    );
+}
+
+#[tokio::test]
+async fn test_load_merge_warden_config_parses_bypass_rules_from_toml() {
+    // Verify that all three bypass-rule sections are parsed from the TOML and
+    // stored on PoliciesConfig.bypass_rules.
+    let toml = r#"schemaVersion = 1
+
+[policies.bypassRules.title_convention]
+enabled = true
+users = ["release-bot", "dependabot[bot]"]
+
+[policies.bypassRules.work_items]
+enabled = true
+users = ["release-bot"]
+
+[policies.bypassRules.size]
+enabled = false
+users = []
+"#;
+
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let app_defaults = ApplicationDefaults::default();
+
+    let config = load_merge_warden_config(
+        "owner",
+        "repo",
+        "merge-warden.toml",
+        &fetcher,
+        &app_defaults,
+    )
+    .await
+    .expect("config should load");
+
+    let bypass = config
+        .policies
+        .bypass_rules
+        .as_ref()
+        .expect("bypass_rules should be Some after parsing the TOML");
+
+    assert!(
+        bypass.title_convention().enabled(),
+        "title_convention bypass should be enabled"
+    );
+    assert_eq!(
+        bypass.title_convention().users(),
+        vec!["release-bot", "dependabot[bot]"],
+        "title_convention bypass users should match TOML"
+    );
+
+    assert!(
+        bypass.work_item_convention().enabled(),
+        "work_items bypass should be enabled"
+    );
+    assert_eq!(
+        bypass.work_item_convention().users(),
+        vec!["release-bot"],
+        "work_items bypass users should match TOML"
+    );
+
+    assert!(!bypass.size().enabled(), "size bypass should be disabled");
+    assert!(
+        bypass.size().users().is_empty(),
+        "size bypass users should be empty"
+    );
+}
+
+#[tokio::test]
+async fn test_to_validation_config_repo_bypass_rules_override_server_level() {
+    // End-to-end: load a TOML that has bypass rules, convert to validation config
+    // using a different set of server-level bypass rules, and verify the TOML rules win.
+    let toml = r#"schemaVersion = 1
+
+[policies.bypassRules.title_convention]
+enabled = true
+users = ["pv-release-regent[bot]"]
+
+[policies.bypassRules.work_items]
+enabled = true
+users = ["pv-release-regent[bot]"]
+
+[policies.bypassRules.size]
+enabled = true
+users = ["pv-release-regent[bot]"]
+"#;
+
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let app_defaults = ApplicationDefaults::default();
+
+    let repo_config = load_merge_warden_config(
+        "owner",
+        "repo",
+        "merge-warden.toml",
+        &fetcher,
+        &app_defaults,
+    )
+    .await
+    .expect("config should load");
+
+    let server_bypass = BypassRules::new_with_size(
+        BypassRule::new(true, vec!["server-only-bot".to_string()]),
+        BypassRule::new(true, vec!["server-only-bot".to_string()]),
+        BypassRule::new(true, vec!["server-only-bot".to_string()]),
+    );
+
+    let validation = repo_config.to_validation_config(&server_bypass);
+
+    assert!(
+        validation
+            .bypass_rules
+            .title_convention()
+            .users()
+            .contains(&"pv-release-regent[bot]"),
+        "TOML title bypass user should be active"
+    );
+    assert!(
+        !validation
+            .bypass_rules
+            .title_convention()
+            .users()
+            .contains(&"server-only-bot"),
+        "server-only bypass user must not appear when repo TOML overrides"
+    );
+
+    assert!(
+        validation
+            .bypass_rules
+            .work_item_convention()
+            .users()
+            .contains(&"pv-release-regent[bot]"),
+        "TOML work-item bypass user should be active"
+    );
+    assert!(
+        validation
+            .bypass_rules
+            .size()
+            .users()
+            .contains(&"pv-release-regent[bot]"),
+        "TOML size bypass user should be active"
     );
 }
