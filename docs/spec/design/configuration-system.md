@@ -74,10 +74,19 @@ security = "security"                 # body contains "security" or "vulnerabili
 hotfix = "hotfix"                     # body contains "hotfix"
 tech_debt = "tech-debt"               # body contains "technical debt" or "tech debt"
 
-[bypass_rules]
-title_validation = ["admin", "release-manager"]
-work_item_validation = ["hotfix-team"]
+[policies.bypassRules.title_convention]
+enabled = true
+users = ["admin", "release-manager"]
+
+[policies.bypassRules.work_items]
+enabled = true
+users = ["hotfix-team"]
 ```
+
+> **Note:** All three bypass sub-sections (`title_convention`, `work_items`, `size`) are
+> optional. A repo that specifies only one category inherits the server-level defaults
+> for the other two. A repo that omits the entire `[policies.bypassRules]` block inherits
+> all server-level defaults.
 
 ### Azure App Configuration
 

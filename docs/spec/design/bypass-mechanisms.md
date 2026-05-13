@@ -237,27 +237,25 @@ impl BypassManager {
 ### Configuration Structure
 
 ```toml
-[bypass_rules]
 # Users who can bypass title validation
-title_validation = ["admin", "release-manager"]
+[policies.bypassRules.title_convention]
+enabled = true
+users = ["admin", "release-manager"]
 
 # Users who can bypass work item validation
-work_item_validation = ["hotfix-team", "admin"]
+[policies.bypassRules.work_items]
+enabled = true
+users = ["hotfix-team", "admin"]
 
 # Users who can bypass size validation
-size_validation = ["architect", "admin"]
-
-# Emergency bypass settings
-[bypass_rules.emergency]
-enabled = false
-allowed_users = ["admin", "on-call-engineer"]
-max_duration_hours = 24
-
-# Custom rule bypasses
-[bypass_rules.custom_rules]
-security_scan = ["security-team", "admin"]
-performance_check = ["performance-team"]
+[policies.bypassRules.size]
+enabled = true
+users = ["architect", "admin"]
 ```
+
+Each sub-section is optional. A repo that specifies only `title_convention` inherits
+the server-level defaults for `work_items` and `size`. A repo that omits the entire
+`[policies.bypassRules]` block inherits all server-level defaults.
 
 ## Bypass Indication System
 
@@ -634,15 +632,16 @@ mod tests {
     async fn test_authorized_user_can_bypass() {
         let bypass_manager = create_bypass_manager_with_config(
             r#"
-            [bypass_rules]
-            title_validation = ["admin"]
+            [policies.bypassRules.title_convention]
+            enabled = true
+            users = ["admin"]
             "#
         );
 
         let user = User { login: "admin".to_string() };
         let pr = create_test_pr();
 
-        let result = bypass_manager.check_bypass(&pr, "title_validation", &user).await;
+        let result = bypass_manager.check_bypass(&pr, "title_convention", &user).await;
         assert!(result.is_some());
 
         let bypass_info = result.unwrap();
@@ -654,15 +653,16 @@ mod tests {
     async fn test_unauthorized_user_cannot_bypass() {
         let bypass_manager = create_bypass_manager_with_config(
             r#"
-            [bypass_rules]
-            title_validation = ["admin"]
+            [policies.bypassRules.title_convention]
+            enabled = true
+            users = ["admin"]
             "#
         );
 
         let user = User { login: "regular-user".to_string() };
         let pr = create_test_pr();
 
-        let result = bypass_manager.check_bypass(&pr, "title_validation", &user).await;
+        let result = bypass_manager.check_bypass(&pr, "title_convention", &user).await;
         assert!(result.is_none());
     }
 
