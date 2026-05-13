@@ -1,7 +1,7 @@
 use crate::config::{
-    BypassRule, BypassRules, ChangeTypeLabelConfig, CurrentPullRequestValidationConfiguration,
-    IssuePropagationConfig, KeywordLabelsConfig, PrSizeCheckConfig, WipCheckConfig,
-    CONVENTIONAL_COMMIT_REGEX, WORK_ITEM_REGEX,
+    BypassRule, BypassRules, BypassRulesConfig, ChangeTypeLabelConfig,
+    CurrentPullRequestValidationConfiguration, IssuePropagationConfig, KeywordLabelsConfig,
+    PrSizeCheckConfig, WipCheckConfig, CONVENTIONAL_COMMIT_REGEX, WORK_ITEM_REGEX,
 };
 use crate::size::SizeThresholds;
 use async_trait::async_trait;
@@ -1636,13 +1636,8 @@ enabled = true
 
 #[test]
 fn test_to_validation_config_uses_repo_bypass_rules_over_server_defaults() {
-    // Repo TOML specifies bypass rules → they should take precedence over whatever
-    // the caller passes in as the server-level defaults.
-    let repo_bypass = BypassRules::new_with_size(
-        BypassRule::new(true, vec!["repo-title-bot".to_string()]),
-        BypassRule::new(true, vec!["repo-workitem-bot".to_string()]),
-        BypassRule::new(true, vec!["repo-size-bot".to_string()]),
-    );
+    // Repo TOML specifies all three bypass rules → each should take precedence over
+    // the corresponding server-level default.
     let server_bypass = BypassRules::new_with_size(
         BypassRule::new(true, vec!["server-title-bot".to_string()]),
         BypassRule::new(true, vec!["server-workitem-bot".to_string()]),
@@ -1652,7 +1647,11 @@ fn test_to_validation_config_uses_repo_bypass_rules_over_server_defaults() {
     let config = RepositoryProvidedConfig {
         schema_version: 1,
         policies: PoliciesConfig {
-            bypass_rules: Some(repo_bypass.clone()),
+            bypass_rules: Some(BypassRulesConfig {
+                title_convention: Some(BypassRule::new(true, vec!["repo-title-bot".to_string()])),
+                work_items: Some(BypassRule::new(true, vec!["repo-workitem-bot".to_string()])),
+                size: Some(BypassRule::new(true, vec!["repo-size-bot".to_string()])),
+            }),
             ..Default::default()
         },
         ..Default::default()
@@ -1702,6 +1701,14 @@ fn test_to_validation_config_uses_repo_bypass_rules_over_server_defaults() {
             .users()
             .contains(&"server-workitem-bot"),
         "server work-item bypass user should not leak into repo config"
+    );
+    assert!(
+        !validation
+            .bypass_rules
+            .size()
+            .users()
+            .contains(&"server-size-bot"),
+        "server size-bypass user should not leak into repo config"
     );
 }
 
@@ -1791,28 +1798,47 @@ users = []
         .expect("bypass_rules should be Some after parsing the TOML");
 
     assert!(
-        bypass.title_convention().enabled(),
+        bypass
+            .title_convention()
+            .expect("title_convention should be Some")
+            .enabled(),
         "title_convention bypass should be enabled"
     );
     assert_eq!(
-        bypass.title_convention().users(),
+        bypass
+            .title_convention()
+            .expect("title_convention should be Some")
+            .users(),
         vec!["release-bot", "dependabot[bot]"],
         "title_convention bypass users should match TOML"
     );
 
     assert!(
-        bypass.work_item_convention().enabled(),
+        bypass
+            .work_item_convention()
+            .expect("work_items should be Some")
+            .enabled(),
         "work_items bypass should be enabled"
     );
     assert_eq!(
-        bypass.work_item_convention().users(),
+        bypass
+            .work_item_convention()
+            .expect("work_items should be Some")
+            .users(),
         vec!["release-bot"],
         "work_items bypass users should match TOML"
     );
 
-    assert!(!bypass.size().enabled(), "size bypass should be disabled");
     assert!(
-        bypass.size().users().is_empty(),
+        !bypass.size().expect("size should be Some").enabled(),
+        "size bypass should be disabled"
+    );
+    assert!(
+        bypass
+            .size()
+            .expect("size should be Some")
+            .users()
+            .is_empty(),
         "size bypass users should be empty"
     );
 }
@@ -1889,5 +1915,71 @@ users = ["pv-release-regent[bot]"]
             .users()
             .contains(&"pv-release-regent[bot]"),
         "TOML size bypass user should be active"
+    );
+}
+
+#[test]
+fn test_to_validation_config_partial_repo_bypass_inherits_server_defaults_for_missing_rules() {
+    // A repo that specifies only the title bypass rule should inherit the server-level
+    // work_items and size bypass rules instead of silently replacing them with defaults.
+    let server_bypass = BypassRules::new_with_size(
+        BypassRule::new(true, vec!["server-title-bot".to_string()]),
+        BypassRule::new(true, vec!["server-workitem-bot".to_string()]),
+        BypassRule::new(true, vec!["server-size-bot".to_string()]),
+    );
+
+    let config = RepositoryProvidedConfig {
+        schema_version: 1,
+        policies: PoliciesConfig {
+            // Only title_convention is specified; work_items and size are absent (None).
+            bypass_rules: Some(BypassRulesConfig {
+                title_convention: Some(BypassRule::new(
+                    true,
+                    vec!["repo-title-only-bot".to_string()],
+                )),
+                work_items: None,
+                size: None,
+            }),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let validation = config.to_validation_config(&server_bypass);
+
+    // Repo-specified title rule wins.
+    assert!(
+        validation
+            .bypass_rules
+            .title_convention()
+            .users()
+            .contains(&"repo-title-only-bot"),
+        "repo title-bypass user should be present"
+    );
+    assert!(
+        !validation
+            .bypass_rules
+            .title_convention()
+            .users()
+            .contains(&"server-title-bot"),
+        "server title-bypass user should be replaced by the repo rule"
+    );
+
+    // Absent work_items and size rules fall back to server defaults.
+    assert!(
+        validation
+            .bypass_rules
+            .work_item_convention()
+            .users()
+            .contains(&"server-workitem-bot"),
+        "server work-item bypass should be inherited when repo does not set work_items"
+    );
+    assert!(
+        validation
+            .bypass_rules
+            .size()
+            .users()
+            .contains(&"server-size-bot"),
+        "server size bypass should be inherited when repo does not set size"
     );
 }

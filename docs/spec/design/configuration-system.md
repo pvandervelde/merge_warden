@@ -79,6 +79,26 @@ title_validation = ["admin", "release-manager"]
 work_item_validation = ["hotfix-team"]
 ```
 
+> **Note:** The TOML key under `[policies]` is `bypassRules` (camelCase). Each
+> sub-section (`title_convention`, `work_items`, `size`) maps directly to the
+> corresponding field name in the Rust `BypassRulesConfig` struct. Only sub-sections
+> that are explicitly present in the TOML take effect; absent sub-sections inherit
+> the server-level defaults. The actual supported paths are:
+>
+> ```toml
+> [policies.bypassRules.title_convention]
+> enabled = true
+> users = ["admin", "release-manager"]
+>
+> [policies.bypassRules.work_items]
+> enabled = true
+> users = ["hotfix-team"]
+>
+> [policies.bypassRules.size]
+> enabled = true
+> users = ["architect"]
+> ```
+
 ### Azure App Configuration
 
 Centralized configuration for operational settings:

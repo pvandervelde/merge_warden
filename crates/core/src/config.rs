@@ -566,6 +566,57 @@ impl BypassRules {
     }
 }
 
+/// Per-repository bypass-rule overrides parsed from `[policies.bypassRules.*]` in
+/// `.github/merge-warden.toml`.
+///
+/// Each sub-field is `Option<BypassRule>`.  When a sub-table is absent from the
+/// repository TOML the field is `None`, and callers fall back to the server-level
+/// default for that rule.  This allows a repo to override individual categories
+/// without silently discarding the server defaults for the others.
+///
+/// # Examples
+///
+/// ```toml
+/// # Override title bypass only; work_items and size inherit server defaults.
+/// [policies.bypassRules.title_convention]
+/// enabled = true
+/// users = ["release-bot"]
+/// ```
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+pub struct BypassRulesConfig {
+    /// Per-repo override for title-convention bypass.
+    /// `None` means the server-level default is used for this rule.
+    #[serde(default)]
+    title_convention: Option<BypassRule>,
+
+    /// Per-repo override for work-item bypass.
+    /// `None` means the server-level default is used for this rule.
+    #[serde(default)]
+    work_items: Option<BypassRule>,
+
+    /// Per-repo override for PR-size bypass.
+    /// `None` means the server-level default is used for this rule.
+    #[serde(default)]
+    size: Option<BypassRule>,
+}
+
+impl BypassRulesConfig {
+    /// Returns the per-repo title-convention bypass rule, if configured.
+    pub fn title_convention(&self) -> Option<&BypassRule> {
+        self.title_convention.as_ref()
+    }
+
+    /// Returns the per-repo work-item bypass rule, if configured.
+    pub fn work_item_convention(&self) -> Option<&BypassRule> {
+        self.work_items.as_ref()
+    }
+
+    /// Returns the per-repo size bypass rule, if configured.
+    pub fn size(&self) -> Option<&BypassRule> {
+        self.size.as_ref()
+    }
+}
+
 /// Configuration for propagating issue metadata to pull requests.
 ///
 /// Both flags default to `false`. Teams that do not use GitHub Milestones or
@@ -705,12 +756,14 @@ impl Default for CurrentPullRequestValidationConfiguration {
 /// Policies configuration
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub struct PoliciesConfig {
-    /// Bypass rules for policy validation, parsed from the repository's `merge-warden.toml`.
+    /// Per-repository bypass-rule overrides parsed from `[policies.bypassRules.*]`.
     ///
-    /// When `Some`, these override the server-level [`ApplicationDefaults::bypass_rules`].
-    /// When `None`, the server-level bypass rules are used as a fallback.
+    /// When `Some`, individual sub-rules that are present override the corresponding
+    /// server-level defaults; sub-rules that are absent inherit the server defaults.
+    /// When `None` (i.e. the entire `bypassRules` section is missing from the TOML),
+    /// all server-level bypass rules are used unchanged.
     #[serde(default, rename = "bypassRules")]
-    pub bypass_rules: Option<BypassRules>,
+    pub bypass_rules: Option<BypassRulesConfig>,
 
     /// Configuration for pull request validation policies
     #[serde(default, rename = "pullRequests")]
@@ -891,11 +944,23 @@ impl RepositoryProvidedConfig {
             change_type_labels: self.change_type_labels.clone(),
             wip_check,
             pr_state_labels,
-            bypass_rules: self
-                .policies
-                .bypass_rules
-                .clone()
-                .unwrap_or_else(|| bypass_rules.clone()),
+            // Merge per-sub-rule: if the repo specified a particular bypass rule,
+            // use it; otherwise fall back to the server-level default for that rule.
+            // This prevents a repo that overrides only one category from silently
+            // discarding the server defaults for the other two categories.
+            bypass_rules: {
+                let repo = self.policies.bypass_rules.as_ref();
+                let effective_title = repo
+                    .and_then(|r| r.title_convention.clone())
+                    .unwrap_or_else(|| bypass_rules.title_convention().clone());
+                let effective_work_items = repo
+                    .and_then(|r| r.work_items.clone())
+                    .unwrap_or_else(|| bypass_rules.work_item_convention().clone());
+                let effective_size = repo
+                    .and_then(|r| r.size.clone())
+                    .unwrap_or_else(|| bypass_rules.size().clone());
+                BypassRules::new_with_size(effective_title, effective_work_items, effective_size)
+            },
             issue_propagation: pr_policies.issue_propagation.clone(),
             bot_mention: self.bot_mention.clone(),
         }
