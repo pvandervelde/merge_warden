@@ -951,13 +951,13 @@ impl RepositoryProvidedConfig {
             bypass_rules: {
                 let repo = self.policies.bypass_rules.as_ref();
                 let effective_title = repo
-                    .and_then(|r| r.title_convention.clone())
+                    .and_then(|r| r.title_convention().cloned())
                     .unwrap_or_else(|| bypass_rules.title_convention().clone());
                 let effective_work_items = repo
-                    .and_then(|r| r.work_items.clone())
+                    .and_then(|r| r.work_item_convention().cloned())
                     .unwrap_or_else(|| bypass_rules.work_item_convention().clone());
                 let effective_size = repo
-                    .and_then(|r| r.size.clone())
+                    .and_then(|r| r.size().cloned())
                     .unwrap_or_else(|| bypass_rules.size().clone());
                 BypassRules::new_with_size(effective_title, effective_work_items, effective_size)
             },
