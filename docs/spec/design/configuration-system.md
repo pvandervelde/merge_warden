@@ -379,8 +379,61 @@ The configuration system maintains backward compatibility for at least two major
 - Regular expression validation for patterns and formats
 - Size limits on configuration files and values
 
+## Configuration Change Validation
+
+When a pull request includes changes to `.github/merge-warden.toml`, Merge Warden validates the
+proposed configuration and posts an informational comment on the PR. This gives authors immediate
+feedback before a broken config reaches the default branch.
+
+### How It Works
+
+1. During `process_pull_request`, the changed-file list is inspected for `.github/merge-warden.toml`.
+2. If the file is present, its content is fetched from the PR head SHA using
+   `ConfigFetcher::fetch_config_at_ref` — not from the default branch.
+3. The content is validated with `validate_config_content(content: &str) -> ConfigValidationOutcome`.
+4. A comment identified by `CONFIG_COMMENT_MARKER` (`<!-- MERGE_WARDEN_CONFIG_CHECK -->`) is
+   added, updated, or removed according to the validation result.
+
+### `ConfigValidationOutcome`
+
+```rust
+pub struct ConfigValidationOutcome {
+    /// Whether the configuration parsed and passed schema validation.
+    pub valid: bool,
+    /// Human-readable error descriptions when `valid` is false.
+    pub errors: Vec<String>,
+}
+```
+
+### Validation Rules Applied
+
+- The TOML content must be parseable as `RepositoryProvidedConfig`.
+- `schema_version` must equal `1` (the only currently supported version).
+- Structural constraints enforced by `serde` deserialization (unknown fields, type mismatches).
+
+### Comment Behaviour
+
+| Scenario | Comment action |
+|---|---|
+| Config is valid, no prior comment | No comment posted |
+| Config is valid, prior failure comment exists | Delete prior comment |
+| Config is invalid, no prior comment | Post failure comment with error list |
+| Config is invalid, prior comment identical | No-op (idempotent) |
+| Config is invalid, prior comment differs | Delete old comment; post fresh comment |
+| PR no longer touches config file | Delete any existing config comment |
+
+### Non-Blocking Guarantee
+
+The config validation result **does not** influence the commit status check conclusion
+(`success`, `neutral`, or `failure`). A PR with an invalid `.github/merge-warden.toml`
+can still be merged. The comment exists to surface the problem early, not to gate the PR.
+
+This matches the existing runtime behaviour: if the file is absent or unreadable on the
+default branch, Merge Warden falls back to application defaults without blocking anything.
+
 ## Related Specifications
 
 - [Validation Engine](./validation-engine.md) - How configuration drives validation behavior
 - [Operations Configuration Management](../operations/configuration-management.md) - Operational configuration procedures
 - [Security Data Protection](../security/data-protection.md) - Secure handling of configuration data
+- [Functional Requirements FR-007](../requirements/functional-requirements.md#fr-007-configuration-change-validation) - Acceptance criteria for this feature
