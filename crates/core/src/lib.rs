@@ -14,13 +14,13 @@
 //! ## Example Usage
 //!
 //! ```rust,no_run
-//! use merge_warden_developer_platforms::PullRequestProvider;
+//! use merge_warden_developer_platforms::{ConfigFetcher, PullRequestProvider};
 //! use merge_warden_core::{
 //!     MergeWarden,
 //!     config::{ BypassRules, CONVENTIONAL_COMMIT_REGEX, CurrentPullRequestValidationConfiguration, MISSING_WORK_ITEM_LABEL, TITLE_INVALID_LABEL, WORK_ITEM_REGEX }};
 //! use anyhow::Result;
 //!
-//! async fn validate_pr<P: PullRequestProvider + std::fmt::Debug>(provider: P) -> Result<()> {
+//! async fn validate_pr<P: PullRequestProvider + ConfigFetcher + std::fmt::Debug>(provider: P) -> Result<()> {
 //!     // Create a MergeWarden instance with default configuration
 //!     let warden = MergeWarden::new(provider);
 //!
@@ -41,7 +41,7 @@
 //! }
 //!
 //! // With custom configuration
-//! async fn validate_pr_custom<P: PullRequestProvider + std::fmt::Debug>(provider: P) -> Result<()> {
+//! async fn validate_pr_custom<P: PullRequestProvider + ConfigFetcher + std::fmt::Debug>(provider: P) -> Result<()> {
 //!     // Create a custom configuration
 //!     let config = CurrentPullRequestValidationConfiguration {
 //!         enforce_title_convention: true,
@@ -69,15 +69,17 @@
 use checks::extract_any_issue_reference;
 use indoc::formatdoc;
 use merge_warden_developer_platforms::models::{Installation, PullRequest, Repository, Review};
-use merge_warden_developer_platforms::{IssueMetadataProvider, PullRequestProvider};
+use merge_warden_developer_platforms::{ConfigFetcher, IssueMetadataProvider, PullRequestProvider};
 
 pub mod checks;
 pub mod config;
 use config::CurrentPullRequestValidationConfiguration;
+use config::CONFIG_COMMENT_MARKER;
 use config::SIZE_COMMENT_MARKER;
 use config::TITLE_COMMENT_MARKER;
 use config::WIP_COMMENT_MARKER;
 use config::WORK_ITEM_COMMENT_MARKER;
+use config::{validate_config_content, ConfigValidationOutcome};
 
 /// Error types and utilities for Merge Warden operations.
 ///
@@ -173,11 +175,11 @@ pub struct WebhookPayload {
 /// # Examples
 ///
 /// ```rust,no_run
-/// use merge_warden_developer_platforms::PullRequestProvider;
+/// use merge_warden_developer_platforms::{ConfigFetcher, PullRequestProvider};
 /// use merge_warden_core::MergeWarden;
 /// use anyhow::Result;
 ///
-/// async fn example<P: PullRequestProvider + std::fmt::Debug>(provider: P) -> Result<()> {
+/// async fn example<P: PullRequestProvider + ConfigFetcher + std::fmt::Debug>(provider: P) -> Result<()> {
 ///     // Create a new MergeWarden instance with default configuration
 ///     let warden = MergeWarden::new(provider);
 ///
@@ -202,7 +204,7 @@ pub struct MergeWarden<P: PullRequestProvider + std::fmt::Debug> {
     issue_provider: Option<Box<dyn IssueMetadataProvider>>,
 }
 
-impl<P: PullRequestProvider + std::fmt::Debug> MergeWarden<P> {
+impl<P: PullRequestProvider + ConfigFetcher + std::fmt::Debug> MergeWarden<P> {
     /// Checks if the PR title follows the Conventional Commits format.
     ///
     /// This is a wrapper around the `checks::check_pr_title` function that returns
@@ -1736,7 +1738,7 @@ Please update the PR body to include a valid work item reference."#;
     /// use anyhow::Result;
     /// use async_trait::async_trait;
     /// use merge_warden_core::MergeWarden;
-    /// use merge_warden_developer_platforms::PullRequestProvider;
+    /// use merge_warden_developer_platforms::{ConfigFetcher, PullRequestProvider};
     /// use merge_warden_developer_platforms::errors::Error;
     /// use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
     ///
@@ -1769,6 +1771,12 @@ Please update the PR body to include a valid work item reference."#;
     ///     # async fn list_pr_reviews(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> { unimplemented!() }
     /// }
     ///
+    /// #[async_trait]
+    /// impl ConfigFetcher for MyProvider {
+    ///     # async fn fetch_config(&self, _: &str, _: &str, _: &str) -> Result<Option<String>, Error> { Ok(None) }
+    ///     # async fn fetch_config_at_ref(&self, _: &str, _: &str, _: &str, _: &str) -> Result<Option<String>, Error> { Ok(None) }
+    /// }
+    ///
     /// fn example() {
     ///     let provider = MyProvider;
     ///     let warden = MergeWarden::new(provider);
@@ -1781,6 +1789,162 @@ Please update the PR body to include a valid work item reference."#;
             provider,
             config: CurrentPullRequestValidationConfiguration::default(),
             issue_provider: None,
+        }
+    }
+
+    /// Posts or removes a configuration validity comment on the pull request.
+    ///
+    /// When the configuration is **valid** any existing `CONFIG_COMMENT_MARKER`
+    /// comments are deleted so the PR is not cluttered with stale warnings.
+    ///
+    /// When the configuration is **invalid** a single comment is posted (or kept
+    /// as-is when it is already up-to-date) describing the validation errors so
+    /// contributors can fix them.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner` - The owner of the repository.
+    /// * `repo_name` - The name of the repository.
+    /// * `pr` - The pull request on which the comment is managed.
+    /// * `outcome` - The result of validating the configuration file content.
+    #[instrument(skip(outcome), fields(valid = outcome.valid))]
+    async fn communicate_config_validity_status(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr: &PullRequest,
+        outcome: &ConfigValidationOutcome,
+    ) {
+        info!(
+            repository_owner = repo_owner,
+            repository = repo_name,
+            pull_request = pr.number,
+            valid = outcome.valid,
+            "Updating pull request config validity comment",
+        );
+
+        // Retrieve all existing config-check comments.
+        let existing_comments: Vec<(u64, String)> = {
+            let comments = self
+                .provider
+                .list_comments(repo_owner, repo_name, pr.number)
+                .await
+                .unwrap_or_default();
+            comments
+                .iter()
+                .filter(|c| c.body.contains(CONFIG_COMMENT_MARKER))
+                .map(|c| (c.id, c.body.clone()))
+                .collect()
+        };
+
+        if outcome.valid {
+            // Configuration is valid — remove all stale warning comments.
+            for (comment_id, _) in &existing_comments {
+                if let Err(e) = self
+                    .provider
+                    .delete_comment(repo_owner, repo_name, *comment_id)
+                    .await
+                {
+                    warn!(
+                        repository_owner = repo_owner,
+                        repository = repo_name,
+                        pull_request = pr.number,
+                        comment_id = comment_id,
+                        error = %e,
+                        "Failed to remove stale config validity comment"
+                    );
+                } else {
+                    info!(
+                        repository_owner = repo_owner,
+                        repository = repo_name,
+                        pull_request = pr.number,
+                        "Removed stale config validity comment"
+                    );
+                }
+            }
+        } else {
+            // Configuration is invalid — build the comment body.
+            let error_lines: String = outcome
+                .errors
+                .iter()
+                .map(|e| format!("- {e}"))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            let comment_body = formatdoc! {"
+                {marker}
+                ⚠️ **Invalid merge-warden configuration**
+
+                The `.github/merge-warden.toml` file introduced in this pull request contains \
+                errors and will not be used if this PR is merged.
+
+                **Errors found:**
+
+                {error_lines}
+
+                Please fix the configuration before merging.",
+                marker = CONFIG_COMMENT_MARKER,
+                error_lines = error_lines,
+            };
+
+            let already_up_to_date =
+                existing_comments.len() == 1 && existing_comments[0].1 == comment_body;
+
+            if already_up_to_date {
+                debug!(
+                    repository_owner = repo_owner,
+                    repository = repo_name,
+                    pull_request = pr.number,
+                    "Config validity comment is already up-to-date; skipping"
+                );
+                return;
+            }
+
+            // Delete stale copies then post a fresh comment.
+            let mut all_deleted = true;
+            for (comment_id, _) in &existing_comments {
+                if self
+                    .provider
+                    .delete_comment(repo_owner, repo_name, *comment_id)
+                    .await
+                    .is_err()
+                {
+                    warn!(
+                        repository_owner = repo_owner,
+                        repository = repo_name,
+                        pull_request = pr.number,
+                        comment_id = comment_id,
+                        "Failed to delete stale config validity comment; skipping re-post"
+                    );
+                    all_deleted = false;
+                }
+            }
+
+            if all_deleted {
+                match self
+                    .provider
+                    .add_comment(repo_owner, repo_name, pr.number, &comment_body)
+                    .await
+                {
+                    Ok(_) => {
+                        info!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr.number,
+                            "Posted config validity error comment"
+                        );
+                    }
+                    Err(e) => {
+                        warn!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr.number,
+                            error = %e,
+                            "Failed to post config validity error comment"
+                        );
+                    }
+                }
+            }
         }
     }
 
@@ -1809,7 +1973,7 @@ Please update the PR body to include a valid work item reference."#;
     /// use async_trait::async_trait;
     /// use merge_warden_core::MergeWarden;
     /// use anyhow::Result;
-    /// use merge_warden_developer_platforms::PullRequestProvider;
+    /// use merge_warden_developer_platforms::{ConfigFetcher, PullRequestProvider};
     /// use merge_warden_developer_platforms::errors::Error;
     /// use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
     ///
@@ -1840,6 +2004,12 @@ Please update the PR body to include a valid work item reference."#;
     ///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
     ///     # async fn list_pr_reviews(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> { unimplemented!() }
+    /// }
+    ///
+    /// #[async_trait]
+    /// impl ConfigFetcher for MyProvider {
+    ///     # async fn fetch_config(&self, _: &str, _: &str, _: &str) -> Result<Option<String>, Error> { Ok(None) }
+    ///     # async fn fetch_config_at_ref(&self, _: &str, _: &str, _: &str, _: &str) -> Result<Option<String>, Error> { Ok(None) }
     /// }
     ///
     /// async fn example() -> Result<()> {
@@ -2053,28 +2223,62 @@ Please update the PR body to include a valid work item reference."#;
             validation_result::ValidationResult::valid()
         };
 
-        // Fetch PR files for size analysis if size checking is enabled
-        let (size_result, pr_files) = if self.config.pr_size_check.enabled {
-            let files = self
+        // Fetch PR files unconditionally — needed for both size analysis and config validation.
+        let pr_files = self
+            .provider
+            .get_pull_request_files(repo_owner, repo_name, pr_number)
+            .await
+            .map_err(|e| {
+                error!(
+                    repository_owner = repo_owner,
+                    repository = repo_name,
+                    pull_request = pr_number,
+                    error = e.to_string(),
+                    "Failed to fetch PR files"
+                );
+                MergeWardenError::GitProviderError("Failed to fetch PR files".to_string())
+            })?;
+
+        // Perform size check when enabled.
+        let size_result = if self.config.pr_size_check.enabled {
+            self.check_pr_size(&pr_files, pr.author.as_ref())
+        } else {
+            validation_result::ValidationResult::valid()
+        };
+
+        // Validate .github/merge-warden.toml when it is part of the PR.
+        const CONFIG_FILE_PATH: &str = ".github/merge-warden.toml";
+        if pr_files.iter().any(|f| f.filename == CONFIG_FILE_PATH) {
+            match self
                 .provider
-                .get_pull_request_files(repo_owner, repo_name, pr_number)
+                .fetch_config_at_ref(repo_owner, repo_name, CONFIG_FILE_PATH, &pr.head_sha)
                 .await
-                .map_err(|e| {
-                    error!(
+            {
+                Ok(Some(content)) => {
+                    let outcome = validate_config_content(&content);
+                    self.communicate_config_validity_status(repo_owner, repo_name, &pr, &outcome)
+                        .await;
+                }
+                Ok(None) => {
+                    // File absent at head SHA — treat as if not changed; no comment.
+                    debug!(
                         repository_owner = repo_owner,
                         repository = repo_name,
                         pull_request = pr_number,
-                        error = e.to_string(),
-                        "Failed to fetch PR files for size analysis"
+                        "Config file not found at head SHA; skipping validation comment"
                     );
-                    MergeWardenError::GitProviderError("Failed to fetch PR files".to_string())
-                })?;
-
-            let result = self.check_pr_size(&files, pr.author.as_ref());
-            (result, Some(files))
-        } else {
-            (validation_result::ValidationResult::valid(), None)
-        };
+                }
+                Err(e) => {
+                    warn!(
+                        repository_owner = repo_owner,
+                        repository = repo_name,
+                        pull_request = pr_number,
+                        error = %e,
+                        "Failed to fetch config file for validation; skipping comment"
+                    );
+                }
+            }
+        }
 
         // Collect bypass information for audit trail
         let mut bypasses_used = Vec::new();
@@ -2116,12 +2320,8 @@ Please update the PR body to include a valid work item reference."#;
 
         // Handle size labeling and comments if size checking is enabled
         let size_message = if self.config.pr_size_check.enabled {
-            if let Some(files) = &pr_files {
-                self.communicate_pr_size_status(repo_owner, repo_name, pr_number, files)
-                    .await
-            } else {
-                String::new()
-            }
+            self.communicate_pr_size_status(repo_owner, repo_name, pr_number, &pr_files)
+                .await
         } else {
             String::new()
         };
@@ -2167,9 +2367,9 @@ Please update the PR body to include a valid work item reference."#;
         // - "neutral" when a draft PR has validation failures (non-blocking — developers
         //   can correct issues before converting to ready-for-review)
         // - "failure" for non-draft PRs with validation failures
-        let should_fail_on_size = if let Some(files) = &pr_files {
+        let should_fail_on_size = if self.config.pr_size_check.enabled {
             let size_info = crate::size::PrSizeInfo::from_files_with_exclusions(
-                files,
+                &pr_files,
                 &self.config.pr_size_check.get_effective_thresholds(),
                 &self.config.pr_size_check.excluded_file_patterns,
                 self.config.pr_size_check.ignore_deletions,
@@ -2324,7 +2524,7 @@ Please update the PR body to include a valid work item reference."#;
     ///         MISSING_WORK_ITEM_LABEL, TITLE_INVALID_LABEL, WORK_ITEM_REGEX
     ///     }
     /// };
-    /// use merge_warden_developer_platforms::PullRequestProvider;
+    /// use merge_warden_developer_platforms::{ConfigFetcher, PullRequestProvider};
     /// use merge_warden_developer_platforms::errors::Error;
     /// use merge_warden_developer_platforms::models::{Comment, Label, PullRequest};
     ///
@@ -2355,6 +2555,12 @@ Please update the PR body to include a valid work item reference."#;
     ///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
     ///     # async fn list_pr_reviews(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> { unimplemented!() }
+    /// }
+    ///
+    /// #[async_trait]
+    /// impl ConfigFetcher for MyProvider {
+    ///     # async fn fetch_config(&self, _: &str, _: &str, _: &str) -> Result<Option<String>, Error> { Ok(None) }
+    ///     # async fn fetch_config_at_ref(&self, _: &str, _: &str, _: &str, _: &str) -> Result<Option<String>, Error> { Ok(None) }
     /// }
     ///
     /// fn example() {

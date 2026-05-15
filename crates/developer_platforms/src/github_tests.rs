@@ -291,6 +291,10 @@ async fn test_get_pull_request_returns_pr_data() {
     assert_eq!(pr.body, Some("This adds a great feature".to_string()));
     assert!(!pr.draft);
     assert_eq!(pr.author.as_ref().unwrap().login, "alice");
+    assert_eq!(
+        pr.head_sha, "abc123",
+        "head_sha must be mapped from head.sha"
+    );
 }
 
 #[tokio::test]
@@ -1579,5 +1583,66 @@ async fn test_milestone_propagation_end_to_end_get_then_set() {
     assert!(
         set_result.is_ok(),
         "set_pull_request_milestone must succeed: {set_result:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// fetch_config_at_ref
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_fetch_config_at_ref_returns_file_content() {
+    use base64::Engine;
+    let server = MockServer::start().await;
+    let content_b64 = base64::engine::general_purpose::STANDARD.encode(b"schema_version = 1\n");
+
+    // GET file contents at a specific git ref (sha passed as ?ref= query param)
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/contents/.github/merge-warden.toml"))
+        .and(wiremock::matchers::query_param("ref", "deadbeef"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "type": "file",
+            "encoding": "base64",
+            "name": "merge-warden.toml",
+            "path": ".github/merge-warden.toml",
+            "content": format!("{}\n", content_b64)
+        })))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .fetch_config_at_ref("owner", "repo", ".github/merge-warden.toml", "deadbeef")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result,
+        Some("schema_version = 1\n".to_string()),
+        "fetch_config_at_ref must return the decoded file content"
+    );
+}
+
+#[tokio::test]
+async fn test_fetch_config_at_ref_returns_none_when_file_absent() {
+    let server = MockServer::start().await;
+
+    // GET file: 404 at this specific ref — file does not exist in the PR branch
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/contents/.github/merge-warden.toml"))
+        .and(wiremock::matchers::query_param("ref", "deadbeef"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("Not Found"))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .fetch_config_at_ref("owner", "repo", ".github/merge-warden.toml", "deadbeef")
+        .await
+        .unwrap();
+
+    assert_eq!(
+        result, None,
+        "fetch_config_at_ref must return None (not an error) when the file is absent at the ref"
     );
 }

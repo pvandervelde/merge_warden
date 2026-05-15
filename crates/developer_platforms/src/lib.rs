@@ -69,6 +69,21 @@ pub trait ConfigFetcher: Sync + Send {
         repo_name: &str,
         path: &str,
     ) -> Result<Option<String>, Error>;
+
+    /// Fetch the content of a configuration file at a specific git ref (commit SHA, branch, tag).
+    ///
+    /// Returns `Ok(Some(content))` if the file exists at that ref, `Ok(None)` if it does not
+    /// exist (HTTP 404), or `Err` on any other failure.
+    ///
+    /// The implementation MUST NOT fall back to the default branch when the ref is not found.
+    /// A 404 response MUST be returned as `Ok(None)`.
+    async fn fetch_config_at_ref(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        path: &str,
+        git_ref: &str,
+    ) -> Result<Option<String>, Error>;
 }
 
 /// Trait for interacting with developer platforms that provide pull requests (e.g., GitHub, GitLab).

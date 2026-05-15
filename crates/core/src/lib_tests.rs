@@ -3,9 +3,10 @@ use crate::{
     config::{
         BypassRule, BypassRules, ChangeTypeLabelConfig, ConventionalCommitMappings,
         CurrentPullRequestValidationConfiguration, FallbackLabelSettings, IssuePropagationConfig,
-        KeywordLabelsConfig, LabelDetectionStrategy, WipCheckConfig, CONVENTIONAL_COMMIT_REGEX,
-        MISSING_WORK_ITEM_LABEL, SIZE_COMMENT_MARKER, TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL,
-        WIP_COMMENT_MARKER, WORK_ITEM_COMMENT_MARKER, WORK_ITEM_REGEX,
+        KeywordLabelsConfig, LabelDetectionStrategy, WipCheckConfig, CONFIG_COMMENT_MARKER,
+        CONVENTIONAL_COMMIT_REGEX, MISSING_WORK_ITEM_LABEL, SIZE_COMMENT_MARKER,
+        TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL, WIP_COMMENT_MARKER, WORK_ITEM_COMMENT_MARKER,
+        WORK_ITEM_REGEX,
     },
     validation_result::{BypassRuleType, ValidationResult},
     MergeWarden,
@@ -100,6 +101,7 @@ impl PullRequestProvider for ErrorMockGitProvider {
                     login: "developer123".to_string(),
                 }),
                 milestone_number: None,
+                head_sha: String::new(),
             })
         }
     }
@@ -210,6 +212,28 @@ impl PullRequestProvider for ErrorMockGitProvider {
         _pr_number: u64,
     ) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> {
         Ok(vec![])
+    }
+}
+
+#[async_trait]
+impl merge_warden_developer_platforms::ConfigFetcher for ErrorMockGitProvider {
+    async fn fetch_config(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _path: &str,
+    ) -> Result<Option<String>, Error> {
+        Ok(None)
+    }
+
+    async fn fetch_config_at_ref(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _path: &str,
+        _git_ref: &str,
+    ) -> Result<Option<String>, Error> {
+        Ok(None)
     }
 }
 
@@ -416,6 +440,28 @@ impl PullRequestProvider for DynamicMockGitProvider {
     }
 }
 
+#[async_trait]
+impl merge_warden_developer_platforms::ConfigFetcher for DynamicMockGitProvider {
+    async fn fetch_config(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _path: &str,
+    ) -> Result<Option<String>, Error> {
+        Ok(None)
+    }
+
+    async fn fetch_config_at_ref(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _path: &str,
+        _git_ref: &str,
+    ) -> Result<Option<String>, Error> {
+        Ok(None)
+    }
+}
+
 // Mock implementation of PullRequestProvider for testing
 #[derive(Debug)]
 struct MockGitProvider {
@@ -601,6 +647,28 @@ impl PullRequestProvider for MockGitProvider {
     }
 }
 
+#[async_trait]
+impl merge_warden_developer_platforms::ConfigFetcher for MockGitProvider {
+    async fn fetch_config(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _path: &str,
+    ) -> Result<Option<String>, Error> {
+        Ok(None)
+    }
+
+    async fn fetch_config_at_ref(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _path: &str,
+        _git_ref: &str,
+    ) -> Result<Option<String>, Error> {
+        Ok(None)
+    }
+}
+
 #[tokio::test]
 async fn test_constructor_new() {
     // Create a mock provider
@@ -667,6 +735,7 @@ async fn test_process_pull_request_valid() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     provider.set_pull_request(pr);
 
@@ -729,6 +798,7 @@ async fn test_process_pull_request_invalid_title() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     provider.set_pull_request(pr);
 
@@ -781,6 +851,7 @@ async fn test_process_pull_request_missing_work_item() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     provider.set_pull_request(pr);
 
@@ -833,6 +904,7 @@ async fn test_process_pull_request_both_invalid() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     provider.set_pull_request(pr);
 
@@ -914,6 +986,7 @@ async fn test_handle_title_validation_invalid_to_valid() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     // Handle title validation with valid title
@@ -958,6 +1031,7 @@ async fn test_process_pull_request_custom_config_disabled_checks() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     provider.set_pull_request(pr); // Create a custom configuration with disabled checks
     let config = CurrentPullRequestValidationConfiguration {
@@ -1068,6 +1142,7 @@ async fn test_process_pull_request_existing_labels_comments() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     provider.set_pull_request(pr);
 
@@ -1136,6 +1211,7 @@ async fn test_process_pull_request_dynamic_provider() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let invalid_pr = PullRequest {
@@ -1148,6 +1224,7 @@ async fn test_process_pull_request_dynamic_provider() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     provider.add_pull_request(valid_pr);
@@ -1311,6 +1388,7 @@ async fn test_handle_work_item_validation_missing_to_present() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     // Handle work item validation with valid work item reference
@@ -1352,6 +1430,7 @@ async fn test_bypass_functionality_with_title_bypass() {
             login: "bypass-user".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     // Add the PR to the mock provider
@@ -1409,6 +1488,7 @@ async fn test_bypass_functionality_with_work_item_bypass() {
             login: "emergency-user".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     // Add the PR to the mock provider
@@ -1466,6 +1546,7 @@ async fn test_bypass_functionality_with_multiple_bypasses() {
             login: "admin-user".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     // Add the PR to the mock provider
@@ -1534,6 +1615,7 @@ async fn test_no_bypass_when_user_not_authorized() {
             login: "regular-user".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     // Add the PR to the mock provider
@@ -1588,6 +1670,7 @@ async fn test_check_status_with_bypass_information() {
             login: "emergency-admin".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     // Add the PR to the mock provider
@@ -1646,6 +1729,7 @@ async fn test_check_status_text_formatting() {
             login: "regular-dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     // Add the PR to the mock provider
@@ -1694,6 +1778,7 @@ async fn test_check_status_bypass_information_formatting() {
             login: "bypass-user".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     // Add the PR to the mock provider
@@ -1763,6 +1848,7 @@ async fn test_check_status_multiple_bypasses_formatting() {
             login: "super-bypass-user".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     // Add the PR to the mock provider
@@ -1827,6 +1913,7 @@ async fn test_process_pull_request_smart_label_detection() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     provider.set_pull_request(pr);
 
@@ -1916,6 +2003,7 @@ async fn test_process_pull_request_smart_label_detection_with_audit_logging() {
             login: "smart-dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     provider.set_pull_request(pr);
 
@@ -2049,6 +2137,7 @@ async fn test_check_wip_status_detects_wip_prefix_in_title() {
         body: Some("Fixes #123".to_string()),
         author: None,
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     assert!(warden.check_wip_status(&pr), "Should detect 'WIP:' prefix");
@@ -2075,6 +2164,7 @@ async fn test_check_wip_status_detects_bracketed_wip_in_title() {
         body: Some("Fixes #456".to_string()),
         author: None,
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     assert!(
@@ -2104,6 +2194,7 @@ async fn test_check_wip_status_returns_false_for_clean_title() {
         body: Some("Fixes #789".to_string()),
         author: None,
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     assert!(
@@ -2134,6 +2225,7 @@ async fn test_check_wip_status_detects_custom_description_pattern() {
         body: Some("DO NOT MERGE: waiting for design approval\nFixes #100".to_string()),
         author: None,
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     assert!(
@@ -2164,6 +2256,7 @@ async fn test_check_wip_status_no_body_with_description_pattern_returns_false() 
         body: None, // No body
         author: None,
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     assert!(
@@ -2189,6 +2282,7 @@ async fn test_process_pull_request_wip_title_returns_wip_detected_true() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     });
 
     let config = CurrentPullRequestValidationConfiguration {
@@ -2226,6 +2320,7 @@ async fn test_process_pull_request_wip_sets_failure_check_status() {
             login: "dev2".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     });
 
     let config = CurrentPullRequestValidationConfiguration {
@@ -2267,6 +2362,7 @@ async fn test_process_pull_request_clean_pr_has_wip_detected_false() {
             login: "dev3".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     });
 
     let config = CurrentPullRequestValidationConfiguration {
@@ -2305,6 +2401,7 @@ async fn test_process_pull_request_wip_blocking_disabled_does_not_flag_wip() {
             login: "dev4".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     });
 
     let config = CurrentPullRequestValidationConfiguration {
@@ -2344,6 +2441,7 @@ async fn test_process_pull_request_wip_bypasses_are_not_applied() {
             login: "release-bot".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     });
 
     let bypass_rule = BypassRule::new(true, vec!["release-bot".to_string()]);
@@ -2383,6 +2481,7 @@ async fn test_communicate_wip_status_adds_comment_when_wip() {
             login: "tester".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     });
 
     let config = CurrentPullRequestValidationConfiguration {
@@ -2401,6 +2500,7 @@ async fn test_communicate_wip_status_adds_comment_when_wip() {
         body: Some("Fixes #1".to_string()),
         author: None,
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     warden
@@ -2433,6 +2533,7 @@ async fn test_communicate_wip_status_removes_comment_when_not_wip() {
             login: "tester2".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     });
 
     // Pre-populate with a WIP comment
@@ -2465,6 +2566,7 @@ async fn test_communicate_wip_status_removes_comment_when_not_wip() {
         body: Some("Fixes #2".to_string()),
         author: None,
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     warden
@@ -2515,6 +2617,7 @@ async fn test_communicate_pr_state_labels_superseded_approval_shows_review_state
             login: "author".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let mut provider = DynamicMockGitProvider::new().with_reviews(reviews);
@@ -2693,6 +2796,7 @@ fn make_pr(body: Option<&str>, milestone_number: Option<u64>) -> PullRequest {
             login: "dev".to_string(),
         }),
         milestone_number,
+        head_sha: String::new(),
     }
 }
 
@@ -3086,6 +3190,7 @@ async fn test_process_pull_request_calls_milestone_propagation_via_issue_provide
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let pr_provider = MockGitProvider::new();
@@ -3140,6 +3245,7 @@ async fn test_process_pull_request_skips_propagation_without_issue_provider() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let pr_provider = MockGitProvider::new();
@@ -3186,6 +3292,7 @@ fn make_pr_for_title_test(number: u64, title: &str) -> PullRequest {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     }
 }
 
@@ -3453,6 +3560,7 @@ async fn test_stale_title_comment_is_replaced_when_diagnosis_changes() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     provider.set_pull_request(pr);
 
@@ -3507,6 +3615,7 @@ async fn test_identical_title_comment_is_not_reposted() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     provider.set_pull_request(pr);
 
@@ -3571,6 +3680,7 @@ async fn test_process_pull_request_draft_with_invalid_title_yields_neutral_check
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     });
 
     let warden = MergeWarden::new(provider);
@@ -3613,6 +3723,7 @@ async fn test_process_pull_request_draft_with_valid_pr_yields_success_check_conc
             login: "dev2".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     });
 
     let warden = MergeWarden::new(provider);
@@ -3820,6 +3931,28 @@ impl merge_warden_developer_platforms::PullRequestProvider for SizeMockGitProvid
     }
 }
 
+#[async_trait]
+impl merge_warden_developer_platforms::ConfigFetcher for SizeMockGitProvider {
+    async fn fetch_config(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _path: &str,
+    ) -> Result<Option<String>, merge_warden_developer_platforms::errors::Error> {
+        Ok(None)
+    }
+
+    async fn fetch_config_at_ref(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _path: &str,
+        _git_ref: &str,
+    ) -> Result<Option<String>, merge_warden_developer_platforms::errors::Error> {
+        Ok(None)
+    }
+}
+
 /// Build a `PullRequestFile` that contributes the given number of changed lines.
 fn make_pr_file(filename: &str, changes: u32) -> PullRequestFile {
     PullRequestFile {
@@ -3859,6 +3992,7 @@ async fn test_identical_size_comment_is_not_reposted_when_pr_remains_oversized()
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     // 600 changes → XXL (oversized with default thresholds where XL threshold = 500).
@@ -3915,6 +4049,7 @@ async fn test_size_comment_is_removed_when_pr_becomes_non_oversized() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     // Start oversized: 600 changes.
@@ -3959,5 +4094,412 @@ async fn test_size_comment_is_removed_when_pr_becomes_non_oversized() {
     assert_eq!(
         count_after_second, 0,
         "size comment must be removed when PR is no longer oversized"
+    );
+}
+
+// ── Config change validation tests ────────────────────────────────────────────
+
+/// A minimal mock provider for config-change validation tests.
+///
+/// Tracks comments written/deleted so we can assert on them after processing.
+#[derive(Debug)]
+struct ConfigCheckMockProvider {
+    pr: PullRequest,
+    pr_files: Vec<merge_warden_developer_platforms::models::PullRequestFile>,
+    /// The value returned by `fetch_config_at_ref`.
+    config_at_ref: Option<Result<Option<String>, merge_warden_developer_platforms::errors::Error>>,
+    comments: Arc<Mutex<Vec<Comment>>>,
+    check_updates: Arc<Mutex<Vec<String>>>,
+}
+
+impl ConfigCheckMockProvider {
+    fn new(pr: PullRequest) -> Self {
+        Self {
+            pr,
+            pr_files: vec![],
+            config_at_ref: None,
+            comments: Arc::new(Mutex::new(vec![])),
+            check_updates: Arc::new(Mutex::new(vec![])),
+        }
+    }
+
+    fn with_config_file(mut self, content: Option<String>) -> Self {
+        use merge_warden_developer_platforms::models::PullRequestFile;
+        self.pr_files.push(PullRequestFile {
+            filename: ".github/merge-warden.toml".to_string(),
+            additions: 1,
+            deletions: 0,
+            changes: 1,
+            status: "added".to_string(),
+        });
+        self.config_at_ref = Some(Ok(content));
+        self
+    }
+
+    fn with_config_fetch_error(mut self) -> Self {
+        use merge_warden_developer_platforms::models::PullRequestFile;
+        self.pr_files.push(PullRequestFile {
+            filename: ".github/merge-warden.toml".to_string(),
+            additions: 1,
+            deletions: 0,
+            changes: 1,
+            status: "added".to_string(),
+        });
+        self.config_at_ref = Some(Err(
+            merge_warden_developer_platforms::errors::Error::ApiError(),
+        ));
+        self
+    }
+
+    fn with_existing_comment(self, body: &str) -> Self {
+        self.comments.lock().unwrap().push(Comment {
+            id: 99,
+            body: body.to_string(),
+            user: User {
+                id: 1,
+                login: "merge-warden".to_string(),
+            },
+        });
+        self
+    }
+
+    fn get_comments(&self) -> Vec<Comment> {
+        self.comments.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl merge_warden_developer_platforms::PullRequestProvider for ConfigCheckMockProvider {
+    async fn get_pull_request(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<PullRequest, merge_warden_developer_platforms::errors::Error> {
+        Ok(self.pr.clone())
+    }
+
+    async fn add_comment(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        comment: &str,
+    ) -> Result<(), merge_warden_developer_platforms::errors::Error> {
+        let mut comments = self.comments.lock().unwrap();
+        let id = comments.len() as u64 + 1;
+        comments.push(Comment {
+            id,
+            body: comment.to_string(),
+            user: User {
+                id: 1,
+                login: "merge-warden".to_string(),
+            },
+        });
+        Ok(())
+    }
+
+    async fn delete_comment(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        comment_id: u64,
+    ) -> Result<(), merge_warden_developer_platforms::errors::Error> {
+        self.comments.lock().unwrap().retain(|c| c.id != comment_id);
+        Ok(())
+    }
+
+    async fn list_comments(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<Vec<Comment>, merge_warden_developer_platforms::errors::Error> {
+        Ok(self.comments.lock().unwrap().clone())
+    }
+
+    async fn add_labels(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        _labels: &[String],
+    ) -> Result<(), merge_warden_developer_platforms::errors::Error> {
+        Ok(())
+    }
+
+    async fn remove_label(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        _label: &str,
+    ) -> Result<(), merge_warden_developer_platforms::errors::Error> {
+        Ok(())
+    }
+
+    async fn list_applied_labels(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<Vec<Label>, merge_warden_developer_platforms::errors::Error> {
+        Ok(vec![])
+    }
+
+    async fn list_available_labels(
+        &self,
+        _owner: &str,
+        _repo: &str,
+    ) -> Result<Vec<Label>, merge_warden_developer_platforms::errors::Error> {
+        Ok(vec![])
+    }
+
+    async fn update_pr_check_status(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+        conclusion: &str,
+        _title: &str,
+        _summary: &str,
+        _text: &str,
+    ) -> Result<(), merge_warden_developer_platforms::errors::Error> {
+        self.check_updates
+            .lock()
+            .unwrap()
+            .push(conclusion.to_string());
+        Ok(())
+    }
+
+    async fn get_pull_request_files(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<
+        Vec<merge_warden_developer_platforms::models::PullRequestFile>,
+        merge_warden_developer_platforms::errors::Error,
+    > {
+        Ok(self.pr_files.clone())
+    }
+
+    async fn list_pr_reviews(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _number: u64,
+    ) -> Result<Vec<Review>, merge_warden_developer_platforms::errors::Error> {
+        Ok(vec![])
+    }
+}
+
+#[async_trait]
+impl merge_warden_developer_platforms::ConfigFetcher for ConfigCheckMockProvider {
+    async fn fetch_config(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _path: &str,
+    ) -> Result<Option<String>, merge_warden_developer_platforms::errors::Error> {
+        Ok(None)
+    }
+
+    async fn fetch_config_at_ref(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _path: &str,
+        _git_ref: &str,
+    ) -> Result<Option<String>, merge_warden_developer_platforms::errors::Error> {
+        match &self.config_at_ref {
+            Some(Ok(content)) => Ok(content.clone()),
+            Some(Err(_)) => Err(merge_warden_developer_platforms::errors::Error::ApiError()),
+            None => Ok(None),
+        }
+    }
+}
+
+/// Helper: build a simple valid PR that will pass title and work-item checks.
+fn make_valid_pr_with_sha(sha: &str) -> PullRequest {
+    PullRequest {
+        number: 1,
+        title: "feat: add new feature".to_string(),
+        draft: false,
+        body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
+        milestone_number: None,
+        head_sha: sha.to_string(),
+    }
+}
+
+#[tokio::test]
+async fn test_config_check_no_comment_when_config_not_in_pr_files() {
+    // When .github/merge-warden.toml is NOT in the PR file list the warden
+    // must NOT post any CONFIG_COMMENT_MARKER comment.
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"));
+    // No config file added → config_at_ref is None → file list is empty.
+
+    let warden = MergeWarden::new(provider);
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    assert!(
+        !comments
+            .iter()
+            .any(|c| c.body.contains(CONFIG_COMMENT_MARKER)),
+        "no config check comment expected when config file is not in PR files"
+    );
+}
+
+#[tokio::test]
+async fn test_config_check_no_comment_when_config_is_valid() {
+    // When the config file is changed but its content is valid, no comment must
+    // be posted and the check conclusion must still be "success".
+    let valid_toml = "schemaVersion = 1";
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"))
+        .with_config_file(Some(valid_toml.to_string()));
+
+    let warden = MergeWarden::new(provider);
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    assert!(
+        !comments
+            .iter()
+            .any(|c| c.body.contains(CONFIG_COMMENT_MARKER)),
+        "no config check comment expected for a valid config file"
+    );
+}
+
+#[tokio::test]
+async fn test_config_check_posts_error_comment_when_config_is_invalid() {
+    // When the config file is changed and its content is invalid, an error
+    // comment bearing CONFIG_COMMENT_MARKER must be posted on the PR.
+    let bad_toml = "not = valid = toml [[[";
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"))
+        .with_config_file(Some(bad_toml.to_string()));
+
+    let warden = MergeWarden::new(provider);
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    let config_comments: Vec<_> = comments
+        .iter()
+        .filter(|c| c.body.contains(CONFIG_COMMENT_MARKER))
+        .collect();
+    assert_eq!(
+        config_comments.len(),
+        1,
+        "exactly one config error comment expected; got: {:?}",
+        comments
+    );
+}
+
+#[tokio::test]
+async fn test_config_check_does_not_affect_check_conclusion() {
+    // Even when the config file is invalid the check conclusion must NOT change
+    // (it must remain "success" for a PR that passes all other validations).
+    let bad_toml = "not = valid = toml [[[";
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"))
+        .with_config_file(Some(bad_toml.to_string()));
+
+    let warden = MergeWarden::new(provider);
+    let result = warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    assert!(
+        result.title_valid,
+        "title_valid must remain true regardless of config validity"
+    );
+    assert!(
+        result.work_item_referenced,
+        "work_item_referenced must remain true regardless of config validity"
+    );
+}
+
+#[tokio::test]
+async fn test_config_check_deletes_stale_comment_when_config_becomes_valid() {
+    // When there is an existing CONFIG_COMMENT_MARKER comment from a previous
+    // run and the config file is now valid, the comment must be deleted.
+    let valid_toml = "schemaVersion = 1";
+    let existing_body = format!("{}\nSome old error", CONFIG_COMMENT_MARKER);
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"))
+        .with_config_file(Some(valid_toml.to_string()))
+        .with_existing_comment(&existing_body);
+
+    let warden = MergeWarden::new(provider);
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let remaining = warden.provider.get_comments();
+    assert!(
+        !remaining
+            .iter()
+            .any(|c| c.body.contains(CONFIG_COMMENT_MARKER)),
+        "stale config error comment must be deleted when config is now valid"
+    );
+}
+
+#[tokio::test]
+async fn test_config_check_no_comment_when_fetch_returns_none() {
+    // When fetch_config_at_ref returns Ok(None) (file absent at head SHA) the
+    // warden must silently skip the check and post no comment.
+    let provider =
+        ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123")).with_config_file(None); // file in PR list but absent at ref
+
+    let warden = MergeWarden::new(provider);
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    assert!(
+        !comments
+            .iter()
+            .any(|c| c.body.contains(CONFIG_COMMENT_MARKER)),
+        "no config check comment expected when file is absent at head SHA"
+    );
+}
+
+#[tokio::test]
+async fn test_config_check_no_comment_when_fetch_returns_error() {
+    // When fetch_config_at_ref returns an error the warden must log a warning
+    // and skip the check — no comment must be posted and the call must not
+    // propagate the error as a hard failure.
+    let provider =
+        ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123")).with_config_fetch_error();
+
+    let warden = MergeWarden::new(provider);
+    let result = warden.process_pull_request("owner", "repo", 1).await;
+
+    // The error must NOT propagate — process_pull_request must succeed.
+    assert!(
+        result.is_ok(),
+        "fetch_config_at_ref error must not propagate as a hard failure"
+    );
+    let comments = warden.provider.get_comments();
+    assert!(
+        !comments
+            .iter()
+            .any(|c| c.body.contains(CONFIG_COMMENT_MARKER)),
+        "no config check comment expected when fetch_config_at_ref fails"
     );
 }

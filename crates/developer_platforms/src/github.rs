@@ -268,6 +268,37 @@ impl ConfigFetcher for GitHubProvider {
         self.fetch_file_content(repo_owner, repo_name, path, &default_branch)
             .await
     }
+
+    /// Fetches the content of a configuration file at a specific git ref.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner` — Repository owner.
+    /// * `repo_name` — Repository name.
+    /// * `path` — Path to the configuration file.
+    /// * `git_ref` — The git ref (commit SHA, branch, or tag) to fetch at.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(Some(content))` if found, `Ok(None)` if not found (404), `Err` on failure.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, path, git_ref))]
+    async fn fetch_config_at_ref(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        path: &str,
+        git_ref: &str,
+    ) -> Result<Option<String>, Error> {
+        info!(
+            owner = repo_owner,
+            repo = repo_name,
+            path,
+            git_ref,
+            "Fetching configuration file at specific git ref"
+        );
+        self.fetch_file_content(repo_owner, repo_name, path, git_ref)
+            .await
+    }
 }
 
 #[async_trait]
@@ -458,6 +489,7 @@ impl PullRequestProvider for GitHubProvider {
                 login: pr.user.login,
             }),
             milestone_number: pr.milestone.as_ref().map(|m| m.number),
+            head_sha: pr.head.sha,
         })
     }
 

@@ -346,6 +346,7 @@ fn test_pull_request_serialization() {
         body: Some("This PR adds a new feature.\n\nFixes #123".to_string()),
         author: None,
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     // Serialize to JSON
@@ -390,6 +391,7 @@ fn test_pull_request_with_author_serialization() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     // Serialize to JSON
@@ -414,6 +416,7 @@ fn test_pull_request_without_author() {
         body: Some("Updated documentation".to_string()),
         author: None,
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     // Serialize to JSON
@@ -442,6 +445,7 @@ fn test_pull_request_without_body() {
         body: None,
         author: None,
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     // Serialize to JSON
