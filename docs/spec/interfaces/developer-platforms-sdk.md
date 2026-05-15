@@ -182,3 +182,114 @@ github-bot-sdk = { git = "https://github.com/pvandervelde/github-bot-sdk", branc
    cannot refresh; the error must include the installation ID.
 4. The removed free functions (`authenticate_with_access_token`, `create_app_client`)
    must not appear in any `pub use` or public re-export after migration.
+
+---
+
+## FR-007 Additions
+
+The following changes are required by
+[FR-007 (Configuration Change Validation)](../requirements/functional-requirements.md#fr-007-configuration-change-validation).
+They extend existing types rather than introducing new ones.
+
+### `models::PullRequest` — new field `head_sha`
+
+```rust
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PullRequest {
+    pub number: u64,
+    pub title: String,
+    pub draft: bool,
+    pub body: Option<String>,
+    pub author: Option<User>,
+    #[serde(default)]
+    pub milestone_number: Option<u64>,
+
+    /// SHA of the head commit for this pull request.
+    ///
+    /// Used by [`core`] to fetch files at the exact revision being reviewed
+    /// rather than the default branch.  Populated from `pull_request.head.sha`
+    /// in GitHub webhook payloads and API responses.
+    ///
+    /// Mapped from the GitHub API field `head.sha` inside the pull request object.
+    pub head_sha: String,
+}
+```
+
+All existing construction sites (`github.rs`, test fixtures, integration tests) must
+supply this field.  The GitHub API response for a pull request always includes
+`head.sha`; a missing or empty value should be treated as an API error.
+
+### `ConfigFetcher` trait — new method `fetch_config_at_ref`
+
+```rust
+/// Trait to fetch configuration files from remote repositories.
+#[async_trait]
+pub trait ConfigFetcher: Sync + Send {
+    /// Fetch the content of a configuration file at the given path from the
+    /// repository's default branch.
+    ///
+    /// Returns `Ok(Some(content))` if found, `Ok(None)` if not found, or `Err` on
+    /// error.
+    async fn fetch_config(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        path: &str,
+    ) -> Result<Option<String>, Error>;
+
+    /// Fetch the content of a configuration file at `path` as it exists at
+    /// `git_ref` (a branch name, tag, or commit SHA).
+    ///
+    /// This is used by `core` to read the proposed version of
+    /// `.github/merge-warden.toml` from the PR head SHA rather than the
+    /// default branch.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner` — Repository owner.
+    /// * `repo_name`  — Repository name.
+    /// * `path`       — Path to the configuration file relative to the
+    ///                  repository root.
+    /// * `git_ref`    — Branch name, tag, or commit SHA to read from.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(Some(content))` if the file exists at the given ref,
+    /// `Ok(None)` if the file is absent (HTTP 404), or `Err` for any other
+    /// API failure.
+    async fn fetch_config_at_ref(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        path: &str,
+        git_ref: &str,
+    ) -> Result<Option<String>, Error>;
+}
+```
+
+#### `GitHubProvider` implementation
+
+`GitHubProvider` already contains the private helper
+`fetch_file_content(owner, repo, path, reference) -> Result<Option<String>, Error>`.
+The implementation is a one-line delegation:
+
+```rust
+async fn fetch_config_at_ref(
+    &self,
+    repo_owner: &str,
+    repo_name: &str,
+    path: &str,
+    git_ref: &str,
+) -> Result<Option<String>, Error> {
+    self.fetch_file_content(repo_owner, repo_name, path, git_ref).await
+}
+```
+
+#### Behavioral postconditions for `fetch_config_at_ref`
+
+1. `Ok(None)` must be returned when the file does not exist at `git_ref` (HTTP 404).
+   It must not be treated as an error.
+2. An `Err` must be returned for all non-404 API failures (permission denied, rate
+   limit, server error, etc.).
+3. The method must not fall back to the default branch when `git_ref` is not found —
+   that would silently return stale content.

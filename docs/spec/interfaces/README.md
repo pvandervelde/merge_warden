@@ -8,9 +8,17 @@ behavioral postconditions for a bounded area of the codebase.
 
 ### [developer-platforms-sdk.md](./developer-platforms-sdk.md)
 
-Contracts for the `developer_platforms` crate changes required by the **github-bot-sdk
-migration** (task 1.0). Covers the updated `GitHubProvider` constructor, new error
-variants, and the `EventEnvelope` type origin decision.
+Contracts for the `developer_platforms` crate. Covers the **github-bot-sdk migration**
+(task 1.0) — updated `GitHubProvider` constructor, new error variants, and the
+`EventEnvelope` type origin decision — and the **FR-007 additions**: the new
+`PullRequest.head_sha` field and the `ConfigFetcher::fetch_config_at_ref` method.
+
+### [core-config-validation.md](./core-config-validation.md)
+
+Contracts for the `core` crate additions required by
+**FR-007 (Configuration Change Validation)**. Covers `CONFIG_COMMENT_MARKER`,
+`ConfigValidationOutcome`, `validate_config_content`, the updated `MergeWarden<P>`
+trait bound, and the private `communicate_config_validity_status` method.
 
 ### [server-config.md](./server-config.md)
 
@@ -29,8 +37,14 @@ the **queue-based webhook processing** (task 3.0). Covers `EventIngress`,
 
 ```
 developer-platforms-sdk.md
+  └── defines PullRequest.head_sha, ConfigFetcher::fetch_config_at_ref (FR-007)
   └── defines EventEnvelope (placeholder → SDK type in task 1.0)
         └── used in server-ingress.md (ProcessableEvent.envelope)
+
+core-config-validation.md
+  └── depends on ConfigFetcher::fetch_config_at_ref  (developer-platforms-sdk.md)
+  └── depends on PullRequest.head_sha               (developer-platforms-sdk.md)
+  └── defines ConfigValidationOutcome, validate_config_content
 
 server-config.md
   └── defines ServerConfig, ReceiverMode, QueueServerConfig
@@ -43,13 +57,11 @@ server-ingress.md
 
 ## Source Code Stubs
 
-The corresponding Rust stubs live in `crates/server/src/`:
+The corresponding Rust stubs live in `crates/`:
 
 | Spec document | Source file |
 |---|---|
+| developer-platforms-sdk.md | `crates/developer_platforms/src/lib.rs` (ConfigFetcher trait), `crates/developer_platforms/src/models.rs` (PullRequest), `crates/developer_platforms/src/github.rs` (GitHubProvider impl), `crates/developer_platforms/src/errors.rs` |
+| core-config-validation.md | `crates/core/src/config.rs`, `crates/core/src/lib.rs` |
 | server-config.md | `crates/server/src/config.rs`, `crates/server/src/errors.rs`, `crates/server/src/telemetry.rs` |
 | server-ingress.md | `crates/server/src/ingress.rs` |
-| developer-platforms-sdk.md | `crates/server/src/webhook.rs`, `crates/developer_platforms/src/errors.rs` |
-
-All stubs compile under `cargo check`. Method and function bodies use `todo!()` with
-a reference to the relevant spec document.
