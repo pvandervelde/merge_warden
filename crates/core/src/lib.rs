@@ -2286,7 +2286,10 @@ Please update the PR body to include a valid work item reference."#;
                             errors: vec![],
                         };
                         self.communicate_config_validity_status(
-                            repo_owner, repo_name, &pr, &valid_outcome,
+                            repo_owner,
+                            repo_name,
+                            &pr,
+                            &valid_outcome,
                         )
                         .await;
                     }

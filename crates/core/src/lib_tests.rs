@@ -4553,3 +4553,59 @@ async fn test_config_check_no_comment_when_fetch_returns_error() {
         "no config check comment expected when fetch_config_at_ref fails"
     );
 }
+
+#[tokio::test]
+async fn test_config_check_no_repost_when_error_comment_unchanged() {
+    // Pre-seed a CONFIG_COMMENT_MARKER comment whose body exactly matches what
+    // communicate_config_validity_status would post for schemaVersion = 99.
+    // The warden must detect the body is unchanged (already_up_to_date) and
+    // NOT delete + re-post the comment.
+    //
+    // We distinguish "skipped" from "deleted + re-posted" by checking the comment
+    // ID: the pre-seeded comment has id=99; if the shortcut were bypassed the
+    // comment would be deleted then re-added with id=1.
+    use indoc::formatdoc;
+
+    let bad_toml = "schemaVersion = 99";
+    let error_lines = "- schemaVersion must be 1, found 99";
+    let expected_body = formatdoc! {"
+        {marker}
+        ⚠️ **Invalid merge-warden configuration**
+
+        The `.github/merge-warden.toml` file introduced in this pull request contains \
+        errors and will not be used if this PR is merged.
+
+        **Errors found:**
+
+        {error_lines}
+
+        Please fix the configuration before merging.",
+        marker = CONFIG_COMMENT_MARKER,
+        error_lines = error_lines,
+    };
+
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"))
+        .with_config_file(Some(bad_toml.to_string()))
+        .with_existing_comment(&expected_body);
+
+    let warden = MergeWarden::new(provider);
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    let config_comments: Vec<_> = comments
+        .iter()
+        .filter(|c| c.body.contains(CONFIG_COMMENT_MARKER))
+        .collect();
+    assert_eq!(
+        config_comments.len(),
+        1,
+        "exactly one config check comment must remain after processing"
+    );
+    assert_eq!(
+        config_comments[0].id, 99,
+        "comment must not have been deleted and re-posted; id=99 must be preserved"
+    );
+}
