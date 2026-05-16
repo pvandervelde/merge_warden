@@ -6,6 +6,11 @@
 # Install specific dependencies required to build application
 # Here libssl-dev is required to build openssl crate
 #
+[target.x86_64-unknown-linux-gnu]
+pre-build = [
+    "apt-get update && apt-get install --assume-yes libssl-dev",
+]
+
 [target.x86_64-unknown-linux-musl]
 pre-build = [
     "dpkg --add-architecture amd64",
