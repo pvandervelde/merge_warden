@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.5.0] - 2026-05-07
 
+### <!-- 0 -->⛰️  Features
+
+- Config change validation: when `.github/merge-warden.toml` appears in a PR's
+  changed files, fetch it at the PR's head SHA, validate TOML syntax and
+  `schemaVersion`, and post/update/delete an informational comment on the PR.
+  Validation is purely informational and never affects the check conclusion.
+
 ### <!-- 1 -->🐛 Bug Fixes
 
 - Replace /api/merge_warden with /health and /api/github/webhook ([#235](https://github.com/pvandervelde/merge_warden/issues/235))
@@ -15,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### <!-- 2 -->🚜 Refactor
 
 - Split health and webhook onto separate, conventional routes
+
+### <!-- 3 -->⚠️ Breaking Changes
+
+- `ConfigFetcher` trait (in `merge_warden_developer_platforms`) gains a new required
+  method `fetch_config_at_ref(&self, owner, repo, path, git_ref)`.  Any external crate
+  that implements `ConfigFetcher` must add this method.  The `GitHubProvider` bundled
+  with this crate already implements it.
 
 ### <!-- 6 -->🧪 Testing
 

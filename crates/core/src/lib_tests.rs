@@ -4459,8 +4459,8 @@ async fn test_config_check_deletes_stale_comment_when_config_becomes_valid() {
 
 #[tokio::test]
 async fn test_config_check_no_comment_when_fetch_returns_none() {
-    // When fetch_config_at_ref returns Ok(None) (file absent at head SHA) the
-    // warden must silently skip the check and post no comment.
+    // When fetch_config_at_ref returns Ok(None) (file absent at head SHA) and there is no
+    // pre-existing CONFIG_COMMENT_MARKER comment, the warden must not post a new comment.
     let provider =
         ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123")).with_config_file(None); // file in PR list but absent at ref
 
@@ -4475,7 +4475,57 @@ async fn test_config_check_no_comment_when_fetch_returns_none() {
         !comments
             .iter()
             .any(|c| c.body.contains(CONFIG_COMMENT_MARKER)),
-        "no config check comment expected when file is absent at head SHA"
+        "no config check comment expected when file is absent at head SHA and no stale comment exists"
+    );
+}
+
+#[tokio::test]
+async fn test_config_check_deletes_stale_comment_when_config_file_deleted() {
+    // When fetch_config_at_ref returns Ok(None) (e.g., config file was deleted in this PR)
+    // any stale error comment from a previous push must be cleaned up.
+    let stale_comment = format!(
+        "{}\n⚠️ **Invalid merge-warden configuration**\nold error",
+        CONFIG_COMMENT_MARKER
+    );
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"))
+        .with_config_file(None) // file in PR list but absent at ref
+        .with_existing_comment(&stale_comment);
+
+    let warden = MergeWarden::new(provider);
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    assert!(
+        !comments
+            .iter()
+            .any(|c| c.body.contains(CONFIG_COMMENT_MARKER)),
+        "stale config check comment must be deleted when config file is absent at head SHA"
+    );
+}
+
+#[tokio::test]
+async fn test_config_check_skips_validation_when_head_sha_empty() {
+    // When the PR's head_sha is empty the warden must skip config validation entirely —
+    // no fetch call, no comment posted.  We use invalid config content so that if the
+    // guard is missing and the fetch happens, an error comment would be posted.
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha(""))
+        .with_config_file(Some("schemaVersion = 99".to_string())); // invalid if fetched
+
+    let warden = MergeWarden::new(provider);
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    assert!(
+        !comments
+            .iter()
+            .any(|c| c.body.contains(CONFIG_COMMENT_MARKER)),
+        "no config check comment must be posted when head_sha is empty"
     );
 }
 

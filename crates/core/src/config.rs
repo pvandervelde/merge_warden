@@ -50,6 +50,13 @@ pub const KEYWORD_LABEL_COMMENT_MARKER: &str = "<!-- MERGE_WARDEN_KEYWORD_LABEL:
 /// validation comments so that only one such comment exists on a PR at any time.
 pub const CONFIG_COMMENT_MARKER: &str = "<!-- MERGE_WARDEN_CONFIG_CHECK -->";
 
+/// Path to the repository-provided merge-warden configuration file.
+///
+/// When a PR touches this file, Merge Warden fetches and validates its content and
+/// posts an informational comment on the PR.  The comment is purely informational
+/// and never affects the check conclusion.
+pub const CONFIG_FILE_PATH: &str = ".github/merge-warden.toml";
+
 /// The outcome of validating the content of a repository-provided configuration file.
 ///
 /// This type is returned by [`validate_config_content`] and carries both a boolean
@@ -68,14 +75,28 @@ pub struct ConfigValidationOutcome {
 /// Validates the content of a merge-warden configuration file.
 ///
 /// Parses `content` as TOML into a [`RepositoryProvidedConfig`] and then applies
-/// semantic validation rules.  Returns a [`ConfigValidationOutcome`] that indicates
+/// schema validation rules.  Returns a [`ConfigValidationOutcome`] that indicates
 /// whether the configuration is valid and, if not, lists the reasons why.
 ///
-/// # Validation rules
+/// # Validation scope
+///
+/// Validation is currently limited to:
 ///
 /// 1. The content must be valid TOML that can be deserialized into
 ///    [`RepositoryProvidedConfig`].
 /// 2. The `schemaVersion` field must equal `1`.
+///
+/// Semantic validation (e.g., verifying that label names, regex patterns, or other
+/// field values are meaningful) is **out of scope** for this function.  Callers
+/// should not rely on this function to catch application-level misconfiguration.
+///
+/// # Error message format
+///
+/// When TOML parsing fails, the error message is taken directly from the [`toml`]
+/// crate.  The exact wording and structure of those messages is an implementation
+/// detail of the `toml` crate and **may change** across versions.  Callers that
+/// display these messages to end-users (e.g., in PR comments) should treat them as
+/// opaque, human-readable strings rather than parsing them programmatically.
 ///
 /// # Examples
 ///

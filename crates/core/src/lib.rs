@@ -79,7 +79,7 @@ use config::SIZE_COMMENT_MARKER;
 use config::TITLE_COMMENT_MARKER;
 use config::WIP_COMMENT_MARKER;
 use config::WORK_ITEM_COMMENT_MARKER;
-use config::{validate_config_content, ConfigValidationOutcome};
+use config::{validate_config_content, ConfigValidationOutcome, CONFIG_FILE_PATH};
 
 /// Error types and utilities for Merge Warden operations.
 ///
@@ -2223,7 +2223,10 @@ Please update the PR body to include a valid work item reference."#;
             validation_result::ValidationResult::valid()
         };
 
-        // Fetch PR files unconditionally — needed for both size analysis and config validation.
+        // Fetch PR files unconditionally — needed for both size analysis and config
+        // validation.  This is an intentional trade-off: one extra API call is made per
+        // PR event regardless of whether `pr_size_check` is enabled, in order to support
+        // the config-change validation path without complicating the control flow.
         let pr_files = self
             .provider
             .get_pull_request_files(repo_owner, repo_name, pr_number)
@@ -2247,35 +2250,55 @@ Please update the PR body to include a valid work item reference."#;
         };
 
         // Validate .github/merge-warden.toml when it is part of the PR.
-        const CONFIG_FILE_PATH: &str = ".github/merge-warden.toml";
         if pr_files.iter().any(|f| f.filename == CONFIG_FILE_PATH) {
-            match self
-                .provider
-                .fetch_config_at_ref(repo_owner, repo_name, CONFIG_FILE_PATH, &pr.head_sha)
-                .await
-            {
-                Ok(Some(content)) => {
-                    let outcome = validate_config_content(&content);
-                    self.communicate_config_validity_status(repo_owner, repo_name, &pr, &outcome)
+            if pr.head_sha.is_empty() {
+                warn!(
+                    repository_owner = repo_owner,
+                    repository = repo_name,
+                    pull_request = pr_number,
+                    "head_sha is empty; skipping config file validation"
+                );
+            } else {
+                match self
+                    .provider
+                    .fetch_config_at_ref(repo_owner, repo_name, CONFIG_FILE_PATH, &pr.head_sha)
+                    .await
+                {
+                    Ok(Some(content)) => {
+                        let outcome = validate_config_content(&content);
+                        self.communicate_config_validity_status(
+                            repo_owner, repo_name, &pr, &outcome,
+                        )
                         .await;
-                }
-                Ok(None) => {
-                    // File absent at head SHA — treat as if not changed; no comment.
-                    debug!(
-                        repository_owner = repo_owner,
-                        repository = repo_name,
-                        pull_request = pr_number,
-                        "Config file not found at head SHA; skipping validation comment"
-                    );
-                }
-                Err(e) => {
-                    warn!(
-                        repository_owner = repo_owner,
-                        repository = repo_name,
-                        pull_request = pr_number,
-                        error = %e,
-                        "Failed to fetch config file for validation; skipping comment"
-                    );
+                    }
+                    Ok(None) => {
+                        // File absent at head SHA — the config file was likely deleted in
+                        // this PR.  Treat as valid (no config to check) and clean up any
+                        // stale error comment left from a previous push.
+                        debug!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr_number,
+                            "Config file not found at head SHA; cleaning up stale comment"
+                        );
+                        let valid_outcome = ConfigValidationOutcome {
+                            valid: true,
+                            errors: vec![],
+                        };
+                        self.communicate_config_validity_status(
+                            repo_owner, repo_name, &pr, &valid_outcome,
+                        )
+                        .await;
+                    }
+                    Err(e) => {
+                        warn!(
+                            repository_owner = repo_owner,
+                            repository = repo_name,
+                            pull_request = pr_number,
+                            error = %e,
+                            "Failed to fetch config file for validation; skipping comment"
+                        );
+                    }
                 }
             }
         }
