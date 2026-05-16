@@ -67,6 +67,11 @@
       test/bypass-title-user         — invalid title but author is in bypass list
       test/bypass-workitem-user      — missing work item but author is in bypass list
 
+    Config change validation (.github/merge-warden.toml)
+      test/config-valid-update       — valid config change → no CONFIG_COMMENT_MARKER comment
+      test/config-invalid-schema     — schemaVersion = 2 → error comment posted
+      test/config-invalid-syntax     — malformed TOML → error comment posted
+
 .PARAMETER Org
     GitHub organisation name where the repository will be created.
 
@@ -956,6 +961,96 @@ Expected result: work-item validation is skipped; no missing-work-item label.
 "@ `
         -PrTitle 'chore: bypass work-item check test' `
         -PrBody  'This PR has no issue reference but the author is bypassed.'
+
+    # ======================================================================
+    # CONFIG CHANGE VALIDATION scenarios
+    # ======================================================================
+    Write-Step 'Creating config-change-validation branches'
+
+    # Valid config update — merge-warden must NOT post a config error comment.
+    New-TestBranch `
+        -BranchName    'test/config-valid-update' `
+        -CommitMessage 'chore: update merge-warden config (valid schemaVersion 1)' `
+        -FileName      '.github/merge-warden.toml' `
+        -FileContent   @'
+schemaVersion = 1
+
+[policies.pullRequests.prTitle]
+required = true
+label_if_missing = "pr-issue: invalid-title-format"
+
+[policies.pullRequests.workItem]
+required = true
+label_if_missing = "pr-issue: missing-work-item"
+
+[policies.pullRequests.prSize]
+enabled = true
+fail_on_oversized = true
+excluded_file_patterns = ["*.md", "*.txt", "docs/*"]
+label_prefix = "size: "
+add_comment = true
+
+[policies.pullRequests.wip]
+enforce_wip_blocking = true
+wip_label = "status: work-in-progress"
+wip_title_patterns = ["WIP", "wip:", "[wip]", "draft:", "Draft:"]
+wip_description_patterns = []
+
+[policies.pullRequests.issuePropagation]
+sync_milestone_from_issue = true
+sync_project_from_issue = true
+
+[policies.pullRequests.prState]
+enabled = true
+draft_label    = "status: draft"
+review_label   = "status: in-review"
+approved_label = "status: approved"
+'@ `
+        -PrTitle 'chore: tighten config — fail on oversized PRs' `
+        -PrBody  'fixes #1'
+
+    # Invalid config — schemaVersion is 2 (only 1 is supported).
+    # merge-warden must post a CONFIG_COMMENT_MARKER comment with the error.
+    New-TestBranch `
+        -BranchName    'test/config-invalid-schema' `
+        -CommitMessage 'chore: update merge-warden config (wrong schemaVersion)' `
+        -FileName      '.github/merge-warden.toml' `
+        -FileContent   @'
+schemaVersion = 2
+
+[policies.pullRequests.prTitle]
+required = true
+label_if_missing = "pr-issue: invalid-title-format"
+'@ `
+        -PrTitle 'chore: bump merge-warden config to schemaVersion 2' `
+        -PrBody  @"
+fixes #1
+
+This PR intentionally sets schemaVersion = 2 to verify that merge-warden
+posts an informational error comment on the PR.
+Expected result: CONFIG_COMMENT_MARKER comment posted; check conclusion unaffected.
+"@
+
+    # Invalid config — TOML parse error (unclosed table header).
+    # merge-warden must post a CONFIG_COMMENT_MARKER comment with the TOML error.
+    New-TestBranch `
+        -BranchName    'test/config-invalid-syntax' `
+        -CommitMessage 'chore: update merge-warden config (broken TOML syntax)' `
+        -FileName      '.github/merge-warden.toml' `
+        -FileContent   @'
+schemaVersion = 1
+
+[policies.pullRequests.prTitle
+required = true
+'@ `
+        -PrTitle 'chore: introduce syntax error in merge-warden config' `
+        -PrBody  @"
+fixes #1
+
+This PR intentionally breaks the TOML syntax in .github/merge-warden.toml to
+verify that merge-warden posts an informational error comment on the PR.
+Expected result: CONFIG_COMMENT_MARKER comment posted; check conclusion unaffected.
+"@
 
     # ======================================================================
     # Summary
