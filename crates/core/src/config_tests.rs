@@ -1,3 +1,4 @@
+use crate::config::{validate_config_content, ConfigValidationOutcome};
 use crate::config::{
     BypassRule, BypassRules, BypassRulesConfig, ChangeTypeLabelConfig,
     CurrentPullRequestValidationConfiguration, IssuePropagationConfig, KeywordLabelsConfig,
@@ -28,6 +29,16 @@ impl ConfigFetcher for MockFetcher {
         _repo_owner: &str,
         _repo_name: &str,
         _path: &str,
+    ) -> Result<Option<String>, Error> {
+        Ok(self.config_text.clone())
+    }
+
+    async fn fetch_config_at_ref(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _path: &str,
+        _git_ref: &str,
     ) -> Result<Option<String>, Error> {
         Ok(self.config_text.clone())
     }
@@ -1982,4 +1993,80 @@ fn test_to_validation_config_partial_repo_bypass_inherits_server_defaults_for_mi
             .contains(&"server-size-bot"),
         "server size bypass should be inherited when repo does not set size"
     );
+}
+
+// ── validate_config_content tests ─────────────────────────────────────────────
+
+#[test]
+fn test_validate_config_content_valid_minimal_toml() {
+    // A minimal TOML with schemaVersion = 1 must be accepted.
+    let content = "schemaVersion = 1";
+    let outcome = validate_config_content(content);
+    assert!(
+        outcome.valid,
+        "minimal valid config should be accepted; errors: {:?}",
+        outcome.errors
+    );
+    assert!(
+        outcome.errors.is_empty(),
+        "no errors expected for valid config"
+    );
+}
+
+#[test]
+fn test_validate_config_content_invalid_toml_syntax() {
+    // Garbage that cannot be parsed as TOML must produce a validation error.
+    let content = "not = valid = toml [[[";
+    let outcome = validate_config_content(content);
+    assert!(!outcome.valid, "invalid TOML should be rejected");
+    assert!(
+        !outcome.errors.is_empty(),
+        "at least one error message expected for invalid TOML"
+    );
+}
+
+#[test]
+fn test_validate_config_content_wrong_schema_version_zero() {
+    // schemaVersion = 0 is not a supported version.
+    let content = "schemaVersion = 0";
+    let outcome = validate_config_content(content);
+    assert!(!outcome.valid, "schema_version 0 should be rejected");
+    assert!(
+        outcome.errors.iter().any(|e| e.contains("schemaVersion")),
+        "error message should mention schemaVersion; errors: {:?}",
+        outcome.errors
+    );
+}
+
+#[test]
+fn test_validate_config_content_wrong_schema_version_two() {
+    // schemaVersion = 2 is not yet a supported version.
+    let content = "schemaVersion = 2";
+    let outcome = validate_config_content(content);
+    assert!(!outcome.valid, "schema_version 2 should be rejected");
+    assert!(
+        outcome.errors.iter().any(|e| e.contains("schemaVersion")),
+        "error message should mention schemaVersion; errors: {:?}",
+        outcome.errors
+    );
+}
+
+#[test]
+fn test_validate_config_content_outcome_equality() {
+    // ConfigValidationOutcome must implement PartialEq correctly.
+    let a = ConfigValidationOutcome {
+        valid: true,
+        errors: vec![],
+    };
+    let b = ConfigValidationOutcome {
+        valid: true,
+        errors: vec![],
+    };
+    assert_eq!(a, b);
+
+    let c = ConfigValidationOutcome {
+        valid: false,
+        errors: vec!["some error".to_string()],
+    };
+    assert_ne!(a, c);
 }

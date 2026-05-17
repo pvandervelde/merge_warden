@@ -40,6 +40,7 @@ fn create_pull_request(
         body: body.map(|b| b.to_string()),
         author,
         milestone_number: None,
+        head_sha: String::new(),
     }
 }
 

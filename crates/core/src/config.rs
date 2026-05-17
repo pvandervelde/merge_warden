@@ -44,6 +44,97 @@ pub const WIP_COMMENT_MARKER: &str = "<!-- PR_WIP_CHECK -->";
 /// prefix is sufficient to locate any keyword-label explanation comment.
 pub const KEYWORD_LABEL_COMMENT_MARKER: &str = "<!-- MERGE_WARDEN_KEYWORD_LABEL:";
 
+/// HTML comment marker used to identify configuration validity status comments.
+///
+/// Merge Warden uses this marker to find and update (or delete) configuration
+/// validation comments so that only one such comment exists on a PR at any time.
+pub const CONFIG_COMMENT_MARKER: &str = "<!-- MERGE_WARDEN_CONFIG_CHECK -->";
+
+/// Path to the repository-provided merge-warden configuration file.
+///
+/// When a PR touches this file, Merge Warden fetches and validates its content and
+/// posts an informational comment on the PR.  The comment is purely informational
+/// and never affects the check conclusion.
+pub const CONFIG_FILE_PATH: &str = ".github/merge-warden.toml";
+
+/// The outcome of validating the content of a repository-provided configuration file.
+///
+/// This type is returned by [`validate_config_content`] and carries both a boolean
+/// validity flag and, when invalid, a list of human-readable error messages that can
+/// be surfaced directly in a pull-request comment.
+#[derive(Debug, Clone, PartialEq)]
+pub struct ConfigValidationOutcome {
+    /// `true` when the configuration is syntactically valid TOML and passes all
+    /// schema checks; `false` otherwise.
+    pub valid: bool,
+    /// Human-readable error messages when `valid` is `false`, empty when `valid`
+    /// is `true`.
+    pub errors: Vec<String>,
+}
+
+/// Validates the content of a merge-warden configuration file.
+///
+/// Parses `content` as TOML into a [`RepositoryProvidedConfig`] and then applies
+/// schema validation rules.  Returns a [`ConfigValidationOutcome`] that indicates
+/// whether the configuration is valid and, if not, lists the reasons why.
+///
+/// # Validation scope
+///
+/// Validation is currently limited to:
+///
+/// 1. The content must be valid TOML that can be deserialized into
+///    [`RepositoryProvidedConfig`].
+/// 2. The `schemaVersion` field must equal `1`.
+///
+/// Semantic validation (e.g., verifying that label names, regex patterns, or other
+/// field values are meaningful) is **out of scope** for this function.  Callers
+/// should not rely on this function to catch application-level misconfiguration.
+///
+/// # Error message format
+///
+/// When TOML parsing fails, the error message is taken directly from the [`toml`]
+/// crate.  The exact wording and structure of those messages is an implementation
+/// detail of the `toml` crate and **may change** across versions.  Callers that
+/// display these messages to end-users (e.g., in PR comments) should treat them as
+/// opaque, human-readable strings rather than parsing them programmatically.
+///
+/// # Examples
+///
+/// ```rust
+/// use merge_warden_core::config::validate_config_content;
+///
+/// // Valid configuration
+/// let valid_toml = r#"schemaVersion = 1"#;
+/// let outcome = validate_config_content(valid_toml);
+/// assert!(outcome.valid);
+/// assert!(outcome.errors.is_empty());
+///
+/// // Invalid TOML
+/// let bad_toml = "not = valid = toml";
+/// let outcome = validate_config_content(bad_toml);
+/// assert!(!outcome.valid);
+/// assert!(!outcome.errors.is_empty());
+/// ```
+pub fn validate_config_content(content: &str) -> ConfigValidationOutcome {
+    match toml::from_str::<RepositoryProvidedConfig>(content) {
+        Err(e) => ConfigValidationOutcome {
+            valid: false,
+            errors: vec![e.to_string()],
+        },
+        Ok(config) if config.schema_version != 1 => ConfigValidationOutcome {
+            valid: false,
+            errors: vec![format!(
+                "schemaVersion must be 1, found {}",
+                config.schema_version
+            )],
+        },
+        Ok(_) => ConfigValidationOutcome {
+            valid: true,
+            errors: vec![],
+        },
+    }
+}
+
 /// Pre-compiled regex for conventional commit format validation
 ///
 /// This regex enforces the Conventional Commits specification (https://conventionalcommits.org/)

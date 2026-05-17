@@ -798,6 +798,7 @@ pub fn diagnose_pr_title(title: &str) -> TitleDiagnosis {
 ///     body: Some("This PR adds GitHub login functionality.".to_string()),
 ///     author: None,
 ///     milestone_number: None,
+///     head_sha: String::new(),
 /// };
 ///
 /// let bypass_rule = BypassRule::default();
@@ -818,6 +819,7 @@ pub fn diagnose_pr_title(title: &str) -> TitleDiagnosis {
 ///         login: "emergency-bot".to_string(),
 ///     }),
 ///     milestone_number: None,
+///     head_sha: String::new(),
 /// };
 ///
 /// let bypass_rule = BypassRule::new(true, vec!["emergency-bot".to_string()]);
@@ -914,6 +916,7 @@ pub fn check_pr_title(
 ///     body: Some("Emergency fix without work item".to_string()),
 ///     author: Some(bypass_user),
 ///     milestone_number: None,
+///     head_sha: String::new(),
 /// };
 ///
 /// let bypass_rule = BypassRule::new(true, vec!["bypass-user".to_string()]);

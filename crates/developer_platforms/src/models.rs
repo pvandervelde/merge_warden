@@ -265,6 +265,7 @@ pub struct Organization {
 ///         login: "developer123".to_string(),
 ///     }),
 ///     milestone_number: None,
+///     head_sha: String::new(),
 /// };
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -290,6 +291,14 @@ pub struct PullRequest {
     /// so that redundant API calls can be skipped during issue metadata propagation.
     #[serde(default)]
     pub milestone_number: Option<u64>,
+
+    /// The SHA of the head commit of the pull request.
+    ///
+    /// Used to fetch the configuration file at the exact commit that is part of
+    /// the PR, so validation uses the config as it will be after merging rather
+    /// than the config on the default branch.
+    #[serde(default)]
+    pub head_sha: String,
 }
 
 /// Represents a file that has been changed in a pull request.

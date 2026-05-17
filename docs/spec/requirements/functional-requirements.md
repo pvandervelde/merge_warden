@@ -146,6 +146,35 @@ This document specifies the functional requirements that define what Merge Warde
 **Priority:** High
 **Dependencies:** FR-002 (Configuration Management)
 
+### FR-007: Configuration Change Validation
+
+**Requirement:** The system shall validate `.github/merge-warden.toml` configuration changes included in
+a pull request and post an informational comment on that PR reporting whether the new configuration
+is valid.
+
+**Description:**
+
+- Detect when a PR's changed files include `.github/merge-warden.toml`
+- Fetch the proposed version of the file from the PR head ref
+- Parse and validate it against the `RepositoryProvidedConfig` schema
+- Post a comment summarising the validation outcome (pass or structured error list)
+- Remove or replace a previous config-validation comment on subsequent pushes to the same PR
+- Never block merging based on this check — the comment is informational only
+- Apply regardless of whether the PR author has bypass permissions for other rules
+
+**Acceptance Criteria:**
+
+- ✅ Changed-file scan detects `.github/merge-warden.toml` in the PR diff
+- ✅ Proposed config is fetched from the PR head SHA, not the default branch
+- ✅ Valid config produces a single success comment identified by `CONFIG_COMMENT_MARKER`
+- ✅ Invalid config produces a single failure comment with a structured error list
+- ✅ Comment is updated idempotently (one comment per PR at most)
+- ✅ Stale config comment is removed when the PR no longer touches the config file
+- ✅ Check conclusion (`success`/`failure`/`neutral`) is unaffected by config validation result
+
+**Priority:** High
+**Dependencies:** FR-002 (Configuration Management), FR-001 (Pull Request Validation)
+
 ## Detailed Functional Specifications
 
 ### Pull Request Title Validation

@@ -413,6 +413,7 @@ async fn test_determine_labels_breaking_change() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -442,6 +443,7 @@ async fn test_determine_labels_breaking_change_in_body() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -471,6 +473,7 @@ async fn test_determine_labels_bug_fix() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -501,6 +504,7 @@ async fn test_determine_labels_conflicting_information() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -530,6 +534,7 @@ async fn test_determine_labels_empty_pr_body() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -552,6 +557,7 @@ async fn test_determine_labels_error_handling() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let result = set_pull_request_labels(&provider, "owner", "repo", &pr).await;
@@ -581,6 +587,7 @@ async fn test_determine_labels_feature() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -608,6 +615,7 @@ async fn test_determine_labels_hotfix() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -637,6 +645,7 @@ async fn test_determine_labels_invalid_type_in_pr_title() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -662,6 +671,7 @@ async fn test_determine_labels_keyword_priority() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -696,6 +706,7 @@ async fn test_determine_labels_missing_type_in_pr_title() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -720,6 +731,7 @@ async fn test_determine_labels_multiple_keywords() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -753,6 +765,7 @@ async fn test_determine_labels_no_keywords_in_pr_body() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -778,6 +791,7 @@ async fn test_determine_labels_security() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -807,6 +821,7 @@ async fn test_determine_labels_tech_debt() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -836,6 +851,7 @@ async fn test_determine_labels_with_scope() {
             login: "developer123".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let labels = set_pull_request_labels(&provider, "owner", "repo", &pr)
@@ -1645,6 +1661,7 @@ async fn test_smart_labeling_pipeline_end_to_end() {
             login: "developer".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     // Test the complete pipeline
@@ -1702,6 +1719,7 @@ async fn test_smart_labeling_pipeline_with_fallback() {
             login: "developer".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let labels =
@@ -1729,6 +1747,7 @@ async fn test_smart_labeling_pipeline_legacy_fallback() {
             login: "developer".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let labels = set_pull_request_labels_with_config(&provider, "owner", "repo", &pr, None)
@@ -1768,6 +1787,7 @@ async fn test_smart_labeling_pipeline_disabled() {
             login: "developer".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let labels =
@@ -1824,6 +1844,7 @@ async fn test_smart_labeling_pipeline_multiple_keywords() {
             login: "developer".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let labels =
@@ -1874,6 +1895,7 @@ async fn test_smart_labeling_pipeline_error_recovery() {
             login: "developer".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     // Even if some parts fail, should continue processing
@@ -3189,6 +3211,7 @@ async fn test_keyword_labels_default_breaking_change_title() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     // No config → hard-coded default "breaking-change"
@@ -3216,6 +3239,7 @@ async fn test_keyword_labels_custom_breaking_change() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let config = make_config_with_keyword_labels(KeywordLabelsConfig {
         breaking_change: Some("semver-major".to_string()),
@@ -3252,6 +3276,7 @@ async fn test_keyword_labels_custom_security() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let config = make_config_with_keyword_labels(KeywordLabelsConfig {
         security: Some("security-alert".to_string()),
@@ -3288,6 +3313,7 @@ async fn test_keyword_labels_custom_hotfix() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let config = make_config_with_keyword_labels(KeywordLabelsConfig {
         hotfix: Some("urgent".to_string()),
@@ -3324,6 +3350,7 @@ async fn test_keyword_labels_custom_tech_debt() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let config = make_config_with_keyword_labels(KeywordLabelsConfig {
         tech_debt: Some("cleanup".to_string()),
@@ -3360,6 +3387,7 @@ async fn test_keyword_labels_empty_string_falls_back_to_default() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     // Empty string must fall back to built-in default label name.
     let config = make_config_with_keyword_labels(KeywordLabelsConfig {
@@ -3393,6 +3421,7 @@ async fn test_keyword_labels_no_config_uses_defaults() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
 
     let labels = set_pull_request_labels_with_config(&provider, "owner", "repo", &pr, None)
@@ -4320,6 +4349,7 @@ async fn test_negation_breaking_change_in_body_not_applied() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
         .await
@@ -4365,6 +4395,7 @@ async fn test_negation_breaking_change_without_variant_not_applied() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
         .await
@@ -4388,6 +4419,7 @@ async fn test_negation_breaking_change_doesnt_variant_not_applied() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
         .await
@@ -4414,6 +4446,7 @@ async fn test_negation_breaking_change_in_title_not_applied() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
         .await
@@ -4453,6 +4486,7 @@ async fn test_affirmative_breaking_change_in_body_applied() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
         .await
@@ -4495,6 +4529,7 @@ async fn test_exclamation_colon_always_triggers_breaking_change_even_with_negate
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
         .await
@@ -4527,6 +4562,7 @@ async fn test_body_with_both_negated_and_affirmative_breaking_change_triggers_la
         ),
         author: Some(User { id: 1, login: "dev".to_string() }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
         .await
@@ -4554,6 +4590,7 @@ async fn test_negation_security_in_body_not_applied() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
         .await
@@ -4584,6 +4621,7 @@ async fn test_negation_no_security_issues_in_body_not_applied() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
         .await
@@ -4605,6 +4643,7 @@ async fn test_affirmative_security_in_body_applied() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
         .await
@@ -4639,6 +4678,7 @@ async fn test_negation_hotfix_in_body_not_applied() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
         .await
@@ -4669,6 +4709,7 @@ async fn test_affirmative_hotfix_in_body_applied() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
         .await
@@ -4702,6 +4743,7 @@ async fn test_negation_tech_debt_in_body_not_applied() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
         .await
@@ -4727,6 +4769,7 @@ async fn test_negation_not_technical_debt_in_body_not_applied() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
         .await
@@ -4748,6 +4791,7 @@ async fn test_affirmative_tech_debt_reduces_applied() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
         .await
@@ -4773,6 +4817,7 @@ async fn test_affirmative_technical_debt_in_body_applied() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, None)
         .await
@@ -4804,6 +4849,7 @@ async fn test_suppression_skips_label_application() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config))
         .await
@@ -4856,6 +4902,7 @@ async fn test_suppression_removes_existing_label_from_pr() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config))
         .await
@@ -4893,6 +4940,7 @@ async fn test_suppression_does_not_call_remove_when_label_not_currently_applied(
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config))
         .await
@@ -4924,6 +4972,7 @@ async fn test_suppression_isolated_to_named_label_only() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config))
         .await
@@ -4964,6 +5013,7 @@ async fn test_suppression_multi_label_different_suppressors() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     let labels = set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config))
         .await
@@ -5001,6 +5051,7 @@ async fn test_suppression_list_comments_failure_falls_back_to_no_suppression() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     // Must succeed (no propagated error)
     let result = set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config)).await;
@@ -5039,6 +5090,7 @@ async fn test_explanation_comment_posted_when_label_triggered_and_no_prior_comme
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config))
         .await
@@ -5084,6 +5136,7 @@ async fn test_explanation_comment_idempotent_when_identical_body_exists() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config))
         .await
@@ -5126,6 +5179,7 @@ async fn test_explanation_comment_stale_body_replaced_with_fresh_one() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config))
         .await
@@ -5170,6 +5224,7 @@ async fn test_explanation_comment_two_stale_copies_both_replaced_with_fresh_one(
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config))
         .await
@@ -5215,6 +5270,7 @@ async fn test_explanation_comment_deleted_when_detection_clears() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config))
         .await
@@ -5255,6 +5311,7 @@ async fn test_explanation_comment_deleted_when_label_suppressed() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config))
         .await
@@ -5294,6 +5351,7 @@ async fn test_explanation_comments_independent_per_label() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config))
         .await
@@ -5348,6 +5406,7 @@ async fn test_clearing_one_label_does_not_affect_other_labels_comment() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config))
         .await
@@ -5398,6 +5457,7 @@ async fn test_no_unnecessary_api_calls_when_no_keyword_matched() {
             login: "dev".to_string(),
         }),
         milestone_number: None,
+        head_sha: String::new(),
     };
     set_pull_request_labels_with_config(&provider, "o", "r", &pr, Some(&config))
         .await

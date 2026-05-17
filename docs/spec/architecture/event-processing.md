@@ -210,10 +210,19 @@ process_pull_request(owner, repo, pr_number)
   │    ├─ Pass → remove missing-work-item label (if present)
   │    └─ Fail → add missing-work-item label; add/update failure comment
   │
+  ├─ Fetch changed file list via GitHub API (always; shared by size and config checks)
+  │
   ├─ Check: PR size within configured limits (pr_size_check)
   │    ├─ Compute: additions + deletions across changed files
   │    ├─ Determine size bucket (xs/s/m/l/xl/xxl)
   │    └─ Add/update size label; remove stale size labels
+  │
+  ├─ Check: config file validity (if .github/merge-warden.toml is in changed files)
+  │    ├─ Fetch file content at PR head SHA via ConfigFetcher::fetch_config_at_ref
+  │    ├─ Parse and validate against RepositoryProvidedConfig schema
+  │    ├─ Valid   → remove stale CONFIG_COMMENT_MARKER comment (if present)
+  │    └─ Invalid → add/update CONFIG_COMMENT_MARKER comment with error list
+  │         └─ Does NOT affect check conclusion (informational only)
   │
   ├─ Apply change-type labels based on changed file paths (change_type_labels)
   │    └─ Add labels for matching path patterns; remove stale change-type labels
@@ -247,6 +256,8 @@ See [configuration-management.md](../operations/configuration-management.md) and
 | Message deserialisation (queue mode) | Malformed JSON | Message dead-lettered; loop continues |
 | Unknown schema version | `schema_version != 1` | Message dead-lettered; loop continues |
 | EventEnvelope reconstruction | SDK parse error | Message dead-lettered; loop continues |
+| Config file fetch (config check) | File not found at head SHA | Treated as absent; no comment posted; no error |
+| Config file parse (config check) | Invalid TOML or wrong schema version | Failure comment posted; check conclusion unaffected |
 | PR processing | GitHub API error | `ack.reject()` → dead-letter (queue) or logged (webhook) |
 | Worker task crash | Unrecoverable `IngressError` | Error logged; task exits; process continues (other workers unaffected) |
 

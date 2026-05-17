@@ -79,6 +79,9 @@
     Requirements
     ------------
     - Docker Desktop (running)
+    - Rust toolchain (cargo): https://rustup.rs
+    - cross (required on Windows and macOS): cargo install cross
+      cross uses Docker to cross-compile a Linux binary on non-Linux hosts.
     - Node.js + npm:  https://nodejs.org  (for npx smee-client)
       Or install globally once: npm install --global smee-client
 
@@ -200,23 +203,72 @@ if (-not (Test-Path $dockerfile))
 # Verify external tools are available
 # ---------------------------------------------------------------------------
 
-foreach ($tool in 'docker', 'npx')
+foreach ($tool in 'docker', 'npx', 'cargo')
 {
     if (-not (Get-Command $tool -ErrorAction SilentlyContinue))
     {
         throw "'$tool' was not found on PATH. Please install it and try again.`n" +
         "  docker: https://www.docker.com/products/docker-desktop/`n" +
-        "  npx:    ships with Node.js — https://nodejs.org"
+        "  npx:    ships with Node.js — https://nodejs.org`n" +
+        "  cargo:  ships with the Rust toolchain — https://rustup.rs"
+    }
+}
+
+# cross is only needed on non-Linux hosts; check now so the error is immediate.
+if (-not $SkipBuild -and -not $IsLinux)
+{
+    if (-not (Get-Command 'cross' -ErrorAction SilentlyContinue))
+    {
+        throw "'cross' is required to cross-compile a Linux binary on this platform.`n" +
+        "Install it with: cargo install cross`n" +
+        "cross uses Docker (already required by this script) for cross-compilation."
     }
 }
 
 # ---------------------------------------------------------------------------
-# Build the container image
+# Build the Rust binary, then build the container image
 # ---------------------------------------------------------------------------
 
 if (-not $SkipBuild)
 {
+    $binaryName = 'merge_warden_server'
+    $rustTarget = 'x86_64-unknown-linux-gnu'
+    $stagingDir = Join-Path $repoRoot 'binaries' 'amd64'
+
     Write-Host ""
+    Write-Host "Building Rust binary for $rustTarget ..."
+
+    if ($IsLinux)
+    {
+        # Native Linux build — no cross-compilation needed.
+        cargo build --release -p merge_warden_server
+        $builtBinary = Join-Path $repoRoot 'target' 'release' $binaryName
+    }
+    else
+    {
+        # Windows / macOS — cross-compile to Linux using 'cross'.
+        Write-Host "  Using 'cross' for cross-compilation to $rustTarget"
+        cross build --release -p merge_warden_server --target $rustTarget
+        $builtBinary = Join-Path $repoRoot 'target' $rustTarget 'release' $binaryName
+    }
+
+    if ($LASTEXITCODE -ne 0)
+    {
+        throw "Rust build failed with exit code $LASTEXITCODE."
+    }
+
+    if (-not (Test-Path $builtBinary))
+    {
+        throw "Binary not found after build: $builtBinary"
+    }
+
+    # Stage the binary where the Dockerfile expects it: binaries/amd64/
+    New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
+    Copy-Item -Path $builtBinary -Destination (Join-Path $stagingDir $binaryName) -Force
+    Write-Host "  Staged to: $stagingDir"
+    Write-Host ""
+
+    # Build the Docker image now that the binary is in place.
     Write-Host "Building Docker image '$ImageTag' ..."
     Write-Host "  Context:    $repoRoot"
     Write-Host "  Dockerfile: $dockerfile"
@@ -405,11 +457,11 @@ try
     # npx so no global install is required.
     $smeeCmd = if (Get-Command smee -ErrorAction SilentlyContinue)
     {
-        'smee' 
+        'smee'
     }
     else
     {
-        $null 
+        $null
     }
 
     if ($smeeCmd)

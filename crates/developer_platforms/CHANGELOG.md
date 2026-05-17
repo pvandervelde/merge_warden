@@ -1,5 +1,14 @@
 # Changelog
 
+## [Unreleased]
+
+### Breaking Changes
+
+- `ConfigFetcher` trait gains a new required method `fetch_config_at_ref(&self, owner,
+  repo, path, git_ref) -> Result<Option<String>, Error>`.  Any implementation of this
+  trait outside this crate must add the method.  The `GitHubProvider` shipped with this
+  crate already provides a complete implementation via `fetch_file_content`.
+
 ## 0.1.0 (2025-04-21)
 
 
