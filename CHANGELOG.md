@@ -5,6 +5,70 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-05-17
+
+### Features
+- **config**: Add tests for snake_case ApplicationDefaults TOML keys [b7faa708d3013ab3e449124179f147e061cafc8d]
+- **config**: Rename ApplicationDefaults TOML keys from camelCase to snake_case [323aaf414b2bb6297b15ed991ba00000f991910d]
+- **config**: align ApplicationDefaults TOML keys with snake_case convention (#242) [bcacf09aef977700b76bb77fa505645685dc18ed]
+- **config-validation**: add types, docs, and tests for PR config validation (auto via agent) [32646d37dac3e07b0e024cc6b0f34f6c04a229df]
+- **core**: Add types, stubs and tests for negation-aware keyword labels and suppression [cac710b4ac78811ac9fc61a9e0112b6e5924cddb]
+- **core**: Implement negation-aware keyword detection, label suppression and explanation comments [845be6b31b2ad7276583160432626c52e170f097]
+- **core**: add negation-aware keyword labels, comment suppression, and explanation comments (#251) [93398a5002faee1c625801125e2bec550a7db5af]
+- **core**: validate config file changes in PRs and post informational comment (#256) [a3fafc98e654b00ad164448256903aea7450e750]
+- **labels**: Add types, docs, and tests for configurable keyword labels [19e45e6d5565c60063e6588f35d5a6ed5c4269cb]
+- **labels**: Implement configurable keyword labels [41a0c4379c32d2eb023fa0315f807a774007e03a]
+- **labels**: make keyword-triggered auto-applied labels configurable (#249) [367358e59ed086c43eb2b4bd720df0003fde7299]
+- **size**: add ignore_deletions field and tests for PR size calculation [8ca33e69c63c67e73360bfad5654b37099f3fa4f]
+- **size**: ignore deletions when calculating PR size (#247) [828c9a0c9b71c3d613f111060eb51c352216ad5d]
+- **size**: implement ignore_deletions for PR size calculation [80377ad95ee5df63e4754ce439ec1c9fe3e9b073]
+### Bug Fixes
+- **build**: add x86_64-unknown-linux-gnu openssl support for cross builds [8e2466e195597d2f056ca3b121ed5a2c4c180938]
+- **config**: merge keyword_labels from repo config into app defaults [5222d4f815aa3eed5f8e781ff8aef55a884937ff]
+- **core**: address PR review findings for config change validation [06fe6f67eeba34ec2bf921a7c44df1c7555a925f]
+- **core**: address PR review findings on bypass rule precedence and spec docs [5001fbbc794f37b984c894ad46025475f6903469]
+- **core**: address PR review findings on negation detection and comment lifecycle [4ae6134fdee4079562b75ec6205b0f2b5da4ba5a]
+- **core**: address clippy warnings in labels.rs negation and comment functions [358d0a74b65a709afe38463eb2d33be33f3030e6]
+- **core**: address second-round PR review findings [30f0e7fe91f6a36879ac2430f8fc56f1b5bdccce]
+- **core**: per-repo bypass rules in merge-warden.toml were silently ignored [89a55ce562c1ba1622655a2aeb43601a5e935223]
+- **core**: per-repo bypass rules in merge-warden.toml were silently ignored (#255) [cf3750709cfbc1a4802b661eec72798e41142eb1]
+- **core**: replace unnecessary unwrap_err after is_ok with match [1b0f3a2787b75ce89b60225f45d11bd6a869dddb]
+- **core**: wire label_prefix to manage_size_labels fallback (#253) [12da87162e1a7789fec8f1afe4d6f327e565a66b]
+- **core**: wire label_prefix to manage_size_labels fallback (auto via agent) [55b5a00fa8704be16c10d226e00fbedb24d59a83]
+- **labels**: make size label discovery case-insensitive [7cb541a9c7572c61625f40030697c113ae25ed80]
+- **labels**: make size label discovery case-insensitive (#245) [b0814762d669e8d8159bcb95848d230e6d1a62c2]
+- **release**: address PR review comments on release-regent config [de6d9ba1ca5c4e6605fb0562d8c5b314b4c852e8]
+- **samples**: build Rust binary before docker build in run-local.ps1 [397589c7f76d2a76d18ae98754db1e002ca38de1]
+- **samples**: point smee relay at webhook endpoint not health endpoint [31655a31619055d8377accf41f999b26b5a53665]
+- cross build and smee config (#257) [bc8ccddfeb9588998060ed73dbef02288b26a52c]
+### Documentation
+- **catalog**: add FR-007 config validation abstractions to catalog [deabc6e69dedc8fe5cf531fa9cc661b2b657f139]
+- **config**: add keyword_labels TOML examples to docstring and spec [e8693df4a379b5a88d61333e69b5b734aea22ff4]
+- **size**: clarify total_lines_changed field reflects ignore_deletions mode [802dee327ae35e366c8cab2eebe52056a4a0fe22]
+- **size**: document ignore_deletions field in reference docs and sample configs [f958a24b156a0cc8ce69de0c181df4b4305b0fa7]
+- **spec**: add FR-007 config change validation spec [1e25a946577599300a8d682580460235bf63a2ee]
+- **spec**: add interface specs for FR-007 config change validation [8186e58fef99a3b152b44db854168b278b85eebe]
+- Remove obsolete reference to cliff.toml [8de860aea732334f3089615beac76c1cc2ec52a9]
+### Tests
+- **core**: Add adversarial tests for negation detection, suppression, and explanation comments [30d991ecac3dfccca37d8ea310b9d050caf51121]
+- **core**: add idempotent config comment test; fix formatting [4d7e08e4d7671dacc4d014dff97e409e833d2b81]
+- **core**: add tests for manage_size_labels label_prefix fallback wiring (auto via agent) [104e03728a9ea63a29d9c69e4125d54309daea36]
+- **core**: add title-level negation integration test for breaking-change [d1d5afdccfea09b7cafd96b3b00af8f34aea7d93]
+- **samples**: add config change validation scenarios to setup script [5a01a5a7196772d9343b0e78c36866fd94505dd3]
+### Chores
+- **release**: switch to release-regent for release PR creation [3c2163ee1bc9ce0671525735923d52a85ea763b6]
+- **release**: switch to release-regent for release PR creation (#239) [7ed2ec024c3314d117aaa5a1b242502e1726aea8]
+- Addressing PR comments [5815a086fe5a335747d2ae6c8f001b9214caa27e]
+- Addressing PR comments [4467c22e3764cb2a65e17d077b762585043cbb8a]
+- Fix rust formatting [50baee911135e129af553ce630980875e8ccde72]
+- Update the catalog [944782867c9bfc03668d397dd96d0367fc30d20c]
+- Updating the catalog [ff70b5ffdf5c31bf9e7ca0392c0fc688f6d7e122]
+- update the cargo dependencies [e916604d3b68d05497124a9cf238b1b90ce8e1e7]
+### Config
+- Correct the version detection for release-regent [c1a8c10d2c00eb043ea89958f5f57182940254c6]
+- Disable the manifest_files option for release-regent [81084bb3850c57e70048361975d2bb5fb08c8408]
+- Don't fail on large PRs [d69cf3656090feea41279799768cc6ca93eca367]
+
 ## [0.5.0] - 2026-05-07
 
 ### <!-- 0 -->⛰️  Features
@@ -898,3 +962,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## 0.0.0
 
 - Created project
+
