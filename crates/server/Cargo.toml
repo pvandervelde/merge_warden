@@ -30,18 +30,18 @@ opentelemetry_sdk = { workspace = true }
 
 # See https://github.com/sfackler/rust-openssl/issues/1627
 [target.x86_64-unknown-linux-musl.dependencies]
-openssl = { version = "0.10.72", features = ["vendored"] }
+openssl = { version = "0.10.79", features = ["vendored"] }
 
 # Cross-compiled GNU Linux build used by run-local.ps1 on Windows/macOS.
 # Vendored so the binary does not depend on the cross container's libssl.
 [target.x86_64-unknown-linux-gnu.dependencies]
-openssl = { version = "0.10.72", features = ["vendored"] }
+openssl = { version = "0.10.79", features = ["vendored"] }
 
 # For cross-compiled aarch64 builds (used in the Docker image), compile
 # OpenSSL from source so the binary is fully self-contained and does not
 # depend on system libssl — matching the distroless runtime image.
 [target.aarch64-unknown-linux-gnu.dependencies]
-openssl = { version = "0.10.72", features = ["vendored"] }
+openssl = { version = "0.10.79", features = ["vendored"] }
 
 [[bin]]
 name = "merge_warden_server"
