@@ -380,6 +380,7 @@ if ($containerState -ne 'running')
 # ---------------------------------------------------------------------------
 
 $healthUrl = "http://localhost:$Port/health"
+$webhookUrl = "http://localhost:$Port/api/github/webhook"
 $maxRetries = 20
 $attempt = 0
 $ready = $false
@@ -427,7 +428,7 @@ Write-Host ""
 Write-Host "--------------------------------------------------------"
 Write-Host "Relaying webhooks from smee channel:"
 Write-Host "  $SmeeUrl"
-Write-Host "Local endpoint: $healthUrl"
+Write-Host "Local endpoint: $webhookUrl"
 Write-Host ""
 Write-Host "To trigger events:"
 Write-Host "  - Open a pull request in your test repository"
@@ -466,11 +467,11 @@ try
 
     if ($smeeCmd)
     {
-        & $smeeCmd --url $SmeeUrl --target $healthUrl
+        & $smeeCmd --url $SmeeUrl --target $webhookUrl
     }
     else
     {
-        npx smee-client --url $SmeeUrl --target $healthUrl
+        npx smee-client --url $SmeeUrl --target $webhookUrl
     }
 }
 finally
