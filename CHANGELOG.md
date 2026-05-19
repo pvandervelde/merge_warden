@@ -69,8 +69,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Chores
 
+- **release**: 0.6.0 (#259) [dacbc9b60a61fa5be9af9f90e5543065b07e37ff]
 - **release**: switch to release-regent for release PR creation [3c2163ee1bc9ce0671525735923d52a85ea763b6]
 - **release**: switch to release-regent for release PR creation (#239) [7ed2ec024c3314d117aaa5a1b242502e1726aea8]
+- **release**: update release files for 0.6.0 [46329af62b154d694f6d6ea7772285ceb0a09898]
 - Addressing PR comments [5815a086fe5a335747d2ae6c8f001b9214caa27e]
 - Addressing PR comments [4467c22e3764cb2a65e17d077b762585043cbb8a]
 - Fix rust formatting [50baee911135e129af553ce630980875e8ccde72]
@@ -980,4 +982,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## 0.0.0
 
 - Created project
+
 
