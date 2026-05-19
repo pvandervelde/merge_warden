@@ -19,13 +19,7 @@
   "packageRules": [
     {
       "description": "Security patches bypass the 48h delay — merge fast but still require review",
-      "matchUpdateTypes": [
-        "minor",
-        "patch"
-      ],
-      "matchCategories": [
-        "security"
-      ],
+      "isVulnerabilityAlert": true,
       "minimumReleaseAge": "0 hours",
       "automerge": false,
       "labels": [
@@ -64,7 +58,5 @@
   },
   "prConcurrentLimit": 10,
   "prHourlyLimit": 2,
-  "allowedPostUpdateOptions": [],
-  "postUpdateOptions": [],
   "ignoreScripts": true
 }
