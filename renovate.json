@@ -19,7 +19,7 @@
   "packageRules": [
     {
       "description": "Security patches bypass the 48h delay — merge fast but still require review",
-      "isVulnerabilityAlert": true,
+      "matchIsVulnerabilityAlert": true,
       "minimumReleaseAge": "0 hours",
       "automerge": false,
       "labels": [
