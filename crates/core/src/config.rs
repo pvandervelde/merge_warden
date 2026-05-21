@@ -655,6 +655,18 @@ impl BypassRules {
     pub fn size(&self) -> &BypassRule {
         &self.size
     }
+
+    /// Merges `over` on top of `base` (lower-priority).
+    ///
+    /// For each sub-rule (`title_convention`, `work_items`, `size`):
+    /// use the `over` sub-rule if it has been explicitly configured (its user list
+    /// is non-empty, or its `enabled` flag differs from the default `false`;
+    /// otherwise keep `base`'s sub-rule.
+    ///
+    /// See `docs/spec/interfaces/policy-engine.md` §2.8 for the full contract.
+    pub(crate) fn merge(base: &Self, over: &Self) -> Self {
+        unimplemented!("see docs/spec/interfaces/policy-engine.md §2.8")
+    }
 }
 
 /// Per-repository bypass-rule overrides parsed from `[policies.bypassRules.*]` in
@@ -740,6 +752,17 @@ impl IssuePropagationConfig {
     /// Returns `false` — used as the serde default for both flags.
     fn default_false() -> bool {
         false
+    }
+
+    /// Merges `over` on top of `base` (lower-priority).
+    ///
+    /// Field-level rules:
+    /// - `sync_milestone_from_issue`: `base.sync_milestone_from_issue || over.sync_milestone_from_issue`
+    /// - `sync_project_from_issue`: `base.sync_project_from_issue || over.sync_project_from_issue`
+    ///
+    /// See `docs/spec/interfaces/policy-engine.md` §2.6 for the full contract.
+    pub(crate) fn merge(base: &Self, over: &Self) -> Self {
+        unimplemented!("see docs/spec/interfaces/policy-engine.md §2.6")
     }
 }
 
@@ -919,6 +942,19 @@ impl PullRequestsTitlePolicyConfig {
     /// Default value for title validation requirement (false)
     fn default_required() -> bool {
         false
+    }
+
+    /// Merges `over` on top of `base` (lower-priority).
+    ///
+    /// Field-level rules:
+    /// - `required`: `base.required || over.required` (OR — once required by either tier, stays required)
+    /// - `pattern`: `over.pattern` if non-empty and not equal to `CONVENTIONAL_COMMIT_REGEX`;
+    ///   otherwise `base.pattern`
+    /// - `label_if_missing`: `over.label_if_missing` if `Some`; otherwise `base.label_if_missing`
+    ///
+    /// See `docs/spec/interfaces/policy-engine.md` §2.1 for the full contract.
+    pub(crate) fn merge(base: &Self, over: &Self) -> Self {
+        unimplemented!("see docs/spec/interfaces/policy-engine.md §2.1")
     }
 }
 
@@ -1100,6 +1136,19 @@ impl WorkItemPolicyConfig {
     fn default_required() -> bool {
         false
     }
+
+    /// Merges `over` on top of `base` (lower-priority).
+    ///
+    /// Field-level rules:
+    /// - `required`: `base.required || over.required`
+    /// - `pattern`: `over.pattern` if non-empty and not equal to `WORK_ITEM_REGEX`;
+    ///   otherwise `base.pattern`
+    /// - `label_if_missing`: `over.label_if_missing` if `Some`; otherwise `base.label_if_missing`
+    ///
+    /// See `docs/spec/interfaces/policy-engine.md` §2.2 for the full contract.
+    pub(crate) fn merge(base: &Self, over: &Self) -> Self {
+        unimplemented!("see docs/spec/interfaces/policy-engine.md §2.2")
+    }
 }
 
 impl Default for WorkItemPolicyConfig {
@@ -1196,6 +1245,22 @@ impl PrSizeCheckConfig {
         }
         false
     }
+
+    /// Merges `over` on top of `base` (lower-priority).
+    ///
+    /// Field-level rules:
+    /// - `enabled`: `base.enabled || over.enabled`
+    /// - `fail_on_oversized`: `over` wins unconditionally
+    /// - `thresholds`: `over.thresholds` if `Some`; otherwise `base.thresholds`
+    /// - `excluded_file_patterns`: `over` if non-empty; otherwise `base`
+    /// - `label_prefix`: `over.label_prefix` if not equal to `"size/"`; otherwise `base.label_prefix`
+    /// - `add_comment`: `over` wins unconditionally
+    /// - `ignore_deletions`: `over` wins unconditionally
+    ///
+    /// See `docs/spec/interfaces/policy-engine.md` §2.3 for the full contract.
+    pub(crate) fn merge(base: &Self, over: &Self) -> Self {
+        unimplemented!("see docs/spec/interfaces/policy-engine.md §2.3")
+    }
 }
 
 impl Default for PrSizeCheckConfig {
@@ -1284,6 +1349,21 @@ impl WipCheckConfig {
             "Draft:".to_string(),
         ]
     }
+
+    /// Merges `over` on top of `base` (lower-priority).
+    ///
+    /// Field-level rules:
+    /// - `enforce_wip_blocking`: `base.enforce_wip_blocking || over.enforce_wip_blocking`
+    /// - `wip_label`: `over.wip_label` if it differs from `WipCheckConfig::default().wip_label`;
+    ///   otherwise `base.wip_label`
+    /// - `wip_title_patterns`: `over` if it differs from `WipCheckConfig::default().wip_title_patterns`;
+    ///   otherwise `base`
+    /// - `wip_description_patterns`: `over` if non-empty; otherwise `base`
+    ///
+    /// See `docs/spec/interfaces/policy-engine.md` §2.4 for the full contract.
+    pub(crate) fn merge(base: &Self, over: &Self) -> Self {
+        unimplemented!("see docs/spec/interfaces/policy-engine.md §2.4")
+    }
 }
 
 impl Default for WipCheckConfig {
@@ -1340,6 +1420,19 @@ impl PrStateLabelsConfig {
     fn default_enabled() -> bool {
         false
     }
+
+    /// Merges `over` on top of `base` (lower-priority).
+    ///
+    /// Field-level rules:
+    /// - `enabled`: `base.enabled || over.enabled`
+    /// - `draft_label`: `over.draft_label` if `Some`; otherwise `base.draft_label`
+    /// - `review_label`: `over.review_label` if `Some`; otherwise `base.review_label`
+    /// - `approved_label`: `over.approved_label` if `Some`; otherwise `base.approved_label`
+    ///
+    /// See `docs/spec/interfaces/policy-engine.md` §2.5 for the full contract.
+    pub(crate) fn merge(base: &Self, over: &Self) -> Self {
+        unimplemented!("see docs/spec/interfaces/policy-engine.md §2.5")
+    }
 }
 
 impl Default for PrStateLabelsConfig {
@@ -1349,6 +1442,105 @@ impl Default for PrStateLabelsConfig {
             draft_label: None,
             review_label: None,
             approved_label: None,
+        }
+    }
+}
+
+/// A resolved, merged set of validation policies ready for enforcement.
+///
+/// `PolicySet` is the single value passed to the validation engine. It is
+/// constructed by merging application-level defaults with any repository-provided
+/// overrides and represents the **final, authoritative** configuration for a
+/// single pull-request evaluation cycle.
+///
+/// # Construction
+///
+/// Callers should not build `PolicySet` by hand. Use:
+/// - [`PolicySet::from_application_defaults`] to create a baseline from
+///   [`ApplicationDefaults`].
+/// - [`PolicySet::from_repository_config`] to create a set from a
+///   [`RepositoryProvidedConfig`] alone.
+/// - [`PolicySet::merge`] to combine two sets, letting the *over* (higher-priority)
+///   set win on a field-by-field basis.
+///
+/// See `docs/spec/interfaces/policy-engine.md` §1 for the full contract and merge
+/// semantics.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PolicySet {
+    /// Title-format validation policy.
+    pub title: PullRequestsTitlePolicyConfig,
+    /// Work-item reference validation policy.
+    pub work_item: WorkItemPolicyConfig,
+    /// PR size classification and labelling policy.
+    pub size: PrSizeCheckConfig,
+    /// WIP detection and blocking policy.
+    pub wip: WipCheckConfig,
+    /// Lifecycle state labelling policy.
+    pub pr_state: PrStateLabelsConfig,
+    /// Issue-to-PR field propagation policy.
+    pub issue_propagation: IssuePropagationConfig,
+    /// Conventional-commit type → label mapping policy.
+    pub change_type_labels: ChangeTypeLabelConfig,
+    /// Per-category bypass allow-lists.
+    pub bypass_rules: BypassRules,
+}
+
+impl PolicySet {
+    /// Merges `over` on top of `self` (lower-priority baseline).
+    ///
+    /// Each constituent config field is merged independently using the field's
+    /// own `merge` method.  The result contains `over`'s values wherever it
+    /// carries an explicit non-default override, and `self`'s values elsewhere.
+    ///
+    /// # Arguments
+    /// * `over` — Higher-priority policy set (typically repository-provided config)
+    ///
+    /// # Returns
+    /// A new [`PolicySet`] with all fields merged.
+    ///
+    /// See `docs/spec/interfaces/policy-engine.md` §1.1 for field-level rules.
+    pub fn merge(&self, over: &PolicySet) -> PolicySet {
+        unimplemented!("see docs/spec/interfaces/policy-engine.md §1.1")
+    }
+
+    /// Constructs a [`PolicySet`] from application-level defaults.
+    ///
+    /// # Arguments
+    /// * `app` — Application defaults loaded at server start-up
+    ///
+    /// # Returns
+    /// A [`PolicySet`] seeded with every field taken from the application defaults.
+    ///
+    /// See `docs/spec/interfaces/policy-engine.md` §1.2 for mapping rules.
+    pub fn from_application_defaults(app: &ApplicationDefaults) -> PolicySet {
+        unimplemented!("see docs/spec/interfaces/policy-engine.md §1.2")
+    }
+
+    /// Constructs a [`PolicySet`] from a repository-provided configuration.
+    ///
+    /// # Arguments
+    /// * `repo` — Config parsed from the `.github/merge-warden.toml` file
+    ///
+    /// # Returns
+    /// A [`PolicySet`] seeded with every field taken from the repository config.
+    ///
+    /// See `docs/spec/interfaces/policy-engine.md` §1.3 for mapping rules.
+    pub fn from_repository_config(repo: &RepositoryProvidedConfig) -> PolicySet {
+        unimplemented!("see docs/spec/interfaces/policy-engine.md §1.3")
+    }
+}
+
+impl Default for PolicySet {
+    fn default() -> Self {
+        Self {
+            title: PullRequestsTitlePolicyConfig::default(),
+            work_item: WorkItemPolicyConfig::default(),
+            size: PrSizeCheckConfig::default(),
+            wip: WipCheckConfig::default(),
+            pr_state: PrStateLabelsConfig::default(),
+            issue_propagation: IssuePropagationConfig::default(),
+            change_type_labels: ChangeTypeLabelConfig::default(),
+            bypass_rules: BypassRules::default(),
         }
     }
 }
@@ -1842,6 +2034,26 @@ impl ChangeTypeLabelConfig {
     /// Returns `true` — change-type label checks are enabled by default.
     fn default_enabled() -> bool {
         true
+    }
+
+    /// Merges `over` on top of `base` (lower-priority).
+    ///
+    /// Field-level rules:
+    /// - `enabled`: `base.enabled || over.enabled`
+    /// - `conventional_commit_mappings.*` (11 `Vec<String>` fields):
+    ///   `over.field` if non-empty; otherwise `base.field`
+    /// - `detection_strategy.exact_match`, `.prefix_match`, `.description_match`:
+    ///   `over` wins unconditionally
+    /// - `detection_strategy.common_prefixes`: `over` if non-empty; otherwise `base`
+    /// - `fallback_label_settings.name_format`: `over` if not equal to
+    ///   `FallbackLabelSettings::default().name_format`; otherwise `base`
+    /// - `fallback_label_settings.color_scheme`: per-key, `over` key wins if present
+    /// - `fallback_label_settings.create_if_missing`: `over` wins unconditionally
+    /// - `keyword_labels.*`: `over.field` if `Some`; otherwise `base.field`
+    ///
+    /// See `docs/spec/interfaces/policy-engine.md` §2.7 for the full contract.
+    pub(crate) fn merge(base: &Self, over: &Self) -> Self {
+        unimplemented!("see docs/spec/interfaces/policy-engine.md §2.7")
     }
 }
 
