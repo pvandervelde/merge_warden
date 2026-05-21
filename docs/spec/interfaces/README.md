@@ -6,6 +6,14 @@ behavioral postconditions for a bounded area of the codebase.
 
 ## Documents
 
+### [policy-engine.md](./policy-engine.md)
+
+Contracts for `PolicySet` and the `merge` methods on all 8 constituent config types
+(issue #162). Covers `PolicySet`, all `merge` static methods, conversion helpers
+`from_application_defaults` / `from_repository_config`, and the updated
+`load_merge_warden_config` internal logic. See
+[ADR-002](../../adr/ADR-002-policy-engine.md) for the rationale.
+
 ### [developer-platforms-sdk.md](./developer-platforms-sdk.md)
 
 Contracts for the `developer_platforms` crate. Covers the **github-bot-sdk migration**
@@ -36,6 +44,12 @@ the **queue-based webhook processing** (task 3.0). Covers `EventIngress`,
 ## Dependency Map
 
 ```
+policy-engine.md
+  └── defines PolicySet, PolicySet::merge, PolicySet::from_* (issue #162)
+  └── defines merge methods on all 8 constituent config types
+        └── used internally by load_merge_warden_config (core/src/config.rs)
+        └── CurrentPullRequestValidationConfiguration unchanged (no new dependencies)
+
 developer-platforms-sdk.md
   └── defines PullRequest.head_sha, ConfigFetcher::fetch_config_at_ref (FR-007)
   └── defines EventEnvelope (placeholder → SDK type in task 1.0)
@@ -61,6 +75,7 @@ The corresponding Rust stubs live in `crates/`:
 
 | Spec document | Source file |
 |---|---|
+| policy-engine.md | `crates/core/src/config.rs` (PolicySet, all merge methods) |
 | developer-platforms-sdk.md | `crates/developer_platforms/src/lib.rs` (ConfigFetcher trait), `crates/developer_platforms/src/models.rs` (PullRequest), `crates/developer_platforms/src/github.rs` (GitHubProvider impl), `crates/developer_platforms/src/errors.rs` |
 | core-config-validation.md | `crates/core/src/config.rs`, `crates/core/src/lib.rs` |
 | server-config.md | `crates/server/src/config.rs`, `crates/server/src/errors.rs`, `crates/server/src/telemetry.rs` |
