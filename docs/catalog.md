@@ -22,3 +22,12 @@ Add to this whenever a reusable component becomes "the standard way".
 | `NEGATION_SINGLE_WORDS` | const | `merge_warden_core::labels` | Conservative list of single-word negation tokens used by `is_keyword_negated`; excludes ambiguous words like "eliminates" | negation, constants |
 | `set_pull_request_labels_with_config` | fn | `merge_warden_core::labels` | Applies change-type + keyword labels to a PR; supports negation-aware detection, comment-based suppression, explanation comment lifecycle, and smart label detection via `LabelManager` | labels, detection, negation, suppression |
 | `manage_size_labels` | fn | `merge_warden_core::labels` | Applies the correct size label to a PR using smart discovery; falls back to `format!("{}{}", label_prefix, category)` when no repo labels are found — takes `label_prefix: &str` from `PrSizeCheckConfig` | size, labels |
+
+## `merge_warden_core` — config / policy
+
+| Name | Kind | Location | Description | Tags |
+|------|------|----------|-------------|------|
+| `PolicySet` | type | `merge_warden_core::config` | Resolved, merged set of PR validation policies (title, work-item, size, WIP, PR-state, issue-propagation, change-type labels, bypass rules). Use `from_application_defaults` + `from_repository_config` + `merge` to compose the effective policy for a PR evaluation cycle. Derives `Default`. | config, policy, merge |
+| `PolicySet::from_application_defaults` | fn | `merge_warden_core::config` | Constructs a `PolicySet` seeded from `ApplicationDefaults`; enforcement-override flags (`enable_title_validation` etc.) are intentionally NOT applied here — apply them after `merge`. | config, policy, merge |
+| `PolicySet::from_repository_config` | fn | `merge_warden_core::config` | Constructs a `PolicySet` seeded from a `RepositoryProvidedConfig`; absent optional fields become typed defaults so they register as "unconfigured" during merge. | config, policy, merge |
+| `PolicySet::merge` | fn | `merge_warden_core::config` | Merges two `PolicySet` values: `self` is the lower-priority base, `other` is the higher-priority override. Returns a new `PolicySet` with each field resolved according to §2 of the policy-engine spec. | config, policy, merge |
