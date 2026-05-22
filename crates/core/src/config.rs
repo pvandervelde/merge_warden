@@ -665,7 +665,30 @@ impl BypassRules {
     ///
     /// See `docs/spec/interfaces/policy-engine.md` §2.8 for the full contract.
     pub(crate) fn merge(base: &Self, over: &Self) -> Self {
-        unimplemented!("see docs/spec/interfaces/policy-engine.md §2.8")
+        // A sub-rule is "explicitly configured" when its enabled flag is set or
+        // it names at least one user.  An unconfigured `over` sub-rule defers to
+        // the corresponding `base` sub-rule.
+        fn is_configured(rule: &BypassRule) -> bool {
+            rule.enabled || !rule.users.is_empty()
+        }
+
+        Self {
+            title_convention: if is_configured(&over.title_convention) {
+                over.title_convention.clone()
+            } else {
+                base.title_convention.clone()
+            },
+            work_items: if is_configured(&over.work_items) {
+                over.work_items.clone()
+            } else {
+                base.work_items.clone()
+            },
+            size: if is_configured(&over.size) {
+                over.size.clone()
+            } else {
+                base.size.clone()
+            },
+        }
     }
 }
 
@@ -762,7 +785,11 @@ impl IssuePropagationConfig {
     ///
     /// See `docs/spec/interfaces/policy-engine.md` §2.6 for the full contract.
     pub(crate) fn merge(base: &Self, over: &Self) -> Self {
-        unimplemented!("see docs/spec/interfaces/policy-engine.md §2.6")
+        Self {
+            sync_milestone_from_issue: base.sync_milestone_from_issue
+                || over.sync_milestone_from_issue,
+            sync_project_from_issue: base.sync_project_from_issue || over.sync_project_from_issue,
+        }
     }
 }
 
@@ -954,7 +981,19 @@ impl PullRequestsTitlePolicyConfig {
     ///
     /// See `docs/spec/interfaces/policy-engine.md` §2.1 for the full contract.
     pub(crate) fn merge(base: &Self, over: &Self) -> Self {
-        unimplemented!("see docs/spec/interfaces/policy-engine.md §2.1")
+        let pattern = if !over.pattern.is_empty() && over.pattern != CONVENTIONAL_COMMIT_REGEX {
+            over.pattern.clone()
+        } else {
+            base.pattern.clone()
+        };
+        Self {
+            required: base.required || over.required,
+            pattern,
+            label_if_missing: over
+                .label_if_missing
+                .clone()
+                .or_else(|| base.label_if_missing.clone()),
+        }
     }
 }
 
@@ -1147,7 +1186,19 @@ impl WorkItemPolicyConfig {
     ///
     /// See `docs/spec/interfaces/policy-engine.md` §2.2 for the full contract.
     pub(crate) fn merge(base: &Self, over: &Self) -> Self {
-        unimplemented!("see docs/spec/interfaces/policy-engine.md §2.2")
+        let pattern = if !over.pattern.is_empty() && over.pattern != WORK_ITEM_REGEX {
+            over.pattern.clone()
+        } else {
+            base.pattern.clone()
+        };
+        Self {
+            required: base.required || over.required,
+            pattern,
+            label_if_missing: over
+                .label_if_missing
+                .clone()
+                .or_else(|| base.label_if_missing.clone()),
+        }
     }
 }
 
@@ -1259,7 +1310,25 @@ impl PrSizeCheckConfig {
     ///
     /// See `docs/spec/interfaces/policy-engine.md` §2.3 for the full contract.
     pub(crate) fn merge(base: &Self, over: &Self) -> Self {
-        unimplemented!("see docs/spec/interfaces/policy-engine.md §2.3")
+        let label_prefix = if over.label_prefix != Self::default_label_prefix() {
+            over.label_prefix.clone()
+        } else {
+            base.label_prefix.clone()
+        };
+        let excluded_file_patterns = if !over.excluded_file_patterns.is_empty() {
+            over.excluded_file_patterns.clone()
+        } else {
+            base.excluded_file_patterns.clone()
+        };
+        Self {
+            enabled: base.enabled || over.enabled,
+            fail_on_oversized: over.fail_on_oversized,
+            thresholds: over.thresholds.clone().or_else(|| base.thresholds.clone()),
+            excluded_file_patterns,
+            label_prefix,
+            add_comment: over.add_comment,
+            ignore_deletions: over.ignore_deletions,
+        }
     }
 }
 
@@ -1362,7 +1431,28 @@ impl WipCheckConfig {
     ///
     /// See `docs/spec/interfaces/policy-engine.md` §2.4 for the full contract.
     pub(crate) fn merge(base: &Self, over: &Self) -> Self {
-        unimplemented!("see docs/spec/interfaces/policy-engine.md §2.4")
+        let default = Self::default();
+        let wip_label = if over.wip_label != default.wip_label {
+            over.wip_label.clone()
+        } else {
+            base.wip_label.clone()
+        };
+        let wip_title_patterns = if over.wip_title_patterns != default.wip_title_patterns {
+            over.wip_title_patterns.clone()
+        } else {
+            base.wip_title_patterns.clone()
+        };
+        let wip_description_patterns = if !over.wip_description_patterns.is_empty() {
+            over.wip_description_patterns.clone()
+        } else {
+            base.wip_description_patterns.clone()
+        };
+        Self {
+            enforce_wip_blocking: base.enforce_wip_blocking || over.enforce_wip_blocking,
+            wip_label,
+            wip_title_patterns,
+            wip_description_patterns,
+        }
     }
 }
 
@@ -1431,7 +1521,21 @@ impl PrStateLabelsConfig {
     ///
     /// See `docs/spec/interfaces/policy-engine.md` §2.5 for the full contract.
     pub(crate) fn merge(base: &Self, over: &Self) -> Self {
-        unimplemented!("see docs/spec/interfaces/policy-engine.md §2.5")
+        Self {
+            enabled: base.enabled || over.enabled,
+            draft_label: over
+                .draft_label
+                .clone()
+                .or_else(|| base.draft_label.clone()),
+            review_label: over
+                .review_label
+                .clone()
+                .or_else(|| base.review_label.clone()),
+            approved_label: over
+                .approved_label
+                .clone()
+                .or_else(|| base.approved_label.clone()),
+        }
     }
 }
 
@@ -1500,7 +1604,22 @@ impl PolicySet {
     ///
     /// See `docs/spec/interfaces/policy-engine.md` §1.1 for field-level rules.
     pub fn merge(&self, over: &PolicySet) -> PolicySet {
-        unimplemented!("see docs/spec/interfaces/policy-engine.md §1.1")
+        PolicySet {
+            title: PullRequestsTitlePolicyConfig::merge(&self.title, &over.title),
+            work_item: WorkItemPolicyConfig::merge(&self.work_item, &over.work_item),
+            size: PrSizeCheckConfig::merge(&self.size, &over.size),
+            wip: WipCheckConfig::merge(&self.wip, &over.wip),
+            pr_state: PrStateLabelsConfig::merge(&self.pr_state, &over.pr_state),
+            issue_propagation: IssuePropagationConfig::merge(
+                &self.issue_propagation,
+                &over.issue_propagation,
+            ),
+            change_type_labels: ChangeTypeLabelConfig::merge(
+                &self.change_type_labels,
+                &over.change_type_labels,
+            ),
+            bypass_rules: BypassRules::merge(&self.bypass_rules, &over.bypass_rules),
+        }
     }
 
     /// Constructs a [`PolicySet`] from application-level defaults.
@@ -1513,7 +1632,28 @@ impl PolicySet {
     ///
     /// See `docs/spec/interfaces/policy-engine.md` §1.2 for mapping rules.
     pub fn from_application_defaults(app: &ApplicationDefaults) -> PolicySet {
-        unimplemented!("see docs/spec/interfaces/policy-engine.md §1.2")
+        PolicySet {
+            // Note: `app.enable_title_validation` is intentionally NOT applied here.
+            // It is a post-merge enforcement override applied in `load_merge_warden_config`.
+            title: PullRequestsTitlePolicyConfig {
+                required: false,
+                pattern: app.default_title_pattern.clone(),
+                label_if_missing: app.default_invalid_title_label.clone(),
+            },
+            // Note: `app.enable_work_item_validation` is intentionally NOT applied here.
+            // It is a post-merge enforcement override applied in `load_merge_warden_config`.
+            work_item: WorkItemPolicyConfig {
+                required: false,
+                pattern: app.default_work_item_pattern.clone(),
+                label_if_missing: app.default_missing_work_item_label.clone(),
+            },
+            size: app.pr_size_check.clone(),
+            wip: app.wip_check.clone(),
+            pr_state: app.pr_state_labels.clone(),
+            issue_propagation: IssuePropagationConfig::default(),
+            change_type_labels: app.change_type_labels.clone(),
+            bypass_rules: app.bypass_rules.clone(),
+        }
     }
 
     /// Constructs a [`PolicySet`] from a repository-provided configuration.
@@ -1526,7 +1666,29 @@ impl PolicySet {
     ///
     /// See `docs/spec/interfaces/policy-engine.md` §1.3 for mapping rules.
     pub fn from_repository_config(repo: &RepositoryProvidedConfig) -> PolicySet {
-        unimplemented!("see docs/spec/interfaces/policy-engine.md §1.3")
+        let pr = &repo.policies.pull_requests;
+        // Repo bypass rules live in `BypassRulesConfig` (where each sub-rule is
+        // `Option<BypassRule>`). We convert each present sub-rule directly; absent
+        // sub-rules become `BypassRule::default()` (disabled, no users) so they
+        // register as "unconfigured" and let the app-defaults rule win during merge.
+        let bypass_rules = match &repo.policies.bypass_rules {
+            None => BypassRules::default(),
+            Some(brc) => BypassRules::new_with_size(
+                brc.title_convention().cloned().unwrap_or_default(),
+                brc.work_item_convention().cloned().unwrap_or_default(),
+                brc.size().cloned().unwrap_or_default(),
+            ),
+        };
+        PolicySet {
+            title: pr.title_policies.clone(),
+            work_item: pr.work_item_policies.clone(),
+            size: pr.size_policies.clone(),
+            wip: pr.wip_policies.clone(),
+            pr_state: pr.pr_state_policies.clone(),
+            issue_propagation: pr.issue_propagation.clone(),
+            change_type_labels: repo.change_type_labels.clone().unwrap_or_default(),
+            bypass_rules,
+        }
     }
 }
 
@@ -2053,7 +2215,72 @@ impl ChangeTypeLabelConfig {
     ///
     /// See `docs/spec/interfaces/policy-engine.md` §2.7 for the full contract.
     pub(crate) fn merge(base: &Self, over: &Self) -> Self {
-        unimplemented!("see docs/spec/interfaces/policy-engine.md §2.7")
+        let bm = &base.conventional_commit_mappings;
+        let om = &over.conventional_commit_mappings;
+        let mappings = ConventionalCommitMappings {
+            feat: if !om.feat.is_empty() { om.feat.clone() } else { bm.feat.clone() },
+            fix: if !om.fix.is_empty() { om.fix.clone() } else { bm.fix.clone() },
+            docs: if !om.docs.is_empty() { om.docs.clone() } else { bm.docs.clone() },
+            style: if !om.style.is_empty() { om.style.clone() } else { bm.style.clone() },
+            refactor: if !om.refactor.is_empty() { om.refactor.clone() } else { bm.refactor.clone() },
+            perf: if !om.perf.is_empty() { om.perf.clone() } else { bm.perf.clone() },
+            test: if !om.test.is_empty() { om.test.clone() } else { bm.test.clone() },
+            chore: if !om.chore.is_empty() { om.chore.clone() } else { bm.chore.clone() },
+            ci: if !om.ci.is_empty() { om.ci.clone() } else { bm.ci.clone() },
+            build: if !om.build.is_empty() { om.build.clone() } else { bm.build.clone() },
+            revert: if !om.revert.is_empty() { om.revert.clone() } else { bm.revert.clone() },
+        };
+
+        let bd = &base.detection_strategy;
+        let od = &over.detection_strategy;
+        let detection_strategy = LabelDetectionStrategy {
+            exact_match: od.exact_match,
+            prefix_match: od.prefix_match,
+            description_match: od.description_match,
+            common_prefixes: if !od.common_prefixes.is_empty() {
+                od.common_prefixes.clone()
+            } else {
+                bd.common_prefixes.clone()
+            },
+        };
+
+        let bf = &base.fallback_label_settings;
+        let of = &over.fallback_label_settings;
+        let default_name_format = FallbackLabelSettings::default_name_format();
+        let name_format = if of.name_format != default_name_format {
+            of.name_format.clone()
+        } else {
+            bf.name_format.clone()
+        };
+        let mut color_scheme = bf.color_scheme.clone();
+        for (key, value) in &of.color_scheme {
+            color_scheme.insert(key.clone(), value.clone());
+        }
+        let fallback_label_settings = FallbackLabelSettings {
+            name_format,
+            color_scheme,
+            create_if_missing: of.create_if_missing,
+        };
+
+        let bk = &base.keyword_labels;
+        let ok = &over.keyword_labels;
+        let keyword_labels = KeywordLabelsConfig {
+            breaking_change: ok
+                .breaking_change
+                .clone()
+                .or_else(|| bk.breaking_change.clone()),
+            security: ok.security.clone().or_else(|| bk.security.clone()),
+            hotfix: ok.hotfix.clone().or_else(|| bk.hotfix.clone()),
+            tech_debt: ok.tech_debt.clone().or_else(|| bk.tech_debt.clone()),
+        };
+
+        Self {
+            enabled: base.enabled || over.enabled,
+            conventional_commit_mappings: mappings,
+            detection_strategy,
+            fallback_label_settings,
+            keyword_labels,
+        }
     }
 }
 
