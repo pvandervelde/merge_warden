@@ -3806,3 +3806,712 @@ proptest! {
         prop_assert_eq!(result.enforce_wip_blocking, base_val || over_val);
     }
 }
+
+// ── Mutation kill tests — serde `default_*` helper functions ─────────────────
+//
+// The `Default::default()` implementations for these types inline their values
+// and do NOT call the serde `default_*` helper functions.  Mutations that swap
+// return values of those helpers can only be detected via TOML deserialization.
+
+/// Kills: `replace IssuePropagationConfig::default_false -> bool with true` (line 777).
+///
+/// `Default::default()` uses `bool::default()` (`false`) directly, so only a
+/// TOML round-trip where the fields are absent invokes `default_false()`.
+#[test]
+fn test_issue_propagation_config_serde_absent_fields_are_false() {
+    let cfg: IssuePropagationConfig = toml::from_str("").unwrap();
+    assert!(
+        !cfg.sync_milestone_from_issue,
+        "serde default for sync_milestone_from_issue must be false"
+    );
+    assert!(
+        !cfg.sync_project_from_issue,
+        "serde default for sync_project_from_issue must be false"
+    );
+}
+
+/// Kills: `replace PullRequestsTitlePolicyConfig::default_pattern -> String with String::new()` (line 966).
+///
+/// The manual `Default` impl calls `Self::default_pattern()`, so a direct
+/// `::default()` call is sufficient.
+#[test]
+fn test_pull_requests_title_policy_default_pattern_is_conventional_commit_regex() {
+    let cfg = PullRequestsTitlePolicyConfig::default();
+    assert_eq!(
+        cfg.pattern, CONVENTIONAL_COMMIT_REGEX,
+        "default pattern must equal CONVENTIONAL_COMMIT_REGEX"
+    );
+}
+
+/// Kills: `replace WorkItemPolicyConfig::default_pattern -> String with String::new()` (line 1171).
+#[test]
+fn test_work_item_policy_default_pattern_is_work_item_regex() {
+    let cfg = WorkItemPolicyConfig::default();
+    assert_eq!(
+        cfg.pattern, WORK_ITEM_REGEX,
+        "default pattern must equal WORK_ITEM_REGEX"
+    );
+}
+
+/// Kills: `replace ChangeTypeLabelConfig::default_enabled -> bool with false` (line 2198).
+///
+/// The manual `Default` impl for `ChangeTypeLabelConfig` inlines `enabled: true`
+/// so only a TOML deserialization where the `enabled` key is absent calls
+/// `default_enabled()`.
+#[test]
+fn test_change_type_label_config_serde_absent_enabled_defaults_to_true() {
+    let cfg: ChangeTypeLabelConfig = toml::from_str("").unwrap();
+    assert!(
+        cfg.enabled,
+        "serde default for ChangeTypeLabelConfig::enabled must be true"
+    );
+}
+
+/// Kills all `replace ConventionalCommitMappings::default_<type> -> Vec<String>` mutants
+/// (lines 2328, 2336, 2340, 2344, 2348, 2356, 2360, 2368, 2376, 2384, 2388).
+///
+/// Each `default_<type>` function is invoked by serde when the corresponding key
+/// is absent in TOML.  The `Default` impl inlines vectors directly and does not
+/// call these helpers.
+#[test]
+fn test_conventional_commit_mappings_serde_absent_fields_use_correct_defaults() {
+    let cfg: ConventionalCommitMappings = toml::from_str("").unwrap();
+    assert_eq!(
+        cfg.feat,
+        vec!["enhancement", "feature", "new feature"],
+        "serde default for feat"
+    );
+    assert_eq!(
+        cfg.fix,
+        vec!["bug", "bugfix", "fix"],
+        "serde default for fix"
+    );
+    assert_eq!(
+        cfg.docs,
+        vec!["documentation", "docs"],
+        "serde default for docs"
+    );
+    assert_eq!(
+        cfg.style,
+        vec!["style", "formatting"],
+        "serde default for style"
+    );
+    assert_eq!(
+        cfg.refactor,
+        vec!["refactor", "refactoring", "code quality"],
+        "serde default for refactor"
+    );
+    assert_eq!(
+        cfg.perf,
+        vec!["performance", "optimization"],
+        "serde default for perf"
+    );
+    assert_eq!(
+        cfg.test,
+        vec!["test", "tests", "testing"],
+        "serde default for test"
+    );
+    assert_eq!(
+        cfg.chore,
+        vec!["chore", "maintenance", "housekeeping"],
+        "serde default for chore"
+    );
+    assert_eq!(
+        cfg.ci,
+        vec!["ci", "continuous integration", "build"],
+        "serde default for ci"
+    );
+    assert_eq!(
+        cfg.build,
+        vec!["build", "dependencies"],
+        "serde default for build"
+    );
+    assert_eq!(cfg.revert, vec!["revert"], "serde default for revert");
+}
+
+/// Kills: `replace FallbackLabelSettings::default_name_format -> String with ...` (line 2409)
+/// and   `replace FallbackLabelSettings::default_create_if_missing -> bool with false` (line 2413).
+///
+/// `FallbackLabelSettings::default()` inlines its values; only serde deserialization
+/// invokes these helpers.
+#[test]
+fn test_fallback_label_settings_serde_absent_scalar_fields_use_correct_defaults() {
+    let cfg: FallbackLabelSettings = toml::from_str("").unwrap();
+    assert_eq!(
+        cfg.name_format, "type: {change_type}",
+        "serde default for name_format"
+    );
+    assert!(
+        cfg.create_if_missing,
+        "serde default for create_if_missing must be true"
+    );
+}
+
+/// Kills: `replace FallbackLabelSettings::default_color_scheme -> HashMap<...> with ...`
+/// (line 2417, four variants: empty map, single-entry maps).
+///
+/// `default_color_scheme()` delegates to `FallbackLabelSettings::default().color_scheme`.
+/// A deserialization test that omits the colour scheme forces `default_color_scheme()` to
+/// run and checks that the resulting map is non-trivial.
+#[test]
+fn test_fallback_label_settings_serde_absent_color_scheme_uses_all_eleven_defaults() {
+    let cfg: FallbackLabelSettings = toml::from_str("").unwrap();
+    // All eleven commit-type colours must be present.
+    assert_eq!(
+        cfg.color_scheme.get("feat").map(String::as_str),
+        Some("#0075ca")
+    );
+    assert_eq!(
+        cfg.color_scheme.get("fix").map(String::as_str),
+        Some("#d73a4a")
+    );
+    assert_eq!(
+        cfg.color_scheme.get("docs").map(String::as_str),
+        Some("#0052cc")
+    );
+    assert_eq!(
+        cfg.color_scheme.get("style").map(String::as_str),
+        Some("#f9d0c4")
+    );
+    assert_eq!(
+        cfg.color_scheme.get("refactor").map(String::as_str),
+        Some("#fef2c0")
+    );
+    assert_eq!(
+        cfg.color_scheme.get("perf").map(String::as_str),
+        Some("#a2eeef")
+    );
+    assert_eq!(
+        cfg.color_scheme.get("test").map(String::as_str),
+        Some("#d4edda")
+    );
+    assert_eq!(
+        cfg.color_scheme.get("chore").map(String::as_str),
+        Some("#e1e4e8")
+    );
+    assert_eq!(
+        cfg.color_scheme.get("ci").map(String::as_str),
+        Some("#fbca04")
+    );
+    assert_eq!(
+        cfg.color_scheme.get("build").map(String::as_str),
+        Some("#c5def5")
+    );
+    assert_eq!(
+        cfg.color_scheme.get("revert").map(String::as_str),
+        Some("#b60205")
+    );
+    assert_eq!(
+        cfg.color_scheme.len(),
+        11,
+        "color_scheme must have exactly 11 entries"
+    );
+}
+
+/// Kills: `replace LabelDetectionStrategy::default_true -> bool with false` (line 2509).
+///
+/// `LabelDetectionStrategy::default()` inlines `true` for each flag directly.
+/// Only serde deserialization calls `default_true()`.
+#[test]
+fn test_label_detection_strategy_serde_absent_bool_fields_are_true() {
+    let cfg: LabelDetectionStrategy = toml::from_str("").unwrap();
+    assert!(
+        cfg.exact_match,
+        "serde default for exact_match must be true"
+    );
+    assert!(
+        cfg.prefix_match,
+        "serde default for prefix_match must be true"
+    );
+    assert!(
+        cfg.description_match,
+        "serde default for description_match must be true"
+    );
+}
+
+/// Kills: `replace LabelDetectionStrategy::default_common_prefixes -> Vec<String> with ...`
+/// (line 2513, three variants: empty vec, single-entry vecs).
+#[test]
+fn test_label_detection_strategy_serde_absent_common_prefixes_uses_correct_defaults() {
+    let cfg: LabelDetectionStrategy = toml::from_str("").unwrap();
+    assert_eq!(
+        cfg.common_prefixes,
+        vec!["type:", "kind:", "category:"],
+        "serde default for common_prefixes"
+    );
+}
+
+// ── Mutation kill tests — ChangeTypeLabelConfig::merge detection_strategy ────
+//
+// Lines 2240 and 2250 survive because no tests exercise the `common_prefixes`
+// and `name_format` fallback paths in `ChangeTypeLabelConfig::merge`.
+
+/// Kills: `delete ! in ChangeTypeLabelConfig::merge` at line 2240
+/// (`if !od.common_prefixes.is_empty()`).
+///
+/// When `over.detection_strategy.common_prefixes` is empty the result must use
+/// `base.detection_strategy.common_prefixes`.  Deleting `!` would flip this so
+/// the empty override is copied over the non-empty base.
+#[test]
+fn change_type_merge_detection_strategy_common_prefixes_over_empty_uses_base() {
+    let mut base = ChangeTypeLabelConfig::default();
+    base.detection_strategy.common_prefixes = vec!["base-prefix:".to_string()];
+
+    let mut over = ChangeTypeLabelConfig::default();
+    over.detection_strategy.common_prefixes = vec![];
+
+    let result = ChangeTypeLabelConfig::merge(&base, &over);
+
+    assert_eq!(
+        result.detection_strategy.common_prefixes,
+        vec!["base-prefix:"],
+        "empty over.common_prefixes must fall back to base"
+    );
+}
+
+/// Kills: `replace != with == in ChangeTypeLabelConfig::merge` at line 2250
+/// (`if of.name_format != default_name_format`).
+///
+/// When `over.fallback_label_settings.name_format` equals the default string
+/// (`"type: {change_type}"`) the result must use `base.name_format`.  Replacing
+/// `!=` with `==` would flip this so the default-value override wins instead of
+/// the base.
+#[test]
+fn change_type_merge_fallback_name_format_over_default_value_uses_base() {
+    let mut base = ChangeTypeLabelConfig::default();
+    base.fallback_label_settings.name_format = "custom: {t}".to_string();
+
+    let mut over = ChangeTypeLabelConfig::default();
+    // Explicitly set to the serde/Default value — should NOT override base.
+    over.fallback_label_settings.name_format = "type: {change_type}".to_string();
+
+    let result = ChangeTypeLabelConfig::merge(&base, &over);
+
+    assert_eq!(
+        result.fallback_label_settings.name_format, "custom: {t}",
+        "over.name_format equal to default must fall back to base"
+    );
+}
+
+// ── Mutation kill tests — load_merge_warden_config `delete !` mutants ────────
+//
+// These tests cover the branches in load_merge_warden_config where the `!`
+// guard is deleted, causing the logic to run in the wrong direction.
+
+/// Kills: `delete ! in load_merge_warden_config` at line 1853
+/// (`if !config.policies.pull_requests.size_policies.enabled`).
+///
+/// When the repo config has `size.enabled = true`, the size config must NOT be
+/// replaced by the app-level defaults.  Deleting `!` would cause the replacement
+/// to happen whenever size IS enabled, corrupting repo-specific settings.
+#[tokio::test]
+async fn test_load_merge_warden_config_repo_size_enabled_not_replaced_by_app_defaults() {
+    let toml = r#"
+schemaVersion = 1
+[policies.pullRequests.prSize]
+enabled = true
+fail_on_oversized = true
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let mut app_defaults = ApplicationDefaults::default();
+    // App has size disabled with different settings — must not override repo.
+    app_defaults.pr_size_check.enabled = false;
+    app_defaults.pr_size_check.fail_on_oversized = false;
+
+    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
+        .await
+        .unwrap();
+
+    assert!(
+        config.policies.pull_requests.size_policies.enabled,
+        "repo size.enabled=true must be preserved"
+    );
+    assert!(
+        config
+            .policies
+            .pull_requests
+            .size_policies
+            .fail_on_oversized,
+        "repo fail_on_oversized=true must not be replaced by app default false"
+    );
+}
+
+/// Kills: `delete !` mutants at lines 1869-2031 — all eleven commit-type
+/// `!is_empty()` guards in `load_merge_warden_config`.
+///
+/// When the repo TOML provides a `[change_type_labels]` section but sets each
+/// individual commit-type mapping to an empty array, the app-level defaults
+/// for those mappings must be preserved.  Deleting any `!` would cause the
+/// empty repo list to be copied over the non-empty app default.
+#[tokio::test]
+async fn test_load_merge_warden_config_empty_repo_commit_type_mappings_use_app_defaults() {
+    let toml = r#"
+schemaVersion = 1
+[change_type_labels]
+enabled = true
+[change_type_labels.conventional_commit_mappings]
+feat     = []
+fix      = []
+docs     = []
+style    = []
+refactor = []
+perf     = []
+test     = []
+chore    = []
+ci       = []
+build    = []
+revert   = []
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let mut app_defaults = ApplicationDefaults::default();
+    // Use the compile-time defaults so we have known expected values.
+    app_defaults.change_type_labels = ChangeTypeLabelConfig::default();
+
+    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
+        .await
+        .unwrap();
+
+    let labels = config
+        .change_type_labels
+        .expect("change_type_labels should be set");
+    let m = &labels.conventional_commit_mappings;
+    assert_eq!(
+        m.feat,
+        vec!["enhancement", "feature", "new feature"],
+        "feat falls back to app default"
+    );
+    assert_eq!(
+        m.fix,
+        vec!["bug", "bugfix", "fix"],
+        "fix falls back to app default"
+    );
+    assert_eq!(
+        m.docs,
+        vec!["documentation", "docs"],
+        "docs falls back to app default"
+    );
+    assert_eq!(
+        m.style,
+        vec!["style", "formatting"],
+        "style falls back to app default"
+    );
+    assert_eq!(
+        m.refactor,
+        vec!["refactor", "refactoring", "code quality"],
+        "refactor falls back to app default"
+    );
+    assert_eq!(
+        m.perf,
+        vec!["performance", "optimization"],
+        "perf falls back to app default"
+    );
+    assert_eq!(
+        m.test,
+        vec!["test", "tests", "testing"],
+        "test falls back to app default"
+    );
+    assert_eq!(
+        m.chore,
+        vec!["chore", "maintenance", "housekeeping"],
+        "chore falls back to app default"
+    );
+    assert_eq!(
+        m.ci,
+        vec!["ci", "continuous integration", "build"],
+        "ci falls back to app default"
+    );
+    assert_eq!(
+        m.build,
+        vec!["build", "dependencies"],
+        "build falls back to app default"
+    );
+    assert_eq!(m.revert, vec!["revert"], "revert falls back to app default");
+}
+
+/// Kills: `delete ! in load_merge_warden_config` at line 2123
+/// (`if !config.policies.pull_requests.pr_state_policies.enabled`).
+///
+/// Also kills `replace && with ||` at line 2124 (the `&&` within the same
+/// condition): when the repo has `pr_state.enabled = true` and the app also
+/// enables pr_state, the repo's custom labels must NOT be replaced by the app
+/// defaults.
+#[tokio::test]
+async fn test_load_merge_warden_config_repo_pr_state_enabled_not_replaced_by_app() {
+    let toml = r#"
+schemaVersion = 1
+[policies.pullRequests.prState]
+enabled = true
+draft_label = "custom-draft"
+review_label = "custom-review"
+approved_label = "custom-approved"
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let mut app_defaults = ApplicationDefaults::default();
+    app_defaults.pr_state_labels.enabled = true;
+    app_defaults.pr_state_labels.draft_label = Some("app-draft".to_string());
+    app_defaults.pr_state_labels.review_label = Some("app-review".to_string());
+
+    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
+        .await
+        .unwrap();
+
+    assert!(config.policies.pull_requests.pr_state_policies.enabled);
+    assert_eq!(
+        config.policies.pull_requests.pr_state_policies.draft_label,
+        Some("custom-draft".to_string()),
+        "repo custom draft_label must be preserved when repo pr_state is enabled"
+    );
+    assert_eq!(
+        config.policies.pull_requests.pr_state_policies.review_label,
+        Some("custom-review".to_string()),
+        "repo custom review_label must be preserved when repo pr_state is enabled"
+    );
+    assert_eq!(
+        config
+            .policies
+            .pull_requests
+            .pr_state_policies
+            .approved_label,
+        Some("custom-approved".to_string()),
+        "repo custom approved_label must be preserved when repo pr_state is enabled"
+    );
+}
+
+// ── Mutation kill tests — load_merge_warden_config `&&→||` WIP conditions ────
+//
+// Each `&&` in the WIP merge block requires BOTH conditions to be true before
+// an override occurs.  The tests below set up the case where the first condition
+// is false (repo has a custom/non-default value) while the second is true (app
+// also has a custom value), which should produce NO override.  If `&&` is
+// replaced with `||` the second condition alone would trigger the override.
+
+/// Kills: `replace && with ||` at line 2084 (wip_label condition).
+/// Also kills: `replace == with !=` at line 2095 (same condition, first operand).
+///
+/// Repo sets a custom WIP label that differs from the default.  App also has a
+/// custom label.  The repo label must be preserved because the first guard
+/// (`config.wip_label == default`) is false.
+#[tokio::test]
+async fn test_load_merge_warden_config_repo_custom_wip_label_not_overridden_by_app_custom() {
+    let toml = r#"
+schemaVersion = 1
+[policies.pullRequests.wip]
+wip_label = "🚧 In Progress"
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let mut app_defaults = ApplicationDefaults::default();
+    app_defaults.wip_check.wip_label = Some("work-in-progress".to_string());
+
+    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        config.policies.pull_requests.wip_policies.wip_label,
+        Some("🚧 In Progress".to_string()),
+        "repo custom wip_label must be preserved when app also has a custom label"
+    );
+}
+
+/// Kills: `replace && with ||` at line 2096 (wip_title_patterns condition).
+///
+/// Repo sets custom title patterns; app also has custom patterns.  The repo
+/// patterns must be preserved because the first guard (`config.patterns == default`)
+/// is false.
+#[tokio::test]
+async fn test_load_merge_warden_config_repo_custom_wip_title_patterns_not_overridden_by_app_custom()
+{
+    let toml = r#"
+schemaVersion = 1
+[policies.pullRequests.wip]
+wip_title_patterns = ["CUSTOM_WIP"]
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let mut app_defaults = ApplicationDefaults::default();
+    app_defaults.wip_check.wip_title_patterns = vec!["APP_WIP".to_string()];
+
+    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        config
+            .policies
+            .pull_requests
+            .wip_policies
+            .wip_title_patterns,
+        vec!["CUSTOM_WIP"],
+        "repo custom wip_title_patterns must be preserved when app also has custom patterns"
+    );
+}
+
+/// Kills: `replace != with == in load_merge_warden_config` at line 2097
+/// (`app_defaults.wip_check.wip_title_patterns != WipCheckConfig::default()`).
+///
+/// When the repo uses the default WIP title patterns and the app provides custom
+/// patterns, the app patterns must override.  With `!=→==` the guard becomes
+/// "app == default", which never fires when the app has custom patterns, leaving
+/// the repo at the default value.
+#[tokio::test]
+async fn test_load_merge_warden_config_app_wip_title_patterns_override_when_repo_uses_default() {
+    let toml = r#"schemaVersion = 1"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let mut app_defaults = ApplicationDefaults::default();
+    // Custom patterns — different from WipCheckConfig::default().wip_title_patterns.
+    app_defaults.wip_check.wip_title_patterns = vec!["MY_WIP".to_string()];
+
+    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        config
+            .policies
+            .pull_requests
+            .wip_policies
+            .wip_title_patterns,
+        vec!["MY_WIP"],
+        "app custom wip_title_patterns must be applied when repo uses the default"
+    );
+}
+
+/// Kills: `delete ! in load_merge_warden_config` at line 1993
+/// (`if !repo.fallback_label_settings.name_format.is_empty()`).
+///
+/// When the repo's `name_format` is an empty string the app-level default must
+/// be preserved.  Deleting `!` causes the override to run when `name_format` IS
+/// empty, replacing the app default with an empty string.
+#[tokio::test]
+async fn test_load_merge_warden_config_empty_repo_name_format_uses_app_default() {
+    let toml = r#"
+schemaVersion = 1
+[change_type_labels]
+enabled = true
+[change_type_labels.fallback_label_settings]
+name_format = ""
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let mut app_defaults = ApplicationDefaults::default();
+    app_defaults
+        .change_type_labels
+        .fallback_label_settings
+        .name_format = "app: {change_type}".to_string();
+
+    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
+        .await
+        .unwrap();
+
+    let labels = config
+        .change_type_labels
+        .expect("change_type_labels must be set");
+    assert_eq!(
+        labels.fallback_label_settings.name_format, "app: {change_type}",
+        "empty repo name_format must fall back to app default"
+    );
+}
+
+/// Kills: `delete ! in load_merge_warden_config` at line 2005
+/// (`if !repo.fallback_label_settings.color_scheme.is_empty()`).
+///
+/// When the repo provides an empty colour scheme the app-level defaults must be
+/// preserved.  Deleting `!` causes the empty map to override the app defaults.
+#[tokio::test]
+async fn test_load_merge_warden_config_empty_repo_color_scheme_uses_app_default() {
+    let toml = r#"
+schemaVersion = 1
+[change_type_labels]
+enabled = true
+[change_type_labels.fallback_label_settings.color_scheme]
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let mut app_defaults = ApplicationDefaults::default();
+    app_defaults
+        .change_type_labels
+        .fallback_label_settings
+        .color_scheme
+        .insert("feat".to_string(), "#custom".to_string());
+
+    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
+        .await
+        .unwrap();
+
+    let labels = config
+        .change_type_labels
+        .expect("change_type_labels must be set");
+    assert_eq!(
+        labels
+            .fallback_label_settings
+            .color_scheme
+            .get("feat")
+            .map(String::as_str),
+        Some("#custom"),
+        "empty repo color_scheme must fall back to app default colour scheme"
+    );
+}
+
+/// Kills: `delete ! in load_merge_warden_config` at line 2031
+/// (`if !repo.detection_strategy.common_prefixes.is_empty()`).
+///
+/// When the repo sets `common_prefixes = []` the app-level defaults must be
+/// used.  Deleting `!` would copy the empty vec over the app defaults.
+#[tokio::test]
+async fn test_load_merge_warden_config_empty_repo_common_prefixes_uses_app_default() {
+    let toml = r#"
+schemaVersion = 1
+[change_type_labels]
+enabled = true
+[change_type_labels.detection_strategy]
+common_prefixes = []
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let mut app_defaults = ApplicationDefaults::default();
+    app_defaults
+        .change_type_labels
+        .detection_strategy
+        .common_prefixes = vec!["app-prefix:".to_string()];
+
+    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
+        .await
+        .unwrap();
+
+    let labels = config
+        .change_type_labels
+        .expect("change_type_labels must be set");
+    assert_eq!(
+        labels.detection_strategy.common_prefixes,
+        vec!["app-prefix:"],
+        "empty repo common_prefixes must fall back to app default"
+    );
+}
+
+/// Kills: `replace && with ||` at line 2112 (wip_description_patterns condition).
+///
+/// Repo already has non-empty description patterns; app also has patterns.  The
+/// first guard (`config.patterns.is_empty()`) is false, so no override should occur.
+/// If `&&` is replaced with `||`, the second guard (`!app.patterns.is_empty()`)
+/// alone would trigger the override.
+#[tokio::test]
+async fn test_load_merge_warden_config_repo_description_patterns_not_overridden_by_app_patterns() {
+    let toml = r#"
+schemaVersion = 1
+[policies.pullRequests.wip]
+wip_description_patterns = ["🚧 repo-pattern"]
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let mut app_defaults = ApplicationDefaults::default();
+    app_defaults.wip_check.wip_description_patterns = vec!["app-desc-pattern".to_string()];
+
+    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        config
+            .policies
+            .pull_requests
+            .wip_policies
+            .wip_description_patterns,
+        vec!["🚧 repo-pattern"],
+        "non-empty repo description_patterns must be preserved when app also has patterns"
+    );
+}
