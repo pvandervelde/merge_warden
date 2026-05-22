@@ -2070,3 +2070,1739 @@ fn test_validate_config_content_outcome_equality() {
     };
     assert_ne!(a, c);
 }
+
+// ── PolicySet structural merge tests ─────────────────────────────────────────
+//
+// Spec §5.1 — verify the "identity element" behaviour of PolicySet::merge.
+
+/// Two default PolicySets merged must produce PolicySet::default().
+#[test]
+fn policy_set_merge_both_defaults_yields_default() {
+    let base = PolicySet::default();
+    let over = PolicySet::default();
+
+    let merged = base.merge(&over);
+
+    assert_eq!(merged, PolicySet::default());
+}
+
+/// When `over` is default, result equals `base` (default is a right identity).
+#[test]
+fn policy_set_merge_over_default_preserves_base() {
+    let mut base = PolicySet::default();
+    base.title.required = true;
+    base.title.pattern = "custom-pattern".to_string();
+    base.work_item.required = true;
+
+    let merged = base.merge(&PolicySet::default());
+
+    assert_eq!(merged, base);
+}
+
+/// When `base` is default, result equals `over` (default is a left absorber for OR fields).
+/// Non-default values on `over` must propagate even when base is default.
+#[test]
+fn policy_set_merge_base_default_over_non_default_propagates_over() {
+    let mut over = PolicySet::default();
+    over.title.required = true;
+    over.title.pattern = "my-pattern".to_string();
+    over.work_item.required = true;
+    over.size.enabled = true;
+
+    let merged = PolicySet::default().merge(&over);
+
+    assert!(merged.title.required);
+    assert_eq!(merged.title.pattern, "my-pattern");
+    assert!(merged.work_item.required);
+    assert!(merged.size.enabled);
+}
+
+/// PolicySet::merge must delegate to each constituent's own merge independently —
+/// a non-default value in one field must not affect a different field.
+#[test]
+fn policy_set_merge_constituent_fields_are_independent() {
+    let mut over = PolicySet::default();
+    over.title.required = true;
+
+    let merged = PolicySet::default().merge(&over);
+
+    // Only title was modified — all other fields remain at default.
+    assert!(merged.title.required);
+    assert!(!merged.work_item.required);
+    assert!(!merged.size.enabled);
+    assert!(!merged.wip.enforce_wip_blocking);
+    assert!(!merged.pr_state.enabled);
+    assert!(!merged.issue_propagation.sync_milestone_from_issue);
+    assert!(!merged.issue_propagation.sync_project_from_issue);
+}
+
+// ── PullRequestsTitlePolicyConfig::merge ─────────────────────────────────────
+//
+// Spec §2.1 and §5.2
+
+/// `required` uses OR semantics: base=true, over=false → true.
+#[test]
+fn title_merge_required_or_base_true_over_false_yields_true() {
+    let base = PullRequestsTitlePolicyConfig {
+        required: true,
+        pattern: CONVENTIONAL_COMMIT_REGEX.to_string(),
+        label_if_missing: None,
+    };
+    let over = PullRequestsTitlePolicyConfig {
+        required: false,
+        pattern: CONVENTIONAL_COMMIT_REGEX.to_string(),
+        label_if_missing: None,
+    };
+
+    let result = PullRequestsTitlePolicyConfig::merge(&base, &over);
+
+    assert!(result.required);
+}
+
+/// `required` uses OR semantics: base=false, over=true → true.
+#[test]
+fn title_merge_required_or_base_false_over_true_yields_true() {
+    let base = PullRequestsTitlePolicyConfig {
+        required: false,
+        pattern: CONVENTIONAL_COMMIT_REGEX.to_string(),
+        label_if_missing: None,
+    };
+    let over = PullRequestsTitlePolicyConfig {
+        required: true,
+        pattern: CONVENTIONAL_COMMIT_REGEX.to_string(),
+        label_if_missing: None,
+    };
+
+    let result = PullRequestsTitlePolicyConfig::merge(&base, &over);
+
+    assert!(result.required);
+}
+
+/// `required` OR: both false → false.
+#[test]
+fn title_merge_required_or_both_false_yields_false() {
+    let base = PullRequestsTitlePolicyConfig {
+        required: false,
+        ..Default::default()
+    };
+    let over = PullRequestsTitlePolicyConfig {
+        required: false,
+        ..Default::default()
+    };
+
+    let result = PullRequestsTitlePolicyConfig::merge(&base, &over);
+
+    assert!(!result.required);
+}
+
+/// Non-default, non-empty `over.pattern` wins over base.
+#[test]
+fn title_merge_pattern_over_non_default_wins() {
+    let base = PullRequestsTitlePolicyConfig {
+        required: false,
+        pattern: "old-pattern".to_string(),
+        label_if_missing: None,
+    };
+    let over = PullRequestsTitlePolicyConfig {
+        required: false,
+        pattern: "new-pattern".to_string(),
+        label_if_missing: None,
+    };
+
+    let result = PullRequestsTitlePolicyConfig::merge(&base, &over);
+
+    assert_eq!(result.pattern, "new-pattern");
+}
+
+/// An empty `over.pattern` falls back to `base.pattern`.
+#[test]
+fn title_merge_pattern_over_empty_keeps_base() {
+    let base = PullRequestsTitlePolicyConfig {
+        required: false,
+        pattern: "base-pattern".to_string(),
+        label_if_missing: None,
+    };
+    let over = PullRequestsTitlePolicyConfig {
+        required: false,
+        pattern: String::new(),
+        label_if_missing: None,
+    };
+
+    let result = PullRequestsTitlePolicyConfig::merge(&base, &over);
+
+    assert_eq!(result.pattern, "base-pattern");
+}
+
+/// When `over.pattern` equals `CONVENTIONAL_COMMIT_REGEX`, `base.pattern` is kept.
+#[test]
+fn title_merge_pattern_over_default_keeps_base() {
+    let base = PullRequestsTitlePolicyConfig {
+        required: false,
+        pattern: "custom-base-pattern".to_string(),
+        label_if_missing: None,
+    };
+    let over = PullRequestsTitlePolicyConfig {
+        required: false,
+        pattern: CONVENTIONAL_COMMIT_REGEX.to_string(),
+        label_if_missing: None,
+    };
+
+    let result = PullRequestsTitlePolicyConfig::merge(&base, &over);
+
+    assert_eq!(result.pattern, "custom-base-pattern");
+}
+
+/// `over.label_if_missing = Some(_)` wins.
+#[test]
+fn title_merge_label_over_some_wins() {
+    let base = PullRequestsTitlePolicyConfig {
+        required: false,
+        pattern: CONVENTIONAL_COMMIT_REGEX.to_string(),
+        label_if_missing: Some("base-label".to_string()),
+    };
+    let over = PullRequestsTitlePolicyConfig {
+        required: false,
+        pattern: CONVENTIONAL_COMMIT_REGEX.to_string(),
+        label_if_missing: Some("over-label".to_string()),
+    };
+
+    let result = PullRequestsTitlePolicyConfig::merge(&base, &over);
+
+    assert_eq!(result.label_if_missing, Some("over-label".to_string()));
+}
+
+/// `over.label_if_missing = None` falls back to `base.label_if_missing`.
+#[test]
+fn title_merge_label_over_none_keeps_base() {
+    let base = PullRequestsTitlePolicyConfig {
+        required: false,
+        pattern: CONVENTIONAL_COMMIT_REGEX.to_string(),
+        label_if_missing: Some("base-label".to_string()),
+    };
+    let over = PullRequestsTitlePolicyConfig {
+        required: false,
+        pattern: CONVENTIONAL_COMMIT_REGEX.to_string(),
+        label_if_missing: None,
+    };
+
+    let result = PullRequestsTitlePolicyConfig::merge(&base, &over);
+
+    assert_eq!(result.label_if_missing, Some("base-label".to_string()));
+}
+
+/// Both labels None → result is None.
+#[test]
+fn title_merge_label_both_none_yields_none() {
+    let result = PullRequestsTitlePolicyConfig::merge(
+        &PullRequestsTitlePolicyConfig::default(),
+        &PullRequestsTitlePolicyConfig::default(),
+    );
+
+    assert_eq!(result.label_if_missing, None);
+}
+
+// ── WorkItemPolicyConfig::merge ───────────────────────────────────────────────
+//
+// Spec §2.2 and §5.3 — mirror of title policy rules.
+
+/// `required` OR: base=true, over=false → true.
+#[test]
+fn work_item_merge_required_or_base_true_over_false_yields_true() {
+    let base = WorkItemPolicyConfig {
+        required: true,
+        ..Default::default()
+    };
+    let over = WorkItemPolicyConfig {
+        required: false,
+        ..Default::default()
+    };
+
+    assert!(WorkItemPolicyConfig::merge(&base, &over).required);
+}
+
+/// `required` OR: base=false, over=true → true.
+#[test]
+fn work_item_merge_required_or_base_false_over_true_yields_true() {
+    let base = WorkItemPolicyConfig {
+        required: false,
+        ..Default::default()
+    };
+    let over = WorkItemPolicyConfig {
+        required: true,
+        ..Default::default()
+    };
+
+    assert!(WorkItemPolicyConfig::merge(&base, &over).required);
+}
+
+/// Non-default, non-empty `over.pattern` wins.
+#[test]
+fn work_item_merge_pattern_over_non_default_wins() {
+    let base = WorkItemPolicyConfig {
+        required: false,
+        pattern: "old-wi-pattern".to_string(),
+        label_if_missing: None,
+    };
+    let over = WorkItemPolicyConfig {
+        required: false,
+        pattern: "GH-\\d+".to_string(),
+        label_if_missing: None,
+    };
+
+    let result = WorkItemPolicyConfig::merge(&base, &over);
+
+    assert_eq!(result.pattern, "GH-\\d+");
+}
+
+/// Empty `over.pattern` falls back to `base.pattern`.
+#[test]
+fn work_item_merge_pattern_over_empty_keeps_base() {
+    let base = WorkItemPolicyConfig {
+        required: false,
+        pattern: "base-wi-pattern".to_string(),
+        label_if_missing: None,
+    };
+    let over = WorkItemPolicyConfig {
+        required: false,
+        pattern: String::new(),
+        label_if_missing: None,
+    };
+
+    let result = WorkItemPolicyConfig::merge(&base, &over);
+
+    assert_eq!(result.pattern, "base-wi-pattern");
+}
+
+/// `over.pattern == WORK_ITEM_REGEX` (default) → `base.pattern` is kept.
+#[test]
+fn work_item_merge_pattern_over_default_keeps_base() {
+    let base = WorkItemPolicyConfig {
+        required: false,
+        pattern: "custom-wi-base".to_string(),
+        label_if_missing: None,
+    };
+    let over = WorkItemPolicyConfig {
+        required: false,
+        pattern: WORK_ITEM_REGEX.to_string(),
+        label_if_missing: None,
+    };
+
+    let result = WorkItemPolicyConfig::merge(&base, &over);
+
+    assert_eq!(result.pattern, "custom-wi-base");
+}
+
+/// `over.label_if_missing = Some(_)` wins.
+#[test]
+fn work_item_merge_label_over_some_wins() {
+    let base = WorkItemPolicyConfig {
+        required: false,
+        pattern: WORK_ITEM_REGEX.to_string(),
+        label_if_missing: Some("base-wi-label".to_string()),
+    };
+    let over = WorkItemPolicyConfig {
+        required: false,
+        pattern: WORK_ITEM_REGEX.to_string(),
+        label_if_missing: Some("over-wi-label".to_string()),
+    };
+
+    let result = WorkItemPolicyConfig::merge(&base, &over);
+
+    assert_eq!(result.label_if_missing, Some("over-wi-label".to_string()));
+}
+
+/// `over.label_if_missing = None` keeps `base.label_if_missing`.
+#[test]
+fn work_item_merge_label_over_none_keeps_base() {
+    let base = WorkItemPolicyConfig {
+        required: false,
+        pattern: WORK_ITEM_REGEX.to_string(),
+        label_if_missing: Some("base-wi-label".to_string()),
+    };
+    let over = WorkItemPolicyConfig {
+        required: false,
+        pattern: WORK_ITEM_REGEX.to_string(),
+        label_if_missing: None,
+    };
+
+    let result = WorkItemPolicyConfig::merge(&base, &over);
+
+    assert_eq!(result.label_if_missing, Some("base-wi-label".to_string()));
+}
+
+// ── PrSizeCheckConfig::merge ──────────────────────────────────────────────────
+//
+// Spec §2.3 and §5.4
+
+/// `enabled` OR: base=true, over=false → true.
+#[test]
+fn size_merge_enabled_or_base_true_over_false_yields_true() {
+    let base = PrSizeCheckConfig {
+        enabled: true,
+        ..Default::default()
+    };
+    let over = PrSizeCheckConfig {
+        enabled: false,
+        ..Default::default()
+    };
+
+    assert!(PrSizeCheckConfig::merge(&base, &over).enabled);
+}
+
+/// `enabled` OR: base=false, over=true → true.
+#[test]
+fn size_merge_enabled_or_base_false_over_true_yields_true() {
+    let base = PrSizeCheckConfig {
+        enabled: false,
+        ..Default::default()
+    };
+    let over = PrSizeCheckConfig {
+        enabled: true,
+        ..Default::default()
+    };
+
+    assert!(PrSizeCheckConfig::merge(&base, &over).enabled);
+}
+
+/// `fail_on_oversized` is unconditional: over=false wins over base=true.
+#[test]
+fn size_merge_fail_on_oversized_over_false_wins_over_base_true() {
+    let base = PrSizeCheckConfig {
+        fail_on_oversized: true,
+        ..Default::default()
+    };
+    let over = PrSizeCheckConfig {
+        fail_on_oversized: false,
+        ..Default::default()
+    };
+
+    assert!(!PrSizeCheckConfig::merge(&base, &over).fail_on_oversized);
+}
+
+/// `fail_on_oversized` is unconditional: over=true wins over base=false.
+#[test]
+fn size_merge_fail_on_oversized_over_true_wins_over_base_false() {
+    let base = PrSizeCheckConfig {
+        fail_on_oversized: false,
+        ..Default::default()
+    };
+    let over = PrSizeCheckConfig {
+        fail_on_oversized: true,
+        ..Default::default()
+    };
+
+    assert!(PrSizeCheckConfig::merge(&base, &over).fail_on_oversized);
+}
+
+/// `thresholds = Some(_)` on over wins.
+#[test]
+fn size_merge_thresholds_over_some_wins() {
+    let custom = SizeThresholds::new(1, 10, 50, 100, 200);
+    let base = PrSizeCheckConfig {
+        thresholds: None,
+        ..Default::default()
+    };
+    let over = PrSizeCheckConfig {
+        thresholds: Some(custom.clone()),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        PrSizeCheckConfig::merge(&base, &over).thresholds,
+        Some(custom)
+    );
+}
+
+/// `thresholds = None` on over falls back to `base.thresholds`.
+#[test]
+fn size_merge_thresholds_over_none_keeps_base() {
+    let custom = SizeThresholds::new(2, 20, 60, 120, 240);
+    let base = PrSizeCheckConfig {
+        thresholds: Some(custom.clone()),
+        ..Default::default()
+    };
+    let over = PrSizeCheckConfig {
+        thresholds: None,
+        ..Default::default()
+    };
+
+    assert_eq!(
+        PrSizeCheckConfig::merge(&base, &over).thresholds,
+        Some(custom)
+    );
+}
+
+/// Non-empty `over.excluded_file_patterns` wins.
+#[test]
+fn size_merge_excluded_patterns_over_non_empty_wins() {
+    let base = PrSizeCheckConfig {
+        excluded_file_patterns: vec!["*.md".to_string()],
+        ..Default::default()
+    };
+    let over = PrSizeCheckConfig {
+        excluded_file_patterns: vec!["*.toml".to_string(), "*.lock".to_string()],
+        ..Default::default()
+    };
+
+    assert_eq!(
+        PrSizeCheckConfig::merge(&base, &over).excluded_file_patterns,
+        vec!["*.toml", "*.lock"]
+    );
+}
+
+/// Empty `over.excluded_file_patterns` falls back to `base`.
+#[test]
+fn size_merge_excluded_patterns_over_empty_keeps_base() {
+    let base = PrSizeCheckConfig {
+        excluded_file_patterns: vec!["*.md".to_string()],
+        ..Default::default()
+    };
+    let over = PrSizeCheckConfig {
+        excluded_file_patterns: vec![],
+        ..Default::default()
+    };
+
+    assert_eq!(
+        PrSizeCheckConfig::merge(&base, &over).excluded_file_patterns,
+        vec!["*.md"]
+    );
+}
+
+/// Non-default `over.label_prefix` wins.
+#[test]
+fn size_merge_label_prefix_over_non_default_wins() {
+    let base = PrSizeCheckConfig {
+        label_prefix: "custom-base/".to_string(),
+        ..Default::default()
+    };
+    let over = PrSizeCheckConfig {
+        label_prefix: "pr/".to_string(),
+        ..Default::default()
+    };
+
+    assert_eq!(PrSizeCheckConfig::merge(&base, &over).label_prefix, "pr/");
+}
+
+/// When `over.label_prefix` equals the default `"size/"`, `base.label_prefix` is kept.
+#[test]
+fn size_merge_label_prefix_over_default_keeps_base() {
+    let base = PrSizeCheckConfig {
+        label_prefix: "my-size/".to_string(),
+        ..Default::default()
+    };
+    let over = PrSizeCheckConfig {
+        label_prefix: "size/".to_string(), // default value
+        ..Default::default()
+    };
+
+    assert_eq!(
+        PrSizeCheckConfig::merge(&base, &over).label_prefix,
+        "my-size/"
+    );
+}
+
+/// `add_comment` is unconditional: over=false wins over base=true.
+#[test]
+fn size_merge_add_comment_over_false_wins_over_base_true() {
+    let base = PrSizeCheckConfig {
+        add_comment: true,
+        ..Default::default()
+    };
+    let over = PrSizeCheckConfig {
+        add_comment: false,
+        ..Default::default()
+    };
+
+    assert!(!PrSizeCheckConfig::merge(&base, &over).add_comment);
+}
+
+/// `ignore_deletions` is unconditional: over=true wins over base=false.
+#[test]
+fn size_merge_ignore_deletions_over_true_wins_over_base_false() {
+    let base = PrSizeCheckConfig {
+        ignore_deletions: false,
+        ..Default::default()
+    };
+    let over = PrSizeCheckConfig {
+        ignore_deletions: true,
+        ..Default::default()
+    };
+
+    assert!(PrSizeCheckConfig::merge(&base, &over).ignore_deletions);
+}
+
+// ── WipCheckConfig::merge ─────────────────────────────────────────────────────
+//
+// Spec §2.4 and §5.5
+
+/// `enforce_wip_blocking` OR: base=true, over=false → true.
+#[test]
+fn wip_merge_enforce_or_base_true_over_false_yields_true() {
+    let base = WipCheckConfig {
+        enforce_wip_blocking: true,
+        ..Default::default()
+    };
+    let over = WipCheckConfig {
+        enforce_wip_blocking: false,
+        ..Default::default()
+    };
+
+    assert!(WipCheckConfig::merge(&base, &over).enforce_wip_blocking);
+}
+
+/// `enforce_wip_blocking` OR: base=false, over=true → true.
+#[test]
+fn wip_merge_enforce_or_base_false_over_true_yields_true() {
+    let base = WipCheckConfig {
+        enforce_wip_blocking: false,
+        ..Default::default()
+    };
+    let over = WipCheckConfig {
+        enforce_wip_blocking: true,
+        ..Default::default()
+    };
+
+    assert!(WipCheckConfig::merge(&base, &over).enforce_wip_blocking);
+}
+
+/// Non-default `over.wip_label` wins over `base.wip_label`.
+#[test]
+fn wip_merge_label_over_non_default_wins() {
+    let base = WipCheckConfig {
+        wip_label: Some("base-wip".to_string()),
+        ..Default::default()
+    };
+    let over = WipCheckConfig {
+        wip_label: Some("work-in-progress".to_string()),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        WipCheckConfig::merge(&base, &over).wip_label,
+        Some("work-in-progress".to_string())
+    );
+}
+
+/// `over.wip_label` equal to `WipCheckConfig::default().wip_label` → `base.wip_label` kept.
+#[test]
+fn wip_merge_label_over_default_value_keeps_base() {
+    let base = WipCheckConfig {
+        wip_label: Some("custom-wip-base".to_string()),
+        ..Default::default()
+    };
+    let over = WipCheckConfig {
+        wip_label: Some("WIP".to_string()), // default value
+        ..Default::default()
+    };
+
+    assert_eq!(
+        WipCheckConfig::merge(&base, &over).wip_label,
+        Some("custom-wip-base".to_string())
+    );
+}
+
+/// Non-default `over.wip_title_patterns` wins.
+#[test]
+fn wip_merge_title_patterns_over_non_default_wins() {
+    let default_patterns = WipCheckConfig::default().wip_title_patterns;
+    let base = WipCheckConfig {
+        wip_title_patterns: default_patterns.clone(),
+        ..Default::default()
+    };
+    let over = WipCheckConfig {
+        wip_title_patterns: vec!["DO NOT MERGE".to_string(), "BLOCKED".to_string()],
+        ..Default::default()
+    };
+
+    assert_eq!(
+        WipCheckConfig::merge(&base, &over).wip_title_patterns,
+        vec!["DO NOT MERGE", "BLOCKED"]
+    );
+}
+
+/// `over.wip_title_patterns` equal to defaults → `base.wip_title_patterns` kept.
+#[test]
+fn wip_merge_title_patterns_over_default_keeps_base() {
+    let default_patterns = WipCheckConfig::default().wip_title_patterns;
+    let base = WipCheckConfig {
+        wip_title_patterns: vec!["custom-base-wip".to_string()],
+        ..Default::default()
+    };
+    let over = WipCheckConfig {
+        wip_title_patterns: default_patterns,
+        ..Default::default()
+    };
+
+    assert_eq!(
+        WipCheckConfig::merge(&base, &over).wip_title_patterns,
+        vec!["custom-base-wip"]
+    );
+}
+
+/// Non-empty `over.wip_description_patterns` wins.
+#[test]
+fn wip_merge_description_patterns_over_non_empty_wins() {
+    let base = WipCheckConfig {
+        wip_description_patterns: vec!["base-desc".to_string()],
+        ..Default::default()
+    };
+    let over = WipCheckConfig {
+        wip_description_patterns: vec!["🚧".to_string(), "DRAFT".to_string()],
+        ..Default::default()
+    };
+
+    assert_eq!(
+        WipCheckConfig::merge(&base, &over).wip_description_patterns,
+        vec!["🚧", "DRAFT"]
+    );
+}
+
+/// Empty `over.wip_description_patterns` falls back to `base`.
+#[test]
+fn wip_merge_description_patterns_over_empty_keeps_base() {
+    let base = WipCheckConfig {
+        wip_description_patterns: vec!["base-desc-pattern".to_string()],
+        ..Default::default()
+    };
+    let over = WipCheckConfig {
+        wip_description_patterns: vec![],
+        ..Default::default()
+    };
+
+    assert_eq!(
+        WipCheckConfig::merge(&base, &over).wip_description_patterns,
+        vec!["base-desc-pattern"]
+    );
+}
+
+// ── PrStateLabelsConfig::merge ────────────────────────────────────────────────
+//
+// Spec §2.5
+
+/// `enabled` OR: base=true, over=false → true.
+#[test]
+fn pr_state_merge_enabled_or_base_true_over_false_yields_true() {
+    let base = PrStateLabelsConfig {
+        enabled: true,
+        ..Default::default()
+    };
+    let over = PrStateLabelsConfig {
+        enabled: false,
+        ..Default::default()
+    };
+
+    assert!(PrStateLabelsConfig::merge(&base, &over).enabled);
+}
+
+/// `enabled` OR: base=false, over=true → true.
+#[test]
+fn pr_state_merge_enabled_or_base_false_over_true_yields_true() {
+    let base = PrStateLabelsConfig {
+        enabled: false,
+        ..Default::default()
+    };
+    let over = PrStateLabelsConfig {
+        enabled: true,
+        ..Default::default()
+    };
+
+    assert!(PrStateLabelsConfig::merge(&base, &over).enabled);
+}
+
+/// `over.draft_label = Some(_)` wins.
+#[test]
+fn pr_state_merge_draft_label_over_some_wins() {
+    let base = PrStateLabelsConfig {
+        draft_label: Some("base-draft".to_string()),
+        ..Default::default()
+    };
+    let over = PrStateLabelsConfig {
+        draft_label: Some("over-draft".to_string()),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        PrStateLabelsConfig::merge(&base, &over).draft_label,
+        Some("over-draft".to_string())
+    );
+}
+
+/// `over.draft_label = None` falls back to `base.draft_label`.
+#[test]
+fn pr_state_merge_draft_label_over_none_keeps_base() {
+    let base = PrStateLabelsConfig {
+        draft_label: Some("base-draft".to_string()),
+        ..Default::default()
+    };
+    let over = PrStateLabelsConfig {
+        draft_label: None,
+        ..Default::default()
+    };
+
+    assert_eq!(
+        PrStateLabelsConfig::merge(&base, &over).draft_label,
+        Some("base-draft".to_string())
+    );
+}
+
+/// `over.review_label = Some(_)` wins.
+#[test]
+fn pr_state_merge_review_label_over_some_wins() {
+    let base = PrStateLabelsConfig {
+        review_label: Some("base-review".to_string()),
+        ..Default::default()
+    };
+    let over = PrStateLabelsConfig {
+        review_label: Some("awaiting-review".to_string()),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        PrStateLabelsConfig::merge(&base, &over).review_label,
+        Some("awaiting-review".to_string())
+    );
+}
+
+/// `over.review_label = None` falls back to `base.review_label`.
+#[test]
+fn pr_state_merge_review_label_over_none_keeps_base() {
+    let base = PrStateLabelsConfig {
+        review_label: Some("base-review".to_string()),
+        ..Default::default()
+    };
+    let over = PrStateLabelsConfig {
+        review_label: None,
+        ..Default::default()
+    };
+
+    assert_eq!(
+        PrStateLabelsConfig::merge(&base, &over).review_label,
+        Some("base-review".to_string())
+    );
+}
+
+/// `over.approved_label = Some(_)` wins.
+#[test]
+fn pr_state_merge_approved_label_over_some_wins() {
+    let base = PrStateLabelsConfig {
+        approved_label: Some("base-approved".to_string()),
+        ..Default::default()
+    };
+    let over = PrStateLabelsConfig {
+        approved_label: Some("lgtm".to_string()),
+        ..Default::default()
+    };
+
+    assert_eq!(
+        PrStateLabelsConfig::merge(&base, &over).approved_label,
+        Some("lgtm".to_string())
+    );
+}
+
+/// `over.approved_label = None` falls back to `base.approved_label`.
+#[test]
+fn pr_state_merge_approved_label_over_none_keeps_base() {
+    let base = PrStateLabelsConfig {
+        approved_label: Some("base-approved".to_string()),
+        ..Default::default()
+    };
+    let over = PrStateLabelsConfig {
+        approved_label: None,
+        ..Default::default()
+    };
+
+    assert_eq!(
+        PrStateLabelsConfig::merge(&base, &over).approved_label,
+        Some("base-approved".to_string())
+    );
+}
+
+// ── IssuePropagationConfig::merge ─────────────────────────────────────────────
+//
+// Spec §2.6
+
+/// `sync_milestone_from_issue` OR: base=true, over=false → true.
+#[test]
+fn issue_propagation_merge_milestone_or_base_true_over_false_yields_true() {
+    let base = IssuePropagationConfig {
+        sync_milestone_from_issue: true,
+        sync_project_from_issue: false,
+    };
+    let over = IssuePropagationConfig {
+        sync_milestone_from_issue: false,
+        sync_project_from_issue: false,
+    };
+
+    assert!(IssuePropagationConfig::merge(&base, &over).sync_milestone_from_issue);
+}
+
+/// `sync_milestone_from_issue` OR: base=false, over=true → true.
+#[test]
+fn issue_propagation_merge_milestone_or_base_false_over_true_yields_true() {
+    let base = IssuePropagationConfig {
+        sync_milestone_from_issue: false,
+        sync_project_from_issue: false,
+    };
+    let over = IssuePropagationConfig {
+        sync_milestone_from_issue: true,
+        sync_project_from_issue: false,
+    };
+
+    assert!(IssuePropagationConfig::merge(&base, &over).sync_milestone_from_issue);
+}
+
+/// `sync_project_from_issue` OR: base=true, over=false → true.
+#[test]
+fn issue_propagation_merge_project_or_base_true_over_false_yields_true() {
+    let base = IssuePropagationConfig {
+        sync_milestone_from_issue: false,
+        sync_project_from_issue: true,
+    };
+    let over = IssuePropagationConfig {
+        sync_milestone_from_issue: false,
+        sync_project_from_issue: false,
+    };
+
+    assert!(IssuePropagationConfig::merge(&base, &over).sync_project_from_issue);
+}
+
+/// `sync_project_from_issue` OR: base=false, over=true → true.
+#[test]
+fn issue_propagation_merge_project_or_base_false_over_true_yields_true() {
+    let base = IssuePropagationConfig {
+        sync_milestone_from_issue: false,
+        sync_project_from_issue: false,
+    };
+    let over = IssuePropagationConfig {
+        sync_milestone_from_issue: false,
+        sync_project_from_issue: true,
+    };
+
+    assert!(IssuePropagationConfig::merge(&base, &over).sync_project_from_issue);
+}
+
+/// Merge of two defaults yields default.
+#[test]
+fn issue_propagation_merge_both_defaults_yields_default() {
+    let result = IssuePropagationConfig::merge(
+        &IssuePropagationConfig::default(),
+        &IssuePropagationConfig::default(),
+    );
+
+    assert!(!result.sync_milestone_from_issue);
+    assert!(!result.sync_project_from_issue);
+}
+
+// ── ChangeTypeLabelConfig::merge — commit-type mappings ───────────────────────
+//
+// Spec §2.7 and §5.6 — non-empty over wins for each Vec<String> mapping field.
+
+/// Non-empty `over.conventional_commit_mappings.feat` wins.
+#[test]
+fn change_type_merge_feat_over_non_empty_wins() {
+    let mut base = ChangeTypeLabelConfig::default();
+    base.conventional_commit_mappings.feat = vec!["feature-base".to_string()];
+    let mut over = ChangeTypeLabelConfig::default();
+    over.conventional_commit_mappings.feat = vec!["feature-over".to_string()];
+
+    let result = ChangeTypeLabelConfig::merge(&base, &over);
+
+    assert_eq!(
+        result.conventional_commit_mappings.feat,
+        vec!["feature-over"]
+    );
+}
+
+/// Empty `over.conventional_commit_mappings.feat` falls back to `base`.
+#[test]
+fn change_type_merge_feat_over_empty_keeps_base() {
+    let mut base = ChangeTypeLabelConfig::default();
+    base.conventional_commit_mappings.feat = vec!["feature-base".to_string()];
+    let mut over = ChangeTypeLabelConfig::default();
+    over.conventional_commit_mappings.feat = vec![];
+
+    let result = ChangeTypeLabelConfig::merge(&base, &over);
+
+    assert_eq!(
+        result.conventional_commit_mappings.feat,
+        vec!["feature-base"]
+    );
+}
+
+/// Verify the same non-empty-wins rule applies to all 11 commit-type mapping fields.
+#[test]
+fn change_type_merge_all_eleven_types_over_non_empty_wins() {
+    let mut base = ChangeTypeLabelConfig::default();
+    base.conventional_commit_mappings.feat = vec!["b-feat".to_string()];
+    base.conventional_commit_mappings.fix = vec!["b-fix".to_string()];
+    base.conventional_commit_mappings.docs = vec!["b-docs".to_string()];
+    base.conventional_commit_mappings.style = vec!["b-style".to_string()];
+    base.conventional_commit_mappings.refactor = vec!["b-refactor".to_string()];
+    base.conventional_commit_mappings.perf = vec!["b-perf".to_string()];
+    base.conventional_commit_mappings.test = vec!["b-test".to_string()];
+    base.conventional_commit_mappings.chore = vec!["b-chore".to_string()];
+    base.conventional_commit_mappings.ci = vec!["b-ci".to_string()];
+    base.conventional_commit_mappings.build = vec!["b-build".to_string()];
+    base.conventional_commit_mappings.revert = vec!["b-revert".to_string()];
+
+    let mut over = ChangeTypeLabelConfig::default();
+    over.conventional_commit_mappings.feat = vec!["o-feat".to_string()];
+    over.conventional_commit_mappings.fix = vec!["o-fix".to_string()];
+    over.conventional_commit_mappings.docs = vec!["o-docs".to_string()];
+    over.conventional_commit_mappings.style = vec!["o-style".to_string()];
+    over.conventional_commit_mappings.refactor = vec!["o-refactor".to_string()];
+    over.conventional_commit_mappings.perf = vec!["o-perf".to_string()];
+    over.conventional_commit_mappings.test = vec!["o-test".to_string()];
+    over.conventional_commit_mappings.chore = vec!["o-chore".to_string()];
+    over.conventional_commit_mappings.ci = vec!["o-ci".to_string()];
+    over.conventional_commit_mappings.build = vec!["o-build".to_string()];
+    over.conventional_commit_mappings.revert = vec!["o-revert".to_string()];
+
+    let result = ChangeTypeLabelConfig::merge(&base, &over);
+
+    assert_eq!(result.conventional_commit_mappings.feat, vec!["o-feat"]);
+    assert_eq!(result.conventional_commit_mappings.fix, vec!["o-fix"]);
+    assert_eq!(result.conventional_commit_mappings.docs, vec!["o-docs"]);
+    assert_eq!(result.conventional_commit_mappings.style, vec!["o-style"]);
+    assert_eq!(
+        result.conventional_commit_mappings.refactor,
+        vec!["o-refactor"]
+    );
+    assert_eq!(result.conventional_commit_mappings.perf, vec!["o-perf"]);
+    assert_eq!(result.conventional_commit_mappings.test, vec!["o-test"]);
+    assert_eq!(result.conventional_commit_mappings.chore, vec!["o-chore"]);
+    assert_eq!(result.conventional_commit_mappings.ci, vec!["o-ci"]);
+    assert_eq!(result.conventional_commit_mappings.build, vec!["o-build"]);
+    assert_eq!(result.conventional_commit_mappings.revert, vec!["o-revert"]);
+}
+
+/// All 11 fields empty on `over` — all 11 must fall back to base.
+#[test]
+fn change_type_merge_all_eleven_types_over_empty_keeps_base() {
+    let mut base = ChangeTypeLabelConfig::default();
+    base.conventional_commit_mappings.feat = vec!["b-feat".to_string()];
+    base.conventional_commit_mappings.fix = vec!["b-fix".to_string()];
+    base.conventional_commit_mappings.docs = vec!["b-docs".to_string()];
+
+    let mut over = ChangeTypeLabelConfig::default();
+    over.conventional_commit_mappings.feat = vec![];
+    over.conventional_commit_mappings.fix = vec![];
+    over.conventional_commit_mappings.docs = vec![];
+
+    let result = ChangeTypeLabelConfig::merge(&base, &over);
+
+    assert_eq!(result.conventional_commit_mappings.feat, vec!["b-feat"]);
+    assert_eq!(result.conventional_commit_mappings.fix, vec!["b-fix"]);
+    assert_eq!(result.conventional_commit_mappings.docs, vec!["b-docs"]);
+}
+
+/// `enabled` OR: base=false, over=true → true.
+#[test]
+fn change_type_merge_enabled_or_base_false_over_true_yields_true() {
+    let mut base = ChangeTypeLabelConfig::default();
+    base.enabled = false;
+    let mut over = ChangeTypeLabelConfig::default();
+    over.enabled = true;
+
+    assert!(ChangeTypeLabelConfig::merge(&base, &over).enabled);
+}
+
+// ── ChangeTypeLabelConfig::merge — keyword labels ─────────────────────────────
+//
+// Spec §2.7 and §5.7
+
+/// `over.keyword_labels.breaking_change = Some(_)` wins.
+#[test]
+fn change_type_merge_keyword_breaking_change_over_some_wins() {
+    let base = ChangeTypeLabelConfig {
+        keyword_labels: KeywordLabelsConfig {
+            breaking_change: Some("semver-major-base".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let over = ChangeTypeLabelConfig {
+        keyword_labels: KeywordLabelsConfig {
+            breaking_change: Some("semver-major".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let result = ChangeTypeLabelConfig::merge(&base, &over);
+
+    assert_eq!(
+        result.keyword_labels.breaking_change,
+        Some("semver-major".to_string())
+    );
+}
+
+/// `over.keyword_labels.breaking_change = None` falls back to `base`.
+#[test]
+fn change_type_merge_keyword_breaking_change_over_none_keeps_base() {
+    let base = ChangeTypeLabelConfig {
+        keyword_labels: KeywordLabelsConfig {
+            breaking_change: Some("semver-major-base".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let over = ChangeTypeLabelConfig {
+        keyword_labels: KeywordLabelsConfig {
+            breaking_change: None,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let result = ChangeTypeLabelConfig::merge(&base, &over);
+
+    assert_eq!(
+        result.keyword_labels.breaking_change,
+        Some("semver-major-base".to_string())
+    );
+}
+
+/// `over.keyword_labels.security = Some(_)` wins.
+#[test]
+fn change_type_merge_keyword_security_over_some_wins() {
+    let base = ChangeTypeLabelConfig {
+        keyword_labels: KeywordLabelsConfig {
+            security: Some("base-security".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let over = ChangeTypeLabelConfig {
+        keyword_labels: KeywordLabelsConfig {
+            security: Some("vulnerability".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    assert_eq!(
+        ChangeTypeLabelConfig::merge(&base, &over)
+            .keyword_labels
+            .security,
+        Some("vulnerability".to_string())
+    );
+}
+
+/// `over.keyword_labels.hotfix = None` falls back to `base`.
+#[test]
+fn change_type_merge_keyword_hotfix_over_none_keeps_base() {
+    let base = ChangeTypeLabelConfig {
+        keyword_labels: KeywordLabelsConfig {
+            hotfix: Some("critical".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let over = ChangeTypeLabelConfig {
+        keyword_labels: KeywordLabelsConfig {
+            hotfix: None,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    assert_eq!(
+        ChangeTypeLabelConfig::merge(&base, &over)
+            .keyword_labels
+            .hotfix,
+        Some("critical".to_string())
+    );
+}
+
+/// `over.keyword_labels.tech_debt = Some(_)` wins.
+#[test]
+fn change_type_merge_keyword_tech_debt_over_some_wins() {
+    let base = ChangeTypeLabelConfig {
+        keyword_labels: KeywordLabelsConfig {
+            tech_debt: Some("base-debt".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let over = ChangeTypeLabelConfig {
+        keyword_labels: KeywordLabelsConfig {
+            tech_debt: Some("cleanup".to_string()),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    assert_eq!(
+        ChangeTypeLabelConfig::merge(&base, &over)
+            .keyword_labels
+            .tech_debt,
+        Some("cleanup".to_string())
+    );
+}
+
+/// All four keyword labels on `over` being `None` preserves all four from `base`.
+#[test]
+fn change_type_merge_all_keyword_labels_over_none_keeps_all_base() {
+    let base = ChangeTypeLabelConfig {
+        keyword_labels: KeywordLabelsConfig {
+            breaking_change: Some("semver-major".to_string()),
+            security: Some("sec".to_string()),
+            hotfix: Some("hot".to_string()),
+            tech_debt: Some("debt".to_string()),
+        },
+        ..Default::default()
+    };
+    let over = ChangeTypeLabelConfig {
+        keyword_labels: KeywordLabelsConfig::default(),
+        ..Default::default()
+    };
+
+    let result = ChangeTypeLabelConfig::merge(&base, &over);
+
+    assert_eq!(
+        result.keyword_labels.breaking_change,
+        Some("semver-major".to_string())
+    );
+    assert_eq!(result.keyword_labels.security, Some("sec".to_string()));
+    assert_eq!(result.keyword_labels.hotfix, Some("hot".to_string()));
+    assert_eq!(result.keyword_labels.tech_debt, Some("debt".to_string()));
+}
+
+// ── BypassRules::merge ────────────────────────────────────────────────────────
+//
+// Spec §2.8
+
+/// `over.title_convention` is explicitly configured (non-empty users) → it wins.
+#[test]
+fn bypass_merge_title_convention_over_configured_wins() {
+    let base = BypassRules::new_with_size(
+        BypassRule::new(true, vec!["base-title-bot".to_string()]),
+        BypassRule::default(),
+        BypassRule::default(),
+    );
+    let over = BypassRules::new_with_size(
+        BypassRule::new(true, vec!["over-title-bot".to_string()]),
+        BypassRule::default(),
+        BypassRule::default(),
+    );
+
+    let result = BypassRules::merge(&base, &over);
+
+    assert!(result
+        .title_convention()
+        .users()
+        .contains(&"over-title-bot"));
+    assert!(!result
+        .title_convention()
+        .users()
+        .contains(&"base-title-bot"));
+}
+
+/// `over.title_convention` is unconfigured (empty users, disabled) → `base` is kept.
+#[test]
+fn bypass_merge_title_convention_over_unconfigured_keeps_base() {
+    let base = BypassRules::new_with_size(
+        BypassRule::new(true, vec!["base-title-bot".to_string()]),
+        BypassRule::default(),
+        BypassRule::default(),
+    );
+    let over = BypassRules::default(); // all rules are default (disabled, empty users)
+
+    let result = BypassRules::merge(&base, &over);
+
+    assert!(result
+        .title_convention()
+        .users()
+        .contains(&"base-title-bot"));
+}
+
+/// `over.work_items` is explicitly configured → it wins.
+#[test]
+fn bypass_merge_work_items_over_configured_wins() {
+    let base = BypassRules::new_with_size(
+        BypassRule::default(),
+        BypassRule::new(true, vec!["base-wi-bot".to_string()]),
+        BypassRule::default(),
+    );
+    let over = BypassRules::new_with_size(
+        BypassRule::default(),
+        BypassRule::new(true, vec!["over-wi-bot".to_string()]),
+        BypassRule::default(),
+    );
+
+    let result = BypassRules::merge(&base, &over);
+
+    assert!(result
+        .work_item_convention()
+        .users()
+        .contains(&"over-wi-bot"));
+    assert!(!result
+        .work_item_convention()
+        .users()
+        .contains(&"base-wi-bot"));
+}
+
+/// `over.work_items` is unconfigured → `base` is kept.
+#[test]
+fn bypass_merge_work_items_over_unconfigured_keeps_base() {
+    let base = BypassRules::new_with_size(
+        BypassRule::default(),
+        BypassRule::new(true, vec!["base-wi-bot".to_string()]),
+        BypassRule::default(),
+    );
+    let over = BypassRules::default();
+
+    let result = BypassRules::merge(&base, &over);
+
+    assert!(result
+        .work_item_convention()
+        .users()
+        .contains(&"base-wi-bot"));
+}
+
+/// `over.size` is explicitly configured → it wins.
+#[test]
+fn bypass_merge_size_over_configured_wins() {
+    let base = BypassRules::new_with_size(
+        BypassRule::default(),
+        BypassRule::default(),
+        BypassRule::new(true, vec!["base-size-bot".to_string()]),
+    );
+    let over = BypassRules::new_with_size(
+        BypassRule::default(),
+        BypassRule::default(),
+        BypassRule::new(true, vec!["over-size-bot".to_string()]),
+    );
+
+    let result = BypassRules::merge(&base, &over);
+
+    assert!(result.size().users().contains(&"over-size-bot"));
+    assert!(!result.size().users().contains(&"base-size-bot"));
+}
+
+/// `over.size` is unconfigured → `base` is kept.
+#[test]
+fn bypass_merge_size_over_unconfigured_keeps_base() {
+    let base = BypassRules::new_with_size(
+        BypassRule::default(),
+        BypassRule::default(),
+        BypassRule::new(true, vec!["base-size-bot".to_string()]),
+    );
+    let over = BypassRules::default();
+
+    let result = BypassRules::merge(&base, &over);
+
+    assert!(result.size().users().contains(&"base-size-bot"));
+}
+
+/// Each rule is evaluated independently: one configured, two unconfigured.
+#[test]
+fn bypass_merge_partial_over_keeps_base_for_unconfigured_rules() {
+    let base = BypassRules::new_with_size(
+        BypassRule::new(true, vec!["base-title".to_string()]),
+        BypassRule::new(true, vec!["base-wi".to_string()]),
+        BypassRule::new(true, vec!["base-size".to_string()]),
+    );
+    // Only title_convention is configured on `over`.
+    let over = BypassRules::new_with_size(
+        BypassRule::new(true, vec!["over-title".to_string()]),
+        BypassRule::default(),
+        BypassRule::default(),
+    );
+
+    let result = BypassRules::merge(&base, &over);
+
+    assert!(result.title_convention().users().contains(&"over-title"));
+    assert!(result.work_item_convention().users().contains(&"base-wi"));
+    assert!(result.size().users().contains(&"base-size"));
+}
+
+/// `over` rule with `enabled = true` but empty users is considered explicitly configured.
+#[test]
+fn bypass_merge_over_enabled_true_empty_users_is_explicitly_configured() {
+    let base = BypassRules::new_with_size(
+        BypassRule::new(true, vec!["base-title".to_string()]),
+        BypassRule::default(),
+        BypassRule::default(),
+    );
+    // enabled=true, users=[] → this is an explicit override (operator intentionally clearing users)
+    let over = BypassRules::new_with_size(
+        BypassRule::new(true, vec![]),
+        BypassRule::default(),
+        BypassRule::default(),
+    );
+
+    let result = BypassRules::merge(&base, &over);
+
+    // The `over` rule (enabled, empty users) is explicitly configured — it wins.
+    assert!(result.title_convention().users().is_empty());
+    assert!(!result.title_convention().users().contains(&"base-title"));
+}
+
+// ── PolicySet::from_application_defaults ─────────────────────────────────────
+//
+// Spec §1.2
+
+/// `from_application_defaults` maps `default_title_pattern` → `title.pattern`.
+#[test]
+fn policy_set_from_app_defaults_title_pattern_mapped() {
+    let mut app = ApplicationDefaults::default();
+    app.default_title_pattern = "my-title-regex".to_string();
+
+    let ps = PolicySet::from_application_defaults(&app);
+
+    assert_eq!(ps.title.pattern, "my-title-regex");
+}
+
+/// `from_application_defaults` maps `default_invalid_title_label` → `title.label_if_missing`.
+#[test]
+fn policy_set_from_app_defaults_title_label_mapped() {
+    let mut app = ApplicationDefaults::default();
+    app.default_invalid_title_label = Some("bad-title".to_string());
+
+    let ps = PolicySet::from_application_defaults(&app);
+
+    assert_eq!(ps.title.label_if_missing, Some("bad-title".to_string()));
+}
+
+/// `enable_title_validation` is NOT applied by `from_application_defaults`
+/// (it is applied as a post-merge enforcement override).
+#[test]
+fn policy_set_from_app_defaults_enable_title_validation_not_applied() {
+    let mut app = ApplicationDefaults::default();
+    app.enable_title_validation = true;
+
+    let ps = PolicySet::from_application_defaults(&app);
+
+    assert!(!ps.title.required,
+        "enable_title_validation must not be applied inside from_application_defaults; it is an enforcement override");
+}
+
+/// `from_application_defaults` maps `default_work_item_pattern` → `work_item.pattern`.
+#[test]
+fn policy_set_from_app_defaults_work_item_pattern_mapped() {
+    let mut app = ApplicationDefaults::default();
+    app.default_work_item_pattern = "GH-\\d+".to_string();
+
+    let ps = PolicySet::from_application_defaults(&app);
+
+    assert_eq!(ps.work_item.pattern, "GH-\\d+");
+}
+
+/// `enable_work_item_validation` is NOT applied by `from_application_defaults`.
+#[test]
+fn policy_set_from_app_defaults_enable_work_item_validation_not_applied() {
+    let mut app = ApplicationDefaults::default();
+    app.enable_work_item_validation = true;
+
+    let ps = PolicySet::from_application_defaults(&app);
+
+    assert!(!ps.work_item.required,
+        "enable_work_item_validation must not be applied inside from_application_defaults; it is an enforcement override");
+}
+
+/// `from_application_defaults` maps `pr_size_check` → `size`.
+#[test]
+fn policy_set_from_app_defaults_size_mapped() {
+    let mut app = ApplicationDefaults::default();
+    app.pr_size_check.enabled = true;
+    app.pr_size_check.label_prefix = "app-size/".to_string();
+
+    let ps = PolicySet::from_application_defaults(&app);
+
+    assert!(ps.size.enabled);
+    assert_eq!(ps.size.label_prefix, "app-size/");
+}
+
+/// `from_application_defaults` maps `wip_check` → `wip`.
+#[test]
+fn policy_set_from_app_defaults_wip_mapped() {
+    let mut app = ApplicationDefaults::default();
+    app.wip_check.enforce_wip_blocking = true;
+    app.wip_check.wip_label = Some("work-in-progress".to_string());
+
+    let ps = PolicySet::from_application_defaults(&app);
+
+    assert!(ps.wip.enforce_wip_blocking);
+    assert_eq!(ps.wip.wip_label, Some("work-in-progress".to_string()));
+}
+
+/// `from_application_defaults` maps `pr_state_labels` → `pr_state`.
+#[test]
+fn policy_set_from_app_defaults_pr_state_mapped() {
+    let mut app = ApplicationDefaults::default();
+    app.pr_state_labels.enabled = true;
+    app.pr_state_labels.draft_label = Some("in-progress".to_string());
+
+    let ps = PolicySet::from_application_defaults(&app);
+
+    assert!(ps.pr_state.enabled);
+    assert_eq!(ps.pr_state.draft_label, Some("in-progress".to_string()));
+}
+
+/// `from_application_defaults` maps `change_type_labels` → `change_type_labels`.
+#[test]
+fn policy_set_from_app_defaults_change_type_labels_mapped() {
+    let mut app = ApplicationDefaults::default();
+    app.change_type_labels.keyword_labels.breaking_change = Some("semver-major".to_string());
+
+    let ps = PolicySet::from_application_defaults(&app);
+
+    assert_eq!(
+        ps.change_type_labels.keyword_labels.breaking_change,
+        Some("semver-major".to_string())
+    );
+}
+
+/// `from_application_defaults` maps `bypass_rules` → `bypass_rules`.
+#[test]
+fn policy_set_from_app_defaults_bypass_rules_mapped() {
+    let mut app = ApplicationDefaults::default();
+    app.bypass_rules.title_convention = BypassRule::new(true, vec!["release-bot".to_string()]);
+
+    let ps = PolicySet::from_application_defaults(&app);
+
+    assert!(ps
+        .bypass_rules
+        .title_convention()
+        .users()
+        .contains(&"release-bot"));
+}
+
+// ── PolicySet::from_repository_config ────────────────────────────────────────
+//
+// Spec §1.3
+
+/// `from_repository_config` maps `policies.pull_requests.title_policies` → `title`.
+#[test]
+fn policy_set_from_repo_config_title_mapped() {
+    let repo = RepositoryProvidedConfig {
+        schema_version: 1,
+        policies: PoliciesConfig {
+            pull_requests: PullRequestsPoliciesConfig {
+                title_policies: PullRequestsTitlePolicyConfig {
+                    required: true,
+                    pattern: "repo-title-pattern".to_string(),
+                    label_if_missing: Some("repo-label".to_string()),
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let ps = PolicySet::from_repository_config(&repo);
+
+    assert!(ps.title.required);
+    assert_eq!(ps.title.pattern, "repo-title-pattern");
+    assert_eq!(ps.title.label_if_missing, Some("repo-label".to_string()));
+}
+
+/// `from_repository_config` maps `policies.pull_requests.work_item_policies` → `work_item`.
+#[test]
+fn policy_set_from_repo_config_work_item_mapped() {
+    let repo = RepositoryProvidedConfig {
+        schema_version: 1,
+        policies: PoliciesConfig {
+            pull_requests: PullRequestsPoliciesConfig {
+                work_item_policies: WorkItemPolicyConfig {
+                    required: true,
+                    pattern: "GH-\\d+".to_string(),
+                    label_if_missing: Some("missing-wi".to_string()),
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let ps = PolicySet::from_repository_config(&repo);
+
+    assert!(ps.work_item.required);
+    assert_eq!(ps.work_item.pattern, "GH-\\d+");
+}
+
+/// `from_repository_config` maps `policies.pull_requests.size_policies` → `size`.
+#[test]
+fn policy_set_from_repo_config_size_mapped() {
+    let repo = RepositoryProvidedConfig {
+        schema_version: 1,
+        policies: PoliciesConfig {
+            pull_requests: PullRequestsPoliciesConfig {
+                size_policies: PrSizeCheckConfig {
+                    enabled: true,
+                    label_prefix: "repo-size/".to_string(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let ps = PolicySet::from_repository_config(&repo);
+
+    assert!(ps.size.enabled);
+    assert_eq!(ps.size.label_prefix, "repo-size/");
+}
+
+/// `from_repository_config` maps `policies.pull_requests.wip_policies` → `wip`.
+#[test]
+fn policy_set_from_repo_config_wip_mapped() {
+    let repo = RepositoryProvidedConfig {
+        schema_version: 1,
+        policies: PoliciesConfig {
+            pull_requests: PullRequestsPoliciesConfig {
+                wip_policies: WipCheckConfig {
+                    enforce_wip_blocking: true,
+                    wip_label: Some("🚧".to_string()),
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let ps = PolicySet::from_repository_config(&repo);
+
+    assert!(ps.wip.enforce_wip_blocking);
+    assert_eq!(ps.wip.wip_label, Some("🚧".to_string()));
+}
+
+/// `from_repository_config` maps `change_type_labels` → `change_type_labels`
+/// (Some variant).
+#[test]
+fn policy_set_from_repo_config_change_type_labels_some_mapped() {
+    let mut ctl = ChangeTypeLabelConfig::default();
+    ctl.keyword_labels.breaking_change = Some("semver-major".to_string());
+
+    let repo = RepositoryProvidedConfig {
+        schema_version: 1,
+        change_type_labels: Some(ctl),
+        ..Default::default()
+    };
+
+    let ps = PolicySet::from_repository_config(&repo);
+
+    assert_eq!(
+        ps.change_type_labels.keyword_labels.breaking_change,
+        Some("semver-major".to_string())
+    );
+}
+
+/// `from_repository_config` with `change_type_labels = None` yields `ChangeTypeLabelConfig::default()`.
+#[test]
+fn policy_set_from_repo_config_change_type_labels_none_uses_default() {
+    let repo = RepositoryProvidedConfig {
+        schema_version: 1,
+        change_type_labels: None,
+        ..Default::default()
+    };
+
+    let ps = PolicySet::from_repository_config(&repo);
+
+    assert_eq!(ps.change_type_labels, ChangeTypeLabelConfig::default());
+}
+
+// ── Property-based tests (Tier 3) ────────────────────────────────────────────
+
+proptest! {
+    /// Merging with a default PolicySet as `over` is a right identity for boolean OR fields.
+    /// Any field that is `true` in `base` must remain `true` in the result.
+    #[test]
+    fn prop_policy_set_merge_default_over_preserves_base_true_fields(
+        title_required in proptest::bool::ANY,
+        work_item_required in proptest::bool::ANY,
+        size_enabled in proptest::bool::ANY,
+        wip_enabled in proptest::bool::ANY,
+    ) {
+        let mut base = PolicySet::default();
+        base.title.required = title_required;
+        base.work_item.required = work_item_required;
+        base.size.enabled = size_enabled;
+        base.wip.enforce_wip_blocking = wip_enabled;
+
+        let result = base.clone().merge(&PolicySet::default());
+
+        prop_assert_eq!(result.title.required, base.title.required);
+        prop_assert_eq!(result.work_item.required, base.work_item.required);
+        prop_assert_eq!(result.size.enabled, base.size.enabled);
+        prop_assert_eq!(result.wip.enforce_wip_blocking, base.wip.enforce_wip_blocking);
+    }
+
+    /// For OR-semantics fields, `merge(base, over).field` is always >= `base.field`
+    /// (once true, stays true).
+    #[test]
+    fn prop_title_merge_required_or_never_loses_a_true(
+        base_required in proptest::bool::ANY,
+        over_required in proptest::bool::ANY,
+    ) {
+        let base = PullRequestsTitlePolicyConfig {
+            required: base_required,
+            ..Default::default()
+        };
+        let over = PullRequestsTitlePolicyConfig {
+            required: over_required,
+            ..Default::default()
+        };
+        let result = PullRequestsTitlePolicyConfig::merge(&base, &over);
+
+        prop_assert_eq!(result.required, base_required || over_required);
+    }
+
+    /// For OR-semantics fields, `merge` is commutative for the `required` flag.
+    #[test]
+    fn prop_title_merge_required_commutative(
+        a_required in proptest::bool::ANY,
+        b_required in proptest::bool::ANY,
+    ) {
+        let a = PullRequestsTitlePolicyConfig { required: a_required, ..Default::default() };
+        let b = PullRequestsTitlePolicyConfig { required: b_required, ..Default::default() };
+
+        let ab = PullRequestsTitlePolicyConfig::merge(&a, &b);
+        let ba = PullRequestsTitlePolicyConfig::merge(&b, &a);
+
+        prop_assert_eq!(ab.required, ba.required);
+    }
+
+    /// `PrSizeCheckConfig::merge` never panics on any combination of default inputs.
+    #[test]
+    fn prop_size_merge_never_panics(
+        base_enabled in proptest::bool::ANY,
+        over_enabled in proptest::bool::ANY,
+        base_fail in proptest::bool::ANY,
+        over_fail in proptest::bool::ANY,
+    ) {
+        let base = PrSizeCheckConfig {
+            enabled: base_enabled,
+            fail_on_oversized: base_fail,
+            ..Default::default()
+        };
+        let over = PrSizeCheckConfig {
+            enabled: over_enabled,
+            fail_on_oversized: over_fail,
+            ..Default::default()
+        };
+        let _ = PrSizeCheckConfig::merge(&base, &over);
+    }
+
+    /// `WipCheckConfig::merge` OR for `enforce_wip_blocking` is always
+    /// `base || over`.
+    #[test]
+    fn prop_wip_merge_enforce_or_is_correct(
+        base_val in proptest::bool::ANY,
+        over_val in proptest::bool::ANY,
+    ) {
+        let base = WipCheckConfig { enforce_wip_blocking: base_val, ..Default::default() };
+        let over = WipCheckConfig { enforce_wip_blocking: over_val, ..Default::default() };
+        let result = WipCheckConfig::merge(&base, &over);
+
+        prop_assert_eq!(result.enforce_wip_blocking, base_val || over_val);
+    }
+}
