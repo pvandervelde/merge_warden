@@ -870,15 +870,16 @@ maxLines = 1000
         repository: &TestRepository,
         pr_number: u64,
     ) -> TestResult<Vec<crate::environment::PullRequestLabel>> {
-        let issue = self
+        let pr = self
             .github_client
-            .issues(&repository.organization, &repository.name)
+            .pulls(&repository.organization, &repository.name)
             .get(pr_number)
             .await
-            .map_err(|e| TestError::github_api_error("get_issue", &e.to_string()))?;
+            .map_err(|e| TestError::github_api_error("get_pr_labels", &e.to_string()))?;
 
-        let labels = issue
+        let labels = pr
             .labels
+            .unwrap_or_default()
             .into_iter()
             .map(|label| crate::environment::PullRequestLabel {
                 id: label.id.0,
