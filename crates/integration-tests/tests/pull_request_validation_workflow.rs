@@ -149,7 +149,10 @@ async fn test_complete_pull_request_validation_workflow() -> TestResult<()> {
 
     // Size labels are best-effort: GitHub returns 422 if the label does not yet exist in
     // the repository.  Capture for debugging but do not assert.
-    let _labels = test_env.get_pr_labels(&repo, pr.number).await.unwrap_or_default();
+    let _labels = test_env
+        .get_pr_labels(&repo, pr.number)
+        .await
+        .unwrap_or_default();
 
     // Assert: Verify status checks were updated
     let checks = test_env.get_pr_checks(&repo, pr.number).await?;
