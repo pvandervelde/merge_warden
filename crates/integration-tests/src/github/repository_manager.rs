@@ -222,52 +222,75 @@ impl TestRepositoryManager {
     /// }
     /// ```
     pub async fn create_repository(&mut self, name_suffix: &str) -> TestResult<TestRepository> {
+        use std::time::Duration;
         use uuid::Uuid;
 
-        // Generate unique repository name
-        let repo_name = format!(
-            "{}-{}-{}",
-            self.repository_prefix,
-            name_suffix,
-            Uuid::new_v4()
-        );
+        const MAX_ATTEMPTS: u32 = 3;
 
-        // Create repository via GitHub API POST request
         let route = format!("/orgs/{}/repos", self.organization);
-        let body = serde_json::json!({
-            "name": repo_name,
-            "private": true,
-            "auto_init": true,
-            "description": "Test repository for Merge Warden integration testing"
-        });
+        let mut last_error = None;
 
-        let create_result: octocrab::models::Repository = self
-            .github_client
-            .post(route, Some(&body))
-            .await
-            .map_err(|e| TestError::github_api_error("create_repository", &e.to_string()))?;
+        for attempt in 0..MAX_ATTEMPTS {
+            if attempt > 0 {
+                // Exponential backoff: 1 s, 2 s for attempts 2 and 3
+                let delay = Duration::from_millis(1_000u64 << (attempt - 1));
+                tokio::time::sleep(delay).await;
+            }
 
-        // Track for cleanup
-        self.created_repositories.push(repo_name.clone());
+            // Generate a fresh unique name each attempt so a partially-completed
+            // previous attempt (repo created but response lost) doesn't cause a
+            // 422 Unprocessable Entity on retry.
+            let repo_name = format!(
+                "{}-{}-{}",
+                self.repository_prefix,
+                name_suffix,
+                Uuid::new_v4()
+            );
 
-        // Create TestRepository handle
-        let repo = TestRepository {
-            name: repo_name.clone(),
-            organization: self.organization.clone(),
-            id: create_result.id.0,
-            full_name: format!("{}/{}", self.organization, repo_name),
-            clone_url: create_result
-                .clone_url
-                .map(|u| u.to_string())
-                .unwrap_or_default(),
-            default_branch: create_result
-                .default_branch
-                .unwrap_or_else(|| "main".to_string()),
-            private: true,
-            created_at: chrono::Utc::now(),
-        };
+            let body = serde_json::json!({
+                "name": repo_name,
+                "private": true,
+                "auto_init": true,
+                "description": "Test repository for Merge Warden integration testing"
+            });
 
-        Ok(repo)
+            match self
+                .github_client
+                .post::<_, octocrab::models::Repository>(&route, Some(&body))
+                .await
+            {
+                Ok(create_result) => {
+                    // Track for cleanup
+                    self.created_repositories.push(repo_name.clone());
+
+                    let repo = TestRepository {
+                        name: repo_name.clone(),
+                        organization: self.organization.clone(),
+                        id: create_result.id.0,
+                        full_name: format!("{}/{}", self.organization, repo_name),
+                        clone_url: create_result
+                            .clone_url
+                            .map(|u| u.to_string())
+                            .unwrap_or_default(),
+                        default_branch: create_result
+                            .default_branch
+                            .unwrap_or_else(|| "main".to_string()),
+                        private: true,
+                        created_at: chrono::Utc::now(),
+                    };
+
+                    return Ok(repo);
+                }
+                Err(e) => {
+                    last_error = Some(e);
+                }
+            }
+        }
+
+        Err(TestError::github_api_error(
+            "create_repository",
+            &last_error.unwrap().to_string(),
+        ))
     }
 
     /// Sets up merge-warden configuration for a test repository.

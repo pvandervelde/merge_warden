@@ -16,6 +16,7 @@ use merge_warden_integration_tests::{
     },
     TestError, TestResult,
 };
+use serial_test::serial;
 
 /// Test recovery from GitHub API failures.
 ///
@@ -37,6 +38,7 @@ use merge_warden_integration_tests::{
 /// - Integration tests must achieve 95% success rate in CI environment over 100+ consecutive runs (Assertion #8)
 /// - Mock Azure services must accurately simulate real service behavior including failure modes (Assertion #10)
 #[tokio::test]
+#[serial]
 #[ignore = "requires GitHub App credentials (REPO_CREATION_APP_ID, MERGE_WARDEN_APP_ID)"]
 async fn test_recovery_from_github_api_failures() -> TestResult<()> {
     // Arrange: Set up test environment
@@ -151,6 +153,7 @@ async fn test_recovery_from_github_api_failures() -> TestResult<()> {
 /// This test validates system behavior when multiple services fail simultaneously
 /// and recovery happens in stages.
 #[tokio::test]
+#[serial]
 #[ignore = "requires GitHub App credentials (REPO_CREATION_APP_ID, MERGE_WARDEN_APP_ID)"]
 async fn test_multiple_concurrent_service_failures() -> TestResult<()> {
     // Arrange: Set up test environment
