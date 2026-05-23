@@ -1,7 +1,7 @@
 # Configuration System
 
-**Version:** 1.0
-**Last Updated:** July 22, 2025
+**Version:** 1.1
+**Last Updated:** 2026-05-21
 
 ## Overview
 
@@ -29,15 +29,86 @@ Support for runtime configuration updates without service restarts, enabling ope
 
 ```mermaid
 graph TD
-    A[Repository Config] --> D[Configuration Merger]
-    B[Central Defaults] --> D
-    C[Environment Variables] --> D
-    D --> E[Validated Configuration]
-    E --> F[Runtime Engine]
+    A[Repository Config] --> D["PolicySet::merge (configuration merger)"]
+    B[Application Defaults] --> D
+    D --> E[Merged PolicySet]
+    E --> F[CurrentPullRequestValidationConfiguration]
+    F --> G[Runtime Engine]
 
-    G[Schema Validator] --> E
-    H[Config Cache] --> F
+    H[Schema Validator] --> E
 ```
+
+> **Future extension:** When org-level configuration is introduced, two additional tiers feed
+> into `PolicySet::merge`: org-level defaults (overriding application defaults) and org-level
+> enforced policies (applied last, winning unconditionally).
+
+## Policy Engine
+
+### `PolicySet` — the merge abstraction
+
+All PR validation policies for a single configuration tier are grouped in a `PolicySet`
+struct. The 8 constituent configs are:
+
+| Field | Type | Description |
+| :--- | :--- | :--- |
+| `title` | `PullRequestsTitlePolicyConfig` | Title format, pattern, and missing label |
+| `work_item` | `WorkItemPolicyConfig` | Work-item requirement, pattern, and missing label |
+| `size` | `PrSizeCheckConfig` | Size thresholds, label prefix, file exclusions |
+| `wip` | `WipCheckConfig` | WIP detection patterns and blocking behaviour |
+| `pr_state` | `PrStateLabelsConfig` | Draft / review / approved lifecycle labels |
+| `issue_propagation` | `IssuePropagationConfig` | Milestone and project propagation settings |
+| `change_type_labels` | `ChangeTypeLabelConfig` | Conventional-commit mappings, keyword labels |
+| `bypass_rules` | `BypassRules` | Per-rule bypass user lists |
+
+`PolicySet::merge(&self, over: &PolicySet) -> PolicySet` implements "higher-priority `over`
+wins for non-default values". Enforcement is achieved by call-site ordering — the enforcing
+tier is applied last in the merge chain. See
+[ADR-002](../../adr/ADR-002-policy-engine.md) for the full rationale.
+
+### Merge semantics
+
+```mermaid
+graph LR
+    A["app_defaults_ps (base)"] --> M["PolicySet::merge"]
+    B["repo_ps (over)"] --> M
+    M --> C["merged PolicySet"]
+    C --> D["post-merge enforcement overrides"]
+    D --> E["CurrentPullRequestValidationConfiguration"]
+```
+
+Per-field merge rules:
+
+| Field type | Rule |
+| :--- | :--- |
+| Activation `bool` (`required`, `enabled`, `enforce_*`) | `base \|\| over` — once active in either tier, stays active |
+| Pattern `String` | `over` wins if non-empty and differs from the type's `default()` value |
+| `Option<String>` — optional label | `over.or(base)` |
+| `Vec<String>` — label candidates | `over` if non-empty; otherwise `base` |
+| Non-activation `bool` | `over` wins unconditionally |
+| `HashMap<String, String>` | Per-key: `over` key wins if present |
+
+### Enforcement overrides
+
+Until org-level configuration is supported, four ad-hoc enforcement overrides are applied
+after `PolicySet::merge` in `load_merge_warden_config`:
+
+- `app_defaults.enable_title_validation = true` → force `merged.title.required = true`
+- `app_defaults.enable_work_item_validation = true` → force `merged.work_item.required = true`
+- `app_defaults.pr_size_check.enabled = true` → force `merged.size.enabled = true`
+- `app_defaults.wip_check.enforce_wip_blocking = true` → force `merged.wip.enforce_wip_blocking = true`
+
+These will be replaced by the `OrgPolicy.enforced` tier when org-level configuration is introduced.
+
+### Four-tier chain with org-level configuration (planned)
+
+```text
+app_defaults_ps
+    .merge(&org_defaults_ps)   // org defaults override app defaults
+    .merge(&repo_ps)           // repo overrides org defaults
+    .merge(&org_enforced_ps)   // org enforced wins unconditionally — applied last
+```
+
+Concrete type definitions for `OrgPolicy` are deferred to a future interface spec.
 
 ## Configuration Sources
 

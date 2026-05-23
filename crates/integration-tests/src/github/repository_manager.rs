@@ -222,52 +222,75 @@ impl TestRepositoryManager {
     /// }
     /// ```
     pub async fn create_repository(&mut self, name_suffix: &str) -> TestResult<TestRepository> {
+        use std::time::Duration;
         use uuid::Uuid;
 
-        // Generate unique repository name
-        let repo_name = format!(
-            "{}-{}-{}",
-            self.repository_prefix,
-            name_suffix,
-            Uuid::new_v4()
-        );
+        const MAX_ATTEMPTS: u32 = 3;
 
-        // Create repository via GitHub API POST request
         let route = format!("/orgs/{}/repos", self.organization);
-        let body = serde_json::json!({
-            "name": repo_name,
-            "private": true,
-            "auto_init": true,
-            "description": "Test repository for Merge Warden integration testing"
-        });
+        let mut last_error = None;
 
-        let create_result: octocrab::models::Repository = self
-            .github_client
-            .post(route, Some(&body))
-            .await
-            .map_err(|e| TestError::github_api_error("create_repository", &e.to_string()))?;
+        for attempt in 0..MAX_ATTEMPTS {
+            if attempt > 0 {
+                // Exponential backoff: 1 s, 2 s for attempts 2 and 3
+                let delay = Duration::from_millis(1_000u64 << (attempt - 1));
+                tokio::time::sleep(delay).await;
+            }
 
-        // Track for cleanup
-        self.created_repositories.push(repo_name.clone());
+            // Generate a fresh unique name each attempt so a partially-completed
+            // previous attempt (repo created but response lost) doesn't cause a
+            // 422 Unprocessable Entity on retry.
+            let repo_name = format!(
+                "{}-{}-{}",
+                self.repository_prefix,
+                name_suffix,
+                Uuid::new_v4()
+            );
 
-        // Create TestRepository handle
-        let repo = TestRepository {
-            name: repo_name.clone(),
-            organization: self.organization.clone(),
-            id: create_result.id.0,
-            full_name: format!("{}/{}", self.organization, repo_name),
-            clone_url: create_result
-                .clone_url
-                .map(|u| u.to_string())
-                .unwrap_or_default(),
-            default_branch: create_result
-                .default_branch
-                .unwrap_or_else(|| "main".to_string()),
-            private: true,
-            created_at: chrono::Utc::now(),
-        };
+            let body = serde_json::json!({
+                "name": repo_name,
+                "private": true,
+                "auto_init": true,
+                "description": "Test repository for Merge Warden integration testing"
+            });
 
-        Ok(repo)
+            match self
+                .github_client
+                .post::<_, octocrab::models::Repository>(&route, Some(&body))
+                .await
+            {
+                Ok(create_result) => {
+                    // Track for cleanup
+                    self.created_repositories.push(repo_name.clone());
+
+                    let repo = TestRepository {
+                        name: repo_name.clone(),
+                        organization: self.organization.clone(),
+                        id: create_result.id.0,
+                        full_name: format!("{}/{}", self.organization, repo_name),
+                        clone_url: create_result
+                            .clone_url
+                            .map(|u| u.to_string())
+                            .unwrap_or_default(),
+                        default_branch: create_result
+                            .default_branch
+                            .unwrap_or_else(|| "main".to_string()),
+                        private: true,
+                        created_at: chrono::Utc::now(),
+                    };
+
+                    return Ok(repo);
+                }
+                Err(e) => {
+                    last_error = Some(e);
+                }
+            }
+        }
+
+        Err(TestError::github_api_error(
+            "create_repository",
+            &last_error.unwrap().to_string(),
+        ))
     }
 
     /// Sets up merge-warden configuration for a test repository.
@@ -440,7 +463,7 @@ maxLines = 1000
             .path(file_path)
             .send()
             .await
-            .map_err(|e| TestError::github_api_error("get_file_content", &e.to_string()))?;
+            .map_err(|e| TestError::github_api_error("get_file_content", &format!("{e:?}")))?;
 
         if let Some(encoded_content) = content.items[0].content.as_ref() {
             let decoded = general_purpose::STANDARD
@@ -578,45 +601,81 @@ maxLines = 1000
     }
 
     /// Creates a branch in the repository.
+    ///
+    /// Retries up to three times with incremental backoff (0 s, 2 s, 4 s) to
+    /// tolerate transient GitHub API errors (secondary rate-limit responses)
+    /// that can occur when making multiple git-ref API calls in rapid succession.
+    ///
+    /// If a retry attempt receives a 422 "Reference already exists" response the
+    /// branch was created by a previous attempt whose HTTP response was lost; the
+    /// method treats this as success and returns `Ok(())`.
     pub async fn create_branch(
         &self,
         repository: &TestRepository,
         branch_name: &str,
         from_branch: &str,
     ) -> TestResult<()> {
-        // Get the SHA of the from_branch
-        let from_ref = self
-            .github_client
-            .repos(&repository.organization, &repository.name)
-            .get_ref(&octocrab::params::repos::Reference::Branch(
-                from_branch.to_string(),
-            ))
-            .await
-            .map_err(|e| TestError::github_api_error("get_ref", &e.to_string()))?;
+        const MAX_ATTEMPTS: u32 = 3;
+        let mut last_error: Option<TestError> = None;
 
-        // Get the SHA from the ref object
-        let from_sha = match &from_ref.object {
-            octocrab::models::repos::Object::Commit { sha, .. } => sha.clone(),
-            octocrab::models::repos::Object::Tag { sha, .. } => sha.clone(),
-            _ => {
-                return Err(TestError::github_api_error(
-                    "create_branch",
-                    "Unknown object type in ref",
-                ))
+        for attempt in 0..MAX_ATTEMPTS {
+            if attempt > 0 {
+                tokio::time::sleep(std::time::Duration::from_secs(u64::from(attempt) * 2)).await;
             }
-        };
 
-        // Create new branch
-        self.github_client
-            .repos(&repository.organization, &repository.name)
-            .create_ref(
-                &octocrab::params::repos::Reference::Branch(branch_name.to_string()),
-                from_sha,
-            )
-            .await
-            .map_err(|e| TestError::github_api_error("create_ref", &e.to_string()))?;
+            // Get the SHA of the from_branch
+            let from_ref = match self
+                .github_client
+                .repos(&repository.organization, &repository.name)
+                .get_ref(&octocrab::params::repos::Reference::Branch(
+                    from_branch.to_string(),
+                ))
+                .await
+            {
+                Ok(r) => r,
+                Err(e) => {
+                    last_error = Some(TestError::github_api_error("get_ref", &format!("{e:?}")));
+                    continue;
+                }
+            };
 
-        Ok(())
+            // Get the SHA from the ref object
+            let from_sha = match &from_ref.object {
+                octocrab::models::repos::Object::Commit { sha, .. } => sha.clone(),
+                octocrab::models::repos::Object::Tag { sha, .. } => sha.clone(),
+                _ => {
+                    return Err(TestError::github_api_error(
+                        "create_branch",
+                        "Unknown object type in ref",
+                    ))
+                }
+            };
+
+            // Create new branch
+            match self
+                .github_client
+                .repos(&repository.organization, &repository.name)
+                .create_ref(
+                    &octocrab::params::repos::Reference::Branch(branch_name.to_string()),
+                    from_sha,
+                )
+                .await
+            {
+                Ok(_) => return Ok(()),
+                Err(e) => {
+                    let msg = format!("{e:?}");
+                    // 422 "Reference already exists" means a previous attempt
+                    // partially succeeded — treat it as success.
+                    if msg.contains("Reference already exists") {
+                        return Ok(());
+                    }
+                    last_error = Some(TestError::github_api_error("create_ref", &msg));
+                }
+            }
+        }
+
+        Err(last_error
+            .unwrap_or_else(|| TestError::github_api_error("create_branch", "all attempts failed")))
     }
 
     /// Adds a file to a branch.
@@ -671,7 +730,7 @@ maxLines = 1000
                     .send()
                     .await
                     .map(|_| ())
-                    .map_err(|e| TestError::github_api_error("update_file", &e.to_string()))
+                    .map_err(|e| TestError::github_api_error("update_file", &format!("{e:?}")))
             } else {
                 self.github_client
                     .repos(&repository.organization, &repository.name)
@@ -680,7 +739,7 @@ maxLines = 1000
                     .send()
                     .await
                     .map(|_| ())
-                    .map_err(|e| TestError::github_api_error("create_file", &e.to_string()))
+                    .map_err(|e| TestError::github_api_error("create_file", &format!("{e:?}")))
             };
 
             match result {
@@ -727,7 +786,9 @@ maxLines = 1000
                 .branch(branch)
                 .send()
                 .await
-                .map_err(|e| TestError::github_api_error("create_file_upsert", &e.to_string()))?;
+                .map_err(|e| {
+                    TestError::github_api_error("create_file_upsert", &format!("{e:?}"))
+                })?;
             return Ok(());
         }
 
@@ -740,7 +801,7 @@ maxLines = 1000
             .branch(branch)
             .send()
             .await
-            .map_err(|e| TestError::github_api_error("update_file", &e.to_string()))?;
+            .map_err(|e| TestError::github_api_error("update_file", &format!("{e:?}")))?;
 
         Ok(())
     }
@@ -759,7 +820,7 @@ maxLines = 1000
             .draft(spec.draft)
             .send()
             .await
-            .map_err(|e| TestError::github_api_error("create_pull_request", &e.to_string()))?;
+            .map_err(|e| TestError::github_api_error("create_pull_request", &format!("{e:?}")))?;
 
         // Add labels if specified. Treat failures as non-fatal: freshly created
         // test repositories may not have all label names pre-created, and label
@@ -802,7 +863,7 @@ maxLines = 1000
             .pulls(&repository.organization, &repository.name)
             .get(pr_number)
             .await
-            .map_err(|e| TestError::github_api_error("get_pull_request", &e.to_string()))?;
+            .map_err(|e| TestError::github_api_error("get_pull_request", &format!("{e:?}")))?;
 
         let head_sha = pr.head.sha;
 
@@ -813,7 +874,7 @@ maxLines = 1000
             .list_check_runs_for_git_ref(head_sha.into())
             .send()
             .await
-            .map_err(|e| TestError::github_api_error("list_check_runs", &e.to_string()))?;
+            .map_err(|e| TestError::github_api_error("list_check_runs", &format!("{e:?}")))?;
 
         let checks = check_runs
             .check_runs
@@ -845,7 +906,7 @@ maxLines = 1000
             .list_comments(pr_number)
             .send()
             .await
-            .map_err(|e| TestError::github_api_error("list_comments", &e.to_string()))?;
+            .map_err(|e| TestError::github_api_error("list_comments", &format!("{e:?}")))?;
 
         let comments = comments_page
             .items
@@ -870,15 +931,16 @@ maxLines = 1000
         repository: &TestRepository,
         pr_number: u64,
     ) -> TestResult<Vec<crate::environment::PullRequestLabel>> {
-        let issue = self
+        let pr = self
             .github_client
-            .issues(&repository.organization, &repository.name)
+            .pulls(&repository.organization, &repository.name)
             .get(pr_number)
             .await
-            .map_err(|e| TestError::github_api_error("get_issue", &e.to_string()))?;
+            .map_err(|e| TestError::github_api_error("get_pr_labels", &format!("{e:?}")))?;
 
-        let labels = issue
+        let labels = pr
             .labels
+            .unwrap_or_default()
             .into_iter()
             .map(|label| crate::environment::PullRequestLabel {
                 id: label.id.0,

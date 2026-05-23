@@ -655,6 +655,41 @@ impl BypassRules {
     pub fn size(&self) -> &BypassRule {
         &self.size
     }
+
+    /// Merges `over` on top of `base` (lower-priority).
+    ///
+    /// For each sub-rule (`title_convention`, `work_items`, `size`):
+    /// use the `over` sub-rule if it has been explicitly configured (its user list
+    /// is non-empty, or its `enabled` flag differs from the default `false`;
+    /// otherwise keep `base`'s sub-rule.
+    ///
+    /// See `docs/spec/interfaces/policy-engine.md` §2.8 for the full contract.
+    pub(crate) fn merge(base: &Self, over: &Self) -> Self {
+        // A sub-rule is "explicitly configured" when its enabled flag is set or
+        // it names at least one user.  An unconfigured `over` sub-rule defers to
+        // the corresponding `base` sub-rule.
+        fn is_configured(rule: &BypassRule) -> bool {
+            rule.enabled || !rule.users.is_empty()
+        }
+
+        Self {
+            title_convention: if is_configured(&over.title_convention) {
+                over.title_convention.clone()
+            } else {
+                base.title_convention.clone()
+            },
+            work_items: if is_configured(&over.work_items) {
+                over.work_items.clone()
+            } else {
+                base.work_items.clone()
+            },
+            size: if is_configured(&over.size) {
+                over.size.clone()
+            } else {
+                base.size.clone()
+            },
+        }
+    }
 }
 
 /// Per-repository bypass-rule overrides parsed from `[policies.bypassRules.*]` in
@@ -740,6 +775,21 @@ impl IssuePropagationConfig {
     /// Returns `false` — used as the serde default for both flags.
     fn default_false() -> bool {
         false
+    }
+
+    /// Merges `over` on top of `base` (lower-priority).
+    ///
+    /// Field-level rules:
+    /// - `sync_milestone_from_issue`: `base.sync_milestone_from_issue || over.sync_milestone_from_issue`
+    /// - `sync_project_from_issue`: `base.sync_project_from_issue || over.sync_project_from_issue`
+    ///
+    /// See `docs/spec/interfaces/policy-engine.md` §2.6 for the full contract.
+    pub(crate) fn merge(base: &Self, over: &Self) -> Self {
+        Self {
+            sync_milestone_from_issue: base.sync_milestone_from_issue
+                || over.sync_milestone_from_issue,
+            sync_project_from_issue: base.sync_project_from_issue || over.sync_project_from_issue,
+        }
     }
 }
 
@@ -919,6 +969,31 @@ impl PullRequestsTitlePolicyConfig {
     /// Default value for title validation requirement (false)
     fn default_required() -> bool {
         false
+    }
+
+    /// Merges `over` on top of `base` (lower-priority).
+    ///
+    /// Field-level rules:
+    /// - `required`: `base.required || over.required` (OR — once required by either tier, stays required)
+    /// - `pattern`: `over.pattern` if non-empty and not equal to `CONVENTIONAL_COMMIT_REGEX`;
+    ///   otherwise `base.pattern`
+    /// - `label_if_missing`: `over.label_if_missing` if `Some`; otherwise `base.label_if_missing`
+    ///
+    /// See `docs/spec/interfaces/policy-engine.md` §2.1 for the full contract.
+    pub(crate) fn merge(base: &Self, over: &Self) -> Self {
+        let pattern = if !over.pattern.is_empty() && over.pattern != CONVENTIONAL_COMMIT_REGEX {
+            over.pattern.clone()
+        } else {
+            base.pattern.clone()
+        };
+        Self {
+            required: base.required || over.required,
+            pattern,
+            label_if_missing: over
+                .label_if_missing
+                .clone()
+                .or_else(|| base.label_if_missing.clone()),
+        }
     }
 }
 
@@ -1100,6 +1175,31 @@ impl WorkItemPolicyConfig {
     fn default_required() -> bool {
         false
     }
+
+    /// Merges `over` on top of `base` (lower-priority).
+    ///
+    /// Field-level rules:
+    /// - `required`: `base.required || over.required`
+    /// - `pattern`: `over.pattern` if non-empty and not equal to `WORK_ITEM_REGEX`;
+    ///   otherwise `base.pattern`
+    /// - `label_if_missing`: `over.label_if_missing` if `Some`; otherwise `base.label_if_missing`
+    ///
+    /// See `docs/spec/interfaces/policy-engine.md` §2.2 for the full contract.
+    pub(crate) fn merge(base: &Self, over: &Self) -> Self {
+        let pattern = if !over.pattern.is_empty() && over.pattern != WORK_ITEM_REGEX {
+            over.pattern.clone()
+        } else {
+            base.pattern.clone()
+        };
+        Self {
+            required: base.required || over.required,
+            pattern,
+            label_if_missing: over
+                .label_if_missing
+                .clone()
+                .or_else(|| base.label_if_missing.clone()),
+        }
+    }
 }
 
 impl Default for WorkItemPolicyConfig {
@@ -1196,6 +1296,40 @@ impl PrSizeCheckConfig {
         }
         false
     }
+
+    /// Merges `over` on top of `base` (lower-priority).
+    ///
+    /// Field-level rules:
+    /// - `enabled`: `base.enabled || over.enabled`
+    /// - `fail_on_oversized`: `over` wins unconditionally
+    /// - `thresholds`: `over.thresholds` if `Some`; otherwise `base.thresholds`
+    /// - `excluded_file_patterns`: `over` if non-empty; otherwise `base`
+    /// - `label_prefix`: `over.label_prefix` if not equal to `"size/"`; otherwise `base.label_prefix`
+    /// - `add_comment`: `over` wins unconditionally
+    /// - `ignore_deletions`: `over` wins unconditionally
+    ///
+    /// See `docs/spec/interfaces/policy-engine.md` §2.3 for the full contract.
+    pub(crate) fn merge(base: &Self, over: &Self) -> Self {
+        let label_prefix = if over.label_prefix != Self::default_label_prefix() {
+            over.label_prefix.clone()
+        } else {
+            base.label_prefix.clone()
+        };
+        let excluded_file_patterns = if !over.excluded_file_patterns.is_empty() {
+            over.excluded_file_patterns.clone()
+        } else {
+            base.excluded_file_patterns.clone()
+        };
+        Self {
+            enabled: base.enabled || over.enabled,
+            fail_on_oversized: over.fail_on_oversized,
+            thresholds: over.thresholds.clone().or_else(|| base.thresholds.clone()),
+            excluded_file_patterns,
+            label_prefix,
+            add_comment: over.add_comment,
+            ignore_deletions: over.ignore_deletions,
+        }
+    }
 }
 
 impl Default for PrSizeCheckConfig {
@@ -1220,12 +1354,12 @@ impl Default for PrSizeCheckConfig {
 ///
 /// # Merge heuristic
 ///
-/// `load_merge_warden_config` detects whether a repository is "still using
-/// built-in defaults" by comparing the repo's patterns to `WipCheckConfig::default()`.
-/// A repository that explicitly sets its patterns to values identical to the
-/// defaults will have those values overwritten by app-level defaults. This is
-/// intentional (operator can supply a richer default set), but may be surprising
-/// in edge cases. Document any repo-level override explicitly to avoid ambiguity.
+/// `WipCheckConfig::merge` treats a pattern value equal to `WipCheckConfig::default()`
+/// as "not configured" and falls back to the base tier. A repository that explicitly
+/// sets its patterns to values identical to the defaults will therefore see the
+/// app-level defaults applied instead. This is intentional (operator can supply a
+/// richer default set), but may be surprising in edge cases. Document any repo-level
+/// override explicitly to avoid ambiguity.
 ///
 /// # Examples
 ///
@@ -1284,6 +1418,42 @@ impl WipCheckConfig {
             "Draft:".to_string(),
         ]
     }
+
+    /// Merges `over` on top of `base` (lower-priority).
+    ///
+    /// Field-level rules:
+    /// - `enforce_wip_blocking`: `base.enforce_wip_blocking || over.enforce_wip_blocking`
+    /// - `wip_label`: `over.wip_label` if it differs from `WipCheckConfig::default().wip_label`;
+    ///   otherwise `base.wip_label`
+    /// - `wip_title_patterns`: `over` if it differs from `WipCheckConfig::default().wip_title_patterns`;
+    ///   otherwise `base`
+    /// - `wip_description_patterns`: `over` if non-empty; otherwise `base`
+    ///
+    /// See `docs/spec/interfaces/policy-engine.md` §2.4 for the full contract.
+    pub(crate) fn merge(base: &Self, over: &Self) -> Self {
+        let default = Self::default();
+        let wip_label = if over.wip_label != default.wip_label {
+            over.wip_label.clone()
+        } else {
+            base.wip_label.clone()
+        };
+        let wip_title_patterns = if over.wip_title_patterns != default.wip_title_patterns {
+            over.wip_title_patterns.clone()
+        } else {
+            base.wip_title_patterns.clone()
+        };
+        let wip_description_patterns = if !over.wip_description_patterns.is_empty() {
+            over.wip_description_patterns.clone()
+        } else {
+            base.wip_description_patterns.clone()
+        };
+        Self {
+            enforce_wip_blocking: base.enforce_wip_blocking || over.enforce_wip_blocking,
+            wip_label,
+            wip_title_patterns,
+            wip_description_patterns,
+        }
+    }
 }
 
 impl Default for WipCheckConfig {
@@ -1340,6 +1510,33 @@ impl PrStateLabelsConfig {
     fn default_enabled() -> bool {
         false
     }
+
+    /// Merges `over` on top of `base` (lower-priority).
+    ///
+    /// Field-level rules:
+    /// - `enabled`: `base.enabled || over.enabled`
+    /// - `draft_label`: `over.draft_label` if `Some`; otherwise `base.draft_label`
+    /// - `review_label`: `over.review_label` if `Some`; otherwise `base.review_label`
+    /// - `approved_label`: `over.approved_label` if `Some`; otherwise `base.approved_label`
+    ///
+    /// See `docs/spec/interfaces/policy-engine.md` §2.5 for the full contract.
+    pub(crate) fn merge(base: &Self, over: &Self) -> Self {
+        Self {
+            enabled: base.enabled || over.enabled,
+            draft_label: over
+                .draft_label
+                .clone()
+                .or_else(|| base.draft_label.clone()),
+            review_label: over
+                .review_label
+                .clone()
+                .or_else(|| base.review_label.clone()),
+            approved_label: over
+                .approved_label
+                .clone()
+                .or_else(|| base.approved_label.clone()),
+        }
+    }
 }
 
 impl Default for PrStateLabelsConfig {
@@ -1349,6 +1546,157 @@ impl Default for PrStateLabelsConfig {
             draft_label: None,
             review_label: None,
             approved_label: None,
+        }
+    }
+}
+
+/// A resolved, merged set of validation policies ready for enforcement.
+///
+/// `PolicySet` is the single value passed to the validation engine. It is
+/// constructed by merging application-level defaults with any repository-provided
+/// overrides and represents the **final, authoritative** configuration for a
+/// single pull-request evaluation cycle.
+///
+/// # Construction
+///
+/// Callers should not build `PolicySet` by hand. Use:
+/// - [`PolicySet::from_application_defaults`] to create a baseline from
+///   [`ApplicationDefaults`].
+/// - [`PolicySet::from_repository_config`] to create a set from a
+///   [`RepositoryProvidedConfig`] alone.
+/// - [`PolicySet::merge`] to combine two sets, letting the *over* (higher-priority)
+///   set win on a field-by-field basis.
+///
+/// See `docs/spec/interfaces/policy-engine.md` §1 for the full contract and merge
+/// semantics.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct PolicySet {
+    /// Title-format validation policy.
+    pub title: PullRequestsTitlePolicyConfig,
+    /// Work-item reference validation policy.
+    pub work_item: WorkItemPolicyConfig,
+    /// PR size classification and labelling policy.
+    pub size: PrSizeCheckConfig,
+    /// WIP detection and blocking policy.
+    pub wip: WipCheckConfig,
+    /// Lifecycle state labelling policy.
+    pub pr_state: PrStateLabelsConfig,
+    /// Issue-to-PR field propagation policy.
+    pub issue_propagation: IssuePropagationConfig,
+    /// Conventional-commit type → label mapping policy.
+    pub change_type_labels: ChangeTypeLabelConfig,
+    /// Per-category bypass allow-lists.
+    pub bypass_rules: BypassRules,
+}
+
+impl PolicySet {
+    /// Merges `over` on top of `self` (lower-priority baseline).
+    ///
+    /// Each constituent config field is merged independently using the field's
+    /// own `merge` method.  The result contains `over`'s values wherever it
+    /// carries an explicit non-default override, and `self`'s values elsewhere.
+    ///
+    /// # Arguments
+    /// * `over` — Higher-priority policy set (typically repository-provided config)
+    ///
+    /// # Returns
+    /// A new [`PolicySet`] with all fields merged.
+    ///
+    /// See `docs/spec/interfaces/policy-engine.md` §1.1 for field-level rules.
+    pub fn merge(&self, over: &PolicySet) -> PolicySet {
+        PolicySet {
+            title: PullRequestsTitlePolicyConfig::merge(&self.title, &over.title),
+            work_item: WorkItemPolicyConfig::merge(&self.work_item, &over.work_item),
+            size: PrSizeCheckConfig::merge(&self.size, &over.size),
+            wip: WipCheckConfig::merge(&self.wip, &over.wip),
+            pr_state: PrStateLabelsConfig::merge(&self.pr_state, &over.pr_state),
+            issue_propagation: IssuePropagationConfig::merge(
+                &self.issue_propagation,
+                &over.issue_propagation,
+            ),
+            change_type_labels: ChangeTypeLabelConfig::merge(
+                &self.change_type_labels,
+                &over.change_type_labels,
+            ),
+            // TODO: bypass_rules merge result is currently unused — `merged_ps.bypass_rules`
+            // is never written back to `config` in `load_merge_warden_config` because
+            // `to_validation_config` re-runs its own per-sub-rule bypass merge from the
+            // original `config.policies.bypass_rules`.  Remove this note and add the
+            // write-back once the `to_validation_config` bypass path is consolidated
+            // (tracked as follow-up cleanup per docs/spec/interfaces/policy-engine.md §3).
+            bypass_rules: BypassRules::merge(&self.bypass_rules, &over.bypass_rules),
+        }
+    }
+
+    /// Constructs a [`PolicySet`] from application-level defaults.
+    ///
+    /// # Arguments
+    /// * `app` — Application defaults loaded at server start-up
+    ///
+    /// # Returns
+    /// A [`PolicySet`] seeded with every field taken from the application defaults.
+    ///
+    /// See `docs/spec/interfaces/policy-engine.md` §1.2 for mapping rules.
+    pub fn from_application_defaults(app: &ApplicationDefaults) -> PolicySet {
+        PolicySet {
+            // Note: `app.enable_title_validation` is intentionally NOT applied here.
+            // It is a post-merge enforcement override applied in `load_merge_warden_config`.
+            title: PullRequestsTitlePolicyConfig {
+                required: false,
+                pattern: app.default_title_pattern.clone(),
+                label_if_missing: app.default_invalid_title_label.clone(),
+            },
+            // Note: `app.enable_work_item_validation` is intentionally NOT applied here.
+            // It is a post-merge enforcement override applied in `load_merge_warden_config`.
+            work_item: WorkItemPolicyConfig {
+                required: false,
+                pattern: app.default_work_item_pattern.clone(),
+                label_if_missing: app.default_missing_work_item_label.clone(),
+            },
+            size: app.pr_size_check.clone(),
+            wip: app.wip_check.clone(),
+            pr_state: app.pr_state_labels.clone(),
+            // `ApplicationDefaults` carries no issue-propagation settings — issue propagation
+            // is a repository-level opt-in feature, so the app tier always contributes
+            // `IssuePropagationConfig::default()` (both flags `false`).
+            issue_propagation: IssuePropagationConfig::default(),
+            change_type_labels: app.change_type_labels.clone(),
+            bypass_rules: app.bypass_rules.clone(),
+        }
+    }
+
+    /// Constructs a [`PolicySet`] from a repository-provided configuration.
+    ///
+    /// # Arguments
+    /// * `repo` — Config parsed from the `.github/merge-warden.toml` file
+    ///
+    /// # Returns
+    /// A [`PolicySet`] seeded with every field taken from the repository config.
+    ///
+    /// See `docs/spec/interfaces/policy-engine.md` §1.3 for mapping rules.
+    pub fn from_repository_config(repo: &RepositoryProvidedConfig) -> PolicySet {
+        let pr = &repo.policies.pull_requests;
+        // Repo bypass rules live in `BypassRulesConfig` (where each sub-rule is
+        // `Option<BypassRule>`). We convert each present sub-rule directly; absent
+        // sub-rules become `BypassRule::default()` (disabled, no users) so they
+        // register as "unconfigured" and let the app-defaults rule win during merge.
+        let bypass_rules = match &repo.policies.bypass_rules {
+            None => BypassRules::default(),
+            Some(brc) => BypassRules::new_with_size(
+                brc.title_convention().cloned().unwrap_or_default(),
+                brc.work_item_convention().cloned().unwrap_or_default(),
+                brc.size().cloned().unwrap_or_default(),
+            ),
+        };
+        PolicySet {
+            title: pr.title_policies.clone(),
+            work_item: pr.work_item_policies.clone(),
+            size: pr.size_policies.clone(),
+            wip: pr.wip_policies.clone(),
+            pr_state: pr.pr_state_policies.clone(),
+            issue_propagation: pr.issue_propagation.clone(),
+            change_type_labels: repo.change_type_labels.clone().unwrap_or_default(),
+            bypass_rules,
         }
     }
 }
@@ -1430,347 +1778,33 @@ pub async fn load_merge_warden_config(
 
     // Only apply application defaults if we have a valid configuration
     if is_valid_config {
-        // Enforce application-level enables for validations
+        // Build merged policy set: application defaults → repository overrides
+        let app_ps = PolicySet::from_application_defaults(app_defaults);
+        let repo_ps = PolicySet::from_repository_config(&config);
+        let mut merged_ps = app_ps.merge(&repo_ps);
+
+        // Preserved enforcement overrides — to be removed when OrgPolicy is introduced
         if app_defaults.enable_title_validation {
-            config.policies.pull_requests.title_policies.required = true;
+            merged_ps.title.required = true;
         }
-
         if app_defaults.enable_work_item_validation {
-            config.policies.pull_requests.work_item_policies.required = true;
+            merged_ps.work_item.required = true;
         }
-
-        // Use repository config labels and patterns if present, else fallback to defaults
-        if config
-            .policies
-            .pull_requests
-            .title_policies
-            .pattern
-            .is_empty()
-        {
-            config.policies.pull_requests.title_policies.pattern =
-                app_defaults.default_title_pattern.clone();
-        }
-
-        if config
-            .policies
-            .pull_requests
-            .title_policies
-            .label_if_missing
-            .is_none()
-        {
-            config
-                .policies
-                .pull_requests
-                .title_policies
-                .label_if_missing = app_defaults.default_invalid_title_label.clone();
-        }
-
-        if config
-            .policies
-            .pull_requests
-            .work_item_policies
-            .pattern
-            .is_empty()
-        {
-            config.policies.pull_requests.work_item_policies.pattern =
-                app_defaults.default_work_item_pattern.clone();
-        }
-
-        if config
-            .policies
-            .pull_requests
-            .work_item_policies
-            .label_if_missing
-            .is_none()
-        {
-            config
-                .policies
-                .pull_requests
-                .work_item_policies
-                .label_if_missing = app_defaults.default_missing_work_item_label.clone();
-        }
-
-        // Merge PR size configuration from app defaults
         if app_defaults.pr_size_check.enabled {
-            config.policies.pull_requests.size_policies.enabled = true;
+            merged_ps.size.enabled = true;
         }
-
-        // Use app defaults for any unspecified PR size config values
-        if !config.policies.pull_requests.size_policies.enabled {
-            config.policies.pull_requests.size_policies = app_defaults.pr_size_check.clone();
-        }
-
-        // Merge change type labels configuration with application defaults
-        if config.change_type_labels.is_none() {
-            config.change_type_labels = Some(app_defaults.change_type_labels.clone());
-        } else {
-            // Merge repository change type labels config with application defaults
-            let repo_change_type_labels = config.change_type_labels.as_ref().unwrap();
-            let mut merged_change_type_labels = app_defaults.change_type_labels.clone();
-
-            // Override with repository-specific settings where provided
-            merged_change_type_labels.enabled = repo_change_type_labels.enabled;
-
-            // Only override mappings if repository provides them
-            if !repo_change_type_labels
-                .conventional_commit_mappings
-                .feat
-                .is_empty()
-            {
-                merged_change_type_labels.conventional_commit_mappings.feat =
-                    repo_change_type_labels
-                        .conventional_commit_mappings
-                        .feat
-                        .clone();
-            }
-            if !repo_change_type_labels
-                .conventional_commit_mappings
-                .fix
-                .is_empty()
-            {
-                merged_change_type_labels.conventional_commit_mappings.fix =
-                    repo_change_type_labels
-                        .conventional_commit_mappings
-                        .fix
-                        .clone();
-            }
-            if !repo_change_type_labels
-                .conventional_commit_mappings
-                .docs
-                .is_empty()
-            {
-                merged_change_type_labels.conventional_commit_mappings.docs =
-                    repo_change_type_labels
-                        .conventional_commit_mappings
-                        .docs
-                        .clone();
-            }
-            if !repo_change_type_labels
-                .conventional_commit_mappings
-                .style
-                .is_empty()
-            {
-                merged_change_type_labels.conventional_commit_mappings.style =
-                    repo_change_type_labels
-                        .conventional_commit_mappings
-                        .style
-                        .clone();
-            }
-            if !repo_change_type_labels
-                .conventional_commit_mappings
-                .refactor
-                .is_empty()
-            {
-                merged_change_type_labels
-                    .conventional_commit_mappings
-                    .refactor = repo_change_type_labels
-                    .conventional_commit_mappings
-                    .refactor
-                    .clone();
-            }
-            if !repo_change_type_labels
-                .conventional_commit_mappings
-                .perf
-                .is_empty()
-            {
-                merged_change_type_labels.conventional_commit_mappings.perf =
-                    repo_change_type_labels
-                        .conventional_commit_mappings
-                        .perf
-                        .clone();
-            }
-            if !repo_change_type_labels
-                .conventional_commit_mappings
-                .test
-                .is_empty()
-            {
-                merged_change_type_labels.conventional_commit_mappings.test =
-                    repo_change_type_labels
-                        .conventional_commit_mappings
-                        .test
-                        .clone();
-            }
-            if !repo_change_type_labels
-                .conventional_commit_mappings
-                .chore
-                .is_empty()
-            {
-                merged_change_type_labels.conventional_commit_mappings.chore =
-                    repo_change_type_labels
-                        .conventional_commit_mappings
-                        .chore
-                        .clone();
-            }
-            if !repo_change_type_labels
-                .conventional_commit_mappings
-                .ci
-                .is_empty()
-            {
-                merged_change_type_labels.conventional_commit_mappings.ci = repo_change_type_labels
-                    .conventional_commit_mappings
-                    .ci
-                    .clone();
-            }
-            if !repo_change_type_labels
-                .conventional_commit_mappings
-                .build
-                .is_empty()
-            {
-                merged_change_type_labels.conventional_commit_mappings.build =
-                    repo_change_type_labels
-                        .conventional_commit_mappings
-                        .build
-                        .clone();
-            }
-            if !repo_change_type_labels
-                .conventional_commit_mappings
-                .revert
-                .is_empty()
-            {
-                merged_change_type_labels
-                    .conventional_commit_mappings
-                    .revert = repo_change_type_labels
-                    .conventional_commit_mappings
-                    .revert
-                    .clone();
-            }
-
-            // Override fallback settings if repository provides them
-            if !repo_change_type_labels
-                .fallback_label_settings
-                .name_format
-                .is_empty()
-            {
-                merged_change_type_labels
-                    .fallback_label_settings
-                    .name_format = repo_change_type_labels
-                    .fallback_label_settings
-                    .name_format
-                    .clone();
-            }
-            if !repo_change_type_labels
-                .fallback_label_settings
-                .color_scheme
-                .is_empty()
-            {
-                merged_change_type_labels
-                    .fallback_label_settings
-                    .color_scheme = repo_change_type_labels
-                    .fallback_label_settings
-                    .color_scheme
-                    .clone();
-            }
-            merged_change_type_labels
-                .fallback_label_settings
-                .create_if_missing = repo_change_type_labels
-                .fallback_label_settings
-                .create_if_missing;
-
-            // Override detection strategy settings
-            merged_change_type_labels.detection_strategy.exact_match =
-                repo_change_type_labels.detection_strategy.exact_match;
-            merged_change_type_labels.detection_strategy.prefix_match =
-                repo_change_type_labels.detection_strategy.prefix_match;
-            merged_change_type_labels
-                .detection_strategy
-                .description_match = repo_change_type_labels.detection_strategy.description_match;
-            if !repo_change_type_labels
-                .detection_strategy
-                .common_prefixes
-                .is_empty()
-            {
-                merged_change_type_labels.detection_strategy.common_prefixes =
-                    repo_change_type_labels
-                        .detection_strategy
-                        .common_prefixes
-                        .clone();
-            }
-
-            // Override keyword label names if repository provides non-empty values
-            if repo_change_type_labels
-                .keyword_labels
-                .breaking_change
-                .is_some()
-            {
-                merged_change_type_labels.keyword_labels.breaking_change = repo_change_type_labels
-                    .keyword_labels
-                    .breaking_change
-                    .clone();
-            }
-            if repo_change_type_labels.keyword_labels.security.is_some() {
-                merged_change_type_labels.keyword_labels.security =
-                    repo_change_type_labels.keyword_labels.security.clone();
-            }
-            if repo_change_type_labels.keyword_labels.hotfix.is_some() {
-                merged_change_type_labels.keyword_labels.hotfix =
-                    repo_change_type_labels.keyword_labels.hotfix.clone();
-            }
-            if repo_change_type_labels.keyword_labels.tech_debt.is_some() {
-                merged_change_type_labels.keyword_labels.tech_debt =
-                    repo_change_type_labels.keyword_labels.tech_debt.clone();
-            }
-
-            config.change_type_labels = Some(merged_change_type_labels);
-        }
-
-        // Merge WIP configuration from app defaults:
-        // - If the app enables WIP blocking, it overrides the repo setting (operator mandate)
-        // - If the repo does not configure WIP at all (default), use app defaults wholesale
         if app_defaults.wip_check.enforce_wip_blocking {
-            config
-                .policies
-                .pull_requests
-                .wip_policies
-                .enforce_wip_blocking = true;
+            merged_ps.wip.enforce_wip_blocking = true;
         }
 
-        // Where the repo uses the hard defaults for labels/patterns, prefer the app-level settings
-        if config.policies.pull_requests.wip_policies.wip_label
-            == WipCheckConfig::default().wip_label
-            && app_defaults.wip_check.wip_label != WipCheckConfig::default().wip_label
-        {
-            config.policies.pull_requests.wip_policies.wip_label =
-                app_defaults.wip_check.wip_label.clone();
-        }
-
-        if config
-            .policies
-            .pull_requests
-            .wip_policies
-            .wip_title_patterns
-            == WipCheckConfig::default().wip_title_patterns
-            && app_defaults.wip_check.wip_title_patterns
-                != WipCheckConfig::default().wip_title_patterns
-        {
-            config
-                .policies
-                .pull_requests
-                .wip_policies
-                .wip_title_patterns = app_defaults.wip_check.wip_title_patterns.clone();
-        }
-
-        if config
-            .policies
-            .pull_requests
-            .wip_policies
-            .wip_description_patterns
-            .is_empty()
-            && !app_defaults.wip_check.wip_description_patterns.is_empty()
-        {
-            config
-                .policies
-                .pull_requests
-                .wip_policies
-                .wip_description_patterns = app_defaults.wip_check.wip_description_patterns.clone();
-        }
-
-        // Merge PR state label configuration from app defaults:
-        // If the repo has not enabled state labels, use the app-level settings wholesale.
-        if !config.policies.pull_requests.pr_state_policies.enabled
-            && app_defaults.pr_state_labels.enabled
-        {
-            config.policies.pull_requests.pr_state_policies = app_defaults.pr_state_labels.clone();
-        }
+        // Write merged policies back into config for conversion to CPVRC
+        config.policies.pull_requests.title_policies = merged_ps.title;
+        config.policies.pull_requests.work_item_policies = merged_ps.work_item;
+        config.policies.pull_requests.size_policies = merged_ps.size;
+        config.policies.pull_requests.wip_policies = merged_ps.wip;
+        config.policies.pull_requests.pr_state_policies = merged_ps.pr_state;
+        config.policies.pull_requests.issue_propagation = merged_ps.issue_propagation;
+        config.change_type_labels = Some(merged_ps.change_type_labels);
 
         // End of valid config processing
     }
@@ -1842,6 +1876,135 @@ impl ChangeTypeLabelConfig {
     /// Returns `true` — change-type label checks are enabled by default.
     fn default_enabled() -> bool {
         true
+    }
+
+    /// Merges `over` on top of `base` (lower-priority).
+    ///
+    /// Field-level rules:
+    /// - `enabled`: `base.enabled || over.enabled`
+    /// - `conventional_commit_mappings.*` (11 `Vec<String>` fields):
+    ///   `over.field` if non-empty; otherwise `base.field`
+    /// - `detection_strategy.exact_match`, `.prefix_match`, `.description_match`:
+    ///   `over` wins unconditionally
+    /// - `detection_strategy.common_prefixes`: `over` if non-empty; otherwise `base`
+    /// - `fallback_label_settings.name_format`: `over` if non-empty and not equal to
+    ///   `FallbackLabelSettings::default().name_format`; otherwise `base`
+    /// - `fallback_label_settings.color_scheme`: per-key, `over` key wins if present
+    /// - `fallback_label_settings.create_if_missing`: `over` wins unconditionally
+    /// - `keyword_labels.*`: `over.field` if `Some`; otherwise `base.field`
+    ///
+    /// See `docs/spec/interfaces/policy-engine.md` §2.7 for the full contract.
+    pub(crate) fn merge(base: &Self, over: &Self) -> Self {
+        let bm = &base.conventional_commit_mappings;
+        let om = &over.conventional_commit_mappings;
+        let mappings = ConventionalCommitMappings {
+            feat: if !om.feat.is_empty() {
+                om.feat.clone()
+            } else {
+                bm.feat.clone()
+            },
+            fix: if !om.fix.is_empty() {
+                om.fix.clone()
+            } else {
+                bm.fix.clone()
+            },
+            docs: if !om.docs.is_empty() {
+                om.docs.clone()
+            } else {
+                bm.docs.clone()
+            },
+            style: if !om.style.is_empty() {
+                om.style.clone()
+            } else {
+                bm.style.clone()
+            },
+            refactor: if !om.refactor.is_empty() {
+                om.refactor.clone()
+            } else {
+                bm.refactor.clone()
+            },
+            perf: if !om.perf.is_empty() {
+                om.perf.clone()
+            } else {
+                bm.perf.clone()
+            },
+            test: if !om.test.is_empty() {
+                om.test.clone()
+            } else {
+                bm.test.clone()
+            },
+            chore: if !om.chore.is_empty() {
+                om.chore.clone()
+            } else {
+                bm.chore.clone()
+            },
+            ci: if !om.ci.is_empty() {
+                om.ci.clone()
+            } else {
+                bm.ci.clone()
+            },
+            build: if !om.build.is_empty() {
+                om.build.clone()
+            } else {
+                bm.build.clone()
+            },
+            revert: if !om.revert.is_empty() {
+                om.revert.clone()
+            } else {
+                bm.revert.clone()
+            },
+        };
+
+        let bd = &base.detection_strategy;
+        let od = &over.detection_strategy;
+        let detection_strategy = LabelDetectionStrategy {
+            exact_match: od.exact_match,
+            prefix_match: od.prefix_match,
+            description_match: od.description_match,
+            common_prefixes: if !od.common_prefixes.is_empty() {
+                od.common_prefixes.clone()
+            } else {
+                bd.common_prefixes.clone()
+            },
+        };
+
+        let bf = &base.fallback_label_settings;
+        let of = &over.fallback_label_settings;
+        let default_name_format = FallbackLabelSettings::default_name_format();
+        let name_format = if !of.name_format.is_empty() && of.name_format != default_name_format {
+            of.name_format.clone()
+        } else {
+            bf.name_format.clone()
+        };
+        let mut color_scheme = bf.color_scheme.clone();
+        for (key, value) in &of.color_scheme {
+            color_scheme.insert(key.clone(), value.clone());
+        }
+        let fallback_label_settings = FallbackLabelSettings {
+            name_format,
+            color_scheme,
+            create_if_missing: of.create_if_missing,
+        };
+
+        let bk = &base.keyword_labels;
+        let ok = &over.keyword_labels;
+        let keyword_labels = KeywordLabelsConfig {
+            breaking_change: ok
+                .breaking_change
+                .clone()
+                .or_else(|| bk.breaking_change.clone()),
+            security: ok.security.clone().or_else(|| bk.security.clone()),
+            hotfix: ok.hotfix.clone().or_else(|| bk.hotfix.clone()),
+            tech_debt: ok.tech_debt.clone().or_else(|| bk.tech_debt.clone()),
+        };
+
+        Self {
+            enabled: base.enabled || over.enabled,
+            conventional_commit_mappings: mappings,
+            detection_strategy,
+            fallback_label_settings,
+            keyword_labels,
+        }
     }
 }
 
@@ -1973,9 +2136,25 @@ impl FallbackLabelSettings {
     fn default_create_if_missing() -> bool {
         true
     }
-    /// Default colour scheme for fallback labels, taken from `FallbackLabelSettings::default()`.
+    /// Default colour scheme for fallback labels.
+    ///
+    /// Inlined here to avoid constructing a full [`FallbackLabelSettings`] just to extract
+    /// the colour map. Keep in sync with [`FallbackLabelSettings::default`].
     fn default_color_scheme() -> HashMap<String, String> {
-        FallbackLabelSettings::default().color_scheme
+        // Color scheme as specified in issue #107.
+        let mut m = HashMap::new();
+        m.insert("feat".to_string(), "#0075ca".to_string());
+        m.insert("fix".to_string(), "#d73a4a".to_string());
+        m.insert("docs".to_string(), "#0052cc".to_string());
+        m.insert("style".to_string(), "#f9d0c4".to_string());
+        m.insert("refactor".to_string(), "#fef2c0".to_string());
+        m.insert("perf".to_string(), "#a2eeef".to_string());
+        m.insert("test".to_string(), "#d4edda".to_string());
+        m.insert("chore".to_string(), "#e1e4e8".to_string());
+        m.insert("ci".to_string(), "#fbca04".to_string());
+        m.insert("build".to_string(), "#c5def5".to_string());
+        m.insert("revert".to_string(), "#b60205".to_string());
+        m
     }
 }
 
