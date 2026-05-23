@@ -800,7 +800,7 @@ impl TestBotInstance {
             .pulls(&repository.organization, &repository.name)
             .get(pr_number)
             .await
-            .map_err(|e| TestError::github_api_error("get_pull_request", &e.to_string()))?;
+            .map_err(|e| TestError::github_api_error("get_pull_request", &format!("{e:?}")))?;
 
         let head_sha = pr.head.sha;
 
@@ -810,7 +810,7 @@ impl TestBotInstance {
             .list_check_runs_for_git_ref(head_sha.into())
             .send()
             .await
-            .map_err(|e| TestError::github_api_error("list_check_runs", &e.to_string()))?;
+            .map_err(|e| TestError::github_api_error("list_check_runs", &format!("{e:?}")))?;
 
         let checks = check_runs
             .check_runs
