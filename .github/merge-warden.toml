@@ -33,7 +33,7 @@ label_if_missing = "pr-issue:missing-work-item"
 [policies.pullRequests.prSize]
 enabled = true
 fail_on_oversized = false
-label_prefix = "size/"
+label_prefix = "size:"
 add_comment = true
 
 # Files excluded from the line-change count (glob patterns).
@@ -55,7 +55,7 @@ xl = 700
 # ---------------------------------------------------------------------------
 [policies.pullRequests.wip]
 enforce_wip_blocking = true
-wip_label = "status: wip"
+wip_label = "status:wip"
 wip_title_patterns = ["WIP", "wip:", "[wip]", "draft:", "Draft:"]
 wip_description_patterns = []
 
@@ -116,7 +116,7 @@ build = ["type:ci"]
 revert = ["type:revert"]
 
 [change_type_labels.fallback_label_settings]
-name_format = "type: {change_type}"
+name_format = "type:{change_type}"
 create_if_missing = false
 
 [change_type_labels.fallback_label_settings.color_scheme]
