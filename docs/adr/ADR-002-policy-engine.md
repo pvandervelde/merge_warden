@@ -194,13 +194,21 @@ merge rules follow the current ad-hoc behavior exactly, now encoded in the ownin
 
 | Field type | Merge rule |
 | :--- | :--- |
-| `bool` — activation flag (`required`, `enabled`, `enforce_*`) | `base \|\| over` — once activated by either tier, stays active |
+| `bool` — activation flag (`required`, `enabled`, `enforce_*`, `sync_milestone_from_issue`, `sync_project_from_issue`) | `base \|\| over` — once activated by either tier, stays active |
 | `String` — regex pattern or label prefix | `over` if non-empty and not equal to the type's `default()` value; otherwise `base` |
 | `Option<String>` — optional label | `over.or(base)` |
 | `Vec<String>` — label name candidates | `over` if non-empty; otherwise `base` |
-| `bool` — non-activation flag (`fail_on_oversized`, `add_comment`, etc.) | `over` wins unconditionally (higher tier's preference applies) |
+| `bool` — non-activation flag (`fail_on_oversized`, `add_comment`, `exact_match`, `prefix_match`, `description_match`, etc.) | `over` wins unconditionally (higher tier's preference applies) |
 | `Option<SizeThresholds>` | `over.or(base)` |
 | `HashMap<String, String>` — colour scheme | merge per-key: `over` key wins if present |
+
+> **Trade-off — `bool` non-activation flags with `true` defaults:** Fields that default to
+> `true` (e.g., `add_comment`, `exact_match`, `prefix_match`, `description_match`) are
+> asymmetric. If the app tier sets one to `false` but the repo config omits the field
+> (serde default = `true`), "over wins unconditionally" causes the repo's serde default
+> to override the operator's explicit `false`. Fixing this correctly requires `Option<bool>`
+> on those fields, which is a wider refactor deferred to a future cleanup. Operators who
+> need to enforce a `false` value should use the org-policy enforcement tier once available.
 
 ### Conversion helpers
 

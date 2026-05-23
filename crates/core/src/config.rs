@@ -1354,12 +1354,12 @@ impl Default for PrSizeCheckConfig {
 ///
 /// # Merge heuristic
 ///
-/// `load_merge_warden_config` detects whether a repository is "still using
-/// built-in defaults" by comparing the repo's patterns to `WipCheckConfig::default()`.
-/// A repository that explicitly sets its patterns to values identical to the
-/// defaults will have those values overwritten by app-level defaults. This is
-/// intentional (operator can supply a richer default set), but may be surprising
-/// in edge cases. Document any repo-level override explicitly to avoid ambiguity.
+/// `WipCheckConfig::merge` treats a pattern value equal to `WipCheckConfig::default()`
+/// as "not configured" and falls back to the base tier. A repository that explicitly
+/// sets its patterns to values identical to the defaults will therefore see the
+/// app-level defaults applied instead. This is intentional (operator can supply a
+/// richer default set), but may be surprising in edge cases. Document any repo-level
+/// override explicitly to avoid ambiguity.
 ///
 /// # Examples
 ///
@@ -1618,6 +1618,12 @@ impl PolicySet {
                 &self.change_type_labels,
                 &over.change_type_labels,
             ),
+            // TODO: bypass_rules merge result is currently unused — `merged_ps.bypass_rules`
+            // is never written back to `config` in `load_merge_warden_config` because
+            // `to_validation_config` re-runs its own per-sub-rule bypass merge from the
+            // original `config.policies.bypass_rules`.  Remove this note and add the
+            // write-back once the `to_validation_config` bypass path is consolidated
+            // (tracked as follow-up cleanup per docs/spec/interfaces/policy-engine.md §3).
             bypass_rules: BypassRules::merge(&self.bypass_rules, &over.bypass_rules),
         }
     }
@@ -1650,6 +1656,9 @@ impl PolicySet {
             size: app.pr_size_check.clone(),
             wip: app.wip_check.clone(),
             pr_state: app.pr_state_labels.clone(),
+            // `ApplicationDefaults` carries no issue-propagation settings — issue propagation
+            // is a repository-level opt-in feature, so the app tier always contributes
+            // `IssuePropagationConfig::default()` (both flags `false`).
             issue_propagation: IssuePropagationConfig::default(),
             change_type_labels: app.change_type_labels.clone(),
             bypass_rules: app.bypass_rules.clone(),
@@ -2127,9 +2136,25 @@ impl FallbackLabelSettings {
     fn default_create_if_missing() -> bool {
         true
     }
-    /// Default colour scheme for fallback labels, taken from `FallbackLabelSettings::default()`.
+    /// Default colour scheme for fallback labels.
+    ///
+    /// Inlined here to avoid constructing a full [`FallbackLabelSettings`] just to extract
+    /// the colour map. Keep in sync with [`FallbackLabelSettings::default`].
     fn default_color_scheme() -> HashMap<String, String> {
-        FallbackLabelSettings::default().color_scheme
+        // Color scheme as specified in issue #107.
+        let mut m = HashMap::new();
+        m.insert("feat".to_string(), "#0075ca".to_string());
+        m.insert("fix".to_string(), "#d73a4a".to_string());
+        m.insert("docs".to_string(), "#0052cc".to_string());
+        m.insert("style".to_string(), "#f9d0c4".to_string());
+        m.insert("refactor".to_string(), "#fef2c0".to_string());
+        m.insert("perf".to_string(), "#a2eeef".to_string());
+        m.insert("test".to_string(), "#d4edda".to_string());
+        m.insert("chore".to_string(), "#e1e4e8".to_string());
+        m.insert("ci".to_string(), "#fbca04".to_string());
+        m.insert("build".to_string(), "#c5def5".to_string());
+        m.insert("revert".to_string(), "#b60205".to_string());
+        m
     }
 }
 

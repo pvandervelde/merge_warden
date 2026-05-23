@@ -189,13 +189,17 @@ impl PrStateLabelsConfig {
 
 ### 2.6 `IssuePropagationConfig::merge`
 
+`IssuePropagationConfig` has no `enabled` field. Both flags are opt-in activation flags
+(default `false`), so both use OR semantics: once either tier activates a flag it stays
+active.
+
 ```rust
 impl IssuePropagationConfig {
     /// Merges `over` on top of `base`.
     ///
     /// Field-level rules:
-    /// - `enabled`: `base.enabled || over.enabled`
-    /// - All remaining boolean flags: `over` wins unconditionally
+    /// - `sync_milestone_from_issue`: `base.sync_milestone_from_issue || over.sync_milestone_from_issue`
+    /// - `sync_project_from_issue`: `base.sync_project_from_issue || over.sync_project_from_issue`
     pub(crate) fn merge(base: &Self, over: &Self) -> Self;
 }
 ```
