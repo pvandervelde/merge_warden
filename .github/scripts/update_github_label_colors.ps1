@@ -26,7 +26,10 @@ $labelUpdates = @(
     @{ Name = "status:needs-triage"; Color = "64befb"; Description = "Needs triage or review" }
     @{ Name = "status:draft"; Color = "64befb"; Description = "Work is in draft mode" }
     @{ Name = "status:in-progress"; Color = "64befb"; Description = "Work in progress" }
+    @{ Name = "status:wip"; Color = "64befb"; Description = "Work in progress (WIP)" }
     @{ Name = "status:needs-review"; Color = "64befb"; Description = "Needs code or design review" }
+    @{ Name = "status:in-review"; Color = "64befb"; Description = "Currently under code or design review" }
+    @{ Name = "status:approved"; Color = "64befb"; Description = "Pull request approved" }
     @{ Name = "status:blocked"; Color = "64befb"; Description = "Blocked by another issue or dependency" }
     @{ Name = "status:completed"; Color = "64befb"; Description = "Work completed" }
 
