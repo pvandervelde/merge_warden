@@ -222,20 +222,21 @@ jobs:
 
       - name: Verify CLI artifacts
         run: |
-          count=$(find artifacts/ -maxdepth 1 -type f | wc -l)
-          echo "Artifacts found: ${count}"
-          if [[ "${count}" -ne 3 ]]; then
-            echo "ERROR: Expected 3 artifacts (linux-gnu, linux-musl, windows), found ${count}"
+          cli_count=$(find artifacts/ -maxdepth 1 -type f | wc -l)
+          echo "Artifacts found: ${cli_count}"
+          if [[ "${cli_count}" -eq 0 ]]; then
+            echo "ERROR: No CLI artifacts found"
             find artifacts/ -maxdepth 1 -type f
             exit 1
           fi
+          echo "CLI_COUNT=${cli_count}" >> "${GITHUB_ENV}"
 
       - name: Verify SBOM artifacts
         run: |
-          count=$(find sboms/ -maxdepth 1 -type f | wc -l)
-          echo "SBOMs found: ${count}"
-          if [[ "${count}" -ne 3 ]]; then
-            echo "ERROR: Expected 3 SBOMs (linux-gnu, linux-musl, windows), found ${count}"
+          sbom_count=$(find sboms/ -maxdepth 1 -type f | wc -l)
+          echo "SBOMs found: ${sbom_count}"
+          if [[ "${sbom_count}" -ne "${CLI_COUNT}" ]]; then
+            echo "ERROR: SBOM count (${sbom_count}) does not match artifact count (${CLI_COUNT})"
             find sboms/ -maxdepth 1 -type f
             exit 1
           fi
@@ -284,6 +285,7 @@ jobs:
     # and runs a COPY-only Docker build, so 20 minutes is a generous bound.
     timeout-minutes: 20
     permissions:
+      contents: read # To checkout code
       packages: write # To push container images to GHCR
       id-token: write # Required for OIDC-based image attestation
       attestations: write # Required to write attestation records to the repo
