@@ -2,79 +2,52 @@
 name: Publish Release
 
 on:
-  pull_request:
-    types:
-      - closed
-    branches:
-      - "master" # Only run for pull requests targeting the master branch
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       version:
-        description: "Version to publish (e.g. 0.4.0) — use only to recover a failed
+        description:
+          "Version to publish (e.g. 0.4.0) — use only to recover a failed
           release"
         required: true
         type: string
 
 permissions:
-  contents: write # To push tags and to create GitHub Releases
-  packages: write # To push container images to GHCR
+  contents: read
 
 jobs:
-  determine-version:
-    name: Determine Release Version
-    # Only run if the PR was merged and the head branch matches release/*
-    if: github.event.pull_request.merged == true &&
-      startsWith(github.event.pull_request.head.ref, 'release/')
+  resolve-version:
+    name: Resolve Release Version
     runs-on: ubuntu-latest
     outputs:
-      release_version: ${{ steps.get_version.outputs.RELEASE_VERSION }}
+      release_version: ${{ steps.version.outputs.RELEASE_VERSION }}
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          # Checkout the base branch (master) after the merge
-          ref: ${{ github.event.pull_request.base.ref }}
-          # Fetch all history needed for conventional_commits_next_version
-          fetch-depth: 0
-
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
-
-      - name: Install cargo binstall
-        uses: cargo-bins/cargo-binstall@dc19f1e48450eefe5a29b8da6c6b00a87d730b37 # main
-
-      - name: Install Conventional Commits Next Version
-        run: cargo binstall conventional_commits_next_version --no-confirm
-
-      - name: Get release version
-        id: get_version
-        run: |
-          LAST_TAG=$(git describe --tags --abbrev=0)
-          LAST_COMMIT=$(git rev-parse "${LAST_TAG}")
-          RELEASE_VERSION=$(conventional_commits_next_version --from-version "${LAST_TAG}" --calculation-mode Batch "${LAST_COMMIT}")
-          echo "RELEASE_VERSION=${RELEASE_VERSION}" >> "${GITHUB_OUTPUT}"
-          echo "The release version is: ${RELEASE_VERSION}"
-
-      - name: Assert calculated version matches release branch
+      - name: Validate dispatch version input
+        if: github.event_name == 'workflow_dispatch'
         env:
-          RELEASE_VERSION: ${{ steps.get_version.outputs.RELEASE_VERSION }}
-          BRANCH_REF: ${{ github.event.pull_request.head.ref }}
+          DISPATCH_VERSION: ${{ inputs.version }}
         run: |
-          BRANCH_VERSION="${BRANCH_REF#release/}"
-          if [[ "${RELEASE_VERSION}" != "${BRANCH_VERSION}" ]]; then
-            echo "ERROR: Calculated version (${RELEASE_VERSION}) does not match branch version (${BRANCH_VERSION})"
-            echo "Branch: ${BRANCH_REF}"
-            echo "This usually means commits made after the release branch was cut have changed the calculated version."
+          if ! [[ "${DISPATCH_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: version input '${DISPATCH_VERSION}' does not match expected format N.N.N"
             exit 1
           fi
-          echo "Version assertion passed: ${RELEASE_VERSION} matches branch ${BRANCH_REF}"
+
+      - name: Resolve version
+        id: version
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "RELEASE_VERSION=${DISPATCH_VERSION}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "RELEASE_VERSION=${{ github.event.release.tag_name }}" >> "${GITHUB_OUTPUT}"
+          fi
 
   build-cli:
     name: Build CLI - ${{ matrix.target }}
-    needs: determine-version
+    needs: resolve-version
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -93,7 +66,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ github.event.pull_request.base.ref }}
+          ref: ${{ needs.resolve-version.outputs.release_version }}
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -130,7 +103,7 @@ jobs:
         if: runner.os == 'Linux'
         shell: bash
         env:
-          RELEASE_VERSION: ${{ needs.determine-version.outputs.release_version }}
+          RELEASE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
           TARGET: ${{ matrix.target }}
         run: |
           ARCHIVE="merge-warden-${RELEASE_VERSION}-${TARGET}.tar.gz"
@@ -142,7 +115,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         env:
-          RELEASE_VERSION: ${{ needs.determine-version.outputs.release_version }}
+          RELEASE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
           TARGET: ${{ matrix.target }}
         run: |
           $archive = "merge-warden-$env:RELEASE_VERSION-$env:TARGET.zip"
@@ -167,14 +140,7 @@ jobs:
 
   build-server:
     name: Build Server - ${{ matrix.target }}
-    needs: determine-version
-    # Run for normal PR-triggered releases, or for workflow_dispatch recovery
-    # (determine-version is skipped on workflow_dispatch, so always() is required).
-    if: |
-      always() && (
-        needs.determine-version.result == 'success' ||
-        github.event_name == 'workflow_dispatch'
-      )
+    needs: resolve-version
     runs-on: ubuntu-22.04
     permissions:
       contents: read
@@ -189,33 +155,10 @@ jobs:
     timeout-minutes: 60
 
     steps:
-      - name: Validate dispatch version input
-        if: github.event_name == 'workflow_dispatch'
-        env:
-          DISPATCH_VERSION: ${{ inputs.version }}
-        run: |
-          if ! [[ "${DISPATCH_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            echo "ERROR: version input '${DISPATCH_VERSION}' does not match expected format N.N.N"
-            exit 1
-          fi
-
-      - name: Resolve checkout ref
-        id: ref
-        env:
-          DISPATCH_VERSION: ${{ inputs.version }}
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            # On dispatch, DISPATCH_VERSION is used as a git tag ref.
-            # The tag must already exist (created by publish-release in a prior partial run).
-            echo "REF=${DISPATCH_VERSION}" >> "${GITHUB_OUTPUT}"
-          else
-            echo "REF=${{ github.event.pull_request.base.ref }}" >> "${GITHUB_OUTPUT}"
-          fi
-
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ steps.ref.outputs.REF }}
+          ref: ${{ needs.resolve-version.outputs.release_version }}
 
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -254,67 +197,15 @@ jobs:
 
   publish-release:
     name: Publish Release
-    needs: [ determine-version, build-cli ]
+    needs: [resolve-version, build-cli]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
-      contents: write     # To push tags and create GitHub Releases
-      id-token: write     # Required for OIDC-based artifact attestation
+      contents: write # To upload assets to the GitHub Release
+      id-token: write # Required for OIDC-based artifact attestation
       attestations: write # Required to write attestation records to the repo
 
     steps:
-      - name: Generate GitHub App token
-        id: app-token
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349 # v2
-        with:
-          app-id: ${{ secrets.RELEASE_APP_ID }}
-          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
-
-      - name: Checkout code
-        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-        with:
-          # Checkout the base branch (master) after the merge
-          ref: ${{ github.event.pull_request.base.ref }}
-          # Fetch all history needed for git-cliff
-          fetch-depth: 0
-
-      - name: Set up Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-
-      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
-
-      - name: Install cargo binstall
-        uses: cargo-bins/cargo-binstall@dc19f1e48450eefe5a29b8da6c6b00a87d730b37 # main
-
-      - name: Install git-cliff
-        run: cargo binstall git-cliff --no-confirm
-
-      # Recommended as per: https://github.com/actions/checkout?tab=readme-ov-file#push-a-commit-using-the-built-in-token
-      - name: Configure Git user
-        run: |
-          git config user.name "releaser[bot]"
-          git config user.email "releaser[bot]@users.noreply.github.com"
-
-      - name: Set up git remote to use app token
-        run: |
-          git remote set-url origin "https://x-access-token:${{ steps.app-token.outputs.token }}@github.com/${{ github.repository }}.git"
-
-      - name: Create and Push Git Tag
-        run: |
-          RELEASE_VERSION="${{ needs.determine-version.outputs.release_version }}"
-          if git rev-parse "refs/tags/${RELEASE_VERSION}" >/dev/null 2>&1; then
-            echo "Tag ${RELEASE_VERSION} already exists — skipping"
-          else
-            git tag -a "${RELEASE_VERSION}" -m "Release ${RELEASE_VERSION}"
-            git push origin "${RELEASE_VERSION}"
-          fi
-
-      - name: Extract Release Notes
-        run: |
-          RELEASE_VERSION="${{ needs.determine-version.outputs.release_version }}"
-          echo "Extracting notes for tag ${RELEASE_VERSION}"
-          git-cliff --tag "${RELEASE_VERSION}" --strip all > /tmp/release-notes.md
-
       - name: Download CLI artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
         with:
@@ -349,27 +240,21 @@ jobs:
             exit 1
           fi
 
-      - name: Create GitHub Release
+      - name: Upload CLI artifacts to GitHub Release
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
         run: |
-          RELEASE_VERSION="${{ needs.determine-version.outputs.release_version }}"
-          if gh release view "${RELEASE_VERSION}" >/dev/null 2>&1; then
-            echo "GitHub Release ${RELEASE_VERSION} already exists — skipping"
-          else
-            echo "Creating GitHub Release for ${RELEASE_VERSION}"
-            gh release create "${RELEASE_VERSION}" \
-              --title "Release ${RELEASE_VERSION}" \
-              --notes-file /tmp/release-notes.md \
-              artifacts/*
-          fi
+          gh release upload "${RELEASE_VERSION}" artifacts/* --clobber \
+            --repo "${{ github.repository }}"
 
       - name: Upload SBOMs to GitHub Release
         env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
         run: |
-          RELEASE_VERSION="${{ needs.determine-version.outputs.release_version }}"
-          gh release upload "${RELEASE_VERSION}" sboms/* --clobber
+          gh release upload "${RELEASE_VERSION}" sboms/* --clobber \
+            --repo "${{ github.repository }}"
 
       - name: Attest CLI build provenance
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
@@ -383,8 +268,8 @@ jobs:
 
   publish-container:
     name: Publish Container Image
-    needs: [ determine-version, publish-release, build-server ]
-    # Run after a successful PR-triggered publish, or standalone for workflow_dispatch recovery.
+    needs: [resolve-version, publish-release, build-server]
+    # Run after a successful release publish, or standalone for workflow_dispatch recovery.
     # Jobs skipped due to their own 'if' conditions count as 'skipped', not 'failure',
     # so always() is required to allow this job to run when upstream jobs were skipped.
     # build-server must succeed in both paths — it compiles the binaries that
@@ -399,26 +284,15 @@ jobs:
     # and runs a COPY-only Docker build, so 20 minutes is a generous bound.
     timeout-minutes: 20
     permissions:
-      packages: write     # To push container images to GHCR
-      id-token: write     # Required for OIDC-based image attestation
+      packages: write # To push container images to GHCR
+      id-token: write # Required for OIDC-based image attestation
       attestations: write # Required to write attestation records to the repo
 
     steps:
-      - name: Resolve release version
-        id: version
-        env:
-          DISPATCH_VERSION: ${{ inputs.version }}
-        run: |
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            echo "RELEASE_VERSION=${DISPATCH_VERSION}" >> "${GITHUB_OUTPUT}"
-          else
-            echo "RELEASE_VERSION=${{ needs.determine-version.outputs.release_version }}" >> "${GITHUB_OUTPUT}"
-          fi
-
       - name: Checkout code
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
-          ref: ${{ steps.version.outputs.RELEASE_VERSION }}
+          ref: ${{ needs.resolve-version.outputs.release_version }}
 
       - name: Download server artifacts
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
@@ -456,7 +330,7 @@ jobs:
           sbom: true
           tags: |
             ghcr.io/pvandervelde/merge-warden-server:latest
-            ghcr.io/pvandervelde/merge-warden-server:${{ steps.version.outputs.RELEASE_VERSION }}
+            ghcr.io/pvandervelde/merge-warden-server:${{ needs.resolve-version.outputs.release_version }}
 
       - name: Attest container image provenance
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
