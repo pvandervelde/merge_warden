@@ -2,7 +2,7 @@ use crate::config::{validate_config_content, ConfigValidationOutcome};
 use crate::config::{
     BypassRule, BypassRules, BypassRulesConfig, ChangeTypeLabelConfig,
     CurrentPullRequestValidationConfiguration, IssuePropagationConfig, KeywordLabelsConfig,
-    PrSizeCheckConfig, WipCheckConfig, CONVENTIONAL_COMMIT_REGEX, WORK_ITEM_REGEX,
+    OrgPolicySource, PrSizeCheckConfig, WipCheckConfig, CONVENTIONAL_COMMIT_REGEX, WORK_ITEM_REGEX,
 };
 use crate::size::SizeThresholds;
 use async_trait::async_trait;
@@ -740,6 +740,7 @@ fn test_application_defaults_bypass_rules_serialization() {
         wip_check: WipCheckConfig::default(),
         pr_state_labels: crate::config::PrStateLabelsConfig::default(),
         bot_mention: "@merge-warden".to_string(),
+        org_policy_source: None,
     };
 
     let serialized =
@@ -4513,5 +4514,564 @@ wip_description_patterns = ["🚧 repo-pattern"]
             .wip_description_patterns,
         vec!["🚧 repo-pattern"],
         "non-empty repo description_patterns must be preserved when app also has patterns"
+    );
+}
+
+// ============================================================
+// OrgPolicySource / OrgPolicy / load_org_policy tests
+// ============================================================
+
+struct FailingFetcher;
+
+#[async_trait]
+impl ConfigFetcher for FailingFetcher {
+    async fn fetch_config(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _path: &str,
+    ) -> Result<Option<String>, Error> {
+        Err(Error::ApiError())
+    }
+
+    async fn fetch_config_at_ref(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _path: &str,
+        _git_ref: &str,
+    ) -> Result<Option<String>, Error> {
+        Err(Error::ApiError())
+    }
+}
+
+fn make_org_source(fail: bool) -> OrgPolicySource {
+    OrgPolicySource {
+        owner: "my-org".to_string(),
+        repo: "org-policies".to_string(),
+        path: ".github/merge-warden-org.toml".to_string(),
+        fail_if_unreachable: fail,
+    }
+}
+
+#[tokio::test]
+async fn test_load_org_policy_file_not_found_returns_none() {
+    let fetcher = MockFetcher::new(None);
+    let source = make_org_source(false);
+    let result = load_org_policy(&source, &fetcher).await.unwrap();
+    assert!(result.is_none(), "Missing file should return None");
+}
+
+#[tokio::test]
+async fn test_load_org_policy_file_not_found_with_fail_returns_none() {
+    // fail_if_unreachable only applies to errors, not missing files.
+    let fetcher = MockFetcher::new(None);
+    let source = make_org_source(true);
+    let result = load_org_policy(&source, &fetcher).await.unwrap();
+    assert!(
+        result.is_none(),
+        "Missing file with fail_if_unreachable=true should still return None"
+    );
+}
+
+#[tokio::test]
+async fn test_load_org_policy_fetch_error_lenient_returns_none() {
+    let source = make_org_source(false);
+    let result = load_org_policy(&source, &FailingFetcher).await.unwrap();
+    assert!(
+        result.is_none(),
+        "Fetch error with fail_if_unreachable=false should return None"
+    );
+}
+
+#[tokio::test]
+async fn test_load_org_policy_fetch_error_strict_returns_error() {
+    let source = make_org_source(true);
+    let result = load_org_policy(&source, &FailingFetcher).await;
+    assert!(
+        result.is_err(),
+        "Fetch error with fail_if_unreachable=true should return Err"
+    );
+    let e = result.unwrap_err().to_string();
+    assert!(
+        e.contains("Org policy unavailable"),
+        "Error should mention org policy unavailable; got: {e}"
+    );
+}
+
+#[tokio::test]
+async fn test_load_org_policy_parse_error_lenient_returns_none() {
+    let fetcher = MockFetcher::new(Some("not valid toml %%%".to_string()));
+    let source = make_org_source(false);
+    let result = load_org_policy(&source, &fetcher).await.unwrap();
+    assert!(
+        result.is_none(),
+        "Parse error with fail_if_unreachable=false should return None"
+    );
+}
+
+#[tokio::test]
+async fn test_load_org_policy_parse_error_strict_returns_error() {
+    let fetcher = MockFetcher::new(Some("not valid toml %%%".to_string()));
+    let source = make_org_source(true);
+    let result = load_org_policy(&source, &fetcher).await;
+    assert!(
+        result.is_err(),
+        "Parse error with fail_if_unreachable=true should return Err"
+    );
+}
+
+#[tokio::test]
+async fn test_load_org_policy_unsupported_schema_lenient_returns_none() {
+    let toml = r#"
+schemaVersion = 99
+
+[enforced]
+[defaults]
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let source = make_org_source(false);
+    let result = load_org_policy(&source, &fetcher).await.unwrap();
+    assert!(
+        result.is_none(),
+        "Unsupported schema version with fail_if_unreachable=false should return None"
+    );
+}
+
+#[tokio::test]
+async fn test_load_org_policy_unsupported_schema_strict_returns_error() {
+    let toml = r#"
+schemaVersion = 99
+
+[enforced]
+[defaults]
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let source = make_org_source(true);
+    let result = load_org_policy(&source, &fetcher).await;
+    assert!(
+        result.is_err(),
+        "Unsupported schema version with fail_if_unreachable=true should return Err"
+    );
+}
+
+#[tokio::test]
+async fn test_load_org_policy_valid_empty_sections_returns_some() {
+    let toml = r#"
+schemaVersion = 1
+
+[enforced]
+[defaults]
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let source = make_org_source(false);
+    let result = load_org_policy(&source, &fetcher).await.unwrap();
+    assert!(result.is_some(), "Valid minimal org policy should parse OK");
+}
+
+#[tokio::test]
+async fn test_load_org_policy_enforced_title_fields() {
+    let toml = r#"
+schemaVersion = 1
+
+[enforced.policies.pullRequests.prTitle]
+required = true
+pattern = "^feat:"
+
+[defaults]
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let source = make_org_source(false);
+    let policy = load_org_policy(&source, &fetcher)
+        .await
+        .unwrap()
+        .expect("should return Some");
+    assert!(
+        policy.enforced.title.required,
+        "Enforced section title.required should be true"
+    );
+    assert_eq!(policy.enforced.title.pattern, "^feat:");
+}
+
+#[tokio::test]
+async fn test_load_org_policy_defaults_not_in_enforced() {
+    let toml = r#"
+schemaVersion = 1
+
+[enforced]
+
+[defaults.policies.pullRequests.prTitle]
+required = true
+pattern = "^org-default:"
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let source = make_org_source(false);
+    let policy = load_org_policy(&source, &fetcher)
+        .await
+        .unwrap()
+        .expect("should return Some");
+    assert!(
+        !policy.enforced.title.required,
+        "Enforced section should not carry defaults title"
+    );
+    assert!(
+        policy.defaults.title.required,
+        "Defaults section title.required should be true"
+    );
+    assert_eq!(policy.defaults.title.pattern, "^org-default:");
+}
+
+// ============================================================
+// PolicySet::from_app_enforcement_flags tests
+// ============================================================
+
+#[test]
+fn test_from_app_enforcement_flags_all_false_returns_default() {
+    let app = ApplicationDefaults::default();
+    let ps = PolicySet::from_app_enforcement_flags(&app);
+    assert!(!ps.title.required);
+    assert!(!ps.work_item.required);
+    assert!(!ps.size.enabled);
+    assert!(!ps.wip.enforce_wip_blocking);
+}
+
+#[test]
+fn test_from_app_enforcement_flags_title_enabled() {
+    let mut app = ApplicationDefaults::default();
+    app.enable_title_validation = true;
+    let ps = PolicySet::from_app_enforcement_flags(&app);
+    assert!(ps.title.required);
+    assert!(!ps.work_item.required, "work_item should remain false");
+}
+
+#[test]
+fn test_from_app_enforcement_flags_work_item_enabled() {
+    let mut app = ApplicationDefaults::default();
+    app.enable_work_item_validation = true;
+    let ps = PolicySet::from_app_enforcement_flags(&app);
+    assert!(ps.work_item.required);
+    assert!(!ps.title.required, "title should remain false");
+}
+
+#[test]
+fn test_from_app_enforcement_flags_wip_enabled() {
+    let mut app = ApplicationDefaults::default();
+    app.wip_check.enforce_wip_blocking = true;
+    let ps = PolicySet::from_app_enforcement_flags(&app);
+    assert!(ps.wip.enforce_wip_blocking);
+}
+
+#[test]
+fn test_from_app_enforcement_flags_size_enabled() {
+    let mut app = ApplicationDefaults::default();
+    app.pr_size_check.enabled = true;
+    let ps = PolicySet::from_app_enforcement_flags(&app);
+    assert!(ps.size.enabled);
+}
+
+// ============================================================
+// resolve_pull_request_config tests
+// ============================================================
+
+#[tokio::test]
+async fn test_resolve_pull_request_config_no_org_source_no_repo_file() {
+    let fetcher = MockFetcher::new(None);
+    let app = ApplicationDefaults::default();
+    let result = resolve_pull_request_config("owner", "repo", "path", &fetcher, &app)
+        .await
+        .unwrap();
+    // With no configuration at all, title validation is off by default.
+    assert!(
+        !result.enforce_title_convention,
+        "No config should produce default (disabled) title enforcement"
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_pull_request_config_app_enforced_title_overrides_repo() {
+    // Repo disables title validation; app enforcement forces it on.
+    let repo_toml = r#"
+schemaVersion = 1
+
+[policies.pullRequests.prTitle]
+enabled = false
+"#;
+    let fetcher = MockFetcher::new(Some(repo_toml.to_string()));
+    let mut app = ApplicationDefaults::default();
+    app.enable_title_validation = true;
+    let result = resolve_pull_request_config("owner", "repo", "path", &fetcher, &app)
+        .await
+        .unwrap();
+    assert!(
+        result.enforce_title_convention,
+        "App enforcement flag must override repo setting"
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_pull_request_config_repo_enables_title() {
+    let repo_toml = r#"
+schemaVersion = 1
+
+[policies.pullRequests.prTitle]
+required = true
+pattern = "^TICKET-[0-9]+"
+"#;
+    let fetcher = MockFetcher::new(Some(repo_toml.to_string()));
+    let app = ApplicationDefaults::default();
+    let result = resolve_pull_request_config("owner", "repo", "path", &fetcher, &app)
+        .await
+        .unwrap();
+    assert!(result.enforce_title_convention);
+    assert_eq!(result.title_pattern, "^TICKET-[0-9]+");
+}
+
+#[tokio::test]
+async fn test_resolve_pull_request_config_org_enforced_overrides_repo() {
+    // Repo disables title; org enforces it.
+    let repo_toml = r#"
+schemaVersion = 1
+
+[policies.pullRequests.prTitle]
+enabled = false
+"#;
+    let org_toml = r#"
+schemaVersion = 1
+
+[enforced.policies.pullRequests.prTitle]
+required = true
+pattern = "^ORG:"
+
+[defaults]
+"#;
+
+    // Use a fetcher that returns the repo TOML for the repo path and org TOML for the org path.
+    struct TwoFileFetcher {
+        repo_content: String,
+        org_content: String,
+        org_path: String,
+    }
+
+    #[async_trait]
+    impl ConfigFetcher for TwoFileFetcher {
+        async fn fetch_config(
+            &self,
+            _owner: &str,
+            _repo: &str,
+            path: &str,
+        ) -> Result<Option<String>, Error> {
+            if path == self.org_path {
+                Ok(Some(self.org_content.clone()))
+            } else {
+                Ok(Some(self.repo_content.clone()))
+            }
+        }
+
+        async fn fetch_config_at_ref(
+            &self,
+            _owner: &str,
+            _repo: &str,
+            _path: &str,
+            _git_ref: &str,
+        ) -> Result<Option<String>, Error> {
+            Ok(None)
+        }
+    }
+
+    let fetcher = TwoFileFetcher {
+        repo_content: repo_toml.to_string(),
+        org_content: org_toml.to_string(),
+        org_path: "org-policy.toml".to_string(),
+    };
+
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(OrgPolicySource {
+        owner: "my-org".to_string(),
+        repo: "policies".to_string(),
+        path: "org-policy.toml".to_string(),
+        fail_if_unreachable: false,
+    });
+
+    let result = resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app)
+        .await
+        .unwrap();
+    assert!(
+        result.enforce_title_convention,
+        "Org enforced setting must override repo disabled setting"
+    );
+    assert_eq!(result.title_pattern, "^ORG:");
+}
+
+#[tokio::test]
+async fn test_resolve_pull_request_config_org_defaults_overridden_by_repo() {
+    // Org sets a default title pattern; repo overrides with its own.
+    struct TwoFileFetcher2 {
+        repo_content: String,
+        org_content: String,
+        org_path: String,
+    }
+
+    #[async_trait]
+    impl ConfigFetcher for TwoFileFetcher2 {
+        async fn fetch_config(
+            &self,
+            _owner: &str,
+            _repo: &str,
+            path: &str,
+        ) -> Result<Option<String>, Error> {
+            if path == self.org_path {
+                Ok(Some(self.org_content.clone()))
+            } else {
+                Ok(Some(self.repo_content.clone()))
+            }
+        }
+
+        async fn fetch_config_at_ref(
+            &self,
+            _o: &str,
+            _r: &str,
+            _p: &str,
+            _ref: &str,
+        ) -> Result<Option<String>, Error> {
+            Ok(None)
+        }
+    }
+
+    let org_toml = r#"
+schemaVersion = 1
+
+[enforced]
+
+[defaults.policies.pullRequests.prTitle]
+required = true
+pattern = "^ORG-DEFAULT:"
+"#;
+
+    let repo_toml = r#"
+schemaVersion = 1
+
+[policies.pullRequests.prTitle]
+required = true
+pattern = "^REPO:"
+"#;
+
+    let fetcher = TwoFileFetcher2 {
+        repo_content: repo_toml.to_string(),
+        org_content: org_toml.to_string(),
+        org_path: "org-policy.toml".to_string(),
+    };
+
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(OrgPolicySource {
+        owner: "my-org".to_string(),
+        repo: "policies".to_string(),
+        path: "org-policy.toml".to_string(),
+        fail_if_unreachable: false,
+    });
+
+    let result = resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app)
+        .await
+        .unwrap();
+    assert!(result.enforce_title_convention);
+    assert_eq!(
+        result.title_pattern, "^REPO:",
+        "Repo pattern must take precedence over org default"
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_pull_request_config_org_unavailable_lenient_degrades() {
+    let _fetcher = MockFetcher::new(None); // repo config not found
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(OrgPolicySource {
+        owner: "my-org".to_string(),
+        repo: "policies".to_string(),
+        path: "org-policy.toml".to_string(),
+        fail_if_unreachable: false,
+    });
+    // Both repo and org return None — should succeed using app defaults.
+    let result = resolve_pull_request_config("owner", "repo", "path", &FailingFetcher, &app)
+        .await
+        .unwrap();
+    assert!(
+        !result.enforce_title_convention,
+        "Degraded config should fall back to app defaults (title off)"
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_pull_request_config_org_unavailable_strict_returns_error() {
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(OrgPolicySource {
+        owner: "my-org".to_string(),
+        repo: "policies".to_string(),
+        path: "org-policy.toml".to_string(),
+        fail_if_unreachable: true,
+    });
+    let result =
+        resolve_pull_request_config("owner", "repo", "path", &FailingFetcher, &app).await;
+    assert!(
+        result.is_err(),
+        "Strict org unavailable must propagate as Err"
+    );
+}
+
+// ============================================================
+// CurrentPullRequestValidationConfiguration::from_app_defaults tests
+// ============================================================
+
+#[test]
+fn test_from_app_defaults_title_disabled_by_default() {
+    let app = ApplicationDefaults::default();
+    let cfg = CurrentPullRequestValidationConfiguration::from_app_defaults(&app);
+    assert!(!cfg.enforce_title_convention);
+}
+
+#[test]
+fn test_from_app_defaults_title_enabled() {
+    let mut app = ApplicationDefaults::default();
+    app.enable_title_validation = true;
+    let cfg = CurrentPullRequestValidationConfiguration::from_app_defaults(&app);
+    assert!(cfg.enforce_title_convention);
+}
+
+#[test]
+fn test_from_app_defaults_work_item_enabled() {
+    let mut app = ApplicationDefaults::default();
+    app.enable_work_item_validation = true;
+    let cfg = CurrentPullRequestValidationConfiguration::from_app_defaults(&app);
+    assert!(cfg.enforce_work_item_references);
+}
+
+// ============================================================
+// Verify load_merge_warden_config no longer applies enforcement flags
+// ============================================================
+
+#[tokio::test]
+async fn test_load_merge_warden_config_does_not_apply_enforcement_flags() {
+    // Even with enable_title_validation = true on app defaults,
+    // load_merge_warden_config itself must NOT force-enable title validation.
+    // That responsibility now lives in resolve_pull_request_config.
+    let repo_toml = r#"
+schemaVersion = 1
+
+[policies.pullRequests.prTitle]
+enabled = false
+"#;
+    let fetcher = MockFetcher::new(Some(repo_toml.to_string()));
+    let mut app = ApplicationDefaults::default();
+    app.enable_title_validation = true;
+
+    let config = load_merge_warden_config("owner", "repo", "path", &fetcher, &app)
+        .await
+        .unwrap();
+
+    assert!(
+        !config
+            .policies
+            .pull_requests
+            .title_policies
+            .required,
+        "load_merge_warden_config must NOT apply app enforcement flags"
     );
 }
