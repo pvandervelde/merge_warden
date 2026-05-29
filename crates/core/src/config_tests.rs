@@ -4980,6 +4980,78 @@ pattern = "^REPO:"
 }
 
 #[tokio::test]
+async fn test_resolve_pull_request_config_org_defaults_win_over_custom_app_pattern_when_repo_omits_field(
+) {
+    // Regression test for the double-application bug:
+    // when app has a custom (non-default) title pattern and org defaults configure a
+    // different pattern, and the repo TOML omits the pattern field, org defaults must win.
+    struct OrgOnlyFetcher {
+        org_content: String,
+        org_path: String,
+    }
+
+    #[async_trait]
+    impl ConfigFetcher for OrgOnlyFetcher {
+        async fn fetch_config(
+            &self,
+            _owner: &str,
+            _repo: &str,
+            path: &str,
+        ) -> Result<Option<String>, Error> {
+            if path == self.org_path {
+                Ok(Some(self.org_content.clone()))
+            } else {
+                // Repo TOML deliberately absent — no repo-level pattern configured.
+                Ok(None)
+            }
+        }
+
+        async fn fetch_config_at_ref(
+            &self,
+            _owner: &str,
+            _repo: &str,
+            _path: &str,
+            _git_ref: &str,
+        ) -> Result<Option<String>, Error> {
+            Ok(None)
+        }
+    }
+
+    let org_toml = r#"
+schemaVersion = 1
+
+[enforced]
+
+[defaults.policies.pullRequests.prTitle]
+required = false
+pattern = "^ORG-DEFAULT:"
+"#;
+
+    let fetcher = OrgOnlyFetcher {
+        org_content: org_toml.to_string(),
+        org_path: "org-policy.toml".to_string(),
+    };
+
+    let mut app = ApplicationDefaults::default();
+    // Use a custom (non-default) app title pattern — this is what triggers the bug.
+    app.default_title_pattern = "^CUSTOM:".to_string();
+    app.org_policy_source = Some(OrgPolicySource {
+        owner: "my-org".to_string(),
+        repo: "policies".to_string(),
+        path: "org-policy.toml".to_string(),
+        fail_if_unreachable: false,
+    });
+
+    let result = resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app)
+        .await
+        .unwrap();
+    assert_eq!(
+        result.title_pattern, "^ORG-DEFAULT:",
+        "Org defaults must win over custom app pattern when repo does not configure the field"
+    );
+}
+
+#[tokio::test]
 async fn test_resolve_pull_request_config_org_unavailable_lenient_degrades() {
     let _fetcher = MockFetcher::new(None); // repo config not found
     let mut app = ApplicationDefaults::default();

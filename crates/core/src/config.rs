@@ -5,7 +5,7 @@
 use merge_warden_developer_platforms::{models::User, ConfigFetcher};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::errors::ConfigLoadError;
 use crate::size::SizeThresholds;
@@ -524,7 +524,7 @@ pub struct OrgPolicy {
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct OrgPolicyRaw {
     /// Schema version — must be `1` for the policy to be accepted.
-    #[serde(rename = "schemaVersion", default)]
+    #[serde(rename = "schemaVersion")]
     pub schema_version: u32,
 
     /// Enforced policy section (`[enforced]`).
@@ -2150,6 +2150,64 @@ pub async fn load_org_policy(
     Ok(Some(policy))
 }
 
+/// Fetches and parses the repository `.github/merge-warden.toml` without applying
+/// application defaults.
+///
+/// This is the low-level primitive used by [`resolve_pull_request_config`] to obtain
+/// pure repo-configured values for the repo tier of the four-tier merge chain.
+/// Unlike [`load_merge_warden_config`], which blends application defaults into the
+/// returned struct, this function returns exactly what the repository TOML contains.
+///
+/// # Returns
+///
+/// - `Ok(RepositoryProvidedConfig)` — raw parsed config, or
+///   [`RepositoryProvidedConfig::default`] if the file is absent or has an
+///   unsupported schema version.
+/// - `Err(ConfigLoadError::NotFound)` — the config fetcher returned an error.
+/// - `Err(ConfigLoadError::...)` — TOML parse error.
+async fn parse_repo_config(
+    repo_owner: &str,
+    repo_name: &str,
+    path: &str,
+    fetcher: &dyn ConfigFetcher,
+) -> Result<RepositoryProvidedConfig, ConfigLoadError> {
+    let content = match fetcher.fetch_config(repo_owner, repo_name, path).await {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            debug!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                path = path,
+                "No repo config file found; using empty defaults for repo tier"
+            );
+            return Ok(RepositoryProvidedConfig::default());
+        }
+        Err(e) => {
+            warn!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                path = path,
+                "Failed to find configuration file in repository"
+            );
+            return Err(ConfigLoadError::NotFound(e.to_string()));
+        }
+    };
+
+    let config: RepositoryProvidedConfig = toml::from_str(&content)?;
+    if config.schema_version != 1 {
+        error!(
+            repository_owner = repo_owner,
+            repository = repo_name,
+            path = path,
+            config_version = config.schema_version,
+            "Configuration in repository has an unexpected version. Will not be able to load configuration."
+        );
+        return Ok(RepositoryProvidedConfig::default());
+    }
+
+    Ok(config)
+}
+
 /// Orchestrates the four-tier PR configuration resolution chain.
 ///
 /// This is the primary entry point for platform handlers (server, CLI).
@@ -2159,7 +2217,7 @@ pub async fn load_org_policy(
 ///
 /// 1. Application defaults ([`PolicySet::from_application_defaults`])
 /// 2. Org defaults (from [`OrgPolicy::defaults`], if `org_policy_source` is set)
-/// 3. Repository config ([`load_merge_warden_config`] result)
+/// 3. Repository config ([`parse_repo_config`] — raw repo values only)
 /// 4. Org enforced (from [`OrgPolicy::enforced`], if `org_policy_source` is set)
 /// 5. App-level enforcement flags ([`PolicySet::from_app_enforcement_flags`])
 ///
@@ -2194,15 +2252,11 @@ pub async fn resolve_pull_request_config(
     fetcher: &dyn ConfigFetcher,
     app_defaults: &ApplicationDefaults,
 ) -> Result<CurrentPullRequestValidationConfiguration, ConfigLoadError> {
-    // Load repo config (two-tier: app defaults + repo, no enforcement flags applied).
-    let repo_config = match load_merge_warden_config(
-        repo_owner,
-        repo_name,
-        config_path,
-        fetcher,
-        app_defaults,
-    )
-    .await
+    // Load raw repo config — no application defaults merged in.  This ensures the
+    // repo tier of the four-tier chain carries only values explicitly set in the
+    // repository TOML; app defaults enter the chain exclusively via `app_defaults_ps`.
+    let repo_config = match parse_repo_config(repo_owner, repo_name, config_path, fetcher)
+        .await
     {
         Ok(c) => c,
         Err(e) => {
@@ -2210,9 +2264,9 @@ pub async fn resolve_pull_request_config(
                 repository_owner = repo_owner,
                 repository = repo_name,
                 error = %e,
-                "Failed to load repo config in resolve_pull_request_config; using app defaults for repo tier"
+                "Failed to load repo config in resolve_pull_request_config; using empty defaults for repo tier"
             );
-            // Fall back to an empty repo config; the app defaults will drive everything.
+            // Fall back to an empty repo config; the four-tier chain supplies app and org values.
             RepositoryProvidedConfig::default()
         }
     };
