@@ -7,6 +7,27 @@
 #
 # Field names here use the same snake_case convention as the per-repo config
 # (merge-warden.sample.toml).
+#
+# Configuration is resolved through a four-tier merge chain:
+#   app_defaults → org_defaults → repo_config → org_enforced → enforcement_flags
+# See docs/architecture.md for the full Configuration Architecture section.
+
+# ---------------------------------------------------------------------------
+# Org-level policy source (optional).
+#
+# When configured, merge-warden fetches a central org policy TOML file and
+# inserts it into the config resolution chain:
+#   - [enforced] section — cannot be overridden by per-repo config
+#   - [defaults] section — can be overridden by per-repo config
+#
+# See samples/merge-warden-org-policy.sample.toml for the format of that file.
+#
+# [org_policy_source]
+# owner = "my-org"
+# repo  = "platform-configs"
+# path  = "merge-warden/org-policy.toml"
+# # fail_if_unreachable = false   # set true to block PR processing when unreachable
+# ---------------------------------------------------------------------------
 
 [policies]
 # Enforce conventional-commit title format for all repositories by default.

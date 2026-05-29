@@ -6,6 +6,7 @@ This directory contains sample files and scripts for working with merge-warden-s
 |---|---|
 | `app-config.sample.toml` | Annotated **app-level** policy defaults (loaded via `MERGE_WARDEN_CONFIG_FILE`) |
 | `merge-warden.sample.toml` | Annotated **per-repository** policy configuration (placed at `.github/merge-warden.toml` in each repo) |
+| `merge-warden-org-policy.sample.toml` | Annotated **org-level** policy file (placed in a central repo; referenced via `[org_policy_source]` in the app config) |
 | `run-local.ps1` | PowerShell script to run the server locally and test it with live GitHub webhooks |
 
 ---
