@@ -15,7 +15,7 @@ use github_bot_sdk::{
 };
 use keyring::Entry;
 use merge_warden_core::config::{
-    load_merge_warden_config, CurrentPullRequestValidationConfiguration,
+    resolve_pull_request_config, CurrentPullRequestValidationConfiguration,
 };
 use merge_warden_core::MergeWarden;
 use merge_warden_developer_platforms::app_auth::AppAuthProvider;
@@ -173,7 +173,7 @@ impl WebhookHandler for MergeWardenWebhookHandler {
         let issue_provider = provider.clone();
 
         let merge_warden_config_path = ".github/merge-warden.toml";
-        let validation_config = match load_merge_warden_config(
+        let validation_config = match resolve_pull_request_config(
             repo_owner,
             repo_name,
             merge_warden_config_path,
@@ -187,38 +187,16 @@ impl WebhookHandler for MergeWardenWebhookHandler {
                     "Loaded merge-warden config from {}",
                     merge_warden_config_path
                 );
-                merge_warden_config.to_validation_config(&self.config.policies.bypass_rules)
+                merge_warden_config
             }
             Err(e) => {
                 warn!(
-                    "Failed to load merge-warden config from {}: {}. Falling back to defaults.",
+                    "Failed to resolve PR config from {}: {}. Falling back to compiled-in defaults.",
                     merge_warden_config_path, e
                 );
-                CurrentPullRequestValidationConfiguration {
-                    enforce_title_convention: self.config.policies.enable_title_validation,
-                    title_pattern: self.config.policies.default_title_pattern.clone(),
-                    invalid_title_label: self.config.policies.default_invalid_title_label.clone(),
-                    enforce_work_item_references: self.config.policies.enable_work_item_validation,
-                    work_item_reference_pattern: self
-                        .config
-                        .policies
-                        .default_work_item_pattern
-                        .clone(),
-                    missing_work_item_label: self
-                        .config
-                        .policies
-                        .default_missing_work_item_label
-                        .clone(),
-                    pr_size_check: merge_warden_core::config::PrSizeCheckConfig::default(),
-                    change_type_labels: Some(
-                        merge_warden_core::config::ChangeTypeLabelConfig::default(),
-                    ),
-                    bypass_rules: self.config.policies.bypass_rules.clone(),
-                    wip_check: self.config.policies.wip_check.clone(),
-                    pr_state_labels: self.config.policies.pr_state_labels.clone(),
-                    issue_propagation: Default::default(),
-                    bot_mention: self.config.policies.bot_mention.clone(),
-                }
+                CurrentPullRequestValidationConfiguration::from_app_defaults(
+                    &self.config.policies,
+                )
             }
         };
 
