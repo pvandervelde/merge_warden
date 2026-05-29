@@ -5474,3 +5474,288 @@ required = true
         "work_item.required must be true when both org defaults and repo set it"
     );
 }
+
+// ============================================================
+// PolicySet::to_validation_config — full field-mapping tests
+//
+// The new PolicySet::to_validation_config (line ~1824 of config.rs) is
+// only exercised via resolve_pull_request_config in the existing tests.
+// The field copies below were NOT independently verified, so a mutation
+// swapping `self.x.clone()` → `Default::default()` would survive.
+// ============================================================
+
+#[test]
+fn test_policy_set_to_validation_config_invalid_title_label_forwarded() {
+    let mut app = ApplicationDefaults::default();
+    app.default_invalid_title_label = Some("my-bad-title-label".to_string());
+    let ps = PolicySet::from_application_defaults(&app);
+    let cfg = ps.to_validation_config(&app);
+    assert_eq!(
+        cfg.invalid_title_label,
+        Some("my-bad-title-label".to_string()),
+        "invalid_title_label must be forwarded from PolicySet.title.label_if_missing"
+    );
+}
+
+#[test]
+fn test_policy_set_to_validation_config_missing_work_item_label_forwarded() {
+    let mut app = ApplicationDefaults::default();
+    app.default_missing_work_item_label = Some("missing-wi-label".to_string());
+    let ps = PolicySet::from_application_defaults(&app);
+    let cfg = ps.to_validation_config(&app);
+    assert_eq!(
+        cfg.missing_work_item_label,
+        Some("missing-wi-label".to_string()),
+        "missing_work_item_label must be forwarded from PolicySet.work_item.label_if_missing"
+    );
+}
+
+#[test]
+fn test_policy_set_to_validation_config_enforce_work_item_forwarded() {
+    let mut ps = PolicySet::default();
+    ps.work_item.required = true;
+    ps.work_item.pattern = "WI-[0-9]+".to_string();
+    let app = ApplicationDefaults::default();
+    let cfg = ps.to_validation_config(&app);
+    assert!(
+        cfg.enforce_work_item_references,
+        "enforce_work_item_references must reflect work_item.required"
+    );
+    assert_eq!(
+        cfg.work_item_reference_pattern, "WI-[0-9]+",
+        "work_item_reference_pattern must be forwarded from PolicySet.work_item.pattern"
+    );
+}
+
+#[test]
+fn test_policy_set_to_validation_config_bypass_rules_forwarded() {
+    let mut ps = PolicySet::default();
+    ps.bypass_rules = BypassRules::new_with_size(
+        BypassRule::new(true, vec!["org-bot".to_string()]),
+        BypassRule::new(false, vec![]),
+        BypassRule::new(false, vec![]),
+    );
+    let app = ApplicationDefaults::default();
+    let cfg = ps.to_validation_config(&app);
+    assert!(
+        cfg.bypass_rules.title_convention().enabled(),
+        "bypass_rules must be forwarded from PolicySet.bypass_rules"
+    );
+    assert!(
+        cfg.bypass_rules
+            .title_convention()
+            .users()
+            .contains(&"org-bot"),
+        "bypass user must be forwarded"
+    );
+}
+
+#[test]
+fn test_policy_set_to_validation_config_issue_propagation_forwarded() {
+    let mut ps = PolicySet::default();
+    ps.issue_propagation = IssuePropagationConfig {
+        sync_milestone_from_issue: true,
+        sync_project_from_issue: false,
+    };
+    let app = ApplicationDefaults::default();
+    let cfg = ps.to_validation_config(&app);
+    assert!(
+        cfg.issue_propagation.sync_milestone_from_issue,
+        "issue_propagation.sync_milestone_from_issue must be forwarded"
+    );
+    assert!(
+        !cfg.issue_propagation.sync_project_from_issue,
+        "issue_propagation.sync_project_from_issue must be forwarded as false"
+    );
+}
+
+#[test]
+fn test_policy_set_to_validation_config_wip_check_forwarded() {
+    let mut ps = PolicySet::default();
+    ps.wip.enforce_wip_blocking = true;
+    let app = ApplicationDefaults::default();
+    let cfg = ps.to_validation_config(&app);
+    assert!(
+        cfg.wip_check.enforce_wip_blocking,
+        "wip_check must be forwarded from PolicySet.wip"
+    );
+}
+
+#[test]
+fn test_policy_set_to_validation_config_pr_size_check_forwarded() {
+    let mut ps = PolicySet::default();
+    ps.size.enabled = true;
+    let app = ApplicationDefaults::default();
+    let cfg = ps.to_validation_config(&app);
+    assert!(
+        cfg.pr_size_check.enabled,
+        "pr_size_check must be forwarded from PolicySet.size"
+    );
+}
+
+#[test]
+fn test_policy_set_to_validation_config_pr_state_labels_forwarded() {
+    let mut ps = PolicySet::default();
+    ps.pr_state.enabled = true;
+    ps.pr_state.draft_label = Some("draft".to_string());
+    let app = ApplicationDefaults::default();
+    let cfg = ps.to_validation_config(&app);
+    assert!(
+        cfg.pr_state_labels.enabled,
+        "pr_state_labels.enabled must be forwarded from PolicySet.pr_state"
+    );
+    assert_eq!(
+        cfg.pr_state_labels.draft_label,
+        Some("draft".to_string()),
+        "pr_state_labels.draft_label must be forwarded from PolicySet.pr_state"
+    );
+}
+
+#[test]
+fn test_policy_set_to_validation_config_change_type_labels_wrapped_in_some() {
+    // The new to_validation_config wraps PolicySet.change_type_labels in
+    // Some(). Mutating `Some(self.change_type_labels.clone())` to `None`
+    // would previously survive.
+    let ps = PolicySet::default();
+    let app = ApplicationDefaults::default();
+    let cfg = ps.to_validation_config(&app);
+    assert!(
+        cfg.change_type_labels.is_some(),
+        "to_validation_config must wrap change_type_labels in Some()"
+    );
+}
+
+// ============================================================
+// resolve_pull_request_config — Tier 4 > Tier 3
+// (app enforcement flag beats org enforced)
+// ============================================================
+
+#[tokio::test]
+async fn test_resolve_app_enforcement_beats_org_enforced() {
+    // Org enforced sets title required = false (absent section → default false).
+    // App enforcement flag = true. Result must be true.
+    let org_toml = r#"
+schemaVersion = 1
+
+[enforced.policies.pullRequests.prTitle]
+required = false
+
+[defaults]
+"#;
+    // Repo also sets false.
+    let repo_toml = r#"
+schemaVersion = 1
+
+[policies.pullRequests.prTitle]
+required = false
+"#;
+
+    let fetcher = two_file_fetcher_shared::TwoFileFetcher {
+        repo_content: Some(repo_toml.to_string()),
+        org_content: Some(org_toml.to_string()),
+        org_path: "org-policy.toml".to_string(),
+    };
+
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(make_org_policy_source());
+    app.enable_title_validation = true; // Tier 4 enforcement
+
+    let result = resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app)
+        .await
+        .unwrap();
+
+    assert!(
+        result.enforce_title_convention,
+        "Tier 4 app enforcement flag must override org enforced = false and repo = false"
+    );
+}
+
+// ============================================================
+// CurrentPullRequestValidationConfiguration::from_app_defaults
+// — label field tests (spec §9.5)
+// ============================================================
+
+#[test]
+fn test_from_app_defaults_invalid_title_label_propagated() {
+    let mut app = ApplicationDefaults::default();
+    app.default_invalid_title_label = Some("bad-title-label".to_string());
+    let cfg = CurrentPullRequestValidationConfiguration::from_app_defaults(&app);
+    assert_eq!(
+        cfg.invalid_title_label,
+        Some("bad-title-label".to_string()),
+        "default_invalid_title_label must propagate to invalid_title_label"
+    );
+}
+
+#[test]
+fn test_from_app_defaults_missing_work_item_label_propagated() {
+    let mut app = ApplicationDefaults::default();
+    app.default_missing_work_item_label = Some("no-work-item".to_string());
+    let cfg = CurrentPullRequestValidationConfiguration::from_app_defaults(&app);
+    assert_eq!(
+        cfg.missing_work_item_label,
+        Some("no-work-item".to_string()),
+        "default_missing_work_item_label must propagate to missing_work_item_label"
+    );
+}
+
+// ============================================================
+// PolicySet::from_app_enforcement_flags — all four flags together
+// ============================================================
+
+#[test]
+fn test_from_app_enforcement_flags_all_four_enabled() {
+    let mut app = ApplicationDefaults::default();
+    app.enable_title_validation = true;
+    app.enable_work_item_validation = true;
+    app.pr_size_check.enabled = true;
+    app.wip_check.enforce_wip_blocking = true;
+    let ps = PolicySet::from_app_enforcement_flags(&app);
+    assert!(ps.title.required, "title.required must be set");
+    assert!(ps.work_item.required, "work_item.required must be set");
+    assert!(ps.size.enabled, "size.enabled must be set");
+    assert!(
+        ps.wip.enforce_wip_blocking,
+        "wip.enforce_wip_blocking must be set"
+    );
+}
+
+// ============================================================
+// PolicySet::from_org_section — pr_state and issue_propagation mapping
+// ============================================================
+
+#[test]
+fn test_from_org_section_pr_state_fields_mapped() {
+    let mut section = OrgPolicySectionRaw::default();
+    section.policies.pull_requests.pr_state_policies.enabled = true;
+    section.policies.pull_requests.pr_state_policies.draft_label = Some("in-draft".to_string());
+    let ps = PolicySet::from_org_section(&section);
+    assert!(
+        ps.pr_state.enabled,
+        "pr_state.enabled must be mapped from OrgPolicySectionRaw"
+    );
+    assert_eq!(
+        ps.pr_state.draft_label,
+        Some("in-draft".to_string()),
+        "pr_state.draft_label must be mapped from OrgPolicySectionRaw"
+    );
+}
+
+#[test]
+fn test_from_org_section_issue_propagation_mapped() {
+    let mut section = OrgPolicySectionRaw::default();
+    section
+        .policies
+        .pull_requests
+        .issue_propagation
+        .sync_milestone_from_issue = true;
+    let ps = PolicySet::from_org_section(&section);
+    assert!(
+        ps.issue_propagation.sync_milestone_from_issue,
+        "issue_propagation.sync_milestone_from_issue must be mapped from OrgPolicySectionRaw"
+    );
+    assert!(
+        !ps.issue_propagation.sync_project_from_issue,
+        "issue_propagation.sync_project_from_issue must not be spuriously set"
+    );
+}
