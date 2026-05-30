@@ -39,3 +39,12 @@ Add to this whenever a reusable component becomes "the standard way".
 | `load_org_policy` | fn | `merge_warden_core::config` | Fetches and parses the org policy TOML using a `ConfigFetcher`. Returns `Ok(None)` on missing file or lenient error; `Err(OrgPolicyUnavailable)` on strict error. | config, org-policy |
 | `resolve_pull_request_config` | fn | `merge_warden_core::config` | Four-tier PR config orchestrator (app defaults → org defaults → repo → org enforced → app enforcement flags). Primary entry point for platform handlers; replaces direct `load_merge_warden_config` calls. | config, org-policy |
 | `CurrentPullRequestValidationConfiguration::from_app_defaults` | fn | `merge_warden_core::config` | Constructs a `CurrentPullRequestValidationConfiguration` directly from `ApplicationDefaults` without loading any files. Used as the degraded fallback in platform handlers. | config, fallback |
+| `PolicyCondition` | type | `merge_warden_core::config` | Parsed condition block for a conditional policy entry: `has_any_topic: Vec<String>` (OR semantics, case-insensitive) and `custom_properties: HashMap<String,String>` (AND+case-sensitive). `matches(&RepositoryContext) -> bool` evaluates the condition. | config, conditional-policy |
+| `ConditionalPolicy` | type | `merge_warden_core::config` | Conditional policy entry containing a `PolicyCondition` plus `defaults: PolicySet` and `enforced: PolicySet` tiers, applied only when `condition.matches()` is true for a repository's context. | config, conditional-policy |
+
+## `merge_warden_developer_platforms` — models / traits
+
+| Name | Kind | Location | Description | Tags |
+|------|------|----------|-------------|------|
+| `RepositoryContext` | type | `merge_warden_developer_platforms::models` | Runtime metadata for a repository: `topics: Vec<String>` and `custom_properties: HashMap<String,String>`. Derives `Debug, Clone, Default, PartialEq, Eq`. Used by `PolicyCondition::matches`. | metadata, models, conditional-policy |
+| `RepositoryMetadataProvider` | trait | `merge_warden_developer_platforms` | Async port trait for fetching repository metadata. Single method: `get_repository_context(owner, name) -> Result<RepositoryContext, Error>`. Implemented by `GitHubProvider`; pass `None` in tests or callers that don't need conditional policies. | metadata, trait, port |
