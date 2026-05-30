@@ -4777,7 +4777,7 @@ fn test_from_app_enforcement_flags_size_enabled() {
 async fn test_resolve_pull_request_config_no_org_source_no_repo_file() {
     let fetcher = MockFetcher::new(None);
     let app = ApplicationDefaults::default();
-    let result = resolve_pull_request_config("owner", "repo", "path", &fetcher, &app)
+    let result = resolve_pull_request_config("owner", "repo", "path", &fetcher, &app, None)
         .await
         .unwrap();
     // With no configuration at all, title validation is off by default.
@@ -4799,7 +4799,7 @@ enabled = false
     let fetcher = MockFetcher::new(Some(repo_toml.to_string()));
     let mut app = ApplicationDefaults::default();
     app.enable_title_validation = true;
-    let result = resolve_pull_request_config("owner", "repo", "path", &fetcher, &app)
+    let result = resolve_pull_request_config("owner", "repo", "path", &fetcher, &app, None)
         .await
         .unwrap();
     assert!(
@@ -4819,7 +4819,7 @@ pattern = "^TICKET-[0-9]+"
 "#;
     let fetcher = MockFetcher::new(Some(repo_toml.to_string()));
     let app = ApplicationDefaults::default();
-    let result = resolve_pull_request_config("owner", "repo", "path", &fetcher, &app)
+    let result = resolve_pull_request_config("owner", "repo", "path", &fetcher, &app, None)
         .await
         .unwrap();
     assert!(result.enforce_title_convention);
@@ -4892,9 +4892,10 @@ pattern = "^ORG:"
         fail_if_unreachable: false,
     });
 
-    let result = resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app)
-        .await
-        .unwrap();
+    let result =
+        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
+            .await
+            .unwrap();
     assert!(
         result.enforce_title_convention,
         "Org enforced setting must override repo disabled setting"
@@ -4969,9 +4970,10 @@ pattern = "^REPO:"
         fail_if_unreachable: false,
     });
 
-    let result = resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app)
-        .await
-        .unwrap();
+    let result =
+        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
+            .await
+            .unwrap();
     assert!(result.enforce_title_convention);
     assert_eq!(
         result.title_pattern, "^REPO:",
@@ -5042,9 +5044,10 @@ pattern = "^ORG-DEFAULT:"
         fail_if_unreachable: false,
     });
 
-    let result = resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app)
-        .await
-        .unwrap();
+    let result =
+        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
+            .await
+            .unwrap();
     assert_eq!(
         result.title_pattern, "^ORG-DEFAULT:",
         "Org defaults must win over custom app pattern when repo does not configure the field"
@@ -5062,7 +5065,7 @@ async fn test_resolve_pull_request_config_org_unavailable_lenient_degrades() {
         fail_if_unreachable: false,
     });
     // Both repo and org return None — should succeed using app defaults.
-    let result = resolve_pull_request_config("owner", "repo", "path", &FailingFetcher, &app)
+    let result = resolve_pull_request_config("owner", "repo", "path", &FailingFetcher, &app, None)
         .await
         .unwrap();
     assert!(
@@ -5080,7 +5083,8 @@ async fn test_resolve_pull_request_config_org_unavailable_strict_returns_error()
         path: "org-policy.toml".to_string(),
         fail_if_unreachable: true,
     });
-    let result = resolve_pull_request_config("owner", "repo", "path", &FailingFetcher, &app).await;
+    let result =
+        resolve_pull_request_config("owner", "repo", "path", &FailingFetcher, &app, None).await;
     assert!(
         result.is_err(),
         "Strict org unavailable must propagate as Err"
@@ -5454,9 +5458,10 @@ pattern = "GH-[0-9]+"
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(make_org_policy_source());
 
-    let result = resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app)
-        .await
-        .unwrap();
+    let result =
+        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
+            .await
+            .unwrap();
 
     assert!(result.enforce_work_item_references);
     assert_eq!(
@@ -5495,9 +5500,10 @@ required = false
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(make_org_policy_source());
 
-    let result = resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app)
-        .await
-        .unwrap();
+    let result =
+        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
+            .await
+            .unwrap();
 
     assert!(
         result.enforce_work_item_references,
@@ -5537,9 +5543,10 @@ required = true
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(make_org_policy_source());
 
-    let result = resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app)
-        .await
-        .unwrap();
+    let result =
+        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
+            .await
+            .unwrap();
 
     assert!(
         result.enforce_work_item_references,
@@ -5732,9 +5739,10 @@ required = false
     app.org_policy_source = Some(make_org_policy_source());
     app.enable_title_validation = true; // Tier 4 enforcement
 
-    let result = resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app)
-        .await
-        .unwrap();
+    let result =
+        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
+            .await
+            .unwrap();
 
     assert!(
         result.enforce_title_convention,
@@ -5829,5 +5837,691 @@ fn test_from_org_section_issue_propagation_mapped() {
     assert!(
         !ps.issue_propagation.sync_project_from_issue,
         "issue_propagation.sync_project_from_issue must not be spuriously set"
+    );
+}
+
+// ============================================================
+// PolicyCondition::matches — unit tests
+// ============================================================
+
+#[test]
+fn test_policy_condition_empty_always_matches() {
+    let cond = PolicyCondition::default();
+    let ctx = merge_warden_developer_platforms::models::RepositoryContext::default();
+    assert!(cond.matches(&ctx), "empty condition must always match");
+}
+
+#[test]
+fn test_policy_condition_topic_match_case_insensitive() {
+    let cond = PolicyCondition {
+        has_any_topic: vec!["Payments".to_string()],
+        has_custom_property: HashMap::new(),
+    };
+    let ctx = merge_warden_developer_platforms::models::RepositoryContext {
+        topics: vec!["payments".to_string()],
+        custom_properties: HashMap::new(),
+    };
+    assert!(cond.matches(&ctx), "topic match must be case-insensitive");
+}
+
+#[test]
+fn test_policy_condition_topic_no_match() {
+    let cond = PolicyCondition {
+        has_any_topic: vec!["payments".to_string()],
+        has_custom_property: HashMap::new(),
+    };
+    let ctx = merge_warden_developer_platforms::models::RepositoryContext {
+        topics: vec!["backend".to_string()],
+        custom_properties: HashMap::new(),
+    };
+    assert!(
+        !cond.matches(&ctx),
+        "condition should not match when no topics match"
+    );
+}
+
+#[test]
+fn test_policy_condition_topic_or_semantics() {
+    // Any one of the listed topics is sufficient (OR semantics).
+    let cond = PolicyCondition {
+        has_any_topic: vec!["payments".to_string(), "finance".to_string()],
+        has_custom_property: HashMap::new(),
+    };
+    let ctx = merge_warden_developer_platforms::models::RepositoryContext {
+        topics: vec!["finance".to_string(), "backend".to_string()],
+        custom_properties: HashMap::new(),
+    };
+    assert!(
+        cond.matches(&ctx),
+        "topic OR semantics: matching any one topic is sufficient"
+    );
+}
+
+#[test]
+fn test_policy_condition_custom_property_match() {
+    let mut cond_props = HashMap::new();
+    cond_props.insert("team".to_string(), "platform".to_string());
+    let cond = PolicyCondition {
+        has_any_topic: vec![],
+        has_custom_property: cond_props,
+    };
+    let mut ctx_props = HashMap::new();
+    ctx_props.insert("team".to_string(), "platform".to_string());
+    let ctx = merge_warden_developer_platforms::models::RepositoryContext {
+        topics: vec![],
+        custom_properties: ctx_props,
+    };
+    assert!(cond.matches(&ctx), "custom property match must succeed");
+}
+
+#[test]
+fn test_policy_condition_custom_property_case_sensitive() {
+    // Value comparison for custom properties is case-sensitive.
+    let mut cond_props = HashMap::new();
+    cond_props.insert("team".to_string(), "Platform".to_string());
+    let cond = PolicyCondition {
+        has_any_topic: vec![],
+        has_custom_property: cond_props,
+    };
+    let mut ctx_props = HashMap::new();
+    ctx_props.insert("team".to_string(), "platform".to_string()); // different case
+    let ctx = merge_warden_developer_platforms::models::RepositoryContext {
+        topics: vec![],
+        custom_properties: ctx_props,
+    };
+    assert!(
+        !cond.matches(&ctx),
+        "custom property value match must be case-sensitive"
+    );
+}
+
+#[test]
+fn test_policy_condition_custom_property_all_must_match() {
+    // AND semantics: all required properties must be present.
+    let mut cond_props = HashMap::new();
+    cond_props.insert("team".to_string(), "platform".to_string());
+    cond_props.insert("env".to_string(), "prod".to_string());
+    let cond = PolicyCondition {
+        has_any_topic: vec![],
+        has_custom_property: cond_props,
+    };
+    // Only one property present — must NOT match.
+    let mut ctx_props = HashMap::new();
+    ctx_props.insert("team".to_string(), "platform".to_string());
+    let ctx = merge_warden_developer_platforms::models::RepositoryContext {
+        topics: vec![],
+        custom_properties: ctx_props,
+    };
+    assert!(
+        !cond.matches(&ctx),
+        "all required custom properties must be present (AND semantics)"
+    );
+}
+
+#[test]
+fn test_policy_condition_topic_and_property_both_required() {
+    // Both topic AND property criteria must be satisfied simultaneously.
+    let mut cond_props = HashMap::new();
+    cond_props.insert("team".to_string(), "platform".to_string());
+    let cond = PolicyCondition {
+        has_any_topic: vec!["payments".to_string()],
+        has_custom_property: cond_props,
+    };
+
+    // Topic matches but property does not.
+    let ctx_topic_only = merge_warden_developer_platforms::models::RepositoryContext {
+        topics: vec!["payments".to_string()],
+        custom_properties: HashMap::new(),
+    };
+    assert!(
+        !cond.matches(&ctx_topic_only),
+        "must not match when property criterion is not satisfied"
+    );
+
+    // Property matches but topic does not.
+    let mut ctx_props = HashMap::new();
+    ctx_props.insert("team".to_string(), "platform".to_string());
+    let ctx_prop_only = merge_warden_developer_platforms::models::RepositoryContext {
+        topics: vec!["backend".to_string()],
+        custom_properties: ctx_props.clone(),
+    };
+    assert!(
+        !cond.matches(&ctx_prop_only),
+        "must not match when topic criterion is not satisfied"
+    );
+
+    // Both match.
+    let ctx_both = merge_warden_developer_platforms::models::RepositoryContext {
+        topics: vec!["payments".to_string()],
+        custom_properties: ctx_props,
+    };
+    assert!(
+        cond.matches(&ctx_both),
+        "must match when both topic and property criteria are satisfied"
+    );
+}
+
+// ============================================================
+// resolve_pull_request_config — conditional policy tests
+// ============================================================
+
+/// Mock metadata provider for testing conditional policy evaluation.
+struct MockMetadataProvider {
+    context: merge_warden_developer_platforms::models::RepositoryContext,
+}
+
+impl std::fmt::Debug for MockMetadataProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MockMetadataProvider").finish()
+    }
+}
+
+#[async_trait]
+impl merge_warden_developer_platforms::RepositoryMetadataProvider for MockMetadataProvider {
+    async fn get_repository_context(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+    ) -> Result<
+        merge_warden_developer_platforms::models::RepositoryContext,
+        merge_warden_developer_platforms::errors::Error,
+    > {
+        Ok(self.context.clone())
+    }
+}
+
+/// Mock metadata provider that always fails.
+struct FailingMetadataProvider;
+
+impl std::fmt::Debug for FailingMetadataProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FailingMetadataProvider").finish()
+    }
+}
+
+#[async_trait]
+impl merge_warden_developer_platforms::RepositoryMetadataProvider for FailingMetadataProvider {
+    async fn get_repository_context(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+    ) -> Result<
+        merge_warden_developer_platforms::models::RepositoryContext,
+        merge_warden_developer_platforms::errors::Error,
+    > {
+        Err(merge_warden_developer_platforms::errors::Error::InvalidResponse)
+    }
+}
+
+/// Builds a two-file fetcher returning org policy and (optionally) repo config.
+struct TwoFileFetcherCond {
+    org_content: String,
+    org_path: String,
+    repo_content: Option<String>,
+}
+
+#[async_trait]
+impl ConfigFetcher for TwoFileFetcherCond {
+    async fn fetch_config(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        path: &str,
+    ) -> Result<Option<String>, Error> {
+        if path == self.org_path {
+            Ok(Some(self.org_content.clone()))
+        } else {
+            Ok(self.repo_content.clone())
+        }
+    }
+
+    async fn fetch_config_at_ref(
+        &self,
+        _o: &str,
+        _r: &str,
+        _p: &str,
+        _ref: &str,
+    ) -> Result<Option<String>, Error> {
+        Ok(None)
+    }
+}
+
+#[tokio::test]
+async fn test_conditional_policy_defaults_applied_when_condition_matches() {
+    // Conditional defaults set a title pattern; repo TOML does not set one.
+    // When the topic matches, the conditional default pattern should be used.
+    let org_toml = r#"
+schemaVersion = 1
+
+[enforced]
+[defaults]
+
+[[conditional_policies]]
+[conditional_policies.condition]
+has_any_topic = ["payments"]
+
+[conditional_policies.defaults.policies.pullRequests.prTitle]
+required = true
+pattern = "^PAY:"
+"#;
+
+    let fetcher = TwoFileFetcherCond {
+        org_content: org_toml.to_string(),
+        org_path: "org-policy.toml".to_string(),
+        repo_content: None,
+    };
+
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(OrgPolicySource {
+        owner: "org".to_string(),
+        repo: "policies".to_string(),
+        path: "org-policy.toml".to_string(),
+        fail_if_unreachable: false,
+    });
+
+    let provider = MockMetadataProvider {
+        context: merge_warden_developer_platforms::models::RepositoryContext {
+            topics: vec!["payments".to_string()],
+            custom_properties: HashMap::new(),
+        },
+    };
+
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo-policy.toml",
+        &fetcher,
+        &app,
+        Some(&provider),
+    )
+    .await
+    .unwrap();
+
+    assert!(result.enforce_title_convention);
+    assert_eq!(
+        result.title_pattern, "^PAY:",
+        "Conditional default pattern must be applied when topic matches"
+    );
+}
+
+#[tokio::test]
+async fn test_conditional_policy_not_applied_when_condition_does_not_match() {
+    let org_toml = r#"
+schemaVersion = 1
+
+[enforced]
+[defaults]
+
+[[conditional_policies]]
+[conditional_policies.condition]
+has_any_topic = ["payments"]
+
+[conditional_policies.defaults.policies.pullRequests.prTitle]
+required = true
+pattern = "^PAY:"
+"#;
+
+    let fetcher = TwoFileFetcherCond {
+        org_content: org_toml.to_string(),
+        org_path: "org-policy.toml".to_string(),
+        repo_content: None,
+    };
+
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(OrgPolicySource {
+        owner: "org".to_string(),
+        repo: "policies".to_string(),
+        path: "org-policy.toml".to_string(),
+        fail_if_unreachable: false,
+    });
+
+    let provider = MockMetadataProvider {
+        context: merge_warden_developer_platforms::models::RepositoryContext {
+            topics: vec!["backend".to_string()], // does NOT contain "payments"
+            custom_properties: HashMap::new(),
+        },
+    };
+
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo-policy.toml",
+        &fetcher,
+        &app,
+        Some(&provider),
+    )
+    .await
+    .unwrap();
+
+    // Conditional block did not match → title validation should stay off.
+    assert!(
+        !result.enforce_title_convention,
+        "Conditional block must not be applied when topic condition does not match"
+    );
+}
+
+#[tokio::test]
+async fn test_conditional_policy_enforced_overrides_repo() {
+    // Conditional enforced sets a title pattern; repo provides a different one.
+    // The enforced pattern must win because it is applied after the repo tier.
+    let org_toml = r#"
+schemaVersion = 1
+
+[enforced]
+[defaults]
+
+[[conditional_policies]]
+[conditional_policies.condition]
+has_any_topic = ["payments"]
+
+[conditional_policies.enforced.policies.pullRequests.prTitle]
+required = true
+pattern = "^PAY-ENFORCED:"
+"#;
+
+    let repo_toml = r#"
+schemaVersion = 1
+
+[policies.pullRequests.prTitle]
+required = true
+pattern = "^REPO:"
+"#;
+
+    let fetcher = TwoFileFetcherCond {
+        org_content: org_toml.to_string(),
+        org_path: "org-policy.toml".to_string(),
+        repo_content: Some(repo_toml.to_string()),
+    };
+
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(OrgPolicySource {
+        owner: "org".to_string(),
+        repo: "policies".to_string(),
+        path: "org-policy.toml".to_string(),
+        fail_if_unreachable: false,
+    });
+
+    let provider = MockMetadataProvider {
+        context: merge_warden_developer_platforms::models::RepositoryContext {
+            topics: vec!["payments".to_string()],
+            custom_properties: HashMap::new(),
+        },
+    };
+
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo-policy.toml",
+        &fetcher,
+        &app,
+        Some(&provider),
+    )
+    .await
+    .unwrap();
+
+    assert!(result.enforce_title_convention);
+    assert_eq!(
+        result.title_pattern, "^PAY-ENFORCED:",
+        "Conditional enforced pattern must override repo pattern"
+    );
+}
+
+#[tokio::test]
+async fn test_conditional_policy_repo_overrides_conditional_defaults() {
+    // Conditional defaults suggest a title pattern; repo provides a different one.
+    // Repo must win because it is applied after conditional defaults.
+    let org_toml = r#"
+schemaVersion = 1
+
+[enforced]
+[defaults]
+
+[[conditional_policies]]
+[conditional_policies.condition]
+has_any_topic = ["payments"]
+
+[conditional_policies.defaults.policies.pullRequests.prTitle]
+required = true
+pattern = "^PAY-DEFAULT:"
+"#;
+
+    let repo_toml = r#"
+schemaVersion = 1
+
+[policies.pullRequests.prTitle]
+required = true
+pattern = "^REPO:"
+"#;
+
+    let fetcher = TwoFileFetcherCond {
+        org_content: org_toml.to_string(),
+        org_path: "org-policy.toml".to_string(),
+        repo_content: Some(repo_toml.to_string()),
+    };
+
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(OrgPolicySource {
+        owner: "org".to_string(),
+        repo: "policies".to_string(),
+        path: "org-policy.toml".to_string(),
+        fail_if_unreachable: false,
+    });
+
+    let provider = MockMetadataProvider {
+        context: merge_warden_developer_platforms::models::RepositoryContext {
+            topics: vec!["payments".to_string()],
+            custom_properties: HashMap::new(),
+        },
+    };
+
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo-policy.toml",
+        &fetcher,
+        &app,
+        Some(&provider),
+    )
+    .await
+    .unwrap();
+
+    assert!(result.enforce_title_convention);
+    assert_eq!(
+        result.title_pattern, "^REPO:",
+        "Repo pattern must override conditional defaults"
+    );
+}
+
+#[tokio::test]
+async fn test_conditional_policy_without_metadata_provider_skips_evaluation() {
+    // When no metadata provider is supplied and conditional_policies are present,
+    // the conditional blocks must be silently skipped.
+    let org_toml = r#"
+schemaVersion = 1
+
+[enforced]
+[defaults]
+
+[[conditional_policies]]
+[conditional_policies.condition]
+has_any_topic = ["payments"]
+
+[conditional_policies.enforced.policies.pullRequests.prTitle]
+required = true
+pattern = "^PAY:"
+"#;
+
+    let fetcher = TwoFileFetcherCond {
+        org_content: org_toml.to_string(),
+        org_path: "org-policy.toml".to_string(),
+        repo_content: None,
+    };
+
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(OrgPolicySource {
+        owner: "org".to_string(),
+        repo: "policies".to_string(),
+        path: "org-policy.toml".to_string(),
+        fail_if_unreachable: false,
+    });
+
+    // Pass None — no metadata_provider.
+    let result =
+        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
+            .await
+            .unwrap();
+
+    assert!(
+        !result.enforce_title_convention,
+        "Conditional blocks must be skipped when no metadata_provider is supplied"
+    );
+}
+
+#[tokio::test]
+async fn test_conditional_policy_metadata_fetch_failure_degrades_gracefully() {
+    // When the metadata provider returns an error, conditional evaluation is skipped
+    // and the function continues with only the non-conditional tiers.
+    let org_toml = r#"
+schemaVersion = 1
+
+[enforced]
+[defaults]
+
+[[conditional_policies]]
+[conditional_policies.condition]
+has_any_topic = ["payments"]
+
+[conditional_policies.enforced.policies.pullRequests.prTitle]
+required = true
+pattern = "^PAY:"
+"#;
+
+    let fetcher = TwoFileFetcherCond {
+        org_content: org_toml.to_string(),
+        org_path: "org-policy.toml".to_string(),
+        repo_content: None,
+    };
+
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(OrgPolicySource {
+        owner: "org".to_string(),
+        repo: "policies".to_string(),
+        path: "org-policy.toml".to_string(),
+        fail_if_unreachable: false,
+    });
+
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo-policy.toml",
+        &fetcher,
+        &app,
+        Some(&FailingMetadataProvider),
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        !result.enforce_title_convention,
+        "Metadata fetch failure must degrade gracefully; conditional blocks must be skipped"
+    );
+}
+
+#[tokio::test]
+async fn test_multiple_matching_conditional_policies_merged_in_order() {
+    // Two matching conditional default blocks: first sets required=true and pattern="^FIRST:";
+    // second sets required=true and pattern="^SECOND:". Since the second is applied after the
+    // first (declaration order) and both are non-default values, the second one wins for the
+    // pattern field.
+    let org_toml = r#"
+schemaVersion = 1
+
+[enforced]
+[defaults]
+
+[[conditional_policies]]
+[conditional_policies.condition]
+has_any_topic = ["shared"]
+
+[conditional_policies.defaults.policies.pullRequests.prTitle]
+required = true
+pattern = "^FIRST:"
+
+[[conditional_policies]]
+[conditional_policies.condition]
+has_any_topic = ["shared"]
+
+[conditional_policies.defaults.policies.pullRequests.prTitle]
+required = true
+pattern = "^SECOND:"
+"#;
+
+    let fetcher = TwoFileFetcherCond {
+        org_content: org_toml.to_string(),
+        org_path: "org-policy.toml".to_string(),
+        repo_content: None,
+    };
+
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(OrgPolicySource {
+        owner: "org".to_string(),
+        repo: "policies".to_string(),
+        path: "org-policy.toml".to_string(),
+        fail_if_unreachable: false,
+    });
+
+    let provider = MockMetadataProvider {
+        context: merge_warden_developer_platforms::models::RepositoryContext {
+            topics: vec!["shared".to_string()],
+            custom_properties: HashMap::new(),
+        },
+    };
+
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo-policy.toml",
+        &fetcher,
+        &app,
+        Some(&provider),
+    )
+    .await
+    .unwrap();
+
+    assert!(result.enforce_title_convention);
+    assert_eq!(
+        result.title_pattern, "^SECOND:",
+        "Second matching block must override the first (declaration order, later wins)"
+    );
+}
+
+#[tokio::test]
+async fn test_conditional_policy_toml_with_no_org_policy_source_ignores_conditionals() {
+    // Without org_policy_source there is no org policy at all — even if a metadata_provider
+    // is supplied, no conditional evaluation should happen.
+    let fetcher = MockFetcher::new(None);
+    let app = ApplicationDefaults::default(); // no org_policy_source
+
+    let provider = MockMetadataProvider {
+        context: merge_warden_developer_platforms::models::RepositoryContext {
+            topics: vec!["payments".to_string()],
+            custom_properties: HashMap::new(),
+        },
+    };
+
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo-policy.toml",
+        &fetcher,
+        &app,
+        Some(&provider),
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        !result.enforce_title_convention,
+        "No org_policy_source means no conditional policies regardless of metadata_provider"
     );
 }

@@ -169,7 +169,7 @@ pattern = "^feat:"
     let fetcher = ConstantFetcher::returns(repo_toml);
     let app = ApplicationDefaults::default();
 
-    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app)
+    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app, None)
         .await
         .expect("should succeed");
 
@@ -206,7 +206,7 @@ required = false
     app.org_policy_source = Some(org_source(false));
     app.enable_title_validation = true; // app enforcement flag → always wins
 
-    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app)
+    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app, None)
         .await
         .expect("should succeed");
 
@@ -245,7 +245,7 @@ required = false
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(org_source(false));
 
-    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app)
+    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app, None)
         .await
         .expect("should succeed");
 
@@ -285,7 +285,7 @@ pattern = "^REPO:"
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(org_source(false));
 
-    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app)
+    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app, None)
         .await
         .expect("should succeed");
 
@@ -325,7 +325,7 @@ required = false
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(org_source(false));
 
-    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app)
+    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app, None)
         .await
         .expect("should succeed");
 
@@ -346,9 +346,15 @@ async fn org_fetch_failure_lenient_degrades_gracefully() {
     app.org_policy_source = Some(org_source(false)); // fail_if_unreachable = false
 
     // AlwaysFailingFetcher will fail the org fetch; repo is also unavailable.
-    let result =
-        resolve_pull_request_config("owner", "repo", "repo.toml", &AlwaysFailingFetcher, &app)
-            .await;
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo.toml",
+        &AlwaysFailingFetcher,
+        &app,
+        None,
+    )
+    .await;
 
     assert!(
         result.is_ok(),
@@ -365,9 +371,15 @@ async fn org_fetch_failure_strict_returns_error() {
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(org_source(true)); // fail_if_unreachable = true
 
-    let result =
-        resolve_pull_request_config("owner", "repo", "repo.toml", &AlwaysFailingFetcher, &app)
-            .await;
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo.toml",
+        &AlwaysFailingFetcher,
+        &app,
+        None,
+    )
+    .await;
 
     assert!(
         result.is_err(),
@@ -390,7 +402,8 @@ async fn org_unsupported_schema_strict_returns_error() {
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(org_source(true));
 
-    let result = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app).await;
+    let result =
+        resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app, None).await;
 
     assert!(
         result.is_err(),
@@ -406,7 +419,8 @@ async fn org_malformed_toml_strict_returns_error() {
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(org_source(true));
 
-    let result = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app).await;
+    let result =
+        resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app, None).await;
 
     assert!(
         result.is_err(),
@@ -422,7 +436,7 @@ async fn no_config_at_all_uses_app_defaults() {
     app.enable_title_validation = true;
     app.default_title_pattern = "^APP-DEFAULT:".to_string();
 
-    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app)
+    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app, None)
         .await
         .expect("should succeed");
 
@@ -480,7 +494,7 @@ pattern = "GH-[0-9]+"
     app.org_policy_source = Some(org_source(false));
     app.default_title_pattern = "^APP:".to_string();
 
-    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app)
+    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app, None)
         .await
         .expect("should succeed");
 
@@ -513,7 +527,8 @@ async fn sample_org_policy_toml_parses_successfully() {
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(source);
 
-    let result = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app).await;
+    let result =
+        resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app, None).await;
 
     assert!(
         result.is_ok(),

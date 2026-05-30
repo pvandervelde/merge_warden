@@ -56,7 +56,9 @@ pub mod models;
 mod lib_tests;
 
 use errors::Error;
-use models::{Comment, IssueMetadata, Label, PullRequest, PullRequestFile, Review};
+use models::{
+    Comment, IssueMetadata, Label, PullRequest, PullRequestFile, RepositoryContext, Review,
+};
 
 /// Trait to fetch configuration files from remote repositories.
 #[async_trait]
@@ -781,4 +783,66 @@ pub trait IssueMetadataProvider: std::fmt::Debug + Sync + Send {
         project_number: u64,
         project_owner_login: &str,
     ) -> Result<(), Error>;
+}
+
+/// Fetches repository-level metadata required for conditional policy evaluation.
+///
+/// Implemented by [`github::GitHubProvider`] using two independent GitHub API calls:
+/// - `GET /repos/{owner}/{repo}/topics` — available on all GitHub plans.
+/// - `GET /repos/{owner}/{repo}/properties/values` — GitHub Enterprise only.
+///
+/// # Graceful degradation
+///
+/// - Topics API errors cause `get_repository_context` to return `Err`.
+/// - Custom properties API 403/404 is treated as an empty property map and logged
+///   at `debug!` — this is the expected response on non-enterprise GitHub plans.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use merge_warden_developer_platforms::{RepositoryMetadataProvider, errors::Error};
+/// use merge_warden_developer_platforms::models::RepositoryContext;
+/// use std::collections::HashMap;
+/// use async_trait::async_trait;
+///
+/// #[derive(Debug)]
+/// struct MyProvider;
+///
+/// #[async_trait]
+/// impl RepositoryMetadataProvider for MyProvider {
+///     async fn get_repository_context(
+///         &self,
+///         _repo_owner: &str,
+///         _repo_name: &str,
+///     ) -> Result<RepositoryContext, Error> {
+///         Ok(RepositoryContext {
+///             topics: vec!["payments".to_string()],
+///             custom_properties: HashMap::new(),
+///         })
+///     }
+/// }
+/// ```
+#[async_trait]
+pub trait RepositoryMetadataProvider: std::fmt::Debug + Sync + Send {
+    /// Fetches topics and custom properties for the specified repository.
+    ///
+    /// Makes two API calls:
+    /// 1. `GET /repos/{owner}/{repo}/topics` — topics available on all plans.
+    /// 2. `GET /repos/{owner}/{repo}/properties/values` — custom properties,
+    ///    enterprise only (returns empty map on 403/404).
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner` — Repository owner (org or user).
+    /// * `repo_name` — Repository name.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(RepositoryContext)` — topics fetched (custom properties may be empty).
+    /// - `Err(Error)` — topics fetch failed.
+    async fn get_repository_context(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+    ) -> Result<RepositoryContext, Error>;
 }

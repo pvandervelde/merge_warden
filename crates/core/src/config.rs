@@ -2,7 +2,10 @@
 //!
 //! This module centralizes configuration constants and settings used throughout
 //! the crate, making it easier to modify behavior in one place.
-use merge_warden_developer_platforms::{models::User, ConfigFetcher};
+use merge_warden_developer_platforms::{
+    models::{RepositoryContext, User},
+    ConfigFetcher, RepositoryMetadataProvider,
+};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use tracing::{debug, error, info, warn};
@@ -505,6 +508,168 @@ pub struct OrgPolicySource {
     pub fail_if_unreachable: bool,
 }
 
+/// Internal deserialisation type for a single condition inside a conditional policy block.
+///
+/// Used only during TOML parsing; converted to [`PolicyCondition`] by `load_org_policy`.
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct PolicyConditionRaw {
+    /// Repository topics that satisfy this condition (OR match).
+    ///
+    /// Comparison is case-insensitive.
+    #[serde(default, rename = "has_any_topic")]
+    pub has_any_topic: Vec<String>,
+
+    /// Custom property key-value pairs required for this condition (AND match).
+    ///
+    /// All entries must be present and equal (case-sensitive value comparison).
+    #[serde(default, rename = "has_custom_property")]
+    pub has_custom_property: HashMap<String, String>,
+}
+
+/// Internal deserialisation type for one `[[conditional_policies]]` TOML block.
+///
+/// Converted to [`ConditionalPolicy`] by `load_org_policy`.
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct ConditionalPolicyRaw {
+    /// Condition that must match for this block to apply.
+    #[serde(default)]
+    pub condition: PolicyConditionRaw,
+
+    /// Enforced settings applied after the repo tier when the condition matches.
+    #[serde(default)]
+    pub enforced: OrgPolicySectionRaw,
+
+    /// Default settings applied before the repo tier when the condition matches.
+    #[serde(default)]
+    pub defaults: OrgPolicySectionRaw,
+}
+
+/// Condition used to determine whether a [`ConditionalPolicy`] block applies to a repository.
+///
+/// A condition matches when **all** of its non-empty criteria are satisfied simultaneously
+/// (AND semantics across criteria). Within `has_any_topic` the match uses OR semantics:
+/// at least one listed topic must be present.
+///
+/// An empty condition (no criteria) always matches.
+///
+/// # Examples
+///
+/// ```
+/// use std::collections::HashMap;
+/// use merge_warden_core::config::PolicyCondition;
+/// use merge_warden_developer_platforms::models::RepositoryContext;
+///
+/// // Matches any repo with the "payments" topic.
+/// let cond = PolicyCondition {
+///     has_any_topic: vec!["payments".to_string()],
+///     has_custom_property: HashMap::new(),
+/// };
+/// let ctx = RepositoryContext {
+///     topics: vec!["payments".to_string(), "backend".to_string()],
+///     custom_properties: HashMap::new(),
+/// };
+/// assert!(cond.matches(&ctx));
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PolicyCondition {
+    /// Repository must have at least one of these topics (case-insensitive, OR semantics).
+    ///
+    /// An empty list means "any topics" — i.e., this criterion is considered satisfied.
+    #[serde(default, rename = "has_any_topic")]
+    pub has_any_topic: Vec<String>,
+
+    /// Repository must have ALL of these custom properties with the specified values
+    /// (AND semantics, case-sensitive value comparison).
+    ///
+    /// An empty map means "any properties" — i.e., this criterion is considered satisfied.
+    #[serde(default, rename = "has_custom_property")]
+    pub has_custom_property: HashMap<String, String>,
+}
+
+impl PolicyCondition {
+    /// Returns `true` if this condition matches the given [`RepositoryContext`].
+    ///
+    /// Matching rules:
+    /// - `has_any_topic`: satisfied when empty **or** when at least one entry
+    ///   matches a repository topic (case-insensitive comparison).
+    /// - `has_custom_property`: satisfied when empty **or** when **all** entries
+    ///   are present in the repository's custom properties with equal values
+    ///   (case-sensitive value comparison).
+    /// - Both criteria must be satisfied simultaneously (AND semantics).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use std::collections::HashMap;
+    /// use merge_warden_core::config::PolicyCondition;
+    /// use merge_warden_developer_platforms::models::RepositoryContext;
+    ///
+    /// let cond = PolicyCondition::default();
+    /// let ctx = RepositoryContext::default();
+    /// assert!(cond.matches(&ctx), "empty condition always matches");
+    /// ```
+    pub fn matches(&self, context: &RepositoryContext) -> bool {
+        let topics_match = self.has_any_topic.is_empty()
+            || self.has_any_topic.iter().any(|required| {
+                context
+                    .topics
+                    .iter()
+                    .any(|repo_topic| repo_topic.eq_ignore_ascii_case(required))
+            });
+
+        let props_match = self.has_custom_property.is_empty()
+            || self
+                .has_custom_property
+                .iter()
+                .all(|(key, expected_value)| {
+                    context.custom_properties.get(key) == Some(expected_value)
+                });
+
+        topics_match && props_match
+    }
+}
+
+/// A conditional org policy block that is applied only when its [`PolicyCondition`] matches.
+///
+/// Conditional policies are declared in the `[[conditional_policies]]` array in the org
+/// policy TOML file. When a repository's context satisfies the condition, the block's
+/// `defaults` and `enforced` [`PolicySet`] values are inserted into the merge chain:
+///
+/// ```text
+/// app_defaults → org_defaults → conditional_defaults* → repo → conditional_enforced* → org_enforced → app_enforced
+/// ```
+///
+/// Multiple matching blocks are merged in declaration order (first declaration wins for
+/// non-default conflicting values).
+///
+/// # Examples
+///
+/// TOML:
+///
+/// ```toml
+/// [[conditional_policies]]
+/// [conditional_policies.condition]
+/// has_any_topic = ["payments"]
+///
+/// [conditional_policies.enforced.policies.title]
+/// valid_title_regex = "^(feat|fix|chore)\\(.*\\):"
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConditionalPolicy {
+    /// Condition that must match for this block to apply.
+    pub condition: PolicyCondition,
+
+    /// Settings that CANNOT be overridden by repo-level config.
+    ///
+    /// Inserted into the merge chain after the repo tier when the condition matches.
+    pub enforced: PolicySet,
+
+    /// Settings that CAN be overridden by repo-level config.
+    ///
+    /// Inserted into the merge chain before the repo tier when the condition matches.
+    pub defaults: PolicySet,
+}
+
 /// Parsed and validated org-level policy.
 ///
 /// Contains two [`PolicySet`] values at different precedence levels,
@@ -525,6 +690,12 @@ pub struct OrgPolicy {
     ///
     /// Applied between `app_defaults_ps` and `repo_ps` in the merge chain.
     pub defaults: PolicySet,
+
+    /// Conditional policy blocks applied only when their condition matches the repository.
+    ///
+    /// Each block contributes its `defaults` before the repo tier and its `enforced`
+    /// after the repo tier. Multiple matching blocks are merged in declaration order.
+    pub conditional_policies: Vec<ConditionalPolicy>,
 }
 
 /// Internal deserialisation target for the org policy TOML root.
@@ -551,6 +722,14 @@ pub(crate) struct OrgPolicyRaw {
     /// Default policy section (`[defaults]`).
     #[serde(default)]
     pub defaults: OrgPolicySectionRaw,
+
+    /// Conditional policy blocks (`[[conditional_policies]]`).
+    ///
+    /// Each block's condition is evaluated at runtime against the target repository's
+    /// topics and custom properties. Blocks whose condition matches are merged into the
+    /// policy chain for that PR.
+    #[serde(default)]
+    pub conditional_policies: Vec<ConditionalPolicyRaw>,
 }
 
 /// One section (`[enforced]` or `[defaults]`) of the org policy TOML.
@@ -2176,6 +2355,18 @@ pub(crate) async fn load_org_policy(
     let policy = OrgPolicy {
         enforced: PolicySet::from_org_section(&raw.enforced),
         defaults: PolicySet::from_org_section(&raw.defaults),
+        conditional_policies: raw
+            .conditional_policies
+            .iter()
+            .map(|cp| ConditionalPolicy {
+                condition: PolicyCondition {
+                    has_any_topic: cp.condition.has_any_topic.clone(),
+                    has_custom_property: cp.condition.has_custom_property.clone(),
+                },
+                enforced: PolicySet::from_org_section(&cp.enforced),
+                defaults: PolicySet::from_org_section(&cp.defaults),
+            })
+            .collect(),
     };
 
     info!(
@@ -2269,6 +2460,10 @@ async fn parse_repo_config(
 ///   and org policy fetches.
 /// * `app_defaults` — application-level policy defaults and configuration
 ///   pointers (including `org_policy_source`).
+/// * `metadata_provider` — optional provider for repository topics and custom
+///   properties. Required for conditional org policy evaluation. When `None`,
+///   any `[[conditional_policies]]` blocks in the org policy are skipped and
+///   a `debug!` message is emitted.
 ///
 /// # Returns
 ///
@@ -2289,6 +2484,7 @@ pub async fn resolve_pull_request_config(
     config_path: &str,
     fetcher: &dyn ConfigFetcher,
     app_defaults: &ApplicationDefaults,
+    metadata_provider: Option<&dyn RepositoryMetadataProvider>,
 ) -> Result<CurrentPullRequestValidationConfiguration, ConfigLoadError> {
     // Fetch repo config and org policy concurrently — both are independent
     // read-only operations against potentially different remote repositories.
@@ -2329,12 +2525,73 @@ pub async fn resolve_pull_request_config(
     let repo_ps = PolicySet::from_repository_config(&repo_config);
     let app_enforced_ps = PolicySet::from_app_enforcement_flags(app_defaults);
 
-    // Four-tier merge chain.
-    let effective_ps = app_defaults_ps
-        .merge(&org_defaults_ps)
-        .merge(&repo_ps)
-        .merge(&org_enforced_ps)
-        .merge(&app_enforced_ps);
+    // Evaluate conditional policies when org policy defines any.
+    let (conditional_defaults_policies, conditional_enforced_policies): (
+        Vec<PolicySet>,
+        Vec<PolicySet>,
+    ) = if let Some(ref op) = org_policy {
+        if !op.conditional_policies.is_empty() {
+            match metadata_provider {
+                Some(provider) => {
+                    match provider.get_repository_context(repo_owner, repo_name).await {
+                        Ok(context) => {
+                            let matching: Vec<_> = op
+                                .conditional_policies
+                                .iter()
+                                .filter(|cp| cp.condition.matches(&context))
+                                .collect();
+                            debug!(
+                                repository_owner = repo_owner,
+                                repository = repo_name,
+                                total_conditional_policies = op.conditional_policies.len(),
+                                matching_conditional_policies = matching.len(),
+                                "Evaluated conditional org policies"
+                            );
+                            (
+                                matching.iter().map(|cp| cp.defaults.clone()).collect(),
+                                matching.iter().map(|cp| cp.enforced.clone()).collect(),
+                            )
+                        }
+                        Err(e) => {
+                            warn!(
+                                repository_owner = repo_owner,
+                                repository = repo_name,
+                                error = %e,
+                                "Failed to fetch repository context for conditional policies; skipping conditional evaluation"
+                            );
+                            (vec![], vec![])
+                        }
+                    }
+                }
+                None => {
+                    debug!(
+                        repository_owner = repo_owner,
+                        repository = repo_name,
+                        conditional_policy_count = op.conditional_policies.len(),
+                        "Org policy has conditional policies but no metadata_provider supplied; skipping conditional evaluation"
+                    );
+                    (vec![], vec![])
+                }
+            }
+        } else {
+            (vec![], vec![])
+        }
+    } else {
+        (vec![], vec![])
+    };
+
+    // Merge chain:
+    // app_defaults → org_defaults → conditional_defaults* → repo →
+    // conditional_enforced* → org_enforced → app_enforced
+    let mut effective_ps = app_defaults_ps.merge(&org_defaults_ps);
+    for cd in &conditional_defaults_policies {
+        effective_ps = effective_ps.merge(cd);
+    }
+    effective_ps = effective_ps.merge(&repo_ps);
+    for ce in &conditional_enforced_policies {
+        effective_ps = effective_ps.merge(ce);
+    }
+    effective_ps = effective_ps.merge(&org_enforced_ps).merge(&app_enforced_ps);
 
     Ok(effective_ps.to_validation_config(app_defaults))
 }
