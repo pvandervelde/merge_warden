@@ -17,6 +17,7 @@ use keyring::Entry;
 use merge_warden_core::config::{
     resolve_pull_request_config, CurrentPullRequestValidationConfiguration,
 };
+use merge_warden_core::errors::ConfigLoadError;
 use merge_warden_core::MergeWarden;
 use merge_warden_developer_platforms::app_auth::AppAuthProvider;
 use merge_warden_developer_platforms::github::GitHubProvider;
@@ -188,6 +189,14 @@ impl WebhookHandler for MergeWardenWebhookHandler {
                     merge_warden_config_path
                 );
                 merge_warden_config
+            }
+            Err(ConfigLoadError::OrgPolicyUnavailable(ref msg)) => {
+                error!(
+                    merge_warden_config_path,
+                    org_policy_error = msg.as_str(),
+                    "Org policy unreachable and fail_if_unreachable = true; aborting PR check"
+                );
+                return Err(Box::from(format!("Org policy unavailable: {}", msg)));
             }
             Err(e) => {
                 warn!(

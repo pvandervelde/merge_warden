@@ -490,6 +490,17 @@ pub struct OrgPolicySource {
     /// `Err(ConfigLoadError::OrgPolicyUnavailable)`.
     /// When `false` (default), failures degrade gracefully to the
     /// three-tier system.
+    ///
+    /// # Asymmetry: "file not found" always degrades gracefully
+    ///
+    /// This flag only governs *fetch errors*, *parse errors*, and *schema
+    /// version mismatches*. If the policy file simply does not exist
+    /// (`Ok(None)` from the fetcher), the system always falls back to
+    /// three-tier mode with a warning — even when `fail_if_unreachable`
+    /// is `true`. The rationale: a missing file is an expected bootstrap
+    /// state (e.g. the policy file hasn't been created yet), whereas a
+    /// fetch error indicates an infrastructure problem that the operator
+    /// may want to surface explicitly.
     #[serde(default)]
     pub fail_if_unreachable: bool,
 }
@@ -524,6 +535,12 @@ pub struct OrgPolicy {
 #[derive(Debug, Default, Deserialize)]
 pub(crate) struct OrgPolicyRaw {
     /// Schema version — must be `1` for the policy to be accepted.
+    ///
+    /// No `#[serde(default)]` is applied intentionally: if the field is
+    /// absent from the TOML file the deserialiser produces a generic
+    /// "missing field" error rather than silently treating it as `0`.
+    /// This forces policy file authors to declare a schema version
+    /// explicitly and surfaces the omission as a clear error.
     #[serde(rename = "schemaVersion")]
     pub schema_version: u32,
 
@@ -1772,6 +1789,14 @@ impl PolicySet {
     /// Equivalent to [`from_repository_config`] but operates on
     /// [`OrgPolicySectionRaw`] instead of [`RepositoryProvidedConfig`].
     ///
+    /// # Bypass rules
+    ///
+    /// [`BypassRules`] are always set to [`BypassRules::default()`] (i.e. no bypass
+    /// rules) regardless of what appears in the org policy section. Bypass rules are
+    /// a per-repository security concern and may only be configured at the repository
+    /// tier (`[bypass_rules]` in the repository TOML). Org policies cannot grant
+    /// bypass permissions across repositories.
+    ///
     /// [`from_repository_config`]: PolicySet::from_repository_config
     pub(crate) fn from_org_section(section: &OrgPolicySectionRaw) -> PolicySet {
         let pr = &section.policies.pull_requests;
@@ -1861,14 +1886,16 @@ impl PolicySet {
     pub fn from_application_defaults(app: &ApplicationDefaults) -> PolicySet {
         PolicySet {
             // Note: `app.enable_title_validation` is intentionally NOT applied here.
-            // It is a post-merge enforcement override applied in `load_merge_warden_config`.
+            // It is a post-merge enforcement override applied via `from_app_enforcement_flags`
+            // in `resolve_pull_request_config`.
             title: PullRequestsTitlePolicyConfig {
                 required: false,
                 pattern: app.default_title_pattern.clone(),
                 label_if_missing: app.default_invalid_title_label.clone(),
             },
             // Note: `app.enable_work_item_validation` is intentionally NOT applied here.
-            // It is a post-merge enforcement override applied in `load_merge_warden_config`.
+            // It is a post-merge enforcement override applied via `from_app_enforcement_flags`
+            // in `resolve_pull_request_config`.
             work_item: WorkItemPolicyConfig {
                 required: false,
                 pattern: app.default_work_item_pattern.clone(),
@@ -1988,7 +2015,7 @@ pub async fn load_merge_warden_config(
                 repository = repo_name,
                 path = path_relative_to_repository_root,
                 config_version = config.schema_version,
-                "Configuration in repository has an unexepected version. Will not be able to load configuration."
+                "Configuration in repository has an unexpected version. Will not be able to load configuration."
             );
 
             // If we can't load the configuration we just pretend it's not there
@@ -2076,7 +2103,7 @@ pub async fn load_merge_warden_config(
 ///
 /// * `source` — coordinates of the org policy file.
 /// * `fetcher` — [`ConfigFetcher`] implementation (typically `GitHubProvider`).
-pub async fn load_org_policy(
+pub(crate) async fn load_org_policy(
     source: &OrgPolicySource,
     fetcher: &dyn ConfigFetcher,
 ) -> Result<Option<OrgPolicy>, ConfigLoadError> {
@@ -2263,12 +2290,19 @@ pub async fn resolve_pull_request_config(
     fetcher: &dyn ConfigFetcher,
     app_defaults: &ApplicationDefaults,
 ) -> Result<CurrentPullRequestValidationConfiguration, ConfigLoadError> {
-    // Load raw repo config — no application defaults merged in.  This ensures the
-    // repo tier of the four-tier chain carries only values explicitly set in the
-    // repository TOML; app defaults enter the chain exclusively via `app_defaults_ps`.
-    let repo_config = match parse_repo_config(repo_owner, repo_name, config_path, fetcher)
-        .await
-    {
+    // Fetch repo config and org policy concurrently — both are independent
+    // read-only operations against potentially different remote repositories.
+    let (repo_config_res, org_policy_res) = tokio::join!(
+        parse_repo_config(repo_owner, repo_name, config_path, fetcher),
+        async {
+            match &app_defaults.org_policy_source {
+                None => Ok::<Option<OrgPolicy>, ConfigLoadError>(None),
+                Some(source) => load_org_policy(source, fetcher).await,
+            }
+        }
+    );
+
+    let repo_config = match repo_config_res {
         Ok(c) => c,
         Err(e) => {
             warn!(
@@ -2282,11 +2316,9 @@ pub async fn resolve_pull_request_config(
         }
     };
 
-    // Load org policy if configured.
-    let org_policy: Option<OrgPolicy> = match &app_defaults.org_policy_source {
-        None => None,
-        Some(source) => load_org_policy(source, fetcher).await?,
-    };
+    // Propagate OrgPolicyUnavailable; all other org policy errors are already
+    // handled inside load_org_policy (graceful degradation to three-tier).
+    let org_policy: Option<OrgPolicy> = org_policy_res?;
 
     // Build policy sets for each tier.
     let app_defaults_ps = PolicySet::from_application_defaults(app_defaults);

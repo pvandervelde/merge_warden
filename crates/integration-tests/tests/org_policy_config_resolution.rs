@@ -65,7 +65,12 @@ impl ConfigFetcher for ConstantFetcher {
     }
 }
 
-/// Routes fetches based on the requested path.
+/// Routes fetches based on the requested path only.
+///
+/// **Note:** `owner` and `repo` arguments are ignored — routing is purely
+/// path-based. This is intentional for test simplicity: tests register a
+/// path string and any call to that path returns the associated content
+/// regardless of which owner/repo is requested.
 struct PathRoutingFetcher {
     routes: Vec<(String, String)>,
 }
@@ -494,22 +499,25 @@ pattern = "GH-[0-9]+"
     );
 }
 
-/// The sample org policy TOML file must parse successfully as `OrgPolicyRaw`
-/// and produce a valid `OrgPolicy` via `load_org_policy`.
+/// The sample org policy TOML file must parse successfully and produce a valid
+/// resolved configuration when used as an org policy source.
 #[tokio::test]
 async fn sample_org_policy_toml_parses_successfully() {
     let sample = include_str!("../../../samples/merge-warden-org-policy.sample.toml");
 
-    let fetcher = ConstantFetcher::returns(sample);
     let source = org_source(false);
+    // Route the org policy path to the sample; repo config path has no route
+    // (PathRoutingFetcher returns None for unregistered paths).
+    let fetcher = PathRoutingFetcher::new(vec![(&source.path, sample)]);
 
-    // load_org_policy is pub — call it directly to validate the sample.
-    let result = merge_warden_core::config::load_org_policy(&source, &fetcher)
-        .await
-        .expect("should not return Err");
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(source);
+
+    let result = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app).await;
 
     assert!(
-        result.is_some(),
-        "Sample org policy TOML must parse to Some(OrgPolicy)"
+        result.is_ok(),
+        "Sample org policy TOML must resolve without error, got: {:?}",
+        result.err()
     );
 }

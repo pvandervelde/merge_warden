@@ -24,6 +24,7 @@ use merge_warden_core::{
     config::{
         resolve_pull_request_config, ApplicationDefaults, CurrentPullRequestValidationConfiguration,
     },
+    errors::ConfigLoadError,
     MergeWarden,
 };
 use merge_warden_developer_platforms::github::GitHubProvider;
@@ -244,6 +245,17 @@ impl MergeWardenWebhookHandler {
                     merge_warden_config_path
                 );
                 config
+            }
+            Err(ConfigLoadError::OrgPolicyUnavailable(ref msg)) => {
+                error!(
+                    merge_warden_config_path,
+                    org_policy_error = msg.as_str(),
+                    "Org policy unreachable and fail_if_unreachable = true; aborting PR processing"
+                );
+                return Err(ServerError::ProcessingError(format!(
+                    "Org policy unavailable: {}",
+                    msg
+                )));
             }
             Err(e) => {
                 warn!(

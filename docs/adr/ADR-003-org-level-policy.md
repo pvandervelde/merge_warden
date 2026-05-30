@@ -196,18 +196,23 @@ Tier-placement achieves the same result with less complexity.
 ### `resolve_pull_request_config` internals
 
 ```rust
-// 1. Load repo config (two-tier, no enforcement flags applied)
-let repo_config = load_merge_warden_config(
-    repo_owner, repo_name, config_path, fetcher, app_defaults
-).await?;
+// 1. Fetch repo config and org policy concurrently (independent remote reads)
+let (repo_config_res, org_policy_res) = tokio::join!(
+    parse_repo_config(repo_owner, repo_name, config_path, fetcher),  // raw repo TOML, no app defaults
+    async {
+        match &app_defaults.org_policy_source {
+            None => Ok(None),
+            Some(source) => load_org_policy(source, fetcher).await,
+        }
+    }
+);
 
-// 2. Load org policy (graceful degradation on failure)
-let org_policy = match &app_defaults.org_policy_source {
-    None => None,
-    Some(source) => load_org_policy(source, fetcher).await,  // returns Option<OrgPolicy>
-};
+// repo config failures degrade gracefully (empty defaults for repo tier)
+let repo_config = repo_config_res.unwrap_or_default();
+// org policy errors propagate when fail_if_unreachable = true
+let org_policy: Option<OrgPolicy> = org_policy_res?;
 
-// 3. Build policy sets for each tier
+// 2. Build policy sets for each tier
 let app_defaults_ps = PolicySet::from_application_defaults(app_defaults);
 let (org_defaults_ps, org_enforced_ps) = match &org_policy {
     Some(p) => (p.defaults.clone(), p.enforced.clone()),
@@ -215,7 +220,7 @@ let (org_defaults_ps, org_enforced_ps) = match &org_policy {
 };
 let repo_ps = PolicySet::from_repository_config(&repo_config);
 
-// 4. Build app-level enforced tier from the four enforcement flags
+// 3. Build app-level enforced tier from the four enforcement flags
 let app_enforced_ps = PolicySet::from_app_enforcement_flags(app_defaults);
 
 // 5. Four-tier merge chain
