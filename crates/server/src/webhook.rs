@@ -22,8 +22,9 @@ use github_bot_sdk::{
 };
 use merge_warden_core::{
     config::{
-        load_merge_warden_config, ApplicationDefaults, CurrentPullRequestValidationConfiguration,
+        resolve_pull_request_config, ApplicationDefaults, CurrentPullRequestValidationConfiguration,
     },
+    errors::ConfigLoadError,
     MergeWarden,
 };
 use merge_warden_developer_platforms::github::GitHubProvider;
@@ -229,7 +230,7 @@ impl MergeWardenWebhookHandler {
 
         let merge_warden_config_path = ".github/merge-warden.toml";
 
-        let validation_config = match load_merge_warden_config(
+        let validation_config = match resolve_pull_request_config(
             repo_owner,
             repo_name,
             merge_warden_config_path,
@@ -243,31 +244,25 @@ impl MergeWardenWebhookHandler {
                     "Loaded merge-warden config from {}",
                     merge_warden_config_path
                 );
-                config.to_validation_config(&self.policies.bypass_rules)
+                config
+            }
+            Err(ConfigLoadError::OrgPolicyUnavailable(ref msg)) => {
+                error!(
+                    merge_warden_config_path,
+                    org_policy_error = msg.as_str(),
+                    "Org policy unreachable and fail_if_unreachable = true; aborting PR processing"
+                );
+                return Err(ServerError::ProcessingError(format!(
+                    "Org policy unavailable: {}",
+                    msg
+                )));
             }
             Err(e) => {
                 warn!(
-                    "Failed to load merge-warden config from {}: {}. Using defaults.",
+                    "Failed to resolve PR config from {}: {}. Using compiled-in defaults.",
                     merge_warden_config_path, e
                 );
-                CurrentPullRequestValidationConfiguration {
-                    enforce_title_convention: self.policies.enable_title_validation,
-                    title_pattern: self.policies.default_title_pattern.clone(),
-                    invalid_title_label: self.policies.default_invalid_title_label.clone(),
-                    enforce_work_item_references: self.policies.enable_work_item_validation,
-                    work_item_reference_pattern: self.policies.default_work_item_pattern.clone(),
-                    missing_work_item_label: self.policies.default_missing_work_item_label.clone(),
-                    pr_size_check: self.policies.pr_size_check.clone(),
-                    change_type_labels: Some(self.policies.change_type_labels.clone()),
-                    bypass_rules: self.policies.bypass_rules.clone(),
-                    wip_check: self.policies.wip_check.clone(),
-                    pr_state_labels: self.policies.pr_state_labels.clone(),
-                    // When the per-repo config file cannot be loaded, issue propagation
-                    // is disabled by default. Configure it in .github/merge-warden.toml
-                    // under [policies.pullRequests.issuePropagation] to enable it.
-                    issue_propagation: Default::default(),
-                    bot_mention: self.policies.bot_mention.clone(),
-                }
+                CurrentPullRequestValidationConfiguration::from_app_defaults(&self.policies)
             }
         };
 

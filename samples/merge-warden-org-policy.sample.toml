@@ -1,0 +1,78 @@
+# Org-level policy configuration for merge-warden.
+#
+# This file is fetched from a **central repository** by the merge-warden server
+# at runtime — it is NOT placed in each repository being guarded.
+#
+# To enable org-level policies, add an `[org_policy_source]` section to your
+# app-level config (app-config.sample.toml):
+#
+#   [org_policy_source]
+#   owner = "my-org"
+#   repo  = "platform-configs"
+#   path  = "merge-warden/org-policy.toml"
+#   # fail_if_unreachable = false   # set true to block processing when unreachable
+#
+# The server fetches this file once per PR event using the GitHub App credentials
+# already configured for the server instance.
+#
+# ---
+# Schema version — always 1.
+schemaVersion = 1
+
+# ---------------------------------------------------------------------------
+# [enforced] — settings that CANNOT be overridden by per-repo config.
+#
+# Use this section for policies that apply uniformly across every repository
+# in the organisation, regardless of what the per-repo .github/merge-warden.toml
+# says.  Org-enforced settings beat both repo defaults and per-repo overrides.
+# ---------------------------------------------------------------------------
+[enforced.policies.pullRequests.prTitle]
+# Force conventional-commit title format on every repo in the org.
+required = true
+# pattern = "^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\\([a-z0-9_-]+\\))?!?: .+"
+label_if_missing = "pr-issue: invalid-title-format"
+
+# Uncomment to enforce work-item references org-wide, regardless of per-repo opt-out.
+# [enforced.policies.pullRequests.workItem]
+# required = true
+# label_if_missing = "pr-issue: missing-work-item"
+
+# Uncomment to enforce PR size checking org-wide.
+# [enforced.policies.pullRequests.prSize]
+# enabled = true
+# fail_on_oversized = false
+
+# Uncomment to enforce WIP blocking org-wide.
+# [enforced.policies.pullRequests.wip]
+# enforce_wip_blocking = true
+
+# ---------------------------------------------------------------------------
+# [defaults] — org-wide defaults that CAN be overridden by per-repo config.
+#
+# Use this section for sensible org defaults that individual repositories may
+# legitimately need to customise (e.g. a different work-item pattern for a
+# specific team).  Per-repo config always wins over org defaults.
+# ---------------------------------------------------------------------------
+[defaults.policies.pullRequests.workItem]
+# Org-wide default: require a work-item reference but allow repos to opt out.
+required = true
+# Default pattern matches GitHub issue references and common tracker formats.
+# pattern = "(?i)(fixes|closes|resolves|references|relates to)\\s+(#\\d+|GH-\\d+|https://github\\.com/[^/]+/[^/]+/issues/\\d+|[a-zA-Z0-9_-]+/[a-zA-Z0-9_-]+#\\d+)"
+label_if_missing = "pr-issue: missing-work-item"
+
+# Org-wide default for size checking.
+[defaults.policies.pullRequests.prSize]
+enabled = true
+fail_on_oversized = false
+label_prefix = "size/"
+add_comment = true
+
+# Change-type label defaults at org level.
+# Repos may override individual label names.
+# [defaults.change_type_labels]
+# enabled = true
+# [defaults.change_type_labels.keyword_labels]
+# breaking_change = "breaking-change"
+# security       = "security"
+# hotfix         = "hotfix"
+# tech_debt      = "tech-debt"

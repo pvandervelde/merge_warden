@@ -5,7 +5,7 @@
 use merge_warden_developer_platforms::{models::User, ConfigFetcher};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::errors::ConfigLoadError;
 use crate::size::SizeThresholds;
@@ -391,6 +391,15 @@ pub struct ApplicationDefaults {
     /// to their app's mention handle (e.g. `"@acme-merge-warden[bot]"`).
     #[serde(default = "ApplicationDefaults::default_bot_mention")]
     pub bot_mention: String,
+
+    /// Optional pointer to an org-level policy file.
+    ///
+    /// When `None`, the system behaves identically to the three-tier configuration
+    /// model (application defaults → repo config → system defaults).
+    /// When `Some`, a fourth tier is loaded from the specified repository and
+    /// merged into the resolution chain via [`resolve_pull_request_config`].
+    #[serde(default)]
+    pub org_policy_source: Option<OrgPolicySource>,
 }
 
 impl ApplicationDefaults {
@@ -445,8 +454,119 @@ impl Default for ApplicationDefaults {
             wip_check: WipCheckConfig::default(),
             pr_state_labels: PrStateLabelsConfig::default(),
             bot_mention: ApplicationDefaults::default_bot_mention(),
+            org_policy_source: None,
         }
     }
+}
+
+/// Locates the org-level policy TOML file within a GitHub repository.
+///
+/// Added to [`ApplicationDefaults`] as an optional field.
+/// When absent, the system uses the three-tier configuration model.
+///
+/// # TOML example
+///
+/// ```toml
+/// [org_policy_source]
+/// owner = "my-org"
+/// repo  = "platform-configs"
+/// path  = "merge-warden/org-policy.toml"
+/// # fail_if_unreachable = false   # optional; default false
+/// ```
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OrgPolicySource {
+    /// GitHub organisation or user name that owns the policy repository.
+    pub owner: String,
+
+    /// Name of the repository that holds the org policy file.
+    pub repo: String,
+
+    /// Path to the org policy TOML file within the repository,
+    /// relative to the repository root.
+    pub path: String,
+
+    /// When `true`, an unreachable or unparseable org policy causes
+    /// [`resolve_pull_request_config`] to return
+    /// `Err(ConfigLoadError::OrgPolicyUnavailable)`.
+    /// When `false` (default), failures degrade gracefully to the
+    /// three-tier system.
+    ///
+    /// # Asymmetry: "file not found" always degrades gracefully
+    ///
+    /// This flag only governs *fetch errors*, *parse errors*, and *schema
+    /// version mismatches*. If the policy file simply does not exist
+    /// (`Ok(None)` from the fetcher), the system always falls back to
+    /// three-tier mode with a warning — even when `fail_if_unreachable`
+    /// is `true`. The rationale: a missing file is an expected bootstrap
+    /// state (e.g. the policy file hasn't been created yet), whereas a
+    /// fetch error indicates an infrastructure problem that the operator
+    /// may want to surface explicitly.
+    #[serde(default)]
+    pub fail_if_unreachable: bool,
+}
+
+/// Parsed and validated org-level policy.
+///
+/// Contains two [`PolicySet`] values at different precedence levels,
+/// populated from the `[enforced]` and `[defaults]` sections of the
+/// org policy TOML file.
+///
+/// When either section is absent from the TOML file, the corresponding
+/// [`PolicySet`] is `PolicySet::default()`, which has no effect on the
+/// merge chain.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct OrgPolicy {
+    /// Settings that CANNOT be overridden by repo-level config.
+    ///
+    /// Applied as the last merge tier before app-level enforcement flags.
+    pub enforced: PolicySet,
+
+    /// Settings that CAN be overridden by repo-level config.
+    ///
+    /// Applied between `app_defaults_ps` and `repo_ps` in the merge chain.
+    pub defaults: PolicySet,
+}
+
+/// Internal deserialisation target for the org policy TOML root.
+///
+/// Uses [`OrgPolicySectionRaw`] for the two sections rather than
+/// [`RepositoryProvidedConfig`] directly, to avoid requiring a nested
+/// `schemaVersion` key inside each subsection.
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct OrgPolicyRaw {
+    /// Schema version — must be `1` for the policy to be accepted.
+    ///
+    /// No `#[serde(default)]` is applied intentionally: if the field is
+    /// absent from the TOML file the deserialiser produces a generic
+    /// "missing field" error rather than silently treating it as `0`.
+    /// This forces policy file authors to declare a schema version
+    /// explicitly and surfaces the omission as a clear error.
+    #[serde(rename = "schemaVersion")]
+    pub schema_version: u32,
+
+    /// Enforced policy section (`[enforced]`).
+    #[serde(default)]
+    pub enforced: OrgPolicySectionRaw,
+
+    /// Default policy section (`[defaults]`).
+    #[serde(default)]
+    pub defaults: OrgPolicySectionRaw,
+}
+
+/// One section (`[enforced]` or `[defaults]`) of the org policy TOML.
+///
+/// Contains the same policy-relevant fields as [`RepositoryProvidedConfig`]
+/// minus `schema_version`, so neither subsection requires a `schemaVersion`
+/// key in the TOML.
+#[derive(Debug, Default, Deserialize)]
+pub(crate) struct OrgPolicySectionRaw {
+    /// Pull-request validation policies.
+    #[serde(default, rename = "policies")]
+    pub policies: PoliciesConfig,
+
+    /// Change-type label configuration.
+    #[serde(default)]
+    pub change_type_labels: Option<ChangeTypeLabelConfig>,
 }
 
 /// Configuration for bypass rules allowing specific users to skip validation
@@ -727,6 +847,19 @@ pub struct BypassRulesConfig {
 }
 
 impl BypassRulesConfig {
+    /// Creates a [`BypassRulesConfig`] from an already-merged [`BypassRules`].
+    ///
+    /// All three sub-rules are stored as `Some(...)` so that
+    /// [`RepositoryProvidedConfig::to_validation_config`] uses the pre-merged values
+    /// and the server-level-default fallback parameter has no effect.
+    pub(crate) fn from_merged(rules: &BypassRules) -> Self {
+        Self {
+            title_convention: Some(rules.title_convention().clone()),
+            work_items: Some(rules.work_item_convention().clone()),
+            size: Some(rules.size().clone()),
+        }
+    }
+
     /// Returns the per-repo title-convention bypass rule, if configured.
     pub fn title_convention(&self) -> Option<&BypassRule> {
         self.title_convention.as_ref()
@@ -836,6 +969,34 @@ pub struct CurrentPullRequestValidationConfiguration {
 }
 
 impl CurrentPullRequestValidationConfiguration {
+    /// Constructs a baseline [`CurrentPullRequestValidationConfiguration`] from
+    /// application defaults alone, without any repo or org overrides.
+    ///
+    /// Used as the fallback when [`resolve_pull_request_config`] fails, replacing
+    /// the large inline struct construction previously found in platform handlers.
+    ///
+    /// The four app-level enforcement flags (`enable_title_validation`,
+    /// `enable_work_item_validation`, `pr_size_check.enabled`,
+    /// `wip_check.enforce_wip_blocking`) are applied here so that the fallback
+    /// path honours operator-configured enforcement even in error scenarios.
+    pub fn from_app_defaults(app: &ApplicationDefaults) -> Self {
+        Self {
+            enforce_title_convention: app.enable_title_validation,
+            title_pattern: app.default_title_pattern.clone(),
+            invalid_title_label: app.default_invalid_title_label.clone(),
+            enforce_work_item_references: app.enable_work_item_validation,
+            work_item_reference_pattern: app.default_work_item_pattern.clone(),
+            missing_work_item_label: app.default_missing_work_item_label.clone(),
+            pr_size_check: app.pr_size_check.clone(),
+            change_type_labels: Some(app.change_type_labels.clone()),
+            wip_check: app.wip_check.clone(),
+            pr_state_labels: app.pr_state_labels.clone(),
+            bypass_rules: app.bypass_rules.clone(),
+            issue_propagation: IssuePropagationConfig::default(),
+            bot_mention: app.bot_mention.clone(),
+        }
+    }
+
     #[cfg(test)]
     #[allow(clippy::too_many_arguments)]
     fn new(
@@ -1618,13 +1779,98 @@ impl PolicySet {
                 &self.change_type_labels,
                 &over.change_type_labels,
             ),
-            // TODO: bypass_rules merge result is currently unused — `merged_ps.bypass_rules`
-            // is never written back to `config` in `load_merge_warden_config` because
-            // `to_validation_config` re-runs its own per-sub-rule bypass merge from the
-            // original `config.policies.bypass_rules`.  Remove this note and add the
-            // write-back once the `to_validation_config` bypass path is consolidated
-            // (tracked as follow-up cleanup per docs/spec/interfaces/policy-engine.md §3).
             bypass_rules: BypassRules::merge(&self.bypass_rules, &over.bypass_rules),
+        }
+    }
+
+    /// Constructs a [`PolicySet`] from one section of the org policy TOML
+    /// (`[enforced]` or `[defaults]`).
+    ///
+    /// Equivalent to [`from_repository_config`] but operates on
+    /// [`OrgPolicySectionRaw`] instead of [`RepositoryProvidedConfig`].
+    ///
+    /// # Bypass rules
+    ///
+    /// [`BypassRules`] are always set to [`BypassRules::default()`] (i.e. no bypass
+    /// rules) regardless of what appears in the org policy section. Bypass rules are
+    /// a per-repository security concern and may only be configured at the repository
+    /// tier (`[bypass_rules]` in the repository TOML). Org policies cannot grant
+    /// bypass permissions across repositories.
+    ///
+    /// [`from_repository_config`]: PolicySet::from_repository_config
+    pub(crate) fn from_org_section(section: &OrgPolicySectionRaw) -> PolicySet {
+        let pr = &section.policies.pull_requests;
+        PolicySet {
+            title: pr.title_policies.clone(),
+            work_item: pr.work_item_policies.clone(),
+            size: pr.size_policies.clone(),
+            wip: pr.wip_policies.clone(),
+            pr_state: pr.pr_state_policies.clone(),
+            issue_propagation: pr.issue_propagation.clone(),
+            change_type_labels: section.change_type_labels.clone().unwrap_or_default(),
+            bypass_rules: BypassRules::default(),
+        }
+    }
+
+    /// Constructs a [`PolicySet`] containing only the settings forced by the
+    /// four app-level enforcement flags on [`ApplicationDefaults`].
+    ///
+    /// All other fields are `PolicySet::default()` so they do not override
+    /// anything when this [`PolicySet`] is applied as the last merge tier in
+    /// [`resolve_pull_request_config`].
+    ///
+    /// # Fields mapped
+    ///
+    /// - `enable_title_validation = true`  → `result.title.required = true`
+    /// - `enable_work_item_validation = true` → `result.work_item.required = true`
+    /// - `pr_size_check.enabled = true`    → `result.size.enabled = true`
+    /// - `wip_check.enforce_wip_blocking = true` → `result.wip.enforce_wip_blocking = true`
+    pub(crate) fn from_app_enforcement_flags(app: &ApplicationDefaults) -> PolicySet {
+        let mut ps = PolicySet::default();
+        if app.enable_title_validation {
+            ps.title.required = true;
+        }
+        if app.enable_work_item_validation {
+            ps.work_item.required = true;
+        }
+        if app.pr_size_check.enabled {
+            ps.size.enabled = true;
+        }
+        if app.wip_check.enforce_wip_blocking {
+            ps.wip.enforce_wip_blocking = true;
+        }
+        ps
+    }
+
+    /// Converts a fully-merged [`PolicySet`] into a
+    /// [`CurrentPullRequestValidationConfiguration`].
+    ///
+    /// This replaces the write-back-into-[`RepositoryProvidedConfig`] +
+    /// `to_validation_config` pattern used in [`load_merge_warden_config`].
+    /// Called once per webhook event from [`resolve_pull_request_config`].
+    ///
+    /// # Arguments
+    ///
+    /// * `app_defaults` — needed for fields not covered by [`PolicySet`]
+    ///   (`bot_mention`, and label fields that may be `None` in the policy).
+    pub(crate) fn to_validation_config(
+        &self,
+        app_defaults: &ApplicationDefaults,
+    ) -> CurrentPullRequestValidationConfiguration {
+        CurrentPullRequestValidationConfiguration {
+            enforce_title_convention: self.title.required,
+            title_pattern: self.title.pattern.clone(),
+            invalid_title_label: self.title.label_if_missing.clone(),
+            enforce_work_item_references: self.work_item.required,
+            work_item_reference_pattern: self.work_item.pattern.clone(),
+            missing_work_item_label: self.work_item.label_if_missing.clone(),
+            pr_size_check: self.size.clone(),
+            change_type_labels: Some(self.change_type_labels.clone()),
+            wip_check: self.wip.clone(),
+            pr_state_labels: self.pr_state.clone(),
+            bypass_rules: self.bypass_rules.clone(),
+            issue_propagation: self.issue_propagation.clone(),
+            bot_mention: app_defaults.bot_mention.clone(),
         }
     }
 
@@ -1640,14 +1886,16 @@ impl PolicySet {
     pub fn from_application_defaults(app: &ApplicationDefaults) -> PolicySet {
         PolicySet {
             // Note: `app.enable_title_validation` is intentionally NOT applied here.
-            // It is a post-merge enforcement override applied in `load_merge_warden_config`.
+            // It is a post-merge enforcement override applied via `from_app_enforcement_flags`
+            // in `resolve_pull_request_config`.
             title: PullRequestsTitlePolicyConfig {
                 required: false,
                 pattern: app.default_title_pattern.clone(),
                 label_if_missing: app.default_invalid_title_label.clone(),
             },
             // Note: `app.enable_work_item_validation` is intentionally NOT applied here.
-            // It is a post-merge enforcement override applied in `load_merge_warden_config`.
+            // It is a post-merge enforcement override applied via `from_app_enforcement_flags`
+            // in `resolve_pull_request_config`.
             work_item: WorkItemPolicyConfig {
                 required: false,
                 pattern: app.default_work_item_pattern.clone(),
@@ -1767,7 +2015,7 @@ pub async fn load_merge_warden_config(
                 repository = repo_name,
                 path = path_relative_to_repository_root,
                 config_version = config.schema_version,
-                "Configuration in repository has an unexepected version. Will not be able to load configuration."
+                "Configuration in repository has an unexpected version. Will not be able to load configuration."
             );
 
             // If we can't load the configuration we just pretend it's not there
@@ -1781,21 +2029,7 @@ pub async fn load_merge_warden_config(
         // Build merged policy set: application defaults → repository overrides
         let app_ps = PolicySet::from_application_defaults(app_defaults);
         let repo_ps = PolicySet::from_repository_config(&config);
-        let mut merged_ps = app_ps.merge(&repo_ps);
-
-        // Preserved enforcement overrides — to be removed when OrgPolicy is introduced
-        if app_defaults.enable_title_validation {
-            merged_ps.title.required = true;
-        }
-        if app_defaults.enable_work_item_validation {
-            merged_ps.work_item.required = true;
-        }
-        if app_defaults.pr_size_check.enabled {
-            merged_ps.size.enabled = true;
-        }
-        if app_defaults.wip_check.enforce_wip_blocking {
-            merged_ps.wip.enforce_wip_blocking = true;
-        }
+        let merged_ps = app_ps.merge(&repo_ps);
 
         // Write merged policies back into config for conversion to CPVRC
         config.policies.pull_requests.title_policies = merged_ps.title;
@@ -1805,6 +2039,10 @@ pub async fn load_merge_warden_config(
         config.policies.pull_requests.pr_state_policies = merged_ps.pr_state;
         config.policies.pull_requests.issue_propagation = merged_ps.issue_propagation;
         config.change_type_labels = Some(merged_ps.change_type_labels);
+        // Write bypass_rules back so to_validation_config uses the merged result
+        // rather than re-merging from the raw BypassRulesConfig sub-rules.
+        config.policies.bypass_rules =
+            Some(BypassRulesConfig::from_merged(&merged_ps.bypass_rules));
 
         // End of valid config processing
     }
@@ -1849,6 +2087,256 @@ pub async fn load_merge_warden_config(
     config.bot_mention = app_defaults.bot_mention.clone();
 
     Ok(config)
+}
+
+/// Fetches and parses the org-level policy file.
+///
+/// # Returns
+///
+/// - `Ok(Some(OrgPolicy))` — file exists, parses successfully, schema version is `1`.
+/// - `Ok(None)` — file does not exist or any failure occurred when
+///   `source.fail_if_unreachable` is `false`.
+/// - `Err(ConfigLoadError::OrgPolicyUnavailable)` — fetch or parse error when
+///   `source.fail_if_unreachable` is `true`.
+///
+/// # Arguments
+///
+/// * `source` — coordinates of the org policy file.
+/// * `fetcher` — [`ConfigFetcher`] implementation (typically `GitHubProvider`).
+pub(crate) async fn load_org_policy(
+    source: &OrgPolicySource,
+    fetcher: &dyn ConfigFetcher,
+) -> Result<Option<OrgPolicy>, ConfigLoadError> {
+    let content = match fetcher
+        .fetch_config(&source.owner, &source.repo, &source.path)
+        .await
+    {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            warn!(
+                org_owner = source.owner.as_str(),
+                org_repo = source.repo.as_str(),
+                org_path = source.path.as_str(),
+                "Org policy file not found; using three-tier config"
+            );
+            return Ok(None);
+        }
+        Err(e) => {
+            let msg = format!("Failed to fetch org policy file: {e}");
+            warn!(
+                org_owner = source.owner.as_str(),
+                org_repo = source.repo.as_str(),
+                org_path = source.path.as_str(),
+                error = %e,
+                "Failed to fetch org policy; using three-tier config"
+            );
+            if source.fail_if_unreachable {
+                return Err(ConfigLoadError::OrgPolicyUnavailable(msg));
+            }
+            return Ok(None);
+        }
+    };
+
+    let raw: OrgPolicyRaw = match toml::from_str(&content) {
+        Ok(r) => r,
+        Err(e) => {
+            let msg = format!("Failed to parse org policy TOML: {e}");
+            warn!(
+                org_owner = source.owner.as_str(),
+                org_repo = source.repo.as_str(),
+                org_path = source.path.as_str(),
+                error = %e,
+                "Org policy file has parse errors; using three-tier config"
+            );
+            if source.fail_if_unreachable {
+                return Err(ConfigLoadError::OrgPolicyUnavailable(msg));
+            }
+            return Ok(None);
+        }
+    };
+
+    if raw.schema_version != 1 {
+        let msg = format!(
+            "Unsupported org policy schema version: {}",
+            raw.schema_version
+        );
+        warn!(
+            org_owner = source.owner.as_str(),
+            org_repo = source.repo.as_str(),
+            org_path = source.path.as_str(),
+            schema_version = raw.schema_version,
+            "Org policy file has unsupported schema version; using three-tier config"
+        );
+        if source.fail_if_unreachable {
+            return Err(ConfigLoadError::OrgPolicyUnavailable(msg));
+        }
+        return Ok(None);
+    }
+
+    let policy = OrgPolicy {
+        enforced: PolicySet::from_org_section(&raw.enforced),
+        defaults: PolicySet::from_org_section(&raw.defaults),
+    };
+
+    info!(
+        org_owner = source.owner.as_str(),
+        org_repo = source.repo.as_str(),
+        org_path = source.path.as_str(),
+        "Org policy loaded successfully"
+    );
+
+    Ok(Some(policy))
+}
+
+/// Fetches and parses the repository `.github/merge-warden.toml` without applying
+/// application defaults.
+///
+/// This is the low-level primitive used by [`resolve_pull_request_config`] to obtain
+/// pure repo-configured values for the repo tier of the four-tier merge chain.
+/// Unlike [`load_merge_warden_config`], which blends application defaults into the
+/// returned struct, this function returns exactly what the repository TOML contains.
+///
+/// # Returns
+///
+/// - `Ok(RepositoryProvidedConfig)` — raw parsed config, or
+///   [`RepositoryProvidedConfig::default`] if the file is absent or has an
+///   unsupported schema version.
+/// - `Err(ConfigLoadError::NotFound)` — the config fetcher returned an error.
+/// - `Err(ConfigLoadError::...)` — TOML parse error.
+async fn parse_repo_config(
+    repo_owner: &str,
+    repo_name: &str,
+    path: &str,
+    fetcher: &dyn ConfigFetcher,
+) -> Result<RepositoryProvidedConfig, ConfigLoadError> {
+    let content = match fetcher.fetch_config(repo_owner, repo_name, path).await {
+        Ok(Some(c)) => c,
+        Ok(None) => {
+            debug!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                path = path,
+                "No repo config file found; using empty defaults for repo tier"
+            );
+            return Ok(RepositoryProvidedConfig::default());
+        }
+        Err(e) => {
+            warn!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                path = path,
+                "Failed to find configuration file in repository"
+            );
+            return Err(ConfigLoadError::NotFound(e.to_string()));
+        }
+    };
+
+    let config: RepositoryProvidedConfig = toml::from_str(&content)?;
+    if config.schema_version != 1 {
+        error!(
+            repository_owner = repo_owner,
+            repository = repo_name,
+            path = path,
+            config_version = config.schema_version,
+            "Configuration in repository has an unexpected version. Will not be able to load configuration."
+        );
+        return Ok(RepositoryProvidedConfig::default());
+    }
+
+    Ok(config)
+}
+
+/// Orchestrates the four-tier PR configuration resolution chain.
+///
+/// This is the primary entry point for platform handlers (server, CLI).
+/// It replaces direct calls to [`load_merge_warden_config`].
+///
+/// # Resolution order (highest priority applied last in merge chain)
+///
+/// 1. Application defaults ([`PolicySet::from_application_defaults`])
+/// 2. Org defaults (from [`OrgPolicy::defaults`], if `org_policy_source` is set)
+/// 3. Repository config ([`parse_repo_config`] — raw repo values only)
+/// 4. Org enforced (from [`OrgPolicy::enforced`], if `org_policy_source` is set)
+/// 5. App-level enforcement flags ([`PolicySet::from_app_enforcement_flags`])
+///
+/// # Arguments
+///
+/// * `repo_owner` — GitHub repository owner.
+/// * `repo_name` — GitHub repository name.
+/// * `config_path` — path to the repo policy TOML file
+///   (typically `".github/merge-warden.toml"`).
+/// * `fetcher` — [`ConfigFetcher`] implementation used for both repo config
+///   and org policy fetches.
+/// * `app_defaults` — application-level policy defaults and configuration
+///   pointers (including `org_policy_source`).
+///
+/// # Returns
+///
+/// * `Ok(CurrentPullRequestValidationConfiguration)` — always returned unless
+///   `app_defaults.org_policy_source.fail_if_unreachable = true` and the org
+///   policy cannot be loaded.
+/// * `Err(ConfigLoadError::OrgPolicyUnavailable)` — only when strict mode is
+///   enabled and the org policy is unreachable or unparseable.
+///
+/// # Errors
+///
+/// Repo config load failures (file missing, parse error) are handled internally
+/// by falling back to `PolicySet::default()` for the repo tier, matching the
+/// behaviour previously found in platform handler fallback paths.
+pub async fn resolve_pull_request_config(
+    repo_owner: &str,
+    repo_name: &str,
+    config_path: &str,
+    fetcher: &dyn ConfigFetcher,
+    app_defaults: &ApplicationDefaults,
+) -> Result<CurrentPullRequestValidationConfiguration, ConfigLoadError> {
+    // Fetch repo config and org policy concurrently — both are independent
+    // read-only operations against potentially different remote repositories.
+    let (repo_config_res, org_policy_res) = tokio::join!(
+        parse_repo_config(repo_owner, repo_name, config_path, fetcher),
+        async {
+            match &app_defaults.org_policy_source {
+                None => Ok::<Option<OrgPolicy>, ConfigLoadError>(None),
+                Some(source) => load_org_policy(source, fetcher).await,
+            }
+        }
+    );
+
+    let repo_config = match repo_config_res {
+        Ok(c) => c,
+        Err(e) => {
+            warn!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                error = %e,
+                "Failed to load repo config in resolve_pull_request_config; using empty defaults for repo tier"
+            );
+            // Fall back to an empty repo config; the four-tier chain supplies app and org values.
+            RepositoryProvidedConfig::default()
+        }
+    };
+
+    // Propagate OrgPolicyUnavailable; all other org policy errors are already
+    // handled inside load_org_policy (graceful degradation to three-tier).
+    let org_policy: Option<OrgPolicy> = org_policy_res?;
+
+    // Build policy sets for each tier.
+    let app_defaults_ps = PolicySet::from_application_defaults(app_defaults);
+    let (org_defaults_ps, org_enforced_ps) = match org_policy {
+        Some(ref p) => (p.defaults.clone(), p.enforced.clone()),
+        None => (PolicySet::default(), PolicySet::default()),
+    };
+    let repo_ps = PolicySet::from_repository_config(&repo_config);
+    let app_enforced_ps = PolicySet::from_app_enforcement_flags(app_defaults);
+
+    // Four-tier merge chain.
+    let effective_ps = app_defaults_ps
+        .merge(&org_defaults_ps)
+        .merge(&repo_ps)
+        .merge(&org_enforced_ps)
+        .merge(&app_enforced_ps);
+
+    Ok(effective_ps.to_validation_config(app_defaults))
 }
 
 /// Configuration for change type label detection and management

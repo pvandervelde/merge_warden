@@ -22,6 +22,14 @@ pub enum ConfigLoadError {
     /// TOML parsing error occurred while reading the configuration
     #[error("TOML error: {0}")]
     Toml(#[from] toml::de::Error),
+
+    /// The org policy file could not be loaded or parsed, and
+    /// `OrgPolicySource.fail_if_unreachable` is `true`.
+    ///
+    /// The inner `String` contains a human-readable description of the failure
+    /// (fetch error message or parse error detail).
+    #[error("Org policy unavailable: {0}")]
+    OrgPolicyUnavailable(String),
 }
 
 /// Main error type for Merge Warden operations.
