@@ -830,6 +830,19 @@ pub struct BypassRulesConfig {
 }
 
 impl BypassRulesConfig {
+    /// Creates a [`BypassRulesConfig`] from an already-merged [`BypassRules`].
+    ///
+    /// All three sub-rules are stored as `Some(...)` so that
+    /// [`RepositoryProvidedConfig::to_validation_config`] uses the pre-merged values
+    /// and the server-level-default fallback parameter has no effect.
+    pub(crate) fn from_merged(rules: &BypassRules) -> Self {
+        Self {
+            title_convention: Some(rules.title_convention().clone()),
+            work_items: Some(rules.work_item_convention().clone()),
+            size: Some(rules.size().clone()),
+        }
+    }
+
     /// Returns the per-repo title-convention bypass rule, if configured.
     pub fn title_convention(&self) -> Option<&BypassRule> {
         self.title_convention.as_ref()
@@ -1749,12 +1762,6 @@ impl PolicySet {
                 &self.change_type_labels,
                 &over.change_type_labels,
             ),
-            // TODO: bypass_rules merge result is currently unused — `merged_ps.bypass_rules`
-            // is never written back to `config` in `load_merge_warden_config` because
-            // `to_validation_config` re-runs its own per-sub-rule bypass merge from the
-            // original `config.policies.bypass_rules`.  Remove this note and add the
-            // write-back once the `to_validation_config` bypass path is consolidated
-            // (tracked as follow-up cleanup per docs/spec/interfaces/policy-engine.md §3).
             bypass_rules: BypassRules::merge(&self.bypass_rules, &over.bypass_rules),
         }
     }
@@ -2005,6 +2012,10 @@ pub async fn load_merge_warden_config(
         config.policies.pull_requests.pr_state_policies = merged_ps.pr_state;
         config.policies.pull_requests.issue_propagation = merged_ps.issue_propagation;
         config.change_type_labels = Some(merged_ps.change_type_labels);
+        // Write bypass_rules back so to_validation_config uses the merged result
+        // rather than re-merging from the raw BypassRulesConfig sub-rules.
+        config.policies.bypass_rules =
+            Some(BypassRulesConfig::from_merged(&merged_ps.bypass_rules));
 
         // End of valid config processing
     }
