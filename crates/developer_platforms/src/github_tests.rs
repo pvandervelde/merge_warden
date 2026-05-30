@@ -20,7 +20,7 @@ use wiremock::{
 
 use super::GitHubProvider;
 use crate::errors::Error;
-use crate::{ConfigFetcher, IssueMetadataProvider, PullRequestProvider};
+use crate::{ConfigFetcher, IssueMetadataProvider, PullRequestProvider, RepositoryMetadataProvider};
 
 // ---------------------------------------------------------------------------
 // Test helper: mock authentication provider
@@ -1646,3 +1646,222 @@ async fn test_fetch_config_at_ref_returns_none_when_file_absent() {
         "fetch_config_at_ref must return None (not an error) when the file is absent at the ref"
     );
 }
+
+// ---------------------------------------------------------------------------
+// RepositoryMetadataProvider — get_repository_context
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_get_repository_context_returns_topics_and_properties() {
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/topics"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "names": ["payments", "backend", "rust"]
+        })))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/properties/values"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "property_name": "environment", "value": "production" },
+            { "property_name": "team", "value": "platform" }
+        ])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .get_repository_context("owner", "repo")
+        .await
+        .expect("get_repository_context must succeed");
+
+    assert_eq!(
+        result.topics,
+        vec!["payments", "backend", "rust"],
+        "topics must be populated from the topics endpoint"
+    );
+    assert_eq!(
+        result.custom_properties.get("environment"),
+        Some(&"production".to_string()),
+        "custom property 'environment' must be present"
+    );
+    assert_eq!(
+        result.custom_properties.get("team"),
+        Some(&"platform".to_string()),
+        "custom property 'team' must be present"
+    );
+    assert_eq!(
+        result.custom_properties.len(),
+        2,
+        "exactly two custom properties expected"
+    );
+}
+
+#[tokio::test]
+async fn test_get_repository_context_properties_403_returns_empty_map() {
+    // 403 on the custom properties endpoint indicates a non-Enterprise plan.
+    // The implementation must degrade gracefully to an empty map.
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/topics"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "names": ["open-source"]
+        })))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/properties/values"))
+        .respond_with(ResponseTemplate::new(403).set_body_string("Forbidden"))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .get_repository_context("owner", "repo")
+        .await
+        .expect("get_repository_context must succeed even when properties return 403");
+
+    assert_eq!(result.topics, vec!["open-source"]);
+    assert!(
+        result.custom_properties.is_empty(),
+        "custom_properties must be empty when the API returns 403"
+    );
+}
+
+#[tokio::test]
+async fn test_get_repository_context_properties_404_returns_empty_map() {
+    // 404 on the custom properties endpoint is treated the same as 403.
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/topics"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({
+            "names": []
+        })))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/properties/values"))
+        .respond_with(ResponseTemplate::new(404).set_body_string("Not Found"))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .get_repository_context("owner", "repo")
+        .await
+        .expect("get_repository_context must succeed even when properties return 404");
+
+    assert!(
+        result.topics.is_empty(),
+        "topics must be empty when the endpoint returns an empty names array"
+    );
+    assert!(
+        result.custom_properties.is_empty(),
+        "custom_properties must be empty when the API returns 404"
+    );
+}
+
+#[tokio::test]
+async fn test_get_repository_context_topics_api_error_returns_err() {
+    // A non-200/non-404 HTTP status on the topics endpoint is unexpected and must
+    // surface as an error rather than silent degradation.
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/topics"))
+        .respond_with(ResponseTemplate::new(500).set_body_string("Internal Server Error"))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/properties/values"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider.get_repository_context("owner", "repo").await;
+
+    assert!(
+        result.is_err(),
+        "get_repository_context must return Err when the topics endpoint returns 500"
+    );
+}
+
+#[tokio::test]
+async fn test_get_repository_context_empty_topics_and_empty_properties() {
+    // Both APIs return empty results — valid steady-state for a plain repo.
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/topics"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "names": [] })))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/properties/values"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .get_repository_context("owner", "repo")
+        .await
+        .expect("get_repository_context must succeed with empty results");
+
+    assert!(result.topics.is_empty(), "topics must be empty");
+    assert!(
+        result.custom_properties.is_empty(),
+        "custom_properties must be empty"
+    );
+}
+
+#[tokio::test]
+async fn test_get_repository_context_property_with_null_value_excluded() {
+    // Properties whose "value" field is null should be excluded from the map
+    // (the implementation uses unwrap_or("") so they become empty string — verify that).
+    let server = MockServer::start().await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/topics"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!({ "names": [] })))
+        .mount(&server)
+        .await;
+
+    Mock::given(method("GET"))
+        .and(path("/repos/owner/repo/properties/values"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            { "property_name": "tier", "value": null },
+            { "property_name": "env", "value": "staging" }
+        ])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .get_repository_context("owner", "repo")
+        .await
+        .expect("get_repository_context must succeed");
+
+    // "tier" has a null value — implementation maps it to empty string via unwrap_or("").
+    assert_eq!(
+        result.custom_properties.get("tier"),
+        Some(&"".to_string()),
+        "null value must be stored as empty string"
+    );
+    assert_eq!(
+        result.custom_properties.get("env"),
+        Some(&"staging".to_string()),
+        "env property must be present with correct value"
+    );
+}
+

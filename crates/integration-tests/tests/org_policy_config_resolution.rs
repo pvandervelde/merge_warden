@@ -20,7 +20,10 @@ use async_trait::async_trait;
 use merge_warden_core::config::{
     resolve_pull_request_config, ApplicationDefaults, OrgPolicySource,
 };
-use merge_warden_developer_platforms::{errors::Error as PlatformError, ConfigFetcher};
+use merge_warden_developer_platforms::{
+    errors::Error as PlatformError, models::RepositoryContext, ConfigFetcher,
+    RepositoryMetadataProvider,
+};
 
 // ---------------------------------------------------------------------------
 // Mock ConfigFetcher implementations
@@ -534,5 +537,424 @@ async fn sample_org_policy_toml_parses_successfully() {
         result.is_ok(),
         "Sample org policy TOML must resolve without error, got: {:?}",
         result.err()
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Mock RepositoryMetadataProvider for conditional policy integration tests
+// ---------------------------------------------------------------------------
+
+/// Returns a fixed [`RepositoryContext`] for all calls.
+struct FixedContextProvider {
+    context: RepositoryContext,
+}
+
+impl std::fmt::Debug for FixedContextProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FixedContextProvider").finish()
+    }
+}
+
+#[async_trait]
+impl RepositoryMetadataProvider for FixedContextProvider {
+    async fn get_repository_context(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+    ) -> Result<RepositoryContext, PlatformError> {
+        Ok(self.context.clone())
+    }
+}
+
+/// Always returns an error from `get_repository_context`.
+struct FailingContextProvider;
+
+impl std::fmt::Debug for FailingContextProvider {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("FailingContextProvider").finish()
+    }
+}
+
+#[async_trait]
+impl RepositoryMetadataProvider for FailingContextProvider {
+    async fn get_repository_context(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+    ) -> Result<RepositoryContext, PlatformError> {
+        Err(PlatformError::ApiError())
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Conditional policy integration tests
+// ---------------------------------------------------------------------------
+
+/// A repo whose topics match a conditional policy must have that policy's
+/// `enforced` settings applied after the repo tier.
+#[tokio::test]
+async fn conditional_enforced_policy_applied_when_topic_matches() {
+    let org_toml = r#"
+schemaVersion = 1
+
+[[conditional_policies]]
+[conditional_policies.condition]
+has_any_topic = ["payments"]
+
+[conditional_policies.enforced.policies.pullRequests.prTitle]
+required = true
+pattern = "^pay:"
+"#;
+    let repo_toml = r#"
+schemaVersion = 1
+
+[policies.pullRequests.prTitle]
+required = false
+pattern = "^repo:"
+"#;
+
+    let fetcher = PathRoutingFetcher::new(vec![
+        ("org-policy.toml", org_toml),
+        ("repo.toml", repo_toml),
+    ]);
+
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(org_source(false));
+
+    let provider = FixedContextProvider {
+        context: RepositoryContext {
+            topics: vec!["payments".to_string()],
+            custom_properties: std::collections::HashMap::new(),
+        },
+    };
+
+    let cfg = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo.toml",
+        &fetcher,
+        &app,
+        Some(&provider),
+    )
+    .await
+    .expect("should succeed");
+
+    assert!(
+        cfg.enforce_title_convention,
+        "conditional enforced must make title required"
+    );
+    assert_eq!(
+        cfg.title_pattern, "^pay:",
+        "conditional enforced pattern must override repo pattern"
+    );
+}
+
+/// A repo whose topics do NOT match the condition must be unaffected by that
+/// conditional policy block.
+#[tokio::test]
+async fn conditional_policy_not_applied_when_topic_does_not_match() {
+    let org_toml = r#"
+schemaVersion = 1
+
+[[conditional_policies]]
+[conditional_policies.condition]
+has_any_topic = ["payments"]
+
+[conditional_policies.enforced.policies.pullRequests.prTitle]
+required = true
+pattern = "^pay:"
+"#;
+    let repo_toml = r#"
+schemaVersion = 1
+
+[policies.pullRequests.prTitle]
+required = false
+pattern = "^repo:"
+"#;
+
+    let fetcher = PathRoutingFetcher::new(vec![
+        ("org-policy.toml", org_toml),
+        ("repo.toml", repo_toml),
+    ]);
+
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(org_source(false));
+
+    // Repo has "backend" topic but NOT "payments" — condition must not match.
+    let provider = FixedContextProvider {
+        context: RepositoryContext {
+            topics: vec!["backend".to_string()],
+            custom_properties: std::collections::HashMap::new(),
+        },
+    };
+
+    let cfg = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo.toml",
+        &fetcher,
+        &app,
+        Some(&provider),
+    )
+    .await
+    .expect("should succeed");
+
+    assert!(
+        !cfg.enforce_title_convention,
+        "conditional enforced must NOT apply when topic does not match"
+    );
+    assert_eq!(
+        cfg.title_pattern, "^repo:",
+        "repo pattern must be preserved when condition does not match"
+    );
+}
+
+/// Conditional defaults can be overridden by the repo tier.
+#[tokio::test]
+async fn repo_config_overrides_conditional_defaults() {
+    let org_toml = r#"
+schemaVersion = 1
+
+[[conditional_policies]]
+[conditional_policies.condition]
+has_any_topic = ["payments"]
+
+[conditional_policies.defaults.policies.pullRequests.prTitle]
+required = true
+pattern = "^cond-default:"
+"#;
+    let repo_toml = r#"
+schemaVersion = 1
+
+[policies.pullRequests.prTitle]
+required = true
+pattern = "^repo-override:"
+"#;
+
+    let fetcher = PathRoutingFetcher::new(vec![
+        ("org-policy.toml", org_toml),
+        ("repo.toml", repo_toml),
+    ]);
+
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(org_source(false));
+
+    let provider = FixedContextProvider {
+        context: RepositoryContext {
+            topics: vec!["payments".to_string()],
+            custom_properties: std::collections::HashMap::new(),
+        },
+    };
+
+    let cfg = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo.toml",
+        &fetcher,
+        &app,
+        Some(&provider),
+    )
+    .await
+    .expect("should succeed");
+
+    assert_eq!(
+        cfg.title_pattern, "^repo-override:",
+        "repo-tier pattern must override conditional default"
+    );
+}
+
+/// When no `metadata_provider` is supplied, all conditional policy blocks are
+/// skipped regardless of their conditions.
+#[tokio::test]
+async fn conditional_policies_skipped_when_no_metadata_provider() {
+    let org_toml = r#"
+schemaVersion = 1
+
+[[conditional_policies]]
+[conditional_policies.condition]
+has_any_topic = ["payments"]
+
+[conditional_policies.enforced.policies.pullRequests.prTitle]
+required = true
+pattern = "^pay:"
+"#;
+    let repo_toml = r#"
+schemaVersion = 1
+
+[policies.pullRequests.prTitle]
+required = false
+"#;
+
+    let fetcher = PathRoutingFetcher::new(vec![
+        ("org-policy.toml", org_toml),
+        ("repo.toml", repo_toml),
+    ]);
+
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(org_source(false));
+
+    // No metadata_provider — conditional block must be skipped.
+    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app, None)
+        .await
+        .expect("should succeed");
+
+    assert!(
+        !cfg.enforce_title_convention,
+        "conditional enforced must be skipped when no metadata_provider is supplied"
+    );
+}
+
+/// A metadata provider failure must degrade gracefully: the conditional block is
+/// skipped and the non-conditional merge chain proceeds normally.
+#[tokio::test]
+async fn conditional_policies_skipped_when_metadata_provider_fails() {
+    let org_toml = r#"
+schemaVersion = 1
+
+[[conditional_policies]]
+[conditional_policies.condition]
+has_any_topic = ["payments"]
+
+[conditional_policies.enforced.policies.pullRequests.prTitle]
+required = true
+pattern = "^pay:"
+"#;
+    let repo_toml = r#"
+schemaVersion = 1
+
+[policies.pullRequests.prTitle]
+required = false
+"#;
+
+    let fetcher = PathRoutingFetcher::new(vec![
+        ("org-policy.toml", org_toml),
+        ("repo.toml", repo_toml),
+    ]);
+
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(org_source(false));
+
+    // Provider always fails — must not propagate the error.
+    let cfg = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo.toml",
+        &fetcher,
+        &app,
+        Some(&FailingContextProvider),
+    )
+    .await
+    .expect("metadata provider failure must degrade gracefully");
+
+    assert!(
+        !cfg.enforce_title_convention,
+        "conditional enforced must be skipped when metadata provider fails"
+    );
+}
+
+/// A condition using `has_custom_property` must match only when the repository's
+/// custom properties contain the required key-value pair.
+#[tokio::test]
+async fn conditional_policy_applied_when_custom_property_matches() {
+    let org_toml = r#"
+schemaVersion = 1
+
+[[conditional_policies]]
+[conditional_policies.condition]
+[conditional_policies.condition.has_custom_property]
+tier = "enterprise"
+
+[conditional_policies.enforced.policies.pullRequests.workItem]
+required = true
+"#;
+    let repo_toml = r#"
+schemaVersion = 1
+"#;
+
+    let fetcher = PathRoutingFetcher::new(vec![
+        ("org-policy.toml", org_toml),
+        ("repo.toml", repo_toml),
+    ]);
+
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(org_source(false));
+
+    let provider = FixedContextProvider {
+        context: RepositoryContext {
+            topics: vec![],
+            custom_properties: [("tier".to_string(), "enterprise".to_string())]
+                .into_iter()
+                .collect(),
+        },
+    };
+
+    let cfg = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo.toml",
+        &fetcher,
+        &app,
+        Some(&provider),
+    )
+    .await
+    .expect("should succeed");
+
+    assert!(
+        cfg.enforce_work_item_references,
+        "work_item must be required when custom property condition matches"
+    );
+}
+
+/// Multiple matching conditional policy blocks must be merged in declaration order.
+#[tokio::test]
+async fn multiple_matching_conditional_policies_merged_in_declaration_order() {
+    let org_toml = r#"
+schemaVersion = 1
+
+[[conditional_policies]]
+[conditional_policies.condition]
+has_any_topic = ["payments"]
+
+[conditional_policies.defaults.policies.pullRequests.prTitle]
+required = true
+pattern = "^first:"
+
+[[conditional_policies]]
+[conditional_policies.condition]
+has_any_topic = ["payments"]
+
+[conditional_policies.defaults.policies.pullRequests.prTitle]
+required = true
+pattern = "^second:"
+"#;
+
+    let fetcher = PathRoutingFetcher::new(vec![("org-policy.toml", org_toml)]);
+
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(org_source(false));
+
+    let provider = FixedContextProvider {
+        context: RepositoryContext {
+            topics: vec!["payments".to_string()],
+            custom_properties: std::collections::HashMap::new(),
+        },
+    };
+
+    let cfg = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo.toml",
+        &fetcher,
+        &app,
+        Some(&provider),
+    )
+    .await
+    .expect("should succeed");
+
+    assert!(cfg.enforce_title_convention);
+    // Second block's non-default pattern wins over first (later merge wins for pattern).
+    assert_eq!(
+        cfg.title_pattern, "^second:",
+        "second matching block pattern must override first in declaration order"
     );
 }
