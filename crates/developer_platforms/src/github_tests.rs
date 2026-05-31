@@ -1826,9 +1826,9 @@ async fn test_get_repository_context_empty_topics_and_empty_properties() {
 }
 
 #[tokio::test]
-async fn test_get_repository_context_property_with_null_value_excluded() {
-    // Properties whose "value" field is null should be excluded from the map
-    // (the implementation uses unwrap_or("") so they become empty string — verify that).
+async fn test_get_repository_context_property_null_value_stored_as_empty_string() {
+    // Properties whose "value" field is null are stored as empty string via unwrap_or("").
+    // They are NOT omitted from the map — a condition matching `{"tier": ""}` would still match.
     let server = MockServer::start().await;
 
     Mock::given(method("GET"))
@@ -1852,7 +1852,7 @@ async fn test_get_repository_context_property_with_null_value_excluded() {
         .await
         .expect("get_repository_context must succeed");
 
-    // "tier" has a null value — implementation maps it to empty string via unwrap_or("").
+    // "tier" has a null value — stored as empty string, key is present in the map.
     assert_eq!(
         result.custom_properties.get("tier"),
         Some(&"".to_string()),

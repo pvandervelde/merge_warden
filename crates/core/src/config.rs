@@ -2463,7 +2463,7 @@ async fn parse_repo_config(
 /// * `metadata_provider` — optional provider for repository topics and custom
 ///   properties. Required for conditional org policy evaluation. When `None`,
 ///   any `[[conditional_policies]]` blocks in the org policy are skipped and
-///   a `debug!` message is emitted.
+///   a `warn!` is emitted.
 ///
 /// # Returns
 ///
@@ -2564,7 +2564,7 @@ pub async fn resolve_pull_request_config(
                     }
                 }
                 None => {
-                    debug!(
+                    warn!(
                         repository_owner = repo_owner,
                         repository = repo_name,
                         conditional_policy_count = op.conditional_policies.len(),

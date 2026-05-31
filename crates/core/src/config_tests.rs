@@ -5881,6 +5881,23 @@ fn test_policy_condition_topic_no_match() {
 }
 
 #[test]
+fn test_policy_condition_topic_no_match_empty_topics() {
+    // Spec §7 required scenario: has_any_topic = ["payments"], topics are empty → false.
+    let cond = PolicyCondition {
+        has_any_topic: vec!["payments".to_string()],
+        has_custom_property: HashMap::new(),
+    };
+    let ctx = merge_warden_developer_platforms::models::RepositoryContext {
+        topics: vec![],
+        custom_properties: HashMap::new(),
+    };
+    assert!(
+        !cond.matches(&ctx),
+        "condition must not match when the repository has no topics"
+    );
+}
+
+#[test]
 fn test_policy_condition_topic_or_semantics() {
     // Any one of the listed topics is sufficient (OR semantics).
     let cond = PolicyCondition {

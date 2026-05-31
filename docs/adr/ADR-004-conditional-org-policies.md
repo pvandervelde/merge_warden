@@ -133,8 +133,10 @@ When `GET /repos/{owner}/{repo}/properties/values` returns 403 or 404:
 
 When the topics endpoint returns an error:
 
-- `topics` is set to an empty `Vec<String>`.
-- The error is logged at `warn!` (topics are supported on all plans; a failure is unexpected).
+- `get_repository_context` returns `Err` to the caller.
+- `resolve_pull_request_config` catches this error, logs a `warn!` (topics are supported
+  on all plans; a failure is unexpected), and skips all conditional policy evaluation for
+  that PR (same degradation path as when `metadata_provider` is absent).
 
 ## Consequences
 
