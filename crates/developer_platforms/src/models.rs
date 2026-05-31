@@ -495,5 +495,9 @@ pub struct RepositoryContext {
     ///
     /// Maps property name to its string value. Empty on non-enterprise plans
     /// or when the app lacks the `org_custom_property: read` permission.
+    ///
+    /// **Null values**: properties whose API value is `null` are stored as an empty
+    /// string (`""`). A policy condition requiring `{"key": ""}` will therefore match
+    /// a property that has a `null` value on the platform side.
     pub custom_properties: HashMap<String, String>,
 }

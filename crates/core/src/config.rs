@@ -516,13 +516,13 @@ pub(crate) struct PolicyConditionRaw {
     /// Repository topics that satisfy this condition (OR match).
     ///
     /// Comparison is case-insensitive.
-    #[serde(default, rename = "has_any_topic")]
+    #[serde(default)]
     pub has_any_topic: Vec<String>,
 
     /// Custom property key-value pairs required for this condition (AND match).
     ///
     /// All entries must be present and equal (case-sensitive value comparison).
-    #[serde(default, rename = "has_custom_property")]
+    #[serde(default)]
     pub has_custom_property: HashMap<String, String>,
 }
 
@@ -575,14 +575,14 @@ pub struct PolicyCondition {
     /// Repository must have at least one of these topics (case-insensitive, OR semantics).
     ///
     /// An empty list means "any topics" — i.e., this criterion is considered satisfied.
-    #[serde(default, rename = "has_any_topic")]
+    #[serde(default)]
     pub has_any_topic: Vec<String>,
 
     /// Repository must have ALL of these custom properties with the specified values
     /// (AND semantics, case-sensitive value comparison).
     ///
     /// An empty map means "any properties" — i.e., this criterion is considered satisfied.
-    #[serde(default, rename = "has_custom_property")]
+    #[serde(default)]
     pub has_custom_property: HashMap<String, String>,
 }
 
@@ -2368,6 +2368,18 @@ pub(crate) async fn load_org_policy(
             })
             .collect(),
     };
+
+    for (idx, cp) in policy.conditional_policies.iter().enumerate() {
+        if cp.condition == PolicyCondition::default() {
+            warn!(
+                org_owner = source.owner.as_str(),
+                org_repo = source.repo.as_str(),
+                org_path = source.path.as_str(),
+                conditional_policy_index = idx,
+                "Conditional policy block has an empty condition and will match every repository; add has_any_topic or has_custom_property criteria to restrict its scope"
+            );
+        }
+    }
 
     info!(
         org_owner = source.owner.as_str(),

@@ -1194,12 +1194,14 @@ impl RepositoryMetadataProvider for GitHubProvider {
     /// Makes two independent API calls:
     /// - `GET /repos/{owner}/{repo}/topics` for repository topics (all plans).
     /// - `GET /repos/{owner}/{repo}/properties/values` for custom properties
-    ///   (GitHub Enterprise only; returns empty map on 403/404).
+    ///   (GitHub Enterprise only; 403/404 degrade gracefully to an empty map;
+    ///   other non-2xx and transport errors are logged at `warn!` and also
+    ///   degrade to an empty map rather than failing the request).
     ///
     /// # Errors
     ///
     /// Returns an error only when the topics fetch fails. Custom property failures
-    /// (403/404) degrade gracefully to an empty map.
+    /// degrade gracefully to an empty map.
     #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name))]
     async fn get_repository_context(
         &self,
@@ -1278,14 +1280,23 @@ impl RepositoryMetadataProvider for GitHubProvider {
             }
             Ok(resp) => {
                 let status = resp.status().as_u16();
-                // 403 = not enterprise / missing permission; 404 = not found.
-                // Both are expected on non-enterprise plans.
-                debug!(
-                    owner = repo_owner,
-                    repo = repo_name,
-                    status,
-                    "Custom properties endpoint returned non-success (expected on non-enterprise plans); using empty map"
-                );
+                if status == 403 || status == 404 {
+                    // 403 = not enterprise / missing permission; 404 = not found.
+                    // Both are expected on non-enterprise plans.
+                    debug!(
+                        owner = repo_owner,
+                        repo = repo_name,
+                        status,
+                        "Custom properties endpoint returned 403/404 (expected on non-enterprise plans); using empty map"
+                    );
+                } else {
+                    warn!(
+                        owner = repo_owner,
+                        repo = repo_name,
+                        status,
+                        "Custom properties endpoint returned unexpected non-success status; using empty map"
+                    );
+                }
                 std::collections::HashMap::new()
             }
             Err(
@@ -1299,7 +1310,7 @@ impl RepositoryMetadataProvider for GitHubProvider {
                 std::collections::HashMap::new()
             }
             Err(e) => {
-                debug!(
+                warn!(
                     owner = repo_owner,
                     repo = repo_name,
                     error = %e,

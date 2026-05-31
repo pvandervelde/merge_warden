@@ -787,15 +787,15 @@ pub trait IssueMetadataProvider: std::fmt::Debug + Sync + Send {
 
 /// Fetches repository-level metadata required for conditional policy evaluation.
 ///
-/// Implemented by [`github::GitHubProvider`] using two independent GitHub API calls:
-/// - `GET /repos/{owner}/{repo}/topics` — available on all GitHub plans.
-/// - `GET /repos/{owner}/{repo}/properties/values` — GitHub Enterprise only.
+/// Implementations must return the repository's topics and any available custom
+/// properties.  Custom properties may not be available on all platforms or plans;
+/// in that case the implementation should return an empty map rather than an error.
 ///
 /// # Graceful degradation
 ///
-/// - Topics API errors cause `get_repository_context` to return `Err`.
-/// - Custom properties API 403/404 is treated as an empty property map and logged
-///   at `debug!` — this is the expected response on non-enterprise GitHub plans.
+/// - Topics fetch failures should cause `get_repository_context` to return `Err`.
+/// - Custom properties unavailability should return `Ok(RepositoryContext)` with
+///   an empty `custom_properties` map rather than propagating the error.
 ///
 /// # Examples
 ///
@@ -826,11 +826,6 @@ pub trait IssueMetadataProvider: std::fmt::Debug + Sync + Send {
 pub trait RepositoryMetadataProvider: std::fmt::Debug + Sync + Send {
     /// Fetches topics and custom properties for the specified repository.
     ///
-    /// Makes two API calls:
-    /// 1. `GET /repos/{owner}/{repo}/topics` — topics available on all plans.
-    /// 2. `GET /repos/{owner}/{repo}/properties/values` — custom properties,
-    ///    enterprise only (returns empty map on 403/404).
-    ///
     /// # Arguments
     ///
     /// * `repo_owner` — Repository owner (org or user).
@@ -838,7 +833,8 @@ pub trait RepositoryMetadataProvider: std::fmt::Debug + Sync + Send {
     ///
     /// # Returns
     ///
-    /// - `Ok(RepositoryContext)` — topics fetched (custom properties may be empty).
+    /// - `Ok(RepositoryContext)` — topics fetched successfully; `custom_properties`
+    ///   may be empty when not available on the platform or plan.
     /// - `Err(Error)` — topics fetch failed.
     async fn get_repository_context(
         &self,
