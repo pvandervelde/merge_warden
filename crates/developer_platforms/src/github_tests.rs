@@ -20,7 +20,9 @@ use wiremock::{
 
 use super::GitHubProvider;
 use crate::errors::Error;
-use crate::{ConfigFetcher, IssueMetadataProvider, PullRequestProvider, RepositoryMetadataProvider};
+use crate::{
+    ConfigFetcher, IssueMetadataProvider, PullRequestProvider, RepositoryMetadataProvider,
+};
 
 // ---------------------------------------------------------------------------
 // Test helper: mock authentication provider
@@ -1864,4 +1866,3 @@ async fn test_get_repository_context_property_null_value_stored_as_empty_string(
         "env property must be present with correct value"
     );
 }
-
