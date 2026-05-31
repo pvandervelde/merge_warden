@@ -76,3 +76,52 @@ add_comment = true
 # security       = "security"
 # hotfix         = "hotfix"
 # tech_debt      = "tech-debt"
+
+# ---------------------------------------------------------------------------
+# [[conditional_policies]] — policies applied only when a condition matches.
+#
+# Each `[[conditional_policies]]` block is evaluated at runtime against the
+# target repository's topics and custom properties.  Only blocks whose
+# condition matches are merged into the policy chain for that PR.
+#
+# Merge chain position:
+#   app_defaults → org_defaults → conditional_defaults* → repo →
+#   conditional_enforced* → org_enforced → app_enforced
+#
+# Condition semantics:
+#   • has_any_topic:        OR match (any one topic is sufficient), case-insensitive.
+#   • has_custom_property:  AND match (all key-value pairs must be present, values case-sensitive).
+#   • Both criteria combined with AND (both must be satisfied simultaneously).
+#   • An empty condition always matches every repository.
+#
+# Custom properties require a GitHub Enterprise plan and the
+# `org_custom_property: read` permission on the GitHub App.  On non-enterprise
+# GitHub plans the properties API returns 403/404 and is treated as an empty
+# map — topic-based conditions continue to work on all plans.
+#
+# Example: apply stricter title requirements to repositories tagged "payments".
+# ---------------------------------------------------------------------------
+
+# [[conditional_policies]]
+# [conditional_policies.condition]
+# # Repositories with this topic will have the policy below applied.
+# has_any_topic = ["payments", "finance"]
+#
+# [conditional_policies.enforced.policies.pullRequests.prTitle]
+# # All payments/finance repos must use the PAY- prefix (cannot be overridden).
+# required = true
+# pattern = "^PAY-[0-9]+: .+"
+# label_if_missing = "pr-issue: invalid-title-format"
+
+# Example: use custom properties to target repositories owned by a specific team.
+# [[conditional_policies]]
+# [conditional_policies.condition]
+# [conditional_policies.condition.has_custom_property]
+# team = "platform"
+# env  = "prod"
+#
+# [conditional_policies.defaults.policies.pullRequests.workItem]
+# # Platform/prod repos get a specific work-item pattern as an org default
+# # (overridable by each repo's own config).
+# required = true
+# pattern = "PLAT-[0-9]+"

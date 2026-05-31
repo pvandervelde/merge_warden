@@ -56,7 +56,9 @@ pub mod models;
 mod lib_tests;
 
 use errors::Error;
-use models::{Comment, IssueMetadata, Label, PullRequest, PullRequestFile, Review};
+use models::{
+    Comment, IssueMetadata, Label, PullRequest, PullRequestFile, RepositoryContext, Review,
+};
 
 /// Trait to fetch configuration files from remote repositories.
 #[async_trait]
@@ -781,4 +783,62 @@ pub trait IssueMetadataProvider: std::fmt::Debug + Sync + Send {
         project_number: u64,
         project_owner_login: &str,
     ) -> Result<(), Error>;
+}
+
+/// Fetches repository-level metadata required for conditional policy evaluation.
+///
+/// Implementations must return the repository's topics and any available custom
+/// properties.  Custom properties may not be available on all platforms or plans;
+/// in that case the implementation should return an empty map rather than an error.
+///
+/// # Graceful degradation
+///
+/// - Topics fetch failures should cause `get_repository_context` to return `Err`.
+/// - Custom properties unavailability should return `Ok(RepositoryContext)` with
+///   an empty `custom_properties` map rather than propagating the error.
+///
+/// # Examples
+///
+/// ```rust,no_run
+/// use merge_warden_developer_platforms::{RepositoryMetadataProvider, errors::Error};
+/// use merge_warden_developer_platforms::models::RepositoryContext;
+/// use std::collections::HashMap;
+/// use async_trait::async_trait;
+///
+/// #[derive(Debug)]
+/// struct MyProvider;
+///
+/// #[async_trait]
+/// impl RepositoryMetadataProvider for MyProvider {
+///     async fn get_repository_context(
+///         &self,
+///         _repo_owner: &str,
+///         _repo_name: &str,
+///     ) -> Result<RepositoryContext, Error> {
+///         Ok(RepositoryContext {
+///             topics: vec!["payments".to_string()],
+///             custom_properties: HashMap::new(),
+///         })
+///     }
+/// }
+/// ```
+#[async_trait]
+pub trait RepositoryMetadataProvider: std::fmt::Debug + Sync + Send {
+    /// Fetches topics and custom properties for the specified repository.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner` — Repository owner (org or user).
+    /// * `repo_name` — Repository name.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(RepositoryContext)` — topics fetched successfully; `custom_properties`
+    ///   may be empty when not available on the platform or plan.
+    /// - `Err(Error)` — topics fetch failed.
+    async fn get_repository_context(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+    ) -> Result<RepositoryContext, Error>;
 }

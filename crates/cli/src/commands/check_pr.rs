@@ -180,6 +180,7 @@ impl WebhookHandler for MergeWardenWebhookHandler {
             merge_warden_config_path,
             &provider,
             &self.config.policies,
+            Some(&provider),
         )
         .await
         {

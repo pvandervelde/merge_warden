@@ -6,6 +6,8 @@
 //! pull requests, comments, and labels. They are designed to be serializable and
 //! deserializable to facilitate integration with Git provider APIs.
 
+use std::collections::HashMap;
+
 use serde::{Deserialize, Serialize};
 
 #[cfg(test)]
@@ -457,4 +459,45 @@ pub struct User {
 
     /// The username/login of the user
     pub login: String,
+}
+
+/// Repository metadata used to evaluate conditional org policy conditions.
+///
+/// Populated by [`merge_warden_developer_platforms::RepositoryMetadataProvider::get_repository_context`]
+/// before conditional policy evaluation in `resolve_pull_request_config`.
+///
+/// # Enterprise note
+///
+/// `custom_properties` is empty on non-enterprise GitHub plans because the
+/// custom properties API returns 403/404 for non-enterprise organisations.
+/// All topic-based conditions continue to work on all plans.
+///
+/// # Examples
+///
+/// ```
+/// use std::collections::HashMap;
+/// use merge_warden_developer_platforms::models::RepositoryContext;
+///
+/// let ctx = RepositoryContext {
+///     topics: vec!["payments".to_string(), "backend".to_string()],
+///     custom_properties: HashMap::new(),
+/// };
+/// assert!(ctx.topics.contains(&"payments".to_string()));
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RepositoryContext {
+    /// Repository topics as set in GitHub repository settings.
+    ///
+    /// All topic strings use GitHub's canonical lowercase representation.
+    pub topics: Vec<String>,
+
+    /// Repository-level custom properties (GitHub Enterprise only).
+    ///
+    /// Maps property name to its string value. Empty on non-enterprise plans
+    /// or when the app lacks the `org_custom_property: read` permission.
+    ///
+    /// **Null values**: properties whose API value is `null` are stored as an empty
+    /// string (`""`). A policy condition requiring `{"key": ""}` will therefore match
+    /// a property that has a `null` value on the platform side.
+    pub custom_properties: HashMap<String, String>,
 }

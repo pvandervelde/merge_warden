@@ -11,9 +11,9 @@ use crate::{
     errors::Error,
     models::{
         Comment, IssueMetadata, IssueMilestone, IssueProject, Label, PullRequest, PullRequestFile,
-        Review, User,
+        RepositoryContext, Review, User,
     },
-    ConfigFetcher, IssueMetadataProvider, PullRequestProvider,
+    ConfigFetcher, IssueMetadataProvider, PullRequestProvider, RepositoryMetadataProvider,
 };
 
 #[cfg(test)]
@@ -1184,5 +1184,153 @@ impl IssueMetadataProvider for GitHubProvider {
                 )))
             }
         }
+    }
+}
+
+#[async_trait]
+impl RepositoryMetadataProvider for GitHubProvider {
+    /// Fetches topics and custom properties for a repository.
+    ///
+    /// Makes two independent API calls:
+    /// - `GET /repos/{owner}/{repo}/topics` for repository topics (all plans).
+    /// - `GET /repos/{owner}/{repo}/properties/values` for custom properties
+    ///   (GitHub Enterprise only; 403/404 degrade gracefully to an empty map;
+    ///   other non-2xx and transport errors are logged at `warn!` and also
+    ///   degrade to an empty map rather than failing the request).
+    ///
+    /// # Errors
+    ///
+    /// Returns an error only when the topics fetch fails. Custom property failures
+    /// degrade gracefully to an empty map.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name))]
+    async fn get_repository_context(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+    ) -> Result<RepositoryContext, Error> {
+        let topics_path = format!("/repos/{}/{}/topics", repo_owner, repo_name);
+        let props_path = format!("/repos/{}/{}/properties/values", repo_owner, repo_name);
+
+        // Fetch topics and custom properties concurrently.
+        let (topics_result, props_result) =
+            tokio::join!(self.client.get(&topics_path), self.client.get(&props_path));
+
+        // Topics are supported on all plans — any failure here is unexpected.
+        let topics: Vec<String> = match topics_result {
+            Ok(resp) if resp.status().is_success() => {
+                let json: serde_json::Value =
+                    resp.json().await.map_err(|_| Error::InvalidResponse)?;
+                json["names"]
+                    .as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str())
+                            .map(str::to_string)
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            }
+            Ok(resp) => {
+                let status = resp.status();
+                error!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    status = status.as_u16(),
+                    "Unexpected status fetching repository topics"
+                );
+                return Err(Error::InvalidResponse);
+            }
+            Err(e) => {
+                error!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    error = %e,
+                    "Failed to fetch repository topics"
+                );
+                return Err(map_api_error(e));
+            }
+        };
+
+        // Custom properties: enterprise only. 403/404 degrade gracefully.
+        let custom_properties = match props_result {
+            Ok(resp) if resp.status().is_success() => {
+                let json: serde_json::Value = match resp.json().await {
+                    Ok(v) => v,
+                    Err(_) => {
+                        debug!(
+                            owner = repo_owner,
+                            repo = repo_name,
+                            "Failed to parse custom properties response; returning empty map"
+                        );
+                        serde_json::Value::Array(vec![])
+                    }
+                };
+                // The API returns an array of { property_name, value } objects.
+                json.as_array()
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|item| {
+                                let name = item["property_name"].as_str()?.to_string();
+                                let value = item["value"].as_str().unwrap_or("").to_string();
+                                Some((name, value))
+                            })
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            }
+            Ok(resp) => {
+                let status = resp.status().as_u16();
+                if status == 403 || status == 404 {
+                    // 403 = not enterprise / missing permission; 404 = not found.
+                    // Both are expected on non-enterprise plans.
+                    debug!(
+                        owner = repo_owner,
+                        repo = repo_name,
+                        status,
+                        "Custom properties endpoint returned 403/404 (expected on non-enterprise plans); using empty map"
+                    );
+                } else {
+                    warn!(
+                        owner = repo_owner,
+                        repo = repo_name,
+                        status,
+                        "Custom properties endpoint returned unexpected non-success status; using empty map"
+                    );
+                }
+                std::collections::HashMap::new()
+            }
+            Err(
+                ApiError::NotFound | ApiError::AuthorizationFailed | ApiError::AuthenticationFailed,
+            ) => {
+                debug!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    "Custom properties not available (not found or permission denied); using empty map"
+                );
+                std::collections::HashMap::new()
+            }
+            Err(e) => {
+                warn!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    error = %e,
+                    "Failed to fetch custom properties; using empty map"
+                );
+                std::collections::HashMap::new()
+            }
+        };
+
+        debug!(
+            owner = repo_owner,
+            repo = repo_name,
+            topic_count = topics.len(),
+            custom_property_count = custom_properties.len(),
+            "Fetched repository context"
+        );
+
+        Ok(RepositoryContext {
+            topics,
+            custom_properties,
+        })
     }
 }

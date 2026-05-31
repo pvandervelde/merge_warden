@@ -236,6 +236,7 @@ impl MergeWardenWebhookHandler {
             merge_warden_config_path,
             &provider,
             &self.policies,
+            Some(&provider),
         )
         .await
         {
