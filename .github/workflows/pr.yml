@@ -9,12 +9,13 @@ name: PR Pipeline
 #   workflow_dispatch allows manual runs against any branch.
 #
 # Required secrets:
-#   CODECOV_TOKEN                        - Codecov upload token
-#   INTEGRATION_TEST_GITHUB_APP_ID       - GitHub App ID for integration tests
-#   INTEGRATION_TEST_GITHUB_APP_PRIVATE_KEY - GitHub App private key (PEM)
-#   INTEGRATION_TEST_ORG                 - Test organisation name
-#   INTEGRATION_TEST_USER_TOKEN          - Caller Bearer token for E2E requests
-#   INTEGRATION_TEST_JWT_SECRET          - Secret (>=32 bytes) for backend JWTs
+#   CODECOV_TOKEN                   - Codecov upload token
+#   REPO_CREATION_APP_ID            - GitHub App ID for integration tests
+#   REPO_CREATION_APP_PRIVATE_KEY   - GitHub App private key (PEM)
+#   MERGE_WARDEN_APP_ID             - GitHub App ID for the Merge Warden instance used in integration tests
+#   MERGE_WARDEN_APP_PRIVATE_KEY    - GitHub App private key (PEM) for the Merge Warden instance used in integration tests
+#   MERGE_WARDEN_WEBHOOK_SECRET     - Secret (>=32 bytes) for backend JWTs
+#   TEST_ORGANIZATION               - GitHub organization to run tests in
 
 on:
   pull_request:
