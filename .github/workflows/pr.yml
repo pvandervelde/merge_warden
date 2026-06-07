@@ -48,7 +48,7 @@ jobs:
       - name: Scan Rust dependencies
         run: |
           set +e
-          osv-scanner --json --lockfile=Cargo.lock > /tmp/osv-rust.json 2>&1
+          osv-scanner --format=json --lockfile=Cargo.lock > /tmp/osv-rust.json 2>&1
           SCAN_EXIT=$?
           set -e
           if [ "${SCAN_EXIT}" -ne 0 ]; then
@@ -280,7 +280,7 @@ jobs:
           context: .
           file: crates/server/Dockerfile
           push: false
-          platforms: linux/amd64 # arm64 cross-compilation is validated in publish.yml
+          platforms: linux/amd64 # arm64 cross-compilation is validated in release.yml
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -313,7 +313,7 @@ jobs:
         shell: bash
         run: |
           missing=0
-          for var in REPO_CREATION_APP_ID REPO_CREATION_APP_PRIVATE_KEY MERGE_WARDEN_APP_ID MERGE_WARDEN_APP_PRIVATE_KEY MERGE_WARDEN_WEBHOOK_SECRET; do
+          for var in REPO_CREATION_APP_ID REPO_CREATION_APP_PRIVATE_KEY MERGE_WARDEN_APP_ID MERGE_WARDEN_APP_PRIVATE_KEY MERGE_WARDEN_WEBHOOK_SECRET TEST_ORGANIZATION; do
               if [ -z "${!var}" ]; then
               echo "Missing required secret: ${var}"
               missing=1
