@@ -60,11 +60,11 @@ jobs:
             echo "=== OSV Vulnerability Scan Results ==="
             echo ""
             echo "Summary:"
-            jq -r '"Packages scanned: \([.results[].packages[] | unique] | length)"' /tmp/osv-rust.json
-            jq -r '"Packages with vulnerabilities: \([.results[] | select(.vulnerabilities | length > 0)] | length)"' /tmp/osv-rust.json
+            TOTAL_VULNS=$(jq '[.results[]?.packages[]?.vulnerabilities[]?] | length' /tmp/osv-rust.json 2>/dev/null || echo "0")
+            echo "Total vulnerabilities found: ${TOTAL_VULNS}"
             echo ""
             echo "Affected packages:"
-            jq -r '.results[] | select(.vulnerabilities | length > 0) | "\(.packages[] | tostring): \(.vulnerabilities | length) vulnerability(ies)"' /tmp/osv-rust.json
+            jq -r '.results[]? | select(.packages and (.packages | length) > 0) | .packages[]' /tmp/osv-rust.json 2>/dev/null | sort | uniq || echo "  (unable to parse package list)"
             echo ""
             echo "=== Full Results ==="
             jq '.' /tmp/osv-rust.json 2>/dev/null || cat /tmp/osv-rust.json
