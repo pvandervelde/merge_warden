@@ -46,30 +46,66 @@ jobs:
         with:
           tool: osv-scanner
       - name: Scan Rust dependencies
+        id: osv-scan
         run: |
           set +e
-          osv-scanner --format=json --lockfile=Cargo.lock > /tmp/osv-rust.json 2>&1
+          osv-scanner --format=json --lockfile=Cargo.lock > /tmp/osv-rust.json 2>/tmp/osv-rust-stderr.log
           SCAN_EXIT=$?
           set -e
-          if [ "${SCAN_EXIT}" -ne 0 ]; then
-            FIXABLE=$(jq '[.results[]?.packages[]?.vulnerabilities[]?.affected[]?.ranges[]?.events[]? | select(has("fixed"))] | length' /tmp/osv-rust.json 2>/dev/null || echo "1")
-            if [ "${FIXABLE}" = "0" ]; then
-              echo "::warning::Unfixable vulnerabilities present in Rust dependencies — no action required"
-              exit 0
-            fi
-            echo "=== OSV Vulnerability Scan Results ==="
-            echo ""
-            echo "Summary:"
-            TOTAL_VULNS=$(jq '[.results[]?.packages[]?.vulnerabilities[]?] | length' /tmp/osv-rust.json 2>/dev/null || echo "0")
-            echo "Total vulnerabilities found: ${TOTAL_VULNS}"
-            echo ""
-            echo "Affected packages:"
-            jq -r '.results[]? | select(.packages and (.packages | length) > 0) | .packages[]' /tmp/osv-rust.json 2>/dev/null | sort | uniq || echo "  (unable to parse package list)"
-            echo ""
-            echo "=== Full Results ==="
-            jq '.' /tmp/osv-rust.json 2>/dev/null || cat /tmp/osv-rust.json
+          echo "osv-exit=${SCAN_EXIT}" >> "$GITHUB_OUTPUT"
+          echo "results-path=/tmp/osv-rust.json" >> "$GITHUB_OUTPUT"
+          if [ "${SCAN_EXIT}" -ne 0 ] && [ "${SCAN_EXIT}" -ne 1 ]; then
+            # Exit code 1 = vulnerabilities found (expected), anything else is a tool failure
+            cat /tmp/osv-rust-stderr.log >&2
             exit "${SCAN_EXIT}"
           fi
+
+      - name: Parse OSV results into summary table
+        if: always()
+        shell: bash
+        run: |
+          python3 - /tmp/osv-rust.json << 'EOF'
+          import json, sys
+
+          path = sys.argv[1]
+          with open(path) as f:
+              data = json.load(f)
+
+          rows = []
+          for result in data.get("results", []):
+              for pkg in result.get("packages", []):
+                  name = pkg["package"]["name"]
+                  version = pkg["package"]["version"]
+                  for group in pkg.get("groups", []):
+                      ids = ", ".join(group.get("ids", []))
+                      severity = group.get("max_severity") or "—"
+                      # Grab the informational tag if present (unmaintained, unsound, etc.)
+                      info_tags = set()
+                      for vuln in pkg.get("vulnerabilities", []):
+                          for affected in vuln.get("affected", []):
+                              tag = affected.get("database_specific", {}).get("informational")
+                              if tag:
+                                  info_tags.add(tag)
+                      label = ", ".join(sorted(info_tags)) if info_tags else severity
+                      rows.append((name, version, ids, label))
+
+          summary_path = "$GITHUB_STEP_SUMMARY"
+
+          lines = [
+              "## OSV Scan Results\n",
+              "| Package | Version | Advisory | Severity |",
+              "| --- | --- | --- | --- |",
+          ]
+          for name, version, ids, severity in sorted(rows, key=lambda r: (r[3] == "—", r[3])):
+              lines.append(f"| `{name}` | {version} | {ids} | {severity} |")
+
+          if not rows:
+              lines.append("| — | — | No vulnerabilities found | — |")
+
+          with open(summary_path, "a") as f:
+              f.write("\n".join(lines) + "\n")
+
+          EOF
 
   cargo-audit:
     name: Cargo Audit
