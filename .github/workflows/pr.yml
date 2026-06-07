@@ -57,6 +57,16 @@ jobs:
               echo "::warning::Unfixable vulnerabilities present in Rust dependencies — no action required"
               exit 0
             fi
+            echo "=== OSV Vulnerability Scan Results ==="
+            echo ""
+            echo "Summary:"
+            jq -r '"Packages scanned: \([.results[].packages[] | unique] | length)"' /tmp/osv-rust.json
+            jq -r '"Packages with vulnerabilities: \([.results[] | select(.vulnerabilities | length > 0)] | length)"' /tmp/osv-rust.json
+            echo ""
+            echo "Affected packages:"
+            jq -r '.results[] | select(.vulnerabilities | length > 0) | "\(.packages[] | tostring): \(.vulnerabilities | length) vulnerability(ies)"' /tmp/osv-rust.json
+            echo ""
+            echo "=== Full Results ==="
             jq '.' /tmp/osv-rust.json 2>/dev/null || cat /tmp/osv-rust.json
             exit "${SCAN_EXIT}"
           fi
