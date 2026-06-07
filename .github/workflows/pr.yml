@@ -100,9 +100,6 @@ jobs:
                                       if "fixed" in event:
                                           fixable = True
 
-                      if fixable:
-                          has_fixable = True
-
                       if info_tags:
                           label = ", ".join(sorted(info_tags))
                           status = "⚠️ warn"
@@ -117,6 +114,12 @@ jobs:
                       else:
                           label = "—"
                           status = "⚠️ warn"
+
+                      # Only block the build for non-informational vulnerabilities that
+                      # have a patched version — informational advisories (e.g. unmaintained)
+                      # are warnings even when a fixed version exists.
+                      if status == "❌ fail":
+                          has_fixable = True
 
                       rows.append((name, version, ids, label, status, fixable))
 
