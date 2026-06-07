@@ -1,0 +1,348 @@
+name: PR Pipeline
+
+# Single workflow for all pull request checks.
+#
+# Structure:
+#   Security gate (OSV + cargo-audit) runs first.
+#   All build, lint, and test jobs are blocked until the gate passes.
+#   Path change detection gates expensive crate jobs after the security gate.
+#   workflow_dispatch allows manual runs against any branch.
+#
+# Required secrets:
+#   CODECOV_TOKEN                        - Codecov upload token
+#   INTEGRATION_TEST_GITHUB_APP_ID       - GitHub App ID for integration tests
+#   INTEGRATION_TEST_GITHUB_APP_PRIVATE_KEY - GitHub App private key (PEM)
+#   INTEGRATION_TEST_ORG                 - Test organisation name
+#   INTEGRATION_TEST_USER_TOKEN          - Caller Bearer token for E2E requests
+#   INTEGRATION_TEST_JWT_SECRET          - Secret (>=32 bytes) for backend JWTs
+
+on:
+  pull_request:
+    branches:
+      - master
+  workflow_dispatch:
+
+concurrency:
+  group: pr-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # ── Security gate (runs first, blocks everything else) ────────────────────
+
+  osv-scan-rust:
+    name: OSV Rust Scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install osv-scanner
+        uses: taiki-e/install-action@6bd56108367fcf832720b0ee9c372084f856e8e5 # v2
+        with:
+          tool: osv-scanner
+      - name: Scan Rust dependencies
+        run: |
+          set +e
+          osv-scanner --json --lockfile=Cargo.lock > /tmp/osv-rust.json 2>&1
+          SCAN_EXIT=$?
+          set -e
+          if [ "${SCAN_EXIT}" -ne 0 ]; then
+            FIXABLE=$(jq '[.results[]?.packages[]?.vulnerabilities[]?.affected[]?.ranges[]?.events[]? | select(has("fixed"))] | length' /tmp/osv-rust.json 2>/dev/null || echo "1")
+            if [ "${FIXABLE}" = "0" ]; then
+              echo "::warning::Unfixable vulnerabilities present in Rust dependencies — no action required"
+              exit 0
+            fi
+            jq '.' /tmp/osv-rust.json 2>/dev/null || cat /tmp/osv-rust.json
+            exit "${SCAN_EXIT}"
+          fi
+
+  cargo-audit:
+    name: Cargo Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@6bd56108367fcf832720b0ee9c372084f856e8e5 # v2
+        with:
+          tool: cargo-audit
+      - name: Run security audit
+        run: |
+          set +e
+          cargo audit --json > /tmp/cargo-audit.json 2>&1
+          AUDIT_EXIT=$?
+          set -e
+          if [ "${AUDIT_EXIT}" -ne 0 ]; then
+            FIXABLE=$(jq '[.vulnerabilities.list[] | select(.versions.patched | length > 0)] | length' /tmp/cargo-audit.json 2>/dev/null || echo "1")
+            if [ "${FIXABLE}" = "0" ]; then
+              echo "::warning::Vulnerabilities found in Rust dependencies but none have a patched version — no action required"
+              exit 0
+            fi
+            jq '.' /tmp/cargo-audit.json 2>/dev/null || cat /tmp/cargo-audit.json
+            exit "${AUDIT_EXIT}"
+          fi
+
+  security-gate:
+    name: Security Gate
+    needs: [osv-scan-rust, cargo-audit]
+    runs-on: ubuntu-latest
+    # This job exists solely to provide a single fan-in point after the security
+    # scans.  It relies on GitHub Actions needs-failure propagation to block
+    # downstream jobs when either scan fails.  Never add continue-on-error: true
+    # to osv-scan-rust or cargo-audit — it would silently bypass this gate.
+    steps:
+      - run: echo "All security checks passed"
+
+  # ── Path change detection (gates expensive crate jobs) ───────────────────
+
+  changes:
+    name: Detect changes
+    needs: [security-gate]
+    runs-on: ubuntu-latest
+    outputs:
+      integration: ${{ steps.set-outputs.outputs.integration }}
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dorny/paths-filter@d1c1ffe0248fe513906c8e24db8ea791d46f8590 # v3.0.3
+        id: filter
+        if: github.event_name == 'pull_request'
+        with:
+          filters: |
+            integration:
+              - 'crates/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - '.github/workflows/pr.yml'
+      - name: Set job outputs
+        id: set-outputs
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            echo "integration=true" >> $GITHUB_OUTPUT
+          else
+            FILTER_OUT="${{ steps.filter.outputs.integration }}"
+            echo "integration=${FILTER_OUT:-true}" >> $GITHUB_OUTPUT
+          fi
+
+  # ── Rust lint ─────────────────────────────────────────────────────────────
+
+  check:
+    name: Check
+    needs: [security-gate, changes]
+    if: needs.changes.outputs.integration == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          profile: minimal
+          toolchain: stable
+          override: true
+      - run: cargo check
+
+  rustfmt:
+    name: rustfmt
+    needs: [security-gate, changes]
+    if: needs.changes.outputs.integration == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+          profile: minimal
+          override: true
+          components: rustfmt
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+  clippy:
+    name: Clippy
+    needs: [security-gate, changes]
+    if: needs.changes.outputs.integration == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          toolchain: stable
+          components: clippy
+          override: true
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
+      - run: cargo clippy --all-features -- -D warnings
+
+  cargo-deny:
+    name: Cargo Deny
+    needs: [security-gate, changes]
+    if: needs.changes.outputs.integration == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: EmbarkStudios/cargo-deny-action@3fd3802e88374d3fe9159b834c7714ec57d6c979 # v2.0.15
+        with:
+          # advisories are covered by osv-scan-rust and cargo-audit in the security gate
+          command: check bans licenses sources
+
+  # ── Rust tests ────────────────────────────────────────────────────────────
+
+  test:
+    name: unit-tests
+    needs: [security-gate, changes]
+    if: needs.changes.outputs.integration == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust
+        run: rustup update stable
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@6bd56108367fcf832720b0ee9c372084f856e8e5 # v2
+        with:
+          tool: cargo-llvm-cov@0.6.10
+
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
+
+      - name: Generate code coverage
+        run: |
+          cargo llvm-cov --all-features --workspace --codecov --output-path codecov.json --lib --bins
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@671740ac38dd9b0130fbe1cec585b89eea48d3de # v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: codecov.json
+          flags: rust
+          fail_ci_if_error: true
+
+  doc-test:
+    name: doc-tests
+    needs: [security-gate, changes]
+    if: needs.changes.outputs.integration == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust
+        run: rustup update stable
+
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
+
+      - name: Run doc-tests
+        run: cargo test --doc --all-features --workspace --exclude integration_tests
+
+  docker-build-validate:
+    name: Validate Docker build
+    needs: [security-gate, changes]
+    if: needs.changes.outputs.integration == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libssl-dev
+
+      - name: Build server binary (amd64)
+        run: cargo build --release --target x86_64-unknown-linux-gnu -p
+          merge_warden_server
+        env:
+          OPENSSL_STATIC: "1"
+
+      - name: Stage binary for Docker build
+        run: |
+          mkdir -p binaries/amd64
+          cp target/x86_64-unknown-linux-gnu/release/merge_warden_server binaries/amd64/merge_warden_server
+          chmod +x binaries/amd64/merge_warden_server
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Build container image (no push)
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
+        with:
+          context: .
+          file: crates/server/Dockerfile
+          push: false
+          platforms: linux/amd64 # arm64 cross-compilation is validated in publish.yml
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ── Integration Tests ─────────────────────────────────────────────────────
+
+  integration-tests:
+    name: Integration Tests
+    needs: [security-gate, changes]
+    if: needs.changes.outputs.integration == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      contents: read
+      issues: write
+      pull-requests: write
+
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Install Rust
+        run: rustup update stable
+
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
+
+      - name: Run structural tests (no credentials required)
+        run: cargo test --package merge-warden-integration-tests --test crate_structure_tests -- --nocapture
+
+      - name: Verify integration test credentials
+        shell: bash
+        run: |
+          missing=0
+          for var in REPO_CREATION_APP_ID REPO_CREATION_APP_PRIVATE_KEY MERGE_WARDEN_APP_ID MERGE_WARDEN_APP_PRIVATE_KEY MERGE_WARDEN_WEBHOOK_SECRET; do
+              if [ -z "${!var}" ]; then
+              echo "Missing required secret: ${var}"
+              missing=1
+              fi
+          done
+          if [ "$missing" -eq 1 ]; then
+              echo "Required integration test secrets are missing"
+              exit 1
+          fi
+        env:
+          REPO_CREATION_APP_ID: ${{ secrets.REPO_CREATION_APP_ID }}
+          REPO_CREATION_APP_PRIVATE_KEY: ${{ secrets.REPO_CREATION_APP_PRIVATE_KEY }}
+          MERGE_WARDEN_APP_ID: ${{ secrets.MERGE_WARDEN_APP_ID }}
+          MERGE_WARDEN_APP_PRIVATE_KEY: ${{ secrets.MERGE_WARDEN_APP_PRIVATE_KEY }}
+          MERGE_WARDEN_WEBHOOK_SECRET: ${{ secrets.MERGE_WARDEN_WEBHOOK_SECRET }}
+
+      - name: Run integration tests
+        env:
+          REPO_CREATION_APP_ID: ${{ secrets.REPO_CREATION_APP_ID }}
+          REPO_CREATION_APP_PRIVATE_KEY: ${{ secrets.REPO_CREATION_APP_PRIVATE_KEY }}
+          MERGE_WARDEN_APP_ID: ${{ secrets.MERGE_WARDEN_APP_ID }}
+          MERGE_WARDEN_APP_PRIVATE_KEY: ${{ secrets.MERGE_WARDEN_APP_PRIVATE_KEY }}
+          MERGE_WARDEN_WEBHOOK_SECRET: ${{ secrets.MERGE_WARDEN_WEBHOOK_SECRET }}
+          TEST_ORGANIZATION: ${{ secrets.TEST_ORGANIZATION }}
+          TEST_TIMEOUT_SECONDS: "30"
+          TEST_CLEANUP_ENABLED: "true"
+          USE_MOCK_SERVICES: "false"
+        run: |
+          failed=0
+          cargo test --package merge-warden-integration-tests --test error_handling_and_recovery -- --ignored --nocapture || failed=1
+          cargo test --package merge-warden-integration-tests --test pull_request_validation_workflow -- --ignored --nocapture || failed=1
+          cargo test --package merge-warden-integration-tests --test concurrent_processing -- --nocapture || failed=1
+          exit $failed
