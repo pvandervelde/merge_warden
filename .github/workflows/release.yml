@@ -1,0 +1,407 @@
+name: Release
+
+# Triggered by release-regent when it publishes a GitHub Release after a
+# release/* PR is merged.  This workflow builds CLI binaries for the
+# supported platforms and a Docker image for the API server, then uploads
+# them as assets on the release.
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description:
+          "Version to publish (e.g. 0.4.0) — use only to recover a failed
+          release"
+        required: true
+        type: string
+
+permissions:
+  contents: write # upload release assets
+  packages: write # push to GHCR
+  id-token: write # sign attestations via Sigstore/Fulcio
+  attestations: write # store attestations in GitHub
+
+jobs:
+  resolve-version:
+    name: Resolve Release Version
+    runs-on: ubuntu-latest
+    outputs:
+      release_version: ${{ steps.version.outputs.RELEASE_VERSION }}
+
+    steps:
+      - name: Validate dispatch version input
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+        run: |
+          if ! [[ "${DISPATCH_VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "ERROR: version input '${DISPATCH_VERSION}' does not match expected format N.N.N"
+            exit 1
+          fi
+
+      - name: Resolve version
+        id: version
+        env:
+          DISPATCH_VERSION: ${{ inputs.version }}
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "RELEASE_VERSION=${DISPATCH_VERSION}" >> "${GITHUB_OUTPUT}"
+          else
+            echo "RELEASE_VERSION=${{ github.event.release.tag_name }}" >> "${GITHUB_OUTPUT}"
+          fi
+
+  build-cli:
+    name: Build CLI - ${{ matrix.target }}
+    needs: resolve-version
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      id-token: write # required to sign attestations via Sigstore/Fulcio
+      attestations: write # required to store attestations in GitHub
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+            archive_ext: tar.gz
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-22.04
+            archive_ext: tar.gz
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+            archive_ext: zip
+    timeout-minutes: 60
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.resolve-version.outputs.release_version }}
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: taiki-e/setup-cross-toolchain-action@0123528f956f923e7a476f4cc04882bc005e7c89 # v1
+        with:
+          target: ${{ matrix.target }}
+        if: startsWith(matrix.os, 'ubuntu') && !contains(matrix.target, '-musl')
+
+      - uses: taiki-e/install-action@92f69c195229fe62d58b4d697ab4bc75def98e76 # v2
+        with:
+          tool: cross
+        if: contains(matrix.target, '-musl')
+
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
+
+      - name: Set static CRT for Windows
+        run: echo "RUSTFLAGS=${RUSTFLAGS} -C target-feature=+crt-static" >>
+          "${GITHUB_ENV}"
+        shell: bash
+        if: endsWith(matrix.target, 'windows-msvc')
+
+      - name: Build CLI binary (musl via cross)
+        run: cross build --release --target ${{ matrix.target }} --bin merge-warden
+        if: contains(matrix.target, '-musl')
+
+      - name: Build CLI binary
+        run: cargo build --release --target ${{ matrix.target }} --bin merge-warden
+        if: "!contains(matrix.target, '-musl')"
+
+      - name: Set asset paths
+        shell: bash
+        run: |
+          VERSION="${{ needs.resolve-version.outputs.release_version }}"
+          BASE="merge-warden-${VERSION}-${{ matrix.target }}"
+          if [ "${{ matrix.archive_ext }}" = "zip" ]; then
+              echo "BINARY_PATH=target/${{ matrix.target }}/release/merge-warden.exe" >> $GITHUB_ENV
+              echo "ASSET_PATH=${BASE}.zip" >> $GITHUB_ENV
+          else
+              echo "BINARY_PATH=target/${{ matrix.target }}/release/merge-warden" >> $GITHUB_ENV
+              echo "ASSET_PATH=${BASE}.tar.gz" >> $GITHUB_ENV
+          fi
+          echo "SBOM_PATH=${BASE}.sbom.spdx.json" >> $GITHUB_ENV
+
+      - name: Generate SBOM for CLI binary
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          file: ${{ env.BINARY_PATH }}
+          output-file: ${{ env.SBOM_PATH }}
+          format: spdx-json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Package binary (Unix)
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          RELEASE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          ARCHIVE="merge-warden-${RELEASE_VERSION}-${TARGET}.tar.gz"
+          cp "target/${TARGET}/release/merge-warden" merge-warden
+          tar czf "${ARCHIVE}" merge-warden
+          echo "ARCHIVE=${ARCHIVE}" >> "${GITHUB_ENV}"
+
+      - name: Package binary (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          RELEASE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
+          TARGET: ${{ matrix.target }}
+        run: |
+          $archive = "merge-warden-$env:RELEASE_VERSION-$env:TARGET.zip"
+          Copy-Item "target\$env:TARGET\release\merge-warden.exe" merge-warden.exe
+          Compress-Archive -Path merge-warden.exe -DestinationPath $archive
+          "ARCHIVE=$archive" >> $env:GITHUB_ENV
+
+      - name: Generate checksum (Unix)
+        if: matrix.archive_ext == 'tar.gz'
+        run: sha256sum "${{ env.ARCHIVE }}" > "${{ env.ARCHIVE }}.sha256"
+
+      - name: Generate checksum (Windows)
+        if: matrix.archive_ext == 'zip'
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash -Algorithm SHA256 "$env:ARCHIVE").Hash.ToLower()
+          $filename = Split-Path -Leaf "$env:ARCHIVE"
+          "$hash  $filename" | Set-Content "$env:ARCHIVE.sha256"
+
+      - name: Upload CLI artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cli-${{ matrix.target }}
+          path: |
+            ${{ env.ARCHIVE }}
+            ${{ env.ARCHIVE }}.sha256
+            ${{ env.SBOM_PATH }}
+
+      - name: Attest build provenance for CLI binary
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: ${{ env.ARCHIVE }}
+
+      - name: Attest SBOM for CLI binary
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: ${{ env.ARCHIVE }}
+          predicate-type: https://spdx.dev/Document
+          predicate: ${{ env.SBOM_PATH }}
+
+  build-server:
+    name: Build Server - ${{ matrix.target }}
+    needs: resolve-version
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: read
+      id-token: write # required to sign attestations via Sigstore/Fulcio
+      attestations: write # required to store attestations in GitHub
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            arch: amd64
+          - target: aarch64-unknown-linux-gnu
+            arch: arm64
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.resolve-version.outputs.release_version }}
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install system dependencies (native amd64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends pkg-config libssl-dev
+
+      - uses: taiki-e/install-action@92f69c195229fe62d58b4d697ab4bc75def98e76 # v2
+        with:
+          tool: cross
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+
+      - uses: Swatinem/rust-cache@98c8021b550208e191a6a3145459bfc9fb29c4c0 # v2
+
+      - name: Build server binary (native amd64)
+        if: matrix.target == 'x86_64-unknown-linux-gnu'
+        run: cargo build --release --target ${{ matrix.target }} -p merge_warden_server
+        env:
+          OPENSSL_STATIC: "1"
+
+      - name: Build server binary (cross aarch64)
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: cross build --release --target ${{ matrix.target }} -p merge_warden_server
+
+      - name: Generate SBOM for server binary
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          path: .
+          output-file: sbom-${{ matrix.target }}.spdx.json
+          format: spdx-json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Generate checksum
+        run: sha256sum "target/${{ matrix.target }}/release/merge_warden_server" > "target/${{ matrix.target }}/release/merge_warden_server.sha256"
+
+      - name: Upload server artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: server-${{ matrix.target }}
+          path: |
+            target/${{ matrix.target }}/release/merge_warden_server
+            target/${{ matrix.target }}/release/merge_warden_server.sha256
+            sbom-${{ matrix.target }}.spdx.json
+
+      - name: Attest build provenance for server binary
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: target/${{ matrix.target }}/release/merge_warden_server
+
+      - name: Attest SBOM for server binary
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-path: target/${{ matrix.target }}/release/merge_warden_server
+          predicate-type: https://spdx.dev/Document
+          predicate: sbom-${{ matrix.target }}.spdx.json
+
+  publish-release:
+    name: Publish Release
+    needs: [resolve-version, build-cli, build-server]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: write # To upload assets to the GitHub Release
+
+    steps:
+      - name: Download CLI artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: cli-*
+          path: artifacts/cli
+          merge-multiple: true
+
+      - name: Download server artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: server-*
+          path: artifacts/server
+          merge-multiple: true
+
+      - name: Verify artifacts
+        run: |
+          cli_count=$(find artifacts/cli -maxdepth 1 -type f | wc -l)
+          server_count=$(find artifacts/server -maxdepth 1 -type f | wc -l)
+          echo "CLI artifacts found: ${cli_count}"
+          echo "Server artifacts found: ${server_count}"
+          if [[ "${cli_count}" -eq 0 ]]; then
+            echo "ERROR: No CLI artifacts found"
+            find artifacts/cli -maxdepth 1 -type f
+            exit 1
+          fi
+          if [[ "${server_count}" -eq 0 ]]; then
+            echo "ERROR: No server artifacts found"
+            find artifacts/server -maxdepth 1 -type f
+            exit 1
+          fi
+
+      - name: Upload CLI artifacts to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
+        run: |
+          gh release upload "${RELEASE_VERSION}" artifacts/cli/* --clobber \
+            --repo "${{ github.repository }}"
+
+      - name: Upload server artifacts to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
+        run: |
+          gh release upload "${RELEASE_VERSION}" artifacts/server/* --clobber \
+            --repo "${{ github.repository }}"
+
+  publish-container:
+    name: Publish Container Image
+    needs: [resolve-version, publish-release, build-server]
+    # Run after a successful release publish, or standalone for workflow_dispatch recovery.
+    # Jobs skipped due to their own 'if' conditions count as 'skipped', not 'failure',
+    # so always() is required to allow this job to run when upstream jobs were skipped.
+    # build-server must succeed in both paths — it compiles the binaries that
+    # the Dockerfile COPYs; there is nothing to push without them.
+    if: |
+      always() && (
+        (needs.publish-release.result == 'success' && needs.build-server.result == 'success') ||
+        (github.event_name == 'workflow_dispatch' && needs.build-server.result == 'success')
+      )
+    runs-on: ubuntu-latest
+    # No Rust compilation happens here — the job only stages pre-built binaries
+    # and runs a COPY-only Docker build, so 20 minutes is a generous bound.
+    timeout-minutes: 20
+    permissions:
+      contents: read # To checkout code
+      packages: write # To push container images to GHCR
+      id-token: write # Required for OIDC-based image attestation
+      attestations: write # Required to write attestation records to the repo
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ needs.resolve-version.outputs.release_version }}
+
+      - name: Download server artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: server-*
+          path: server-artifacts
+          merge-multiple: false
+
+      - name: Stage binaries for Docker build
+        run: |
+          mkdir -p binaries/amd64 binaries/arm64
+          cp server-artifacts/server-x86_64-unknown-linux-gnu/merge_warden_server binaries/amd64/merge_warden_server
+          cp server-artifacts/server-aarch64-unknown-linux-gnu/merge_warden_server binaries/arm64/merge_warden_server
+          chmod +x binaries/amd64/merge_warden_server binaries/arm64/merge_warden_server
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+
+      - name: Build and push container image
+        id: docker-build
+        uses: docker/build-push-action@ca052bb54ab0790a636c9b5f226502c73d547a25 # v5
+        with:
+          context: .
+          file: crates/server/Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          provenance: mode=max
+          sbom: true
+          tags: |
+            ghcr.io/pvandervelde/merge-warden-server:latest
+            ghcr.io/pvandervelde/merge-warden-server:${{ needs.resolve-version.outputs.release_version }}
+
+      - name: Attest container image provenance
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-name: ghcr.io/pvandervelde/merge-warden-server
+          subject-digest: ${{ steps.docker-build.outputs.digest }}
+          push-to-registry: true
