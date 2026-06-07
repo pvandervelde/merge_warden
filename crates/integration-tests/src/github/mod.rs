@@ -802,7 +802,7 @@ impl TestBotInstance {
             .await
             .map_err(|e| TestError::github_api_error("get_pull_request", &format!("{e:?}")))?;
 
-        let head_sha = pr.head.sha;
+        let head_sha = pr.head.unwrap().sha;
 
         let check_runs = self
             .github_client

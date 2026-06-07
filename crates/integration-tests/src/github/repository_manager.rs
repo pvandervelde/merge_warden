@@ -826,14 +826,15 @@ maxLines = 1000
         // test repositories may not have all label names pre-created, and label
         // assignment is not critical to PR creation itself.
         if !spec.labels.is_empty() {
+            let pr_num = pr.number.unwrap_or_default();
             if let Err(e) = self
                 .github_client
                 .issues(&repository.organization, &repository.name)
-                .add_labels(pr.number, &spec.labels)
+                .add_labels(pr_num, &spec.labels)
                 .await
             {
                 tracing::warn!(
-                    pr_number = pr.number,
+                    pr_number = pr_num,
                     error = e.to_string(),
                     "Failed to add labels to pull request (non-fatal)"
                 );
@@ -841,8 +842,8 @@ maxLines = 1000
         }
 
         Ok(crate::utils::TestPullRequest {
-            number: pr.number,
-            id: pr.id.0,
+            number: pr.number.unwrap_or_default(),
+            id: pr.id.unwrap().0,
             title: pr.title.unwrap_or_default(),
             body: pr.body.unwrap_or_default(),
             head: spec.source_branch.clone(),
@@ -865,7 +866,7 @@ maxLines = 1000
             .await
             .map_err(|e| TestError::github_api_error("get_pull_request", &format!("{e:?}")))?;
 
-        let head_sha = pr.head.sha;
+        let head_sha = pr.head.unwrap().sha;
 
         // Get check runs - use head SHA as Commitish
         let check_runs = self
