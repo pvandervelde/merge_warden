@@ -264,6 +264,130 @@ Please fix these errors before merging so that the intended policy takes effect.
 
 ---
 
+## Renovate Stability Config Additions
+
+The following types and constants are added to `crates/core/src/config.rs` as part of
+[FR-008 (Renovate Stability Label Management)](../requirements/functional-requirements.md#fr-008-renovate-stability-label-management).
+
+### New Constants
+
+```rust
+/// Context string identifying the Renovate stability check in GitHub commit statuses.
+pub const RENOVATE_STABILITY_CHECK_CONTEXT: &str = "renovate/stability-days";
+
+/// Default label name applied while the Renovate stability period has not elapsed.
+pub const RENOVATE_STABILITY_LABEL: &str = "pr-validation: pending-stability";
+```
+
+### New Type: `RenovateStabilityConfig`
+
+```rust
+/// Configuration for Renovate stability-days label management.
+///
+/// When enabled, `pending_stability_label` is applied to the PR while the
+/// `renovate/stability-days` commit status is `pending`, `error`, or `failure`,
+/// and removed when the status is `success`.
+///
+/// This feature is observability-only: it never influences the commit-status
+/// check conclusion and never prevents merging.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RenovateStabilityConfig {
+    /// Whether Renovate stability label management is enabled.
+    ///
+    /// Defaults to `true`.
+    #[serde(default = "RenovateStabilityConfig::default_enabled")]
+    pub enabled: bool,
+
+    /// Label applied while the Renovate stability period has not elapsed.
+    ///
+    /// Defaults to [`RENOVATE_STABILITY_LABEL`].
+    #[serde(default = "RenovateStabilityConfig::default_label")]
+    pub pending_stability_label: String,
+}
+
+impl Default for RenovateStabilityConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            pending_stability_label: RENOVATE_STABILITY_LABEL.to_string(),
+        }
+    }
+}
+```
+
+### Integration Points
+
+`RenovateStabilityConfig` is threaded through the configuration hierarchy as follows:
+
+| Struct | Field added | Notes |
+| --- | --- | --- |
+| `PullRequestsPoliciesConfig` | `renovate_stability: RenovateStabilityConfig` | TOML key `[policies.pullRequests.renovateStability]` |
+| `PolicySet` | `renovate_stability: RenovateStabilityConfig` | Participates in `PolicySet::merge` |
+| `CurrentPullRequestValidationConfiguration` | `renovate_stability: RenovateStabilityConfig` | Read by `communicate_renovate_stability_status` |
+| `ApplicationDefaults` | `renovate_stability: RenovateStabilityConfig` | Server-level default; `enabled = true` |
+| `RepositoryProvidedConfig` | via `PullRequestsPoliciesConfig` | Repository-level override |
+
+#### Merge semantics for `RenovateStabilityConfig`
+
+| Field | Rule |
+| --- | --- |
+| `enabled` | `base \|\| over` — once enabled in either tier, stays enabled |
+| `pending_stability_label` | `over` wins if non-empty and differs from `default()` |
+
+### New Private Method: `communicate_renovate_stability_status`
+
+Location: `crates/core/src/lib.rs`
+
+Called unconditionally early in `process_pull_request`, immediately after the PR is
+fetched and before the draft check. Errors are logged at `warn` and do not propagate.
+
+```rust
+/// Applies or removes the Renovate stability label for the current PR HEAD.
+///
+/// Delegates to `manage_renovate_stability_label` in `crates/core/src/labels.rs`.
+/// Errors are logged at `warn` level and never propagate — this step must not
+/// block the main validation pipeline or affect the check conclusion.
+///
+/// # Arguments
+///
+/// * `repo_owner` — Repository owner.
+/// * `repo_name`  — Repository name.
+/// * `pr_number`  — Pull request number.
+/// * `head_sha`   — HEAD commit SHA of the pull request.
+#[instrument]
+async fn communicate_renovate_stability_status(
+    &self,
+    repo_owner: &str,
+    repo_name: &str,
+    pr_number: u64,
+    head_sha: &str,
+) {
+    todo!("See docs/spec/interfaces/core-config-validation.md")
+}
+```
+
+### Testing Requirements for `RenovateStabilityConfig`
+
+#### Config unit tests for `RenovateStabilityConfig` (`crates/core/src/config_tests.rs`)
+
+- `RenovateStabilityConfig` defaults: `enabled = true`, label equals `RENOVATE_STABILITY_LABEL`
+- TOML round-trip: a config with `renovateStability` block parses correctly
+- Merge: repo config with `enabled = false` overrides app default of `enabled = true`
+  (activation bool rule: `base || over` — a repo can only enable, not disable, when
+  the merge rule applies; document which direction enforcement overrides apply for this field)
+- Merge: repo config with custom `pending_stability_label` wins over default
+
+#### Integration unit tests for renovate stability (`crates/core/src/lib_tests.rs`)
+
+- `process_pull_request` when `renovate/stability-days` status is `pending` → label applied
+- `process_pull_request` when `renovate/stability-days` status is `success` → label removed
+- `process_pull_request` when no `renovate/stability-days` status → no-op
+- `process_pull_request` when `renovate_stability.enabled = false` → no label operations
+- `communicate_renovate_stability_status` error from provider → logged at warn; processing continues
+- Check conclusion is unaffected by all of the above scenarios
+
+---
+
 ## Testing Requirements
 
 ### Unit tests (`crates/core/src/config_tests.rs`)
