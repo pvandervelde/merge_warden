@@ -144,6 +144,7 @@ pub struct MergeWardenWebhookHandler {
 // async fn handle(&self, envelope: EventEnvelope) -> Result<(), SdkError> {
 //     match envelope.event_type.as_str() {
 //         "pull_request" => self.handle_pull_request(envelope).await,
+//         "status"       => self.handle_status_event(envelope).await,
 //         _ => Ok(()), // unsupported actions are silently ignored
 //     }
 // }
@@ -408,8 +409,8 @@ returns `Err`. An empty statuses array returns `Ok(vec![])`.
 ///
 /// `GET /repos/{owner}/{repo}/commits/{sha}/pulls`
 ///
-/// The GitHub API requires the `application/vnd.github.groot-preview+json`
-/// Accept header (or the current stable equivalent) for this endpoint.
+/// This endpoint is generally available and no longer requires a preview
+/// `Accept` header. Use the standard `application/vnd.github+json` header.
 async fn find_pull_requests_for_commit(
     &self,
     repo_owner: &str,

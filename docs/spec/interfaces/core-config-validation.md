@@ -362,7 +362,7 @@ async fn communicate_renovate_stability_status(
     pr_number: u64,
     head_sha: &str,
 ) {
-    todo!("See docs/spec/interfaces/core-config-validation.md")
+    todo!("See docs/spec/design/labeling-system.md#renovate-stability-days-labeling")
 }
 ```
 
@@ -372,9 +372,9 @@ async fn communicate_renovate_stability_status(
 
 - `RenovateStabilityConfig` defaults: `enabled = true`, label equals `RENOVATE_STABILITY_LABEL`
 - TOML round-trip: a config with `renovateStability` block parses correctly
-- Merge: repo config with `enabled = false` overrides app default of `enabled = true`
-  (activation bool rule: `base || over` — a repo can only enable, not disable, when
-  the merge rule applies; document which direction enforcement overrides apply for this field)
+- Merge: repo config with `enabled = false` does NOT override app default of `enabled = true`;
+  result is `true` (activation bool rule: `base || over` — once either tier enables the feature,
+  the merged value is always `true`; a repo can only enable, not disable)
 - Merge: repo config with custom `pending_stability_label` wins over default
 
 #### Integration unit tests for renovate stability (`crates/core/src/lib_tests.rs`)

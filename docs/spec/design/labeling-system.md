@@ -991,6 +991,7 @@ The Renovate stability label is orthogonal to all other label categories:
 8. A `status` event with `context != "renovate/stability-days"` produces no label changes.
 9. When a `status` event fires, the label decision is based on the current HEAD status of
    each associated PR, not on the state embedded in the event payload.
+10. The stability label is managed regardless of whether the PR is a draft — `communicate_renovate_stability_status` runs before the draft check in `process_pull_request`, so draft PRs receive the same label treatment as open PRs.
 
 ## Keyword Labels
 

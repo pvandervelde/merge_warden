@@ -312,6 +312,8 @@ See [configuration-management.md](../operations/configuration-management.md) and
 | Message deserialisation (queue mode) | Malformed JSON | Message dead-lettered; loop continues |
 | Unknown schema version | `schema_version != 1` | Message dead-lettered; loop continues |
 | EventEnvelope reconstruction | SDK parse error | Message dead-lettered; loop continues |
+| Status event — commit lookup | `find_pull_requests_for_commit` API error | Returned as `ProcessingError`; `ack.reject()` → dead-letter (queue) or logged (webhook) |
+| Status event — PR re-evaluation | `get_commit_statuses` API error inside `process_pull_request` | Logged at `warn`; does not propagate; processing continues for remaining PRs |
 | Config file fetch (config check) | File not found at head SHA | Treated as absent; no comment posted; no error |
 | Config file parse (config check) | Invalid TOML or wrong schema version | Failure comment posted; check conclusion unaffected |
 | PR processing | GitHub API error | `ack.reject()` → dead-letter (queue) or logged (webhook) |

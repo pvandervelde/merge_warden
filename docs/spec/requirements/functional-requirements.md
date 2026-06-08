@@ -352,6 +352,12 @@ Repository permissions:
 - **Issues**: Read (for work item validation)
 - **Metadata**: Read (for repository information)
 - **Contents**: Read (for configuration file access)
+- **Commit statuses**: Read (required for `get_commit_statuses`; needed by FR-008)
+
+Webhook event subscriptions:
+
+- **pull_request** (required for PR validation — FR-001 through FR-007)
+- **status** (commit statuses; required for Renovate stability label management — FR-008)
 
 Organisation permissions:
 
