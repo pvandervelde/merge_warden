@@ -59,6 +59,7 @@ struct. The 8 constituent configs are:
 | `issue_propagation` | `IssuePropagationConfig` | Milestone and project propagation settings |
 | `change_type_labels` | `ChangeTypeLabelConfig` | Conventional-commit mappings, keyword labels |
 | `bypass_rules` | `BypassRules` | Per-rule bypass user lists |
+| `renovate_stability` | `RenovateStabilityConfig` | Renovate stability-days label management |
 
 `PolicySet::merge(&self, over: &PolicySet) -> PolicySet` implements "higher-priority `over`
 wins for non-default values". Enforcement is achieved by call-site ordering — the enforcing
@@ -152,6 +153,13 @@ users = ["admin", "release-manager"]
 [policies.bypassRules.work_items]
 enabled = true
 users = ["hotfix-team"]
+
+# Renovate stability-days label management.
+# Omit this section to use the built-in defaults (enabled = true,
+# label = "pr-validation: pending-stability").
+[policies.pullRequests.renovateStability]
+enabled = true
+pending_stability_label = "pr-validation: pending-stability"
 ```
 
 > **Note:** All three bypass sub-sections (`title_convention`, `work_items`, `size`) are

@@ -175,6 +175,40 @@ is valid.
 **Priority:** High
 **Dependencies:** FR-002 (Configuration Management), FR-001 (Pull Request Validation)
 
+### FR-008: Renovate Stability Label Management
+
+**Requirement:** The system shall reflect the state of the Renovate `stability-days` check
+as a label on pull requests, providing at-a-glance visibility of whether the Renovate
+stability period has elapsed.
+
+**Description:**
+
+- Listen for GitHub `status` webhook events where `context == "renovate/stability-days"`
+- Apply the configured `pending_stability_label` (default: `pr-validation: pending-stability`)
+  when the status is `pending`, `error`, or `failure`
+- Remove the label when the status is `success`
+- Re-evaluate the label on every `pull_request` event by inspecting the current HEAD commit
+  statuses, ensuring the label is always accurate regardless of event ordering
+- When the `renovate/stability-days` context is absent from the HEAD commit's statuses,
+  take no action
+- Auto-create the label in the repository if it does not exist (color `#986ee2`,
+  description "PR is waiting for Renovate stability period")
+- Never block merging - this feature is observability-only and must not contribute to
+  the commit-status check conclusion
+
+**Acceptance Criteria:**
+
+- ✅ `status` event with `context == "renovate/stability-days"` and state `pending`/`error`/`failure` applies `pending_stability_label`
+- ✅ `status` event with `context == "renovate/stability-days"` and state `success` removes `pending_stability_label`
+- ✅ `status` event with any other `context` is a no-op
+- ✅ `pull_request` event re-evaluates the label against the current HEAD commit statuses
+- ✅ Label operations are idempotent (adding a present label and removing an absent label are both safe)
+- ✅ Check conclusion (`success`/`failure`/`neutral`) is unaffected by this feature
+- ✅ Feature is disabled entirely when `enabled = false` in configuration
+
+**Priority:** Medium
+**Dependencies:** FR-001 (Pull Request Validation), FR-002 (Configuration Management)
+
 ## Detailed Functional Specifications
 
 ### Pull Request Title Validation
@@ -318,6 +352,12 @@ Repository permissions:
 - **Issues**: Read (for work item validation)
 - **Metadata**: Read (for repository information)
 - **Contents**: Read (for configuration file access)
+- **Commit statuses**: Read (required for `get_commit_statuses`; needed by FR-008)
+
+Webhook event subscriptions:
+
+- **pull_request** (required for PR validation — FR-001 through FR-007)
+- **status** (commit statuses; required for Renovate stability label management — FR-008)
 
 Organisation permissions:
 

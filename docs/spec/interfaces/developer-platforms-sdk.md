@@ -95,7 +95,7 @@ TokenRefreshFailed(u64, String),
 ### Existing variant reuse
 
 | SDK error condition | Map to existing variant |
-|---|---|
+| --- | --- |
 | HTTP 401 / invalid app credentials | `AuthError(String)` |
 | HTTP 429 / rate limit | `RateLimitExceeded` |
 | HTTP 4xx / malformed request | `InvalidResponse` |
@@ -109,7 +109,7 @@ TokenRefreshFailed(u64, String),
 
 `EventEnvelope` (from `github_bot_sdk::events`) is the type that flows from:
 
-```
+```text
 server::webhook handler → ingress channel → server::ingress::EventIngress → event processor
 ```
 
@@ -144,6 +144,7 @@ pub struct MergeWardenWebhookHandler {
 // async fn handle(&self, envelope: EventEnvelope) -> Result<(), SdkError> {
 //     match envelope.event_type.as_str() {
 //         "pull_request" => self.handle_pull_request(envelope).await,
+//         "status"       => self.handle_status_event(envelope).await,
 //         _ => Ok(()), // unsupported actions are silently ignored
 //     }
 // }
@@ -293,3 +294,142 @@ async fn fetch_config_at_ref(
    limit, server error, etc.).
 3. The method must not fall back to the default branch when `git_ref` is not found —
    that would silently return stale content.
+
+---
+
+## Renovate Stability Days Additions
+
+The following changes are required to support
+[FR-008 (Renovate Stability Label Management)](../requirements/functional-requirements.md#fr-008-renovate-stability-label-management).
+They extend existing types rather than introducing new ones.
+
+### New model: `CommitStatus`
+
+Location: `crates/developer_platforms/src/models.rs`
+
+```rust
+/// A single commit status entry returned by the GitHub Commit Statuses API.
+///
+/// GitHub returns commit statuses newest-first. When multiple entries exist for
+/// the same context, callers should use the first occurrence (i.e. the newest).
+///
+/// Mapped from `GET /repos/{owner}/{repo}/commits/{sha}/statuses`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitStatus {
+    /// The context string that identifies which check produced this status.
+    ///
+    /// Example: `"renovate/stability-days"`.
+    pub context: String,
+
+    /// The state of the status.
+    ///
+    /// GitHub-defined values: `"pending"`, `"success"`, `"failure"`, `"error"`.
+    pub state: String,
+
+    /// Optional human-readable description of the status.
+    pub description: Option<String>,
+}
+```
+
+### New method on `PullRequestProvider`: `get_commit_statuses`
+
+```rust
+/// Fetches commit statuses for the given commit SHA.
+///
+/// Returns the first page of statuses only (same precedent as
+/// `get_pull_request_files`). GitHub returns statuses newest-first; callers
+/// wishing to use the most recent entry per context should take the first
+/// occurrence of each context value.
+///
+/// # Arguments
+///
+/// * `repo_owner` — Repository owner.
+/// * `repo_name`  — Repository name.
+/// * `commit_sha` — Full SHA of the commit to query.
+///
+/// # Returns
+///
+/// `Ok(Vec<CommitStatus>)` — possibly empty if no statuses exist for the commit.
+/// `Err` on any API failure.
+///
+/// # GitHub API
+///
+/// `GET /repos/{owner}/{repo}/commits/{sha}/statuses`
+async fn get_commit_statuses(
+    &self,
+    repo_owner: &str,
+    repo_name: &str,
+    commit_sha: &str,
+) -> Result<Vec<CommitStatus>, Error>;
+```
+
+**Deduplication responsibility:** callers are responsible for deduplicating by context.
+The API returns entries in newest-first order; keeping the first occurrence per context
+yields the most recent status for each check.
+
+**Pagination:** first page only. This is sufficient because Renovate updates its status
+entry in place and the relevant entry is always on the first page. Document and revisit if
+evidence of missed statuses emerges in production.
+
+#### `GitHubProvider` implementation of `get_commit_statuses`
+
+Maps the GitHub API response array to `Vec<CommitStatus>`. HTTP 404 (commit not found)
+returns `Err`. An empty statuses array returns `Ok(vec![])`.
+
+#### Behavioral postconditions for `get_commit_statuses`
+
+1. `Ok(vec![])` is returned when the commit exists but has no associated statuses.
+2. `Err` is returned for all non-200 API responses (including 404 commit-not-found).
+3. The returned vector preserves the API's newest-first ordering.
+4. Only the first page of results is fetched; no pagination loop is performed.
+
+---
+
+### New method on `PullRequestProvider`: `find_pull_requests_for_commit`
+
+```rust
+/// Finds open pull requests whose HEAD commit matches `commit_sha`.
+///
+/// Used by the `status` event handler to map a commit SHA back to the pull
+/// requests that should be re-evaluated when a commit status changes.
+///
+/// # Arguments
+///
+/// * `repo_owner` — Repository owner.
+/// * `repo_name`  — Repository name.
+/// * `commit_sha` — Full SHA of the commit to look up.
+///
+/// # Returns
+///
+/// `Ok(Vec<u64>)` — pull request numbers (possibly empty if no open PRs exist
+/// for this commit).
+/// `Err` on any API failure.
+///
+/// # GitHub API
+///
+/// `GET /repos/{owner}/{repo}/commits/{sha}/pulls`
+///
+/// This endpoint is generally available and no longer requires a preview
+/// `Accept` header. Use the standard `application/vnd.github+json` header.
+async fn find_pull_requests_for_commit(
+    &self,
+    repo_owner: &str,
+    repo_name: &str,
+    commit_sha: &str,
+) -> Result<Vec<u64>, Error>;
+```
+
+**Usage:** this method is called only from the `status` event routing path
+(`handle_status_event` in `crates/server/src/webhook.rs`). It is not called during the
+normal `pull_request` event processing path.
+
+#### `GitHubProvider` implementation of `find_pull_requests_for_commit`
+
+Calls `GET /repos/{owner}/{repo}/commits/{sha}/pulls`, extracts the `number` field from
+each entry in the JSON array, and returns those as `Vec<u64>`.
+
+#### Behavioral postconditions for `find_pull_requests_for_commit`
+
+1. `Ok(vec![])` is returned when no open pull requests reference the given commit SHA.
+2. `Err` is returned for all non-200 API responses.
+3. Only PR numbers are returned; no other PR data is surfaced through this method.

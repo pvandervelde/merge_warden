@@ -818,6 +818,181 @@ State labels are orthogonal to all other label categories:
 - [Configuration System](./configuration-system.md) - Labeling configuration management
 - [Platform Integrations](../architecture/platform-integrations.md) - GitHub API integration patterns
 
+## Renovate Stability Label Management
+
+### Overview
+
+When Renovate raises a dependency-update PR, it runs a "stability days" check: the PR
+remains in a pending state until the package version has been published for a configured
+number of days. Merge Warden reflects this external state with a dedicated label so that
+reviewers can see at a glance whether the stability period has elapsed — without the PR
+being blocked from merging.
+
+This feature is **observability-only**. It never contributes to the commit-status check
+conclusion and never prevents a PR from being merged.
+
+### Trigger Events
+
+The label is re-evaluated in two situations:
+
+1. **`pull_request` events** — on every action that triggers `process_pull_request`
+   (opened, synchronize, ready_for_review, etc.), the current HEAD commit is inspected for
+   a `renovate/stability-days` status and the label is applied or removed accordingly.
+
+2. **`status` events** — when GitHub fires a `status` webhook whose `context` field equals
+   `"renovate/stability-days"`, Merge Warden maps the commit SHA back to open pull requests
+   using `find_pull_requests_for_commit` and calls `process_pull_request` for each one.
+   The event SHA is used only for routing; the label decision always reads the current HEAD
+   status via `get_commit_statuses`.
+
+When the `context` field in a `status` event is absent or does not equal
+`"renovate/stability-days"`, the event is a no-op.
+
+### Label Semantics
+
+| Commit status state | Label action |
+| :--- | :--- |
+| `pending`, `error`, or `failure` | Add `pending_stability_label` (idempotent) |
+| `success` | Remove `pending_stability_label` (idempotent) |
+| Context absent on HEAD | No-op; label state is left unchanged |
+
+Only the newest status entry per context is used. When multiple entries exist for
+`renovate/stability-days` (GitHub returns them newest-first), only the first is read.
+
+### Label Definition
+
+| Property | Value |
+| :--- | :--- |
+| Default label name | `pr-validation: pending-stability` |
+| Colour | `#986ee2` |
+| Description | `PR is waiting for Renovate stability period` |
+
+The label is created automatically on first use if it does not exist in the repository,
+following the same pattern used by `manage_size_labels`.
+
+### Configuration Model
+
+```rust
+/// Configuration for Renovate stability-days label management.
+///
+/// When enabled, `pr-validation: pending-stability` (or the configured label name)
+/// is applied while the `renovate/stability-days` commit status is pending, and
+/// removed when the status reaches success.  The label is purely informational —
+/// it never influences the merge-blocking check conclusion.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RenovateStabilityConfig {
+    /// Whether Renovate stability label management is enabled.
+    ///
+    /// Defaults to `true`.
+    #[serde(default = "RenovateStabilityConfig::default_enabled")]
+    pub enabled: bool,
+
+    /// Label to apply while the stability period has not yet elapsed.
+    ///
+    /// Defaults to `"pr-validation: pending-stability"`.
+    #[serde(default = "RenovateStabilityConfig::default_label")]
+    pub pending_stability_label: String,
+}
+```
+
+TOML configuration:
+
+```toml
+[policies.pullRequests.renovateStability]
+# Disable if you do not use Renovate or do not want this label
+enabled = true
+
+# Override the default label name
+pending_stability_label = "pr-validation: pending-stability"
+```
+
+### Constants
+
+```rust
+/// Context string identifying the Renovate stability check in GitHub commit statuses.
+pub const RENOVATE_STABILITY_CHECK_CONTEXT: &str = "renovate/stability-days";
+
+/// Default label name applied while the Renovate stability period has not elapsed.
+pub const RENOVATE_STABILITY_LABEL: &str = "pr-validation: pending-stability";
+```
+
+### Implementation Contract
+
+`manage_renovate_stability_label` in `crates/core/src/labels.rs`:
+
+```rust
+/// Applies or removes the Renovate stability label based on the current HEAD commit status.
+///
+/// Fetches commit statuses for `head_sha`, filters by `RENOVATE_STABILITY_CHECK_CONTEXT`,
+/// and applies or removes `config.pending_stability_label` accordingly.
+///
+/// This function is a no-op when:
+/// - `config.enabled` is `false`
+/// - no status entry for `renovate/stability-days` is present on `head_sha`
+///
+/// Label operations are idempotent: adding a label that is already present and
+/// removing a label that is absent are both safe and do not return errors.
+///
+/// # Arguments
+///
+/// * `provider`    - The Git provider implementation
+/// * `repo_owner`  - Repository owner
+/// * `repo_name`   - Repository name
+/// * `pr_number`   - Pull request number
+/// * `head_sha`    - HEAD commit SHA whose statuses are inspected
+/// * `config`      - Renovate stability label configuration
+pub async fn manage_renovate_stability_label<P: PullRequestProvider>(
+    provider: &P,
+    repo_owner: &str,
+    repo_name: &str,
+    pr_number: u64,
+    head_sha: &str,
+    config: &RenovateStabilityConfig,
+) -> Result<(), MergeWardenError>;
+```
+
+The function is called from a private method `communicate_renovate_stability_status` on
+`MergeWarden`, which is invoked unconditionally early in `process_pull_request` (after the
+PR is fetched, before validation checks begin). Errors are logged at `warn` level and do not
+propagate, following the same error-handling pattern as `communicate_pr_state_labels`.
+
+### Pagination Assumption
+
+`get_commit_statuses` fetches the first page of results only (same precedent as
+`get_pull_request_files`). Because GitHub returns commit statuses newest-first and Renovate
+updates its status in place, the relevant entry is virtually always on the first page. This
+assumption is documented and should be revisited if evidence of missed statuses emerges.
+
+### Label Conflict Rules
+
+The Renovate stability label is orthogonal to all other label categories:
+
+| Label category | Interaction |
+| :--- | :--- |
+| Size labels (`size/XS` ... `size/XXL`) | No interaction. Both can coexist. |
+| State labels (`status: draft`, etc.) | No interaction. Both can coexist. |
+| WIP label | No interaction. WIP check is independent. |
+| Change-type labels | No interaction. Both can coexist. |
+| Keyword labels | No interaction. Both can coexist. |
+
+### Behavioural Assertions
+
+1. When the `renovate/stability-days` status is `pending`, `error`, or `failure` on the
+   PR's HEAD commit, the `pending_stability_label` is added to the PR.
+2. When the `renovate/stability-days` status is `success` on the PR's HEAD commit, the
+   `pending_stability_label` is removed from the PR.
+3. When no `renovate/stability-days` status exists on the PR's HEAD commit, neither add
+   nor remove is performed.
+4. When `config.enabled` is `false`, no label operations are performed.
+5. All label operations are idempotent — applying an already-present label and removing an
+   absent label are both safe.
+6. The label is auto-created with colour `#986ee2` if it does not exist in the repository.
+7. The Renovate stability label never affects the commit-status check conclusion.
+8. A `status` event with `context != "renovate/stability-days"` produces no label changes.
+9. When a `status` event fires, the label decision is based on the current HEAD status of
+   each associated PR, not on the state embedded in the event payload.
+10. The stability label is managed regardless of whether the PR is a draft — `communicate_renovate_stability_status` runs before the draft check in `process_pull_request`, so draft PRs receive the same label treatment as open PRs.
+
 ## Keyword Labels
 
 ### Overview

@@ -148,14 +148,17 @@ Both modes converge on the same `run_event_processor` loop. This loop is
 mode-agnostic: it receives a `ProcessableEvent` and does not know whether the
 event came from a channel or a queue.
 
-```
+```text
 ProcessableEvent { envelope, ack }
   │
   ▼
 MergeWardenWebhookHandler::handle_event(envelope)
   │
+  ├─ event_type == "status" ?
+  │    └─ handle_status_event(envelope)  (see Status Event Routing below)
+  │
   ├─ event_type != "pull_request" ?
-  │    └─ return Ok(())  (ignored; non-PR events currently unsupported)
+  │    └─ return Ok(())  (ignored; other event types unsupported)
   │
   ├─ action not in { opened, edited, ready_for_review, reopened, unlocked, synchronize } ?
   │    └─ return Ok(())  (no-op for irrelevant actions)
@@ -188,16 +191,69 @@ Acknowledgement
 
 ---
 
+## Status Event Routing
+
+When a GitHub `status` event fires, `handle_status_event` is called before the
+normal `pull_request` dispatch path. Events whose `context` field is not
+`"renovate/stability-days"` are silently dropped.
+
+```text
+handle_status_event(envelope)
+  │
+  ├─ context != "renovate/stability-days" ?
+  │    └─ return Ok(())  (no-op; unrelated status context)
+  │
+  ├─ Extract commit_sha, repo_owner, repo_name, installation_id from payload
+  │
+  ├─ github_client.installation_by_id(installation_id)
+  │    └─ Err → return ProcessingError
+  │
+  ├─ provider.find_pull_requests_for_commit(repo_owner, repo_name, commit_sha)
+  │    ├─ Ok(vec![]) → return Ok(())  (no open PRs for this commit)
+  │    └─ Err → return ProcessingError
+  │
+  ├─ Load .github/merge-warden.toml from the repository
+  │    ├─ Ok  → use repo config merged with application defaults
+  │    └─ Err → fall back to application defaults (logged as warning)
+  │
+  └─ For each pr_number in the returned list:
+       MergeWarden::process_pull_request(owner, repo, pr_number)
+         (see Validation Actions below — the SHA in the event is NOT used;
+          manage_renovate_stability_label reads statuses for the PR's HEAD SHA)
+         └─ Err → logged at warn; processing continues for remaining PRs
+```
+
+**Key design decisions:**
+
+- The status event SHA is used only for routing (finding associated PRs). The label
+  decision inside `manage_renovate_stability_label` always reads the current HEAD
+  commit statuses via `get_commit_statuses(pr.head_sha)`, not the event SHA. This
+  ensures the label reflects current state even if events arrive out of order.
+- Errors from individual PR processing are logged at `warn` and do not abort
+  processing of the remaining PRs in the list.
+- The `status` event check runs before the `pull_request` type check, so it is
+  handled independently of the `pull_request` event path.
+
+---
+
 ## Validation Actions
 
 `MergeWarden::process_pull_request` runs all configured checks and applies their
 results to the PR. The checks run in order; all checks run regardless of earlier
 failures (no short-circuit).
 
-```
+```text
 process_pull_request(owner, repo, pr_number)
   │
   ├─ Fetch PR details via GitHub API
+  │
+  ├─ Renovate stability label (communicate_renovate_stability_status)
+  │    ├─ Fetch commit statuses for pr.head_sha
+  │    ├─ Filter by context "renovate/stability-days"
+  │    ├─ Status pending/error/failure → add pending_stability_label (idempotent)
+  │    ├─ Status success               → remove pending_stability_label (idempotent)
+  │    ├─ Context absent               → no-op
+  │    └─ Err → logged at warn; does NOT propagate; does NOT affect check conclusion
   │
   ├─ Check: PR is not a draft
   │    └─ Draft PRs are skipped entirely (no labels, no comments, no status)
@@ -256,6 +312,8 @@ See [configuration-management.md](../operations/configuration-management.md) and
 | Message deserialisation (queue mode) | Malformed JSON | Message dead-lettered; loop continues |
 | Unknown schema version | `schema_version != 1` | Message dead-lettered; loop continues |
 | EventEnvelope reconstruction | SDK parse error | Message dead-lettered; loop continues |
+| Status event — commit lookup | `find_pull_requests_for_commit` API error | Returned as `ProcessingError`; `ack.reject()` → dead-letter (queue) or logged (webhook) |
+| Status event — PR re-evaluation | `get_commit_statuses` API error inside `process_pull_request` | Logged at `warn`; does not propagate; processing continues for remaining PRs |
 | Config file fetch (config check) | File not found at head SHA | Treated as absent; no comment posted; no error |
 | Config file parse (config check) | Invalid TOML or wrong schema version | Failure comment posted; check conclusion unaffected |
 | PR processing | GitHub API error | `ack.reject()` → dead-letter (queue) or logged (webhook) |
