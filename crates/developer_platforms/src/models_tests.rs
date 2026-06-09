@@ -876,3 +876,121 @@ fn test_issue_project_zero_number_allowed() {
     };
     assert_eq!(project.number, 0);
 }
+
+// ── CommitStatus tests ───────────────────────────────────────────────────────
+
+#[test]
+fn test_commit_status_round_trip_all_fields() {
+    // Serialize a CommitStatus with all three fields populated and deserialize
+    // it back; every field must survive the round-trip unchanged.
+    let status = CommitStatus {
+        context: "renovate/stability-days".to_string(),
+        state: "pending".to_string(),
+        description: Some("Waiting for stability period".to_string()),
+    };
+
+    let json_str = to_string(&status).expect("Failed to serialize CommitStatus");
+    let deserialized: CommitStatus =
+        from_str(&json_str).expect("Failed to deserialize CommitStatus");
+
+    assert_eq!(deserialized.context, "renovate/stability-days");
+    assert_eq!(deserialized.state, "pending");
+    assert_eq!(
+        deserialized.description,
+        Some("Waiting for stability period".to_string())
+    );
+}
+
+#[test]
+fn test_commit_status_round_trip_null_description() {
+    // Serialize a CommitStatus whose description is None (maps to JSON null)
+    // and verify the round-trip produces None again.
+    let status = CommitStatus {
+        context: "ci/build".to_string(),
+        state: "success".to_string(),
+        description: None,
+    };
+
+    let json_str = to_string(&status).expect("Failed to serialize CommitStatus");
+
+    // Confirm the JSON representation carries an explicit null for description
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json_str).expect("Failed to parse JSON");
+    assert!(parsed["description"].is_null());
+
+    let deserialized: CommitStatus =
+        from_str(&json_str).expect("Failed to deserialize CommitStatus");
+    assert_eq!(deserialized.context, "ci/build");
+    assert_eq!(deserialized.state, "success");
+    assert_eq!(deserialized.description, None);
+}
+
+#[test]
+fn test_commit_status_deserialize_from_github_payload() {
+    // Deserialize a JSON fragment that mirrors the shape returned by the
+    // GitHub Commit Statuses API (GET /repos/{owner}/{repo}/commits/{sha}/statuses).
+    let json_str = r#"{
+        "context": "renovate/stability-days",
+        "state": "failure",
+        "description": "Stability period not yet elapsed"
+    }"#;
+
+    let status: CommitStatus = from_str(json_str).expect("Failed to deserialize CommitStatus");
+
+    assert_eq!(status.context, "renovate/stability-days");
+    assert_eq!(status.state, "failure");
+    assert_eq!(
+        status.description,
+        Some("Stability period not yet elapsed".to_string())
+    );
+}
+
+#[test]
+fn test_commit_status_all_github_states_round_trip() {
+    // Verify each GitHub-defined state value (`pending`, `success`, `failure`,
+    // `error`) survives a serialization / deserialization cycle.
+    let states = ["pending", "success", "failure", "error"];
+
+    for state in states {
+        let status = CommitStatus {
+            context: "ci/check".to_string(),
+            state: state.to_string(),
+            description: None,
+        };
+
+        let json_str = to_string(&status).expect("Failed to serialize CommitStatus");
+        let deserialized: CommitStatus =
+            from_str(&json_str).expect("Failed to deserialize CommitStatus");
+
+        assert_eq!(deserialized.state, state);
+    }
+}
+
+#[test]
+fn test_commit_status_clone() {
+    // CommitStatus must implement Clone; cloned value must be independent.
+    let original = CommitStatus {
+        context: "renovate/stability-days".to_string(),
+        state: "pending".to_string(),
+        description: Some("desc".to_string()),
+    };
+
+    let cloned = original.clone();
+    assert_eq!(cloned.context, original.context);
+    assert_eq!(cloned.state, original.state);
+    assert_eq!(cloned.description, original.description);
+}
+
+#[test]
+fn test_commit_status_debug_contains_context() {
+    // CommitStatus must implement Debug; the debug output must contain the
+    // context string so log messages are useful.
+    let status = CommitStatus {
+        context: "renovate/stability-days".to_string(),
+        state: "pending".to_string(),
+        description: None,
+    };
+
+    let debug_output = format!("{:?}", status);
+    assert!(debug_output.contains("renovate/stability-days"));
+}
