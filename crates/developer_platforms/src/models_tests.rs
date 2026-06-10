@@ -876,3 +876,306 @@ fn test_issue_project_zero_number_allowed() {
     };
     assert_eq!(project.number, 0);
 }
+
+// ── CommitStatus tests ────────────────────────────────────────────────────────
+
+// Tier 1 – Specification tests
+// Each test maps directly to a behavioural assertion from the interface contract.
+
+#[test]
+fn test_commit_status_round_trip_all_fields_populated() {
+    // Verify that a CommitStatus with all three fields populated survives a
+    // serde_json serialise → deserialise round-trip without data loss.
+    let original = CommitStatus {
+        context: "renovate/stability-days".to_string(),
+        state: "success".to_string(),
+        description: Some("All stability checks passed".to_string()),
+    };
+
+    let json_str = to_string(&original).expect("Failed to serialize CommitStatus");
+    let restored: CommitStatus =
+        from_str(&json_str).expect("Failed to deserialize CommitStatus");
+
+    assert_eq!(restored.context, "renovate/stability-days");
+    assert_eq!(restored.state, "success");
+    assert_eq!(
+        restored.description,
+        Some("All stability checks passed".to_string())
+    );
+}
+
+#[test]
+fn test_commit_status_round_trip_description_null() {
+    // Verify that description: None serialises to null and deserialises back
+    // to None without error.
+    let original = CommitStatus {
+        context: "ci/build".to_string(),
+        state: "pending".to_string(),
+        description: None,
+    };
+
+    let json_str = to_string(&original).expect("Failed to serialize CommitStatus");
+
+    // The JSON representation must have description as null
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json_str).expect("Failed to parse serialized JSON");
+    assert!(
+        parsed["description"].is_null(),
+        "Expected description to be null in JSON, got: {}",
+        parsed["description"]
+    );
+
+    let restored: CommitStatus =
+        from_str(&json_str).expect("Failed to deserialize CommitStatus");
+    assert_eq!(restored.description, None);
+}
+
+#[test]
+fn test_commit_status_deserialize_from_realistic_github_api_payload() {
+    // Deserialise from a verbatim GitHub Commit Statuses API-style JSON object
+    // (the three fields this struct models).
+    let json_str = r#"{
+        "context": "renovate/stability-days",
+        "state": "pending",
+        "description": "Waiting for stability period to elapse"
+    }"#;
+
+    let status: CommitStatus =
+        from_str(json_str).expect("Failed to deserialize CommitStatus from GitHub payload");
+
+    assert_eq!(status.context, "renovate/stability-days");
+    assert_eq!(status.state, "pending");
+    assert_eq!(
+        status.description,
+        Some("Waiting for stability period to elapse".to_string())
+    );
+}
+
+#[test]
+fn test_commit_status_state_pending_round_trips() {
+    // The GitHub-defined state value "pending" must survive a round-trip.
+    let status = CommitStatus {
+        context: "ci/test".to_string(),
+        state: "pending".to_string(),
+        description: None,
+    };
+
+    let json_str = to_string(&status).expect("Failed to serialize CommitStatus");
+    let restored: CommitStatus =
+        from_str(&json_str).expect("Failed to deserialize CommitStatus");
+
+    assert_eq!(restored.state, "pending");
+}
+
+#[test]
+fn test_commit_status_state_success_round_trips() {
+    // The GitHub-defined state value "success" must survive a round-trip.
+    let status = CommitStatus {
+        context: "ci/test".to_string(),
+        state: "success".to_string(),
+        description: None,
+    };
+
+    let json_str = to_string(&status).expect("Failed to serialize CommitStatus");
+    let restored: CommitStatus =
+        from_str(&json_str).expect("Failed to deserialize CommitStatus");
+
+    assert_eq!(restored.state, "success");
+}
+
+#[test]
+fn test_commit_status_state_failure_round_trips() {
+    // The GitHub-defined state value "failure" must survive a round-trip.
+    let status = CommitStatus {
+        context: "ci/test".to_string(),
+        state: "failure".to_string(),
+        description: None,
+    };
+
+    let json_str = to_string(&status).expect("Failed to serialize CommitStatus");
+    let restored: CommitStatus =
+        from_str(&json_str).expect("Failed to deserialize CommitStatus");
+
+    assert_eq!(restored.state, "failure");
+}
+
+#[test]
+fn test_commit_status_state_error_round_trips() {
+    // The GitHub-defined state value "error" must survive a round-trip.
+    let status = CommitStatus {
+        context: "ci/test".to_string(),
+        state: "error".to_string(),
+        description: None,
+    };
+
+    let json_str = to_string(&status).expect("Failed to serialize CommitStatus");
+    let restored: CommitStatus =
+        from_str(&json_str).expect("Failed to deserialize CommitStatus");
+
+    assert_eq!(restored.state, "error");
+}
+
+// Tier 2 – Adversarial / boundary tests
+// These tests would fail against stubs or trivially wrong implementations.
+
+#[test]
+fn test_commit_status_clone_produces_equal_values() {
+    // Clone must produce an independent copy with identical field values.
+    // Fails if Clone is not derived or if a field is not copied.
+    let original = CommitStatus {
+        context: "security/scan".to_string(),
+        state: "success".to_string(),
+        description: Some("No vulnerabilities found".to_string()),
+    };
+
+    let cloned = original.clone();
+
+    assert_eq!(cloned.context, original.context);
+    assert_eq!(cloned.state, original.state);
+    assert_eq!(cloned.description, original.description);
+}
+
+#[test]
+fn test_commit_status_clone_with_none_description_produces_equal_values() {
+    // Clone must also work correctly when description is None.
+    let original = CommitStatus {
+        context: "lint/clippy".to_string(),
+        state: "pending".to_string(),
+        description: None,
+    };
+
+    let cloned = original.clone();
+
+    assert_eq!(cloned.context, original.context);
+    assert_eq!(cloned.state, original.state);
+    assert_eq!(cloned.description, None);
+}
+
+#[test]
+fn test_commit_status_debug_format_does_not_panic_with_description() {
+    // Debug formatting must not panic for a fully-populated instance.
+    // Fails if Debug is not derived.
+    let status = CommitStatus {
+        context: "renovate/stability-days".to_string(),
+        state: "failure".to_string(),
+        description: Some("Package has not reached stability threshold".to_string()),
+    };
+
+    let debug_output = format!("{:?}", status);
+    assert!(!debug_output.is_empty());
+}
+
+#[test]
+fn test_commit_status_debug_format_does_not_panic_without_description() {
+    // Debug formatting must not panic when description is None.
+    let status = CommitStatus {
+        context: "renovate/stability-days".to_string(),
+        state: "pending".to_string(),
+        description: None,
+    };
+
+    let debug_output = format!("{:?}", status);
+    assert!(!debug_output.is_empty());
+}
+
+#[test]
+fn test_commit_status_json_field_names_match_github_api_contract() {
+    // The JSON keys produced by Serialize must be exactly "context", "state",
+    // and "description" — matching the GitHub API field names.
+    // Fails if serde rename attributes alter the field names.
+    let status = CommitStatus {
+        context: "ci/build".to_string(),
+        state: "success".to_string(),
+        description: Some("Build passed".to_string()),
+    };
+
+    let json_str = to_string(&status).expect("Failed to serialize CommitStatus");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json_str).expect("Failed to parse JSON");
+
+    assert!(
+        parsed.get("context").is_some(),
+        "Expected JSON key 'context' to be present"
+    );
+    assert!(
+        parsed.get("state").is_some(),
+        "Expected JSON key 'state' to be present"
+    );
+    assert!(
+        parsed.get("description").is_some(),
+        "Expected JSON key 'description' to be present"
+    );
+}
+
+#[test]
+fn test_commit_status_context_field_with_slashes_and_dots_preserved() {
+    // A context value containing slashes and dots (the canonical GitHub format,
+    // e.g. "renovate/stability-days") must survive serialisation and
+    // deserialisation without truncation or escaping changes.
+    let original_context = "renovate/stability-days";
+
+    let status = CommitStatus {
+        context: original_context.to_string(),
+        state: "success".to_string(),
+        description: None,
+    };
+
+    let json_str = to_string(&status).expect("Failed to serialize CommitStatus");
+    let restored: CommitStatus =
+        from_str(&json_str).expect("Failed to deserialize CommitStatus");
+
+    assert_eq!(restored.context, original_context);
+}
+
+#[test]
+fn test_commit_status_description_some_value_round_trips_correctly() {
+    // Confirm that a Some(description) value deserialises to Some with the
+    // exact same string — distinct from the None path.
+    let description_text = "Stability period of 3 days has elapsed";
+
+    let original = CommitStatus {
+        context: "renovate/stability-days".to_string(),
+        state: "success".to_string(),
+        description: Some(description_text.to_string()),
+    };
+
+    let json_str = to_string(&original).expect("Failed to serialize CommitStatus");
+    let restored: CommitStatus =
+        from_str(&json_str).expect("Failed to deserialize CommitStatus");
+
+    assert!(
+        restored.description.is_some(),
+        "Expected description to be Some after round-trip"
+    );
+    assert_eq!(restored.description.unwrap(), description_text);
+}
+
+#[test]
+fn test_commit_status_deserialize_ignores_extra_github_api_fields() {
+    // The GitHub Commit Statuses API returns many additional fields (id, url,
+    // avatar_url, created_at, updated_at, etc.).  Deserialisation must succeed
+    // even when those extra fields are present, because serde's default
+    // behaviour (deny_unknown_fields is NOT set) must apply.
+    let json_str = r#"{
+        "url": "https://api.github.com/repos/owner/repo/statuses/abc123def",
+        "id": 99887766,
+        "node_id": "SC_abc123",
+        "state": "success",
+        "description": "Build passed",
+        "target_url": "https://ci.example.com/builds/42",
+        "context": "ci/build",
+        "created_at": "2024-01-15T10:00:00Z",
+        "updated_at": "2024-01-15T10:05:00Z",
+        "creator": {
+            "login": "octocat",
+            "id": 1
+        }
+    }"#;
+
+    let status: CommitStatus =
+        from_str(json_str).expect("Failed to deserialize CommitStatus with extra fields");
+
+    assert_eq!(status.context, "ci/build");
+    assert_eq!(status.state, "success");
+    assert_eq!(status.description, Some("Build passed".to_string()));
+}
