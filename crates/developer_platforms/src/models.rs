@@ -461,6 +461,46 @@ pub struct User {
     pub login: String,
 }
 
+/// A single commit status entry returned by the GitHub Commit Statuses API.
+///
+/// GitHub returns commit statuses newest-first. When multiple entries exist for
+/// the same context, callers should use the first occurrence (i.e. the newest).
+///
+/// Mapped from `GET /repos/{owner}/{repo}/commits/{sha}/statuses`.
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_developer_platforms::models::CommitStatus;
+/// use serde_json::from_str;
+///
+/// let json = r#"{
+///     "context": "renovate/stability-days",
+///     "state": "success",
+///     "description": "All stability checks passed"
+/// }"#;
+///
+/// let status: CommitStatus = from_str(json).expect("Failed to parse commit status");
+/// assert_eq!(status.context, "renovate/stability-days");
+/// assert_eq!(status.state, "success");
+/// assert_eq!(status.description, Some("All stability checks passed".to_string()));
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CommitStatus {
+    /// The context string that identifies which check produced this status.
+    ///
+    /// Example: `"renovate/stability-days"`.
+    pub context: String,
+
+    /// The state of the status.
+    ///
+    /// GitHub-defined values: `"pending"`, `"success"`, `"failure"`, `"error"`.
+    pub state: String,
+
+    /// Optional human-readable description of the status.
+    pub description: Option<String>,
+}
+
 /// Repository metadata used to evaluate conditional org policy conditions.
 ///
 /// Populated by [`merge_warden_developer_platforms::RepositoryMetadataProvider::get_repository_context`]
