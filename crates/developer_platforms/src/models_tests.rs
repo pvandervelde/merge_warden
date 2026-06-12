@@ -1179,3 +1179,37 @@ fn test_commit_status_deserialize_ignores_extra_github_api_fields() {
     assert_eq!(status.state, "success");
     assert_eq!(status.description, Some("Build passed".to_string()));
 }
+
+#[test]
+fn test_commit_status_description_none_serializes_as_null_key_present() {
+    // Kill test for mutant: adding `#[serde(skip_serializing_if = "Option::is_none")]`
+    // to the description field would cause description: None to be omitted from
+    // the JSON output entirely, instead of being serialized as `"description": null`.
+    //
+    // The GitHub Commit Statuses API always emits the description key (even when null),
+    // so the serialized wire format must include the key.  This test uses
+    // `parsed.get("description")` (returns None when the key is absent) rather than
+    // `parsed["description"]` (returns Value::Null for both absent and null), making
+    // it sensitive to the difference.
+    let status = CommitStatus {
+        context: "ci/lint".to_string(),
+        state: "pending".to_string(),
+        description: None,
+    };
+
+    let json_str = to_string(&status).expect("Failed to serialize CommitStatus");
+    let parsed: serde_json::Value =
+        serde_json::from_str(&json_str).expect("Failed to parse serialized JSON");
+
+    assert!(
+        parsed.get("description").is_some(),
+        "Expected JSON key 'description' to be present even when value is None/null; \
+         got JSON: {json_str}"
+    );
+    assert!(
+        parsed["description"].is_null(),
+        "Expected JSON value for 'description' to be null when description is None; \
+         got: {}",
+        parsed["description"]
+    );
+}
