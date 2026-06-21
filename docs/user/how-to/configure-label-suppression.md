@@ -16,13 +16,15 @@ participant can suppress it.
 ## Posting a suppression command
 
 Any PR participant (author, reviewer, or commenter) can suppress a keyword-triggered
-label by posting a PR comment that contains the following line:
+label by posting a PR comment that contains the following on its own line:
 
 ```
 @merge-warden suppress: <label-name>
 ```
 
-Replace `<label-name>` with the exact name of the label to suppress.
+Replace `<label-name>` with the exact name of the label to suppress. The command can
+appear anywhere in a comment body (it does not need to be the only content), but it must
+start at the beginning of a line. Leading and trailing whitespace on that line is ignored.
 
 **Example:**
 

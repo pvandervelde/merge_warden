@@ -185,7 +185,7 @@ auth_method = "app"
 
 [webhooks]
 # Webhook server port
-port = 3000
+port = 3100
 
 [policies]
 # Application-level policy defaults — see app-config reference

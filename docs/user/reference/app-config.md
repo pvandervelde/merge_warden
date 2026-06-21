@@ -113,9 +113,13 @@ Controls the Renovate stability-days label management feature at the application
 | `enabled` | bool | `true` | When `true`, the `pending_stability_label` is applied to a PR while its `renovate/stability-days` commit status is `pending`, `error`, or `failure`. Removed when the status becomes `success`. |
 | `pending_stability_label` | string | `"pr-validation: pending-stability"` | Name of the label applied during the stability wait period. |
 
-The merge rule for `enabled` is OR: once either the application tier or the per-repo
-tier enables this feature, it stays enabled. To disable for all repositories, set
-`enabled = false` here (individual repos cannot override it back to `false`).
+The merge rule for `enabled` is OR: the feature is active when either the application
+tier or the per-repo tier has `enabled = true`. Because the per-repo
+`[policies.pullRequests.renovateStability]` defaults to `enabled = true`, repositories
+with any `.github/merge-warden.toml` (even one that does not mention this section) will
+keep the feature enabled. Setting `enabled = false` here only disables the feature for
+repositories that have no per-repo config file at all. To disable the feature for a
+specific repository, set `enabled = false` in that repository's `.github/merge-warden.toml`.
 
 **Example:**
 

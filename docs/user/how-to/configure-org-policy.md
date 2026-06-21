@@ -9,21 +9,15 @@ An organisation-level policy file lets a platform team define PR policies in one
 place and have them applied to every repository the Merge Warden server processes — without
 each repository needing to maintain a `.github/merge-warden.toml`.
 
-The org policy adds a fourth tier to the configuration resolution chain:
+The org policy adds a fourth tier to the configuration resolution chain (1 = highest priority):
 
-```
-Per-repository .github/merge-warden.toml    (highest priority)
-        ↓  overrides
-Org-enforced policies                        (cannot be overridden by per-repo config)
-        ↓
-Per-repository .github/merge-warden.toml    (sits between org defaults and org enforced)
-        ↓  overrides
-Org-default policies                         (can be overridden by per-repo config)
-        ↓  overrides
-MERGE_WARDEN_CONFIG_FILE (application defaults)
-        ↓  overrides
-Compiled-in defaults                         (lowest priority)
-```
+| Priority | Source | Overridable? |
+| :---: | :--- | :--- |
+| 1 | Org-enforced policies — `[enforced]` section | No — beats everything below |
+| 2 | Per-repository `.github/merge-warden.toml` | — |
+| 3 | Org-default policies — `[defaults]` section | Yes — per-repo config overrides these |
+| 4 | Application defaults — `MERGE_WARDEN_CONFIG_FILE` | Yes |
+| 5 (lowest) | Compiled-in defaults | Yes |
 
 ---
 
@@ -80,8 +74,12 @@ path  = "merge-warden/org-policy.toml"
 ```
 
 The server fetches the org policy file on every PR event using the same GitHub App
-credentials configured for the server instance. The App must have `Contents: Read`
-permission on the policy repository.
+credentials configured for the server instance.
+
+> **Required permission:** The GitHub App must have **`Contents: Read`** permission
+> on the policy repository. Without it, every fetch will fail and PR processing will
+> either be aborted (if `fail_if_unreachable = true`) or degrade to three-tier
+> resolution (the default).
 
 ---
 
