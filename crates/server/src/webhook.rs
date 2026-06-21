@@ -28,6 +28,7 @@ use merge_warden_core::{
     MergeWarden,
 };
 use merge_warden_developer_platforms::github::GitHubProvider;
+use merge_warden_developer_platforms::PullRequestProvider as _;
 use tokio::sync::mpsc;
 use tracing::{debug, error, info, instrument, warn};
 
@@ -293,6 +294,161 @@ impl MergeWardenWebhookHandler {
 
         Ok(())
     }
+
+    /// Processes a `status` webhook event.
+    ///
+    /// When a commit status changes (e.g. `renovate/stability-days` transitions
+    /// from `pending` → `success`), GitHub fires a `status` event. This handler:
+    ///
+    /// 1. Ignores events whose `context` is not `renovate/stability-days`.
+    /// 2. Resolves the installation client from the payload `installation.id`.
+    /// 3. Calls [`merge_warden_developer_platforms::PullRequestProvider::find_pull_requests_for_commit`]
+    ///    to discover all open PRs whose HEAD points at the updated SHA.
+    /// 4. For each PR, loads its config and re-runs
+    ///    [`MergeWarden::process_pull_request`] so the stability label is
+    ///    applied or removed as appropriate.
+    ///
+    /// Errors for individual PRs are logged at `warn` and do not abort
+    /// processing of remaining PRs.
+    pub async fn handle_status_event(
+        &self,
+        envelope: &EventEnvelope,
+    ) -> Result<(), ServerError> {
+        let payload = envelope.payload.raw();
+
+        let context = payload["context"].as_str().unwrap_or("");
+        if context != merge_warden_core::config::RENOVATE_STABILITY_CHECK_CONTEXT {
+            debug!(
+                context = %context,
+                "Ignoring status event with non-renovate context"
+            );
+            return Ok(());
+        }
+
+        let sha = match payload["sha"].as_str() {
+            Some(s) => s.to_string(),
+            None => {
+                error!("Status event payload missing 'sha' field");
+                return Err(ServerError::ProcessingError(
+                    "Missing sha in status payload".to_string(),
+                ));
+            }
+        };
+
+        let installation_id = match payload["installation"]["id"].as_u64() {
+            Some(id) => id,
+            None => {
+                error!("Status event payload missing 'installation.id' field");
+                return Err(ServerError::ProcessingError(
+                    "Missing installation ID in status payload".to_string(),
+                ));
+            }
+        };
+
+        let repo_owner = &envelope.repository.owner.login;
+        let repo_name = &envelope.repository.name;
+
+        info!(
+            repository_owner = repo_owner.as_str(),
+            repository = repo_name.as_str(),
+            sha = %sha,
+            context = %context,
+            "Processing renovate stability status event"
+        );
+
+        let installation_client = self
+            .github_client
+            .installation_by_id(InstallationId::new(installation_id))
+            .await
+            .map_err(|e| {
+                error!(error = %e, "Failed to create installation client for status event");
+                ServerError::AuthError(format!("Failed to create installation client: {e}"))
+            })?;
+
+        let provider = GitHubProvider::new(installation_client);
+
+        let pr_numbers = provider
+            .find_pull_requests_for_commit(repo_owner, repo_name, &sha)
+            .await
+            .map_err(|e| {
+                error!(error = %e, "Failed to find PRs for commit SHA");
+                ServerError::ProcessingError(format!("Failed to find PRs for commit: {e}"))
+            })?;
+
+        if pr_numbers.is_empty() {
+            debug!(
+                repository_owner = repo_owner.as_str(),
+                repository = repo_name.as_str(),
+                sha = %sha,
+                "No open PRs found for commit SHA — nothing to do"
+            );
+            return Ok(());
+        }
+
+        let merge_warden_config_path = ".github/merge-warden.toml";
+
+        for pr_number in pr_numbers {
+            let issue_provider = provider.clone();
+
+            let validation_config = match resolve_pull_request_config(
+                repo_owner,
+                repo_name,
+                merge_warden_config_path,
+                &provider,
+                &self.policies,
+                Some(&provider),
+            )
+            .await
+            {
+                Ok(config) => config,
+                Err(ConfigLoadError::OrgPolicyUnavailable(ref msg)) => {
+                    warn!(
+                        repository_owner = repo_owner.as_str(),
+                        repository = repo_name.as_str(),
+                        pull_request = pr_number,
+                        org_policy_error = msg.as_str(),
+                        "Org policy unreachable for PR during status event processing; using defaults"
+                    );
+                    CurrentPullRequestValidationConfiguration::from_app_defaults(&self.policies)
+                }
+                Err(e) => {
+                    warn!(
+                        repository_owner = repo_owner.as_str(),
+                        repository = repo_name.as_str(),
+                        pull_request = pr_number,
+                        error = %e,
+                        "Failed to resolve config for PR during status event; using defaults"
+                    );
+                    CurrentPullRequestValidationConfiguration::from_app_defaults(&self.policies)
+                }
+            };
+
+            let warden = MergeWarden::with_config(provider.clone(), validation_config)
+                .with_issue_provider(Box::new(issue_provider));
+
+            if let Err(e) = warden
+                .process_pull_request(repo_owner, repo_name, pr_number)
+                .await
+            {
+                warn!(
+                    repository_owner = repo_owner.as_str(),
+                    repository = repo_name.as_str(),
+                    pull_request = pr_number,
+                    error = %e,
+                    "Failed to process PR during status event"
+                );
+            } else {
+                info!(
+                    repository_owner = repo_owner.as_str(),
+                    repository = repo_name.as_str(),
+                    pull_request = pr_number,
+                    "PR re-evaluated after renovate stability status change"
+                );
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[async_trait]
@@ -301,6 +457,13 @@ impl WebhookHandler for MergeWardenWebhookHandler {
         &self,
         envelope: &EventEnvelope,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        if envelope.event_type == "status" {
+            return self
+                .handle_status_event(envelope)
+                .await
+                .map_err(|e| Box::new(e) as Box<dyn std::error::Error + Send + Sync>);
+        }
+
         if envelope.event_type != "pull_request" && envelope.event_type != "pull_request_review" {
             debug!(event_type = %envelope.event_type, "Ignoring non-pull-request event");
             return Ok(());

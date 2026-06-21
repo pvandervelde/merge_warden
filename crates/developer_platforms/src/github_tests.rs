@@ -1650,6 +1650,379 @@ async fn test_fetch_config_at_ref_returns_none_when_file_absent() {
 }
 
 // ---------------------------------------------------------------------------
+// get_commit_statuses
+// ---------------------------------------------------------------------------
+
+/// Spec assertion: `Ok(vec![])` when commit exists but has no statuses.
+#[tokio::test]
+async fn test_get_commit_statuses_returns_empty_vec_when_no_statuses() {
+    let server = MockServer::start().await;
+    let sha = "aabbccdd1122334455667788990011223344556677";
+
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/owner/repo/commits/{sha}/statuses")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .get_commit_statuses("owner", "repo", sha)
+        .await
+        .expect("should succeed with empty vec");
+
+    assert!(result.is_empty());
+}
+
+/// Spec assertion: returned vector preserves API newest-first ordering.
+#[tokio::test]
+async fn test_get_commit_statuses_preserves_api_order() {
+    let server = MockServer::start().await;
+    let sha = "aabbccdd1122334455667788990011223344556677";
+
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/owner/repo/commits/{sha}/statuses")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "context": "renovate/stability-days",
+                "state": "pending",
+                "description": "Stability pending"
+            },
+            {
+                "context": "renovate/stability-days",
+                "state": "success",
+                "description": "All checks passed"
+            }
+        ])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .get_commit_statuses("owner", "repo", sha)
+        .await
+        .expect("should succeed");
+
+    assert_eq!(result.len(), 2);
+    assert_eq!(result[0].state, "pending", "first entry must be newest (as returned by API)");
+    assert_eq!(result[1].state, "success");
+}
+
+/// Spec assertion: statuses have correct context and description fields.
+#[tokio::test]
+async fn test_get_commit_statuses_maps_fields_correctly() {
+    let server = MockServer::start().await;
+    let sha = "aabbccdd1122334455667788990011223344556677";
+
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/owner/repo/commits/{sha}/statuses")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "context": "renovate/stability-days",
+                "state": "success",
+                "description": "All stability checks passed"
+            }
+        ])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .get_commit_statuses("owner", "repo", sha)
+        .await
+        .expect("should succeed");
+
+    let status = &result[0];
+    assert_eq!(status.context, "renovate/stability-days");
+    assert_eq!(status.state, "success");
+    assert_eq!(status.description, Some("All stability checks passed".to_string()));
+}
+
+/// Spec assertion: description may be null / absent.
+#[tokio::test]
+async fn test_get_commit_statuses_null_description_maps_to_none() {
+    let server = MockServer::start().await;
+    let sha = "aabbccdd1122334455667788990011223344556677";
+
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/owner/repo/commits/{sha}/statuses")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "context": "ci/build",
+                "state": "failure",
+                "description": null
+            }
+        ])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .get_commit_statuses("owner", "repo", sha)
+        .await
+        .expect("should succeed");
+
+    assert_eq!(result[0].description, None);
+}
+
+/// Adversarial: 404 must return Err, not an empty vec.
+#[tokio::test]
+async fn test_get_commit_statuses_404_returns_error() {
+    let server = MockServer::start().await;
+    let sha = "aabbccdd1122334455667788990011223344556677";
+
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/owner/repo/commits/{sha}/statuses")))
+        .respond_with(ResponseTemplate::new(404).set_body_string("Not Found"))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider.get_commit_statuses("owner", "repo", sha).await;
+
+    assert!(result.is_err(), "404 must not return Ok");
+}
+
+/// Adversarial: 500 must return Err.
+#[tokio::test]
+async fn test_get_commit_statuses_500_returns_error() {
+    let server = MockServer::start().await;
+    let sha = "aabbccdd1122334455667788990011223344556677";
+
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/owner/repo/commits/{sha}/statuses")))
+        .respond_with(ResponseTemplate::new(500).set_body_string("Internal Server Error"))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider.get_commit_statuses("owner", "repo", sha).await;
+
+    assert!(result.is_err(), "500 must not return Ok");
+}
+
+/// Adversarial: 401/403 auth failure must return Err.
+#[tokio::test]
+async fn test_get_commit_statuses_403_returns_error() {
+    let server = MockServer::start().await;
+    let sha = "aabbccdd1122334455667788990011223344556677";
+
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/owner/repo/commits/{sha}/statuses")))
+        .respond_with(ResponseTemplate::new(403).set_body_string("Forbidden"))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider.get_commit_statuses("owner", "repo", sha).await;
+
+    assert!(result.is_err(), "403 must not return Ok");
+}
+
+/// Adversarial: hit the correct URL path (not the checks API).
+#[tokio::test]
+async fn test_get_commit_statuses_uses_statuses_endpoint() {
+    let server = MockServer::start().await;
+    let sha = "aabbccdd1122334455667788990011223344556677";
+
+    // Only mount on the statuses endpoint — if the impl calls the wrong path WireMock
+    // returns 404 and the test fails.
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/owner/repo/commits/{sha}/statuses")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider.get_commit_statuses("owner", "repo", sha).await;
+
+    assert!(result.is_ok(), "should call the /statuses endpoint");
+}
+
+// ---------------------------------------------------------------------------
+// find_pull_requests_for_commit (FR-008 Task 4)
+// ---------------------------------------------------------------------------
+
+/// Spec assertion: `Ok(vec![])` when no open PRs reference the commit SHA.
+#[tokio::test]
+async fn test_find_pull_requests_for_commit_returns_empty_when_no_prs() {
+    let server = MockServer::start().await;
+    let sha = "aabbccdd1122334455667788990011223344556677";
+
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/owner/repo/commits/{sha}/pulls")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .find_pull_requests_for_commit("owner", "repo", sha)
+        .await
+        .expect("should succeed with empty vec");
+
+    assert!(result.is_empty());
+}
+
+/// Spec assertion: returns PR numbers only (Vec<u64>).
+#[tokio::test]
+async fn test_find_pull_requests_for_commit_returns_pr_numbers() {
+    let server = MockServer::start().await;
+    let sha = "aabbccdd1122334455667788990011223344556677";
+
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/owner/repo/commits/{sha}/pulls")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "number": 42,
+                "title": "feat: something",
+                "state": "open",
+                "draft": false,
+                "body": null,
+                "head": { "sha": sha },
+                "user": { "login": "dev", "id": 1, "node_id": "U_1", "type": "User" },
+                "node_id": "PR_1"
+            },
+            {
+                "number": 99,
+                "title": "fix: another",
+                "state": "open",
+                "draft": false,
+                "body": null,
+                "head": { "sha": sha },
+                "user": { "login": "dev", "id": 1, "node_id": "U_1", "type": "User" },
+                "node_id": "PR_2"
+            }
+        ])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .find_pull_requests_for_commit("owner", "repo", sha)
+        .await
+        .expect("should succeed");
+
+    assert_eq!(result.len(), 2);
+    assert!(result.contains(&42), "PR 42 must be in results");
+    assert!(result.contains(&99), "PR 99 must be in results");
+}
+
+/// Adversarial: only PR numbers returned — no other fields.
+#[tokio::test]
+async fn test_find_pull_requests_for_commit_returns_only_numbers_not_full_structs() {
+    let server = MockServer::start().await;
+    let sha = "aabbccdd1122334455667788990011223344556677";
+
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/owner/repo/commits/{sha}/pulls")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([
+            {
+                "number": 7,
+                "title": "chore: update deps",
+                "state": "open",
+                "draft": false,
+                "body": "some body",
+                "head": { "sha": sha },
+                "user": { "login": "renovate", "id": 2, "node_id": "U_2", "type": "Bot" },
+                "node_id": "PR_7"
+            }
+        ])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .find_pull_requests_for_commit("owner", "repo", sha)
+        .await
+        .expect("should succeed");
+
+    // The return type is Vec<u64>; the single entry must be 7.
+    assert_eq!(result, vec![7u64]);
+}
+
+/// Adversarial: 404 must return Err.
+#[tokio::test]
+async fn test_find_pull_requests_for_commit_404_returns_error() {
+    let server = MockServer::start().await;
+    let sha = "aabbccdd1122334455667788990011223344556677";
+
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/owner/repo/commits/{sha}/pulls")))
+        .respond_with(ResponseTemplate::new(404).set_body_string("Not Found"))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .find_pull_requests_for_commit("owner", "repo", sha)
+        .await;
+
+    assert!(result.is_err(), "404 must not return Ok");
+}
+
+/// Adversarial: 500 must return Err.
+#[tokio::test]
+async fn test_find_pull_requests_for_commit_500_returns_error() {
+    let server = MockServer::start().await;
+    let sha = "aabbccdd1122334455667788990011223344556677";
+
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/owner/repo/commits/{sha}/pulls")))
+        .respond_with(ResponseTemplate::new(500).set_body_string("Internal Server Error"))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .find_pull_requests_for_commit("owner", "repo", sha)
+        .await;
+
+    assert!(result.is_err(), "500 must not return Ok");
+}
+
+/// Adversarial: 422 (unprocessable entity) must return Err.
+#[tokio::test]
+async fn test_find_pull_requests_for_commit_422_returns_error() {
+    let server = MockServer::start().await;
+    let sha = "aabbccdd1122334455667788990011223344556677";
+
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/owner/repo/commits/{sha}/pulls")))
+        .respond_with(ResponseTemplate::new(422).set_body_string("Unprocessable Entity"))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .find_pull_requests_for_commit("owner", "repo", sha)
+        .await;
+
+    assert!(result.is_err(), "422 must not return Ok");
+}
+
+/// Adversarial: correct URL path is called.
+#[tokio::test]
+async fn test_find_pull_requests_for_commit_uses_pulls_endpoint() {
+    let server = MockServer::start().await;
+    let sha = "aabbccdd1122334455667788990011223344556677";
+
+    // Only mount on the /pulls endpoint — wrong path → 404.
+    Mock::given(method("GET"))
+        .and(path(format!("/repos/owner/repo/commits/{sha}/pulls")))
+        .respond_with(ResponseTemplate::new(200).set_body_json(json!([])))
+        .mount(&server)
+        .await;
+
+    let provider = make_provider(&server.uri()).await;
+    let result = provider
+        .find_pull_requests_for_commit("owner", "repo", sha)
+        .await;
+
+    assert!(result.is_ok(), "should call /commits/{{sha}}/pulls");
+}
+
+// ---------------------------------------------------------------------------
 // RepositoryMetadataProvider — get_repository_context
 // ---------------------------------------------------------------------------
 

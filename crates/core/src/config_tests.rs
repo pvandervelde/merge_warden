@@ -739,6 +739,7 @@ fn test_application_defaults_bypass_rules_serialization() {
         change_type_labels: ChangeTypeLabelConfig::default(),
         wip_check: WipCheckConfig::default(),
         pr_state_labels: crate::config::PrStateLabelsConfig::default(),
+        renovate_stability: crate::config::RenovateStabilityConfig::default(),
         bot_mention: "@merge-warden".to_string(),
         org_policy_source: None,
     };
@@ -6541,4 +6542,170 @@ async fn test_conditional_policy_toml_with_no_org_policy_source_ignores_conditio
         !result.enforce_title_convention,
         "No org_policy_source means no conditional policies regardless of metadata_provider"
     );
+}
+
+// ============================================================
+// RenovateStabilityConfig — FR-008 Task 5
+// ============================================================
+
+/// Spec assertion: RenovateStabilityConfig::default() → enabled=true.
+#[test]
+fn test_renovate_stability_config_default_enabled_is_true() {
+    let config = crate::config::RenovateStabilityConfig::default();
+    assert!(config.enabled, "RenovateStabilityConfig::default must have enabled=true");
+}
+
+/// Spec assertion: RenovateStabilityConfig::default() → label == RENOVATE_STABILITY_LABEL.
+#[test]
+fn test_renovate_stability_config_default_label_is_constant() {
+    let config = crate::config::RenovateStabilityConfig::default();
+    assert_eq!(
+        config.pending_stability_label,
+        crate::config::RENOVATE_STABILITY_LABEL,
+        "default label must equal RENOVATE_STABILITY_LABEL constant"
+    );
+}
+
+/// Spec assertion: RENOVATE_STABILITY_LABEL constant has the expected value.
+#[test]
+fn test_renovate_stability_label_constant_value() {
+    assert_eq!(
+        crate::config::RENOVATE_STABILITY_LABEL,
+        "pr-validation: pending-stability"
+    );
+}
+
+/// Spec assertion: RENOVATE_STABILITY_CHECK_CONTEXT constant has the expected value.
+#[test]
+fn test_renovate_stability_check_context_constant_value() {
+    assert_eq!(
+        crate::config::RENOVATE_STABILITY_CHECK_CONTEXT,
+        "renovate/stability-days"
+    );
+}
+
+/// Spec assertion (merge): repo enabled=false does NOT override app default enabled=true.
+/// Result: enabled = base || over = true || false = true.
+#[test]
+fn test_renovate_stability_config_merge_enabled_or_semantics_base_true_over_false() {
+    let base = crate::config::RenovateStabilityConfig {
+        enabled: true,
+        pending_stability_label: crate::config::RENOVATE_STABILITY_LABEL.to_string(),
+    };
+    let over = crate::config::RenovateStabilityConfig {
+        enabled: false,
+        pending_stability_label: crate::config::RENOVATE_STABILITY_LABEL.to_string(),
+    };
+    let merged = crate::config::RenovateStabilityConfig::merge(&base, &over);
+    assert!(
+        merged.enabled,
+        "enabled must use base || over, so true || false = true"
+    );
+}
+
+/// Spec assertion (merge): base false + over true → true.
+#[test]
+fn test_renovate_stability_config_merge_enabled_or_semantics_base_false_over_true() {
+    let base = crate::config::RenovateStabilityConfig {
+        enabled: false,
+        pending_stability_label: crate::config::RENOVATE_STABILITY_LABEL.to_string(),
+    };
+    let over = crate::config::RenovateStabilityConfig {
+        enabled: true,
+        pending_stability_label: crate::config::RENOVATE_STABILITY_LABEL.to_string(),
+    };
+    let merged = crate::config::RenovateStabilityConfig::merge(&base, &over);
+    assert!(merged.enabled, "base false || over true = true");
+}
+
+/// Spec assertion (merge): base false + over false → false.
+#[test]
+fn test_renovate_stability_config_merge_enabled_both_false_stays_false() {
+    let base = crate::config::RenovateStabilityConfig {
+        enabled: false,
+        pending_stability_label: crate::config::RENOVATE_STABILITY_LABEL.to_string(),
+    };
+    let over = crate::config::RenovateStabilityConfig {
+        enabled: false,
+        pending_stability_label: crate::config::RENOVATE_STABILITY_LABEL.to_string(),
+    };
+    let merged = crate::config::RenovateStabilityConfig::merge(&base, &over);
+    assert!(!merged.enabled, "false || false = false");
+}
+
+/// Spec assertion (merge): custom pending_stability_label in `over` wins.
+#[test]
+fn test_renovate_stability_config_merge_custom_label_wins() {
+    let base = crate::config::RenovateStabilityConfig {
+        enabled: true,
+        pending_stability_label: crate::config::RENOVATE_STABILITY_LABEL.to_string(),
+    };
+    let over = crate::config::RenovateStabilityConfig {
+        enabled: true,
+        pending_stability_label: "custom-stability-label".to_string(),
+    };
+    let merged = crate::config::RenovateStabilityConfig::merge(&base, &over);
+    assert_eq!(
+        merged.pending_stability_label,
+        "custom-stability-label",
+        "non-default over label must win"
+    );
+}
+
+/// Spec assertion (merge): empty/default over label defers to base.
+#[test]
+fn test_renovate_stability_config_merge_default_over_label_defers_to_base() {
+    let base = crate::config::RenovateStabilityConfig {
+        enabled: true,
+        pending_stability_label: "base-custom-label".to_string(),
+    };
+    let over = crate::config::RenovateStabilityConfig {
+        enabled: true,
+        pending_stability_label: crate::config::RENOVATE_STABILITY_LABEL.to_string(),
+    };
+    let merged = crate::config::RenovateStabilityConfig::merge(&base, &over);
+    assert_eq!(
+        merged.pending_stability_label,
+        "base-custom-label",
+        "when over has the default label, base custom label wins"
+    );
+}
+
+/// Spec assertion: ApplicationDefaults contains a renovate_stability field.
+#[test]
+fn test_application_defaults_contains_renovate_stability() {
+    let defaults = ApplicationDefaults::default();
+    // accessing the field compiles only if it exists
+    assert!(
+        defaults.renovate_stability.enabled,
+        "ApplicationDefaults.renovate_stability.enabled must default to true"
+    );
+}
+
+/// Spec assertion: CurrentPullRequestValidationConfiguration contains renovate_stability.
+#[test]
+fn test_current_pr_validation_config_contains_renovate_stability() {
+    let app = ApplicationDefaults::default();
+    let cfg = CurrentPullRequestValidationConfiguration::from_app_defaults(&app);
+    assert!(
+        cfg.renovate_stability.enabled,
+        "from_app_defaults must propagate renovate_stability.enabled"
+    );
+}
+
+/// Property-based: enabled is monotonically base || over across random booleans.
+proptest! {
+    #[test]
+    fn prop_renovate_stability_merge_enabled_is_or(base_en: bool, over_en: bool) {
+        let base = crate::config::RenovateStabilityConfig {
+            enabled: base_en,
+            pending_stability_label: crate::config::RENOVATE_STABILITY_LABEL.to_string(),
+        };
+        let over = crate::config::RenovateStabilityConfig {
+            enabled: over_en,
+            pending_stability_label: crate::config::RENOVATE_STABILITY_LABEL.to_string(),
+        };
+        let merged = crate::config::RenovateStabilityConfig::merge(&base, &over);
+        prop_assert_eq!(merged.enabled, base_en || over_en);
+    }
 }

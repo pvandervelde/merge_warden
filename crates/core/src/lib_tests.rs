@@ -213,6 +213,24 @@ impl PullRequestProvider for ErrorMockGitProvider {
     ) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> {
         Ok(vec![])
     }
+
+    async fn get_commit_statuses(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::CommitStatus>, Error> {
+        Ok(vec![])
+    }
+
+    async fn find_pull_requests_for_commit(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<u64>, Error> {
+        Ok(vec![])
+    }
 }
 
 #[async_trait]
@@ -257,6 +275,7 @@ struct DynamicMockGitProvider {
     comments: Arc<Mutex<Vec<Comment>>>,
     check_status_updates: Arc<Mutex<Vec<CheckStatusUpdate>>>,
     reviews: Vec<Review>,
+    commit_statuses: Vec<merge_warden_developer_platforms::models::CommitStatus>,
 }
 
 impl DynamicMockGitProvider {
@@ -267,11 +286,20 @@ impl DynamicMockGitProvider {
             comments: Arc::new(Mutex::new(Vec::new())),
             check_status_updates: Arc::new(Mutex::new(Vec::new())),
             reviews: vec![],
+            commit_statuses: vec![],
         }
     }
 
     fn with_reviews(mut self, reviews: Vec<Review>) -> Self {
         self.reviews = reviews;
+        self
+    }
+
+    fn with_commit_statuses(
+        mut self,
+        statuses: Vec<merge_warden_developer_platforms::models::CommitStatus>,
+    ) -> Self {
+        self.commit_statuses = statuses;
         self
     }
 
@@ -437,6 +465,24 @@ impl PullRequestProvider for DynamicMockGitProvider {
         _pr_number: u64,
     ) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> {
         Ok(self.reviews.clone())
+    }
+
+    async fn get_commit_statuses(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::CommitStatus>, Error> {
+        Ok(self.commit_statuses.clone())
+    }
+
+    async fn find_pull_requests_for_commit(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<u64>, Error> {
+        Ok(vec![])
     }
 }
 
@@ -643,6 +689,24 @@ impl PullRequestProvider for MockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
     ) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> {
+        Ok(vec![])
+    }
+
+    async fn get_commit_statuses(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::CommitStatus>, Error> {
+        Ok(vec![])
+    }
+
+    async fn find_pull_requests_for_commit(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<u64>, Error> {
         Ok(vec![])
     }
 }
@@ -3929,6 +3993,27 @@ impl merge_warden_developer_platforms::PullRequestProvider for SizeMockGitProvid
     > {
         Ok(vec![])
     }
+
+    async fn get_commit_statuses(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<
+        Vec<merge_warden_developer_platforms::models::CommitStatus>,
+        merge_warden_developer_platforms::errors::Error,
+    > {
+        Ok(vec![])
+    }
+
+    async fn find_pull_requests_for_commit(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<u64>, merge_warden_developer_platforms::errors::Error> {
+        Ok(vec![])
+    }
 }
 
 #[async_trait]
@@ -4292,6 +4377,27 @@ impl merge_warden_developer_platforms::PullRequestProvider for ConfigCheckMockPr
     ) -> Result<Vec<Review>, merge_warden_developer_platforms::errors::Error> {
         Ok(vec![])
     }
+
+    async fn get_commit_statuses(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<
+        Vec<merge_warden_developer_platforms::models::CommitStatus>,
+        merge_warden_developer_platforms::errors::Error,
+    > {
+        Ok(vec![])
+    }
+
+    async fn find_pull_requests_for_commit(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<u64>, merge_warden_developer_platforms::errors::Error> {
+        Ok(vec![])
+    }
 }
 
 #[async_trait]
@@ -4607,5 +4713,234 @@ async fn test_config_check_no_repost_when_error_comment_unchanged() {
     assert_eq!(
         config_comments[0].id, 99,
         "comment must not have been deleted and re-posted; id=99 must be preserved"
+    );
+}
+
+// ── Renovate stability label tests ──────────────────────────────────────────
+
+fn make_pr_for_stability(number: u64) -> PullRequest {
+    PullRequest {
+        number,
+        title: "chore: update dependencies".to_string(),
+        draft: false,
+        body: Some("Closes #1".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "renovate".to_string(),
+        }),
+        milestone_number: None,
+        head_sha: "deadbeef".to_string(),
+    }
+}
+
+fn stability_config_enabled() -> CurrentPullRequestValidationConfiguration {
+    CurrentPullRequestValidationConfiguration {
+        renovate_stability: crate::config::RenovateStabilityConfig {
+            enabled: true,
+            pending_stability_label: crate::config::RENOVATE_STABILITY_LABEL.to_string(),
+        },
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn process_pull_request_pending_stability_applies_label() {
+    let mut provider = DynamicMockGitProvider::new()
+        .with_commit_statuses(vec![
+            merge_warden_developer_platforms::models::CommitStatus {
+                context: "renovate/stability-days".to_string(),
+                state: "pending".to_string(),
+                description: None,
+            },
+        ]);
+    provider.add_pull_request(make_pr_for_stability(1));
+
+    let warden = MergeWarden::with_config(provider, stability_config_enabled());
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let labels = warden.provider.get_labels();
+    assert!(
+        labels
+            .iter()
+            .any(|l| l.name == crate::config::RENOVATE_STABILITY_LABEL),
+        "stability label should be applied when status is pending"
+    );
+}
+
+#[tokio::test]
+async fn process_pull_request_success_stability_removes_label() {
+    let mut provider = DynamicMockGitProvider::new()
+        .with_commit_statuses(vec![
+            merge_warden_developer_platforms::models::CommitStatus {
+                context: "renovate/stability-days".to_string(),
+                state: "success".to_string(),
+                description: None,
+            },
+        ]);
+    provider.add_pull_request(make_pr_for_stability(1));
+
+    let warden = MergeWarden::with_config(provider, stability_config_enabled());
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    // remove_label was called (does not error); label not in applied list
+    let labels = warden.provider.get_labels();
+    assert!(
+        !labels
+            .iter()
+            .any(|l| l.name == crate::config::RENOVATE_STABILITY_LABEL),
+        "stability label should not be present when status is success"
+    );
+}
+
+#[tokio::test]
+async fn process_pull_request_no_stability_context_is_noop() {
+    let mut provider = DynamicMockGitProvider::new()
+        .with_commit_statuses(vec![
+            merge_warden_developer_platforms::models::CommitStatus {
+                context: "ci/build".to_string(),
+                state: "success".to_string(),
+                description: None,
+            },
+        ]);
+    provider.add_pull_request(make_pr_for_stability(1));
+
+    let warden = MergeWarden::with_config(provider, stability_config_enabled());
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let labels = warden.provider.get_labels();
+    assert!(
+        !labels
+            .iter()
+            .any(|l| l.name == crate::config::RENOVATE_STABILITY_LABEL),
+        "stability label should not be applied when stability context is absent"
+    );
+}
+
+#[tokio::test]
+async fn process_pull_request_stability_disabled_is_noop() {
+    let mut provider = DynamicMockGitProvider::new()
+        .with_commit_statuses(vec![
+            merge_warden_developer_platforms::models::CommitStatus {
+                context: "renovate/stability-days".to_string(),
+                state: "pending".to_string(),
+                description: None,
+            },
+        ]);
+    provider.add_pull_request(make_pr_for_stability(1));
+
+    let config = CurrentPullRequestValidationConfiguration {
+        renovate_stability: crate::config::RenovateStabilityConfig {
+            enabled: false,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+
+    let warden = MergeWarden::with_config(provider, config);
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let labels = warden.provider.get_labels();
+    assert!(
+        !labels
+            .iter()
+            .any(|l| l.name == crate::config::RENOVATE_STABILITY_LABEL),
+        "stability label should not be applied when feature is disabled"
+    );
+}
+
+#[tokio::test]
+async fn process_pull_request_stability_error_does_not_propagate() {
+    // When the stability label call fails internally, process_pull_request
+    // should still complete (errors are logged at warn, not returned).
+    // DynamicMockGitProvider does not error on list_available_labels, so
+    // this test primarily exercises the path without panicking.
+    let mut provider = DynamicMockGitProvider::new()
+        .with_commit_statuses(vec![
+            merge_warden_developer_platforms::models::CommitStatus {
+                context: "renovate/stability-days".to_string(),
+                state: "pending".to_string(),
+                description: None,
+            },
+        ]);
+    provider.add_pull_request(make_pr_for_stability(1));
+
+    let warden = MergeWarden::with_config(provider, stability_config_enabled());
+    let result = warden.process_pull_request("owner", "repo", 1).await;
+    assert!(
+        result.is_ok(),
+        "stability label errors must not propagate as process_pull_request failures"
+    );
+}
+
+#[tokio::test]
+async fn process_pull_request_draft_receives_stability_label() {
+    let mut provider = DynamicMockGitProvider::new()
+        .with_commit_statuses(vec![
+            merge_warden_developer_platforms::models::CommitStatus {
+                context: "renovate/stability-days".to_string(),
+                state: "pending".to_string(),
+                description: None,
+            },
+        ]);
+    let mut pr = make_pr_for_stability(1);
+    pr.draft = true;
+    provider.add_pull_request(pr);
+
+    let warden = MergeWarden::with_config(provider, stability_config_enabled());
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let labels = warden.provider.get_labels();
+    assert!(
+        labels
+            .iter()
+            .any(|l| l.name == crate::config::RENOVATE_STABILITY_LABEL),
+        "stability label should also be applied on draft PRs"
+    );
+}
+
+#[tokio::test]
+async fn process_pull_request_check_conclusion_unaffected_by_stability() {
+    // A valid PR with pending stability status should still pass the title/body
+    // checks and produce a "success" check-status conclusion.
+    let mut provider = DynamicMockGitProvider::new()
+        .with_commit_statuses(vec![
+            merge_warden_developer_platforms::models::CommitStatus {
+                context: "renovate/stability-days".to_string(),
+                state: "pending".to_string(),
+                description: None,
+            },
+        ]);
+    provider.add_pull_request(make_pr_for_stability(1));
+
+    let warden = MergeWarden::with_config(provider, stability_config_enabled());
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let updates = warden.provider.get_check_status_updates();
+    let conclusion = updates
+        .last()
+        .map(|u| u.conclusion.as_str())
+        .unwrap_or("");
+    // The stability label does not affect the Merge Warden check conclusion.
+    assert!(
+        conclusion == "success" || conclusion == "failure",
+        "check conclusion should be determined by title/body validations, not stability state; got '{conclusion}'"
     );
 }

@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use tokio::test;
 
 use merge_warden_developer_platforms::models::{
-    Comment, Label, PullRequest, PullRequestFile, Review, User,
+    Comment, CommitStatus, Label, PullRequest, PullRequestFile, Review, User,
 };
 use merge_warden_developer_platforms::PullRequestProvider;
 
@@ -144,6 +144,24 @@ impl PullRequestProvider for WipMockProvider {
         _repo: &str,
         _number: u64,
     ) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> {
+        Ok(vec![])
+    }
+
+    async fn get_commit_statuses(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::CommitStatus>, Error> {
+        Ok(vec![])
+    }
+
+    async fn find_pull_requests_for_commit(
+        &self,
+        _owner: &str,
+        _repo: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<u64>, Error> {
         Ok(vec![])
     }
 }
@@ -290,6 +308,24 @@ impl PullRequestProvider for MockGitProvider {
     ) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> {
         Ok(vec![])
     }
+
+    async fn get_commit_statuses(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::CommitStatus>, Error> {
+        Ok(vec![])
+    }
+
+    async fn find_pull_requests_for_commit(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<u64>, Error> {
+        Ok(vec![])
+    }
 }
 
 #[async_trait]
@@ -389,6 +425,24 @@ impl PullRequestProvider for ErrorMockGitProvider {
         _pr_number: u64,
     ) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> {
         unimplemented!("Not needed for this test")
+    }
+
+    async fn get_commit_statuses(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::CommitStatus>, Error> {
+        Ok(vec![])
+    }
+
+    async fn find_pull_requests_for_commit(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<u64>, Error> {
+        Ok(vec![])
     }
 
     async fn list_available_labels(
@@ -1022,6 +1076,24 @@ impl PullRequestProvider for SmartMockGitProvider {
         _repo_name: &str,
         _pr_number: u64,
     ) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> {
+        Ok(vec![])
+    }
+
+    async fn get_commit_statuses(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::CommitStatus>, Error> {
+        Ok(vec![])
+    }
+
+    async fn find_pull_requests_for_commit(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<u64>, Error> {
         Ok(vec![])
     }
 }
@@ -2564,6 +2636,24 @@ impl PullRequestProvider for PrStateMockProvider {
     ) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> {
         Ok(vec![])
     }
+
+    async fn get_commit_statuses(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::CommitStatus>, Error> {
+        Ok(vec![])
+    }
+
+    async fn find_pull_requests_for_commit(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<u64>, Error> {
+        Ok(vec![])
+    }
 }
 
 // ── manage_pr_state_labels tests ─────────────────────────────────────────────
@@ -2953,6 +3043,27 @@ impl PullRequestProvider for SizeLabelMockProvider {
         merge_warden_developer_platforms::errors::Error,
     > {
         unimplemented!("Not needed for this test")
+    }
+
+    async fn get_commit_statuses(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<
+        Vec<merge_warden_developer_platforms::models::CommitStatus>,
+        merge_warden_developer_platforms::errors::Error,
+    > {
+        Ok(vec![])
+    }
+
+    async fn find_pull_requests_for_commit(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<u64>, merge_warden_developer_platforms::errors::Error> {
+        Ok(vec![])
     }
 }
 
@@ -3607,6 +3718,24 @@ impl PullRequestProvider for KeywordLabelMockProvider {
         _repo: &str,
         _number: u64,
     ) -> Result<Vec<PullRequestFile>, Error> {
+        Ok(vec![])
+    }
+
+    async fn get_commit_statuses(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::CommitStatus>, Error> {
+        Ok(vec![])
+    }
+
+    async fn find_pull_requests_for_commit(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<u64>, Error> {
         Ok(vec![])
     }
 }
@@ -5471,5 +5600,435 @@ async fn test_no_unnecessary_api_calls_when_no_keyword_matched() {
         provider.deleted_comment_ids().is_empty(),
         "no comments must be deleted when no stale comments exist; deleted: {:?}",
         provider.deleted_comment_ids()
+    );
+}
+
+// ── manage_renovate_stability_label tests ───────────────────────────────────
+
+struct StabilityMockProvider {
+    commit_statuses: Vec<CommitStatus>,
+    available_labels: Vec<Label>,
+    applied_labels: Arc<Mutex<Vec<Label>>>,
+    create_label_calls: Arc<Mutex<Vec<String>>>,
+    /// When `true`, `remove_label` returns `Error::InvalidResponse` (404).
+    remove_label_404: bool,
+}
+
+impl StabilityMockProvider {
+    fn new(commit_statuses: Vec<CommitStatus>) -> Self {
+        Self {
+            commit_statuses,
+            available_labels: vec![],
+            applied_labels: Arc::new(Mutex::new(vec![])),
+            create_label_calls: Arc::new(Mutex::new(vec![])),
+            remove_label_404: false,
+        }
+    }
+
+    fn with_available_labels(mut self, labels: Vec<Label>) -> Self {
+        self.available_labels = labels;
+        self
+    }
+
+    fn with_remove_label_err(mut self, _err: Error) -> Self {
+        self.remove_label_404 = true;
+        self
+    }
+
+    fn applied_labels(&self) -> Vec<Label> {
+        self.applied_labels.lock().unwrap().clone()
+    }
+
+    fn create_label_calls(&self) -> Vec<String> {
+        self.create_label_calls.lock().unwrap().clone()
+    }
+}
+
+#[async_trait]
+impl PullRequestProvider for StabilityMockProvider {
+    async fn get_pull_request(
+        &self,
+        _: &str,
+        _: &str,
+        _: u64,
+    ) -> Result<PullRequest, Error> {
+        unimplemented!()
+    }
+
+    async fn add_comment(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn delete_comment(&self, _: &str, _: &str, _: u64) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn list_comments(
+        &self,
+        _: &str,
+        _: &str,
+        _: u64,
+    ) -> Result<Vec<Comment>, Error> {
+        Ok(vec![])
+    }
+
+    async fn list_available_labels(&self, _: &str, _: &str) -> Result<Vec<Label>, Error> {
+        Ok(self.available_labels.clone())
+    }
+
+    async fn add_labels(
+        &self,
+        _: &str,
+        _: &str,
+        _: u64,
+        labels: &[String],
+    ) -> Result<(), Error> {
+        let mut applied = self.applied_labels.lock().unwrap();
+        for l in labels {
+            applied.push(Label {
+                name: l.clone(),
+                description: None,
+            });
+        }
+        Ok(())
+    }
+
+    async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> {
+        if self.remove_label_404 {
+            Err(Error::InvalidResponse)
+        } else {
+            Ok(())
+        }
+    }
+
+    async fn list_applied_labels(
+        &self,
+        _: &str,
+        _: &str,
+        _: u64,
+    ) -> Result<Vec<Label>, Error> {
+        Ok(self.applied_labels.lock().unwrap().clone())
+    }
+
+    async fn update_pr_check_status(
+        &self,
+        _: &str,
+        _: &str,
+        _: u64,
+        _: &str,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+
+    async fn list_pr_reviews(
+        &self,
+        _: &str,
+        _: &str,
+        _: u64,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> {
+        Ok(vec![])
+    }
+
+    async fn get_pull_request_files(
+        &self,
+        _: &str,
+        _: &str,
+        _: u64,
+    ) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> {
+        Ok(vec![])
+    }
+
+    async fn get_commit_statuses(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> Result<Vec<CommitStatus>, Error> {
+        Ok(self.commit_statuses.clone())
+    }
+
+    async fn find_pull_requests_for_commit(
+        &self,
+        _: &str,
+        _: &str,
+        _: &str,
+    ) -> Result<Vec<u64>, Error> {
+        Ok(vec![])
+    }
+
+    async fn create_label(
+        &self,
+        _: &str,
+        _: &str,
+        name: &str,
+        _color: &str,
+        _description: Option<&str>,
+    ) -> Result<(), Error> {
+        self.create_label_calls.lock().unwrap().push(name.to_string());
+        Ok(())
+    }
+}
+
+fn pending_status() -> CommitStatus {
+    CommitStatus {
+        context: "renovate/stability-days".to_string(),
+        state: "pending".to_string(),
+        description: None,
+    }
+}
+
+fn success_status() -> CommitStatus {
+    CommitStatus {
+        context: "renovate/stability-days".to_string(),
+        state: "success".to_string(),
+        description: None,
+    }
+}
+
+fn error_status() -> CommitStatus {
+    CommitStatus {
+        context: "renovate/stability-days".to_string(),
+        state: "error".to_string(),
+        description: None,
+    }
+}
+
+fn failure_status() -> CommitStatus {
+    CommitStatus {
+        context: "renovate/stability-days".to_string(),
+        state: "failure".to_string(),
+        description: None,
+    }
+}
+
+fn default_stability_config() -> crate::config::RenovateStabilityConfig {
+    crate::config::RenovateStabilityConfig::default()
+}
+
+#[test]
+async fn manage_renovate_stability_label_pending_adds_label() {
+    let provider = StabilityMockProvider::new(vec![pending_status()]);
+    let config = default_stability_config();
+
+    crate::labels::manage_renovate_stability_label(
+        &provider,
+        "owner",
+        "repo",
+        1,
+        "abc123",
+        &config,
+    )
+    .await
+    .unwrap();
+
+    let applied = provider.applied_labels();
+    assert!(
+        applied.iter().any(|l| l.name == config.pending_stability_label),
+        "stability label should be applied for pending status"
+    );
+}
+
+#[test]
+async fn manage_renovate_stability_label_error_adds_label() {
+    let provider = StabilityMockProvider::new(vec![error_status()]);
+    let config = default_stability_config();
+
+    crate::labels::manage_renovate_stability_label(
+        &provider,
+        "owner",
+        "repo",
+        1,
+        "abc123",
+        &config,
+    )
+    .await
+    .unwrap();
+
+    let applied = provider.applied_labels();
+    assert!(
+        applied.iter().any(|l| l.name == config.pending_stability_label),
+        "stability label should be applied for error status"
+    );
+}
+
+#[test]
+async fn manage_renovate_stability_label_failure_adds_label() {
+    let provider = StabilityMockProvider::new(vec![failure_status()]);
+    let config = default_stability_config();
+
+    crate::labels::manage_renovate_stability_label(
+        &provider,
+        "owner",
+        "repo",
+        1,
+        "abc123",
+        &config,
+    )
+    .await
+    .unwrap();
+
+    let applied = provider.applied_labels();
+    assert!(
+        applied.iter().any(|l| l.name == config.pending_stability_label),
+        "stability label should be applied for failure status"
+    );
+}
+
+#[test]
+async fn manage_renovate_stability_label_success_removes_label() {
+    // Label already present on PR
+    let label_name = default_stability_config().pending_stability_label;
+    let provider = StabilityMockProvider::new(vec![success_status()]);
+
+    crate::labels::manage_renovate_stability_label(
+        &provider,
+        "owner",
+        "repo",
+        1,
+        "abc123",
+        &default_stability_config(),
+    )
+    .await
+    .unwrap();
+
+    // remove_label was called without error
+    let applied = provider.applied_labels();
+    assert!(
+        !applied.iter().any(|l| l.name == label_name),
+        "stability label should not be present after success status"
+    );
+}
+
+#[test]
+async fn manage_renovate_stability_label_success_absent_label_is_noop() {
+    // remove_label returns 404 (InvalidResponse) — should be Ok(())
+    let provider = StabilityMockProvider::new(vec![success_status()])
+        .with_remove_label_err(Error::InvalidResponse);
+
+    let result = crate::labels::manage_renovate_stability_label(
+        &provider,
+        "owner",
+        "repo",
+        1,
+        "abc123",
+        &default_stability_config(),
+    )
+    .await;
+
+    assert!(result.is_ok(), "404 on remove should be treated as no-op");
+}
+
+#[test]
+async fn manage_renovate_stability_label_no_context_is_noop() {
+    let other_status = CommitStatus {
+        context: "ci/build".to_string(),
+        state: "success".to_string(),
+        description: None,
+    };
+    let provider = StabilityMockProvider::new(vec![other_status]);
+    let config = default_stability_config();
+
+    crate::labels::manage_renovate_stability_label(
+        &provider,
+        "owner",
+        "repo",
+        1,
+        "abc123",
+        &config,
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        provider.applied_labels().is_empty(),
+        "no label should be applied when context is absent"
+    );
+}
+
+#[test]
+async fn manage_renovate_stability_label_disabled_is_noop() {
+    let mut config = default_stability_config();
+    config.enabled = false;
+
+    let provider = StabilityMockProvider::new(vec![pending_status()]);
+
+    crate::labels::manage_renovate_stability_label(
+        &provider,
+        "owner",
+        "repo",
+        1,
+        "abc123",
+        &config,
+    )
+    .await
+    .unwrap();
+
+    assert!(
+        provider.applied_labels().is_empty(),
+        "no API calls when config.enabled = false"
+    );
+}
+
+#[test]
+async fn manage_renovate_stability_label_uses_newest_entry() {
+    // First entry (newest per GitHub ordering) is pending; second is success.
+    // The function should act on the first match (pending) → add label.
+    let statuses = vec![
+        pending_status(), // newest
+        success_status(), // older
+    ];
+    let provider = StabilityMockProvider::new(statuses);
+    let config = default_stability_config();
+
+    crate::labels::manage_renovate_stability_label(
+        &provider,
+        "owner",
+        "repo",
+        1,
+        "abc123",
+        &config,
+    )
+    .await
+    .unwrap();
+
+    let applied = provider.applied_labels();
+    assert!(
+        applied.iter().any(|l| l.name == config.pending_stability_label),
+        "pending (newest) entry should win"
+    );
+}
+
+#[test]
+async fn manage_renovate_stability_label_creates_label_if_missing() {
+    // No labels in repository — create_label should be called before add_labels.
+    let provider = StabilityMockProvider::new(vec![pending_status()]); // available_labels is empty
+    let config = default_stability_config();
+
+    crate::labels::manage_renovate_stability_label(
+        &provider,
+        "owner",
+        "repo",
+        1,
+        "abc123",
+        &config,
+    )
+    .await
+    .unwrap();
+
+    let create_calls = provider.create_label_calls();
+    assert_eq!(
+        create_calls.len(),
+        1,
+        "create_label should be called once when label is absent"
+    );
+    assert_eq!(create_calls[0], config.pending_stability_label);
+
+    let applied = provider.applied_labels();
+    assert!(
+        applied.iter().any(|l| l.name == config.pending_stability_label),
+        "label should be applied after creation"
     );
 }
