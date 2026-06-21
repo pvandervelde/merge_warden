@@ -22,7 +22,7 @@ dirs = "6.0"
 async-trait = { workspace = true }
 chrono = { workspace = true }
 github-bot-sdk = { workspace = true }
-keyring = { version = "3.6.2", features = [
+keyring = { version = "4.0.0", features = [
     "apple-native",
     "linux-native",
     "windows-native",
