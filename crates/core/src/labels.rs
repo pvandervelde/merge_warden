@@ -2917,7 +2917,12 @@ pub async fn manage_renovate_stability_label<P: PullRequestProvider + Sync>(
             }
 
             provider
-                .add_labels(repo_owner, repo_name, pr_number, std::slice::from_ref(&label_name))
+                .add_labels(
+                    repo_owner,
+                    repo_name,
+                    pr_number,
+                    std::slice::from_ref(&label_name),
+                )
                 .await
                 .map_err(|e| {
                     MergeWardenError::FailedToUpdatePullRequest(format!(
