@@ -47,6 +47,12 @@ pub const WIP_COMMENT_MARKER: &str = "<!-- PR_WIP_CHECK -->";
 /// prefix is sufficient to locate any keyword-label explanation comment.
 pub const KEYWORD_LABEL_COMMENT_MARKER: &str = "<!-- MERGE_WARDEN_KEYWORD_LABEL:";
 
+/// Context string identifying the Renovate stability check in GitHub commit statuses.
+pub const RENOVATE_STABILITY_CHECK_CONTEXT: &str = "renovate/stability-days";
+
+/// Default label name applied while the Renovate stability period has not elapsed.
+pub const RENOVATE_STABILITY_LABEL: &str = "pr-validation: pending-stability";
+
 /// HTML comment marker used to identify configuration validity status comments.
 ///
 /// Merge Warden uses this marker to find and update (or delete) configuration
@@ -386,6 +392,10 @@ pub struct ApplicationDefaults {
     #[serde(default)]
     pub pr_state_labels: PrStateLabelsConfig,
 
+    /// Application-level defaults for Renovate stability label management
+    #[serde(default)]
+    pub renovate_stability: RenovateStabilityConfig,
+
     /// Bot mention prefix used for comment-based label suppression.
     ///
     /// PR participants post a comment line of the form `<bot_mention> suppress: <label-name>`
@@ -456,6 +466,7 @@ impl Default for ApplicationDefaults {
             change_type_labels: ChangeTypeLabelConfig::default(),
             wip_check: WipCheckConfig::default(),
             pr_state_labels: PrStateLabelsConfig::default(),
+            renovate_stability: RenovateStabilityConfig::default(),
             bot_mention: ApplicationDefaults::default_bot_mention(),
             org_policy_source: None,
         }
@@ -1137,6 +1148,9 @@ pub struct CurrentPullRequestValidationConfiguration {
     /// Configuration for state-based PR lifecycle labels
     pub pr_state_labels: PrStateLabelsConfig,
 
+    /// Configuration for Renovate stability-days label management.
+    pub renovate_stability: RenovateStabilityConfig,
+
     /// Rules for bypassing validation checks
     pub bypass_rules: BypassRules,
 
@@ -1170,6 +1184,7 @@ impl CurrentPullRequestValidationConfiguration {
             change_type_labels: Some(app.change_type_labels.clone()),
             wip_check: app.wip_check.clone(),
             pr_state_labels: app.pr_state_labels.clone(),
+            renovate_stability: app.renovate_stability.clone(),
             bypass_rules: app.bypass_rules.clone(),
             issue_propagation: IssuePropagationConfig::default(),
             bot_mention: app.bot_mention.clone(),
@@ -1207,6 +1222,7 @@ impl CurrentPullRequestValidationConfiguration {
             change_type_labels: None, // Use default behavior for tests
             wip_check: WipCheckConfig::default(),
             pr_state_labels: PrStateLabelsConfig::default(),
+            renovate_stability: RenovateStabilityConfig::default(),
             bypass_rules: bypass_rules.unwrap_or_default(),
             issue_propagation: IssuePropagationConfig::default(),
             bot_mention: "@merge-warden".to_string(),
@@ -1227,6 +1243,7 @@ impl Default for CurrentPullRequestValidationConfiguration {
             change_type_labels: None, // Default to None, will be populated from app defaults
             wip_check: WipCheckConfig::default(),
             pr_state_labels: PrStateLabelsConfig::default(),
+            renovate_stability: RenovateStabilityConfig::default(),
             bypass_rules: BypassRules::default(),
             issue_propagation: IssuePropagationConfig::default(),
             bot_mention: "@merge-warden".to_string(),
@@ -1277,6 +1294,10 @@ pub struct PullRequestsPoliciesConfig {
     /// Configuration for issue metadata propagation.
     #[serde(default, rename = "issuePropagation")]
     pub issue_propagation: IssuePropagationConfig,
+
+    /// Configuration for Renovate stability-days label management.
+    #[serde(default, rename = "renovateStability")]
+    pub renovate_stability: RenovateStabilityConfig,
 }
 
 /// Configuration for PR title policy
@@ -1450,6 +1471,7 @@ impl RepositoryProvidedConfig {
             change_type_labels: self.change_type_labels.clone(),
             wip_check,
             pr_state_labels,
+            renovate_stability: pr_policies.renovate_stability.clone(),
             // Merge per-sub-rule: if the repo specified a particular bypass rule,
             // use it; otherwise fall back to the server-level default for that rule.
             // This prevents a repo that overrides only one category from silently
@@ -1890,6 +1912,82 @@ impl Default for PrStateLabelsConfig {
     }
 }
 
+/// Configuration for Renovate stability-days label management.
+///
+/// When enabled, [`RENOVATE_STABILITY_LABEL`] (or the configured label name) is applied
+/// to the PR while the `renovate/stability-days` commit status is `pending`, `error`, or
+/// `failure`, and removed when the status is `success`.  The label is purely informational —
+/// it never influences the merge-blocking check conclusion.
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_core::config::{RenovateStabilityConfig, RENOVATE_STABILITY_LABEL};
+///
+/// let config = RenovateStabilityConfig::default();
+/// assert!(config.enabled);
+/// assert_eq!(config.pending_stability_label, RENOVATE_STABILITY_LABEL);
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RenovateStabilityConfig {
+    /// Whether Renovate stability label management is enabled.
+    ///
+    /// Defaults to `true`.  The merge rule is `base || over`: once either tier enables
+    /// the feature the merged value is always `true`.  A repository can only opt in,
+    /// not opt out.
+    #[serde(default = "RenovateStabilityConfig::default_enabled")]
+    pub enabled: bool,
+
+    /// Label applied while the Renovate stability period has not yet elapsed.
+    ///
+    /// Defaults to [`RENOVATE_STABILITY_LABEL`].
+    #[serde(default = "RenovateStabilityConfig::default_label")]
+    pub pending_stability_label: String,
+}
+
+impl RenovateStabilityConfig {
+    /// Default value for `enabled` — opt-in enabled by default.
+    fn default_enabled() -> bool {
+        true
+    }
+
+    /// Default value for `pending_stability_label`.
+    fn default_label() -> String {
+        RENOVATE_STABILITY_LABEL.to_string()
+    }
+
+    /// Merges `over` on top of `base` (lower-priority).
+    ///
+    /// Field-level rules:
+    /// - `enabled`: `base.enabled || over.enabled` — once enabled in either tier, stays enabled.
+    ///   This means a repo-level `enabled = false` cannot override an app-level `enabled = true`.
+    ///   To disable for all repos, set `enabled = false` at the application defaults level.
+    /// - `pending_stability_label`: `over` wins if non-empty and differs from the default label;
+    ///   otherwise `base` is used
+    pub(crate) fn merge(base: &Self, over: &Self) -> Self {
+        let label = if !over.pending_stability_label.is_empty()
+            && over.pending_stability_label != RENOVATE_STABILITY_LABEL
+        {
+            over.pending_stability_label.clone()
+        } else {
+            base.pending_stability_label.clone()
+        };
+        Self {
+            enabled: base.enabled || over.enabled,
+            pending_stability_label: label,
+        }
+    }
+}
+
+impl Default for RenovateStabilityConfig {
+    fn default() -> Self {
+        Self {
+            enabled: Self::default_enabled(),
+            pending_stability_label: Self::default_label(),
+        }
+    }
+}
+
 /// A resolved, merged set of validation policies ready for enforcement.
 ///
 /// `PolicySet` is the single value passed to the validation engine. It is
@@ -1921,6 +2019,8 @@ pub struct PolicySet {
     pub wip: WipCheckConfig,
     /// Lifecycle state labelling policy.
     pub pr_state: PrStateLabelsConfig,
+    /// Renovate stability-days label management policy.
+    pub renovate_stability: RenovateStabilityConfig,
     /// Issue-to-PR field propagation policy.
     pub issue_propagation: IssuePropagationConfig,
     /// Conventional-commit type → label mapping policy.
@@ -1950,6 +2050,10 @@ impl PolicySet {
             size: PrSizeCheckConfig::merge(&self.size, &over.size),
             wip: WipCheckConfig::merge(&self.wip, &over.wip),
             pr_state: PrStateLabelsConfig::merge(&self.pr_state, &over.pr_state),
+            renovate_stability: RenovateStabilityConfig::merge(
+                &self.renovate_stability,
+                &over.renovate_stability,
+            ),
             issue_propagation: IssuePropagationConfig::merge(
                 &self.issue_propagation,
                 &over.issue_propagation,
@@ -1985,6 +2089,7 @@ impl PolicySet {
             size: pr.size_policies.clone(),
             wip: pr.wip_policies.clone(),
             pr_state: pr.pr_state_policies.clone(),
+            renovate_stability: pr.renovate_stability.clone(),
             issue_propagation: pr.issue_propagation.clone(),
             change_type_labels: section.change_type_labels.clone().unwrap_or_default(),
             bypass_rules: BypassRules::default(),
@@ -2047,6 +2152,7 @@ impl PolicySet {
             change_type_labels: Some(self.change_type_labels.clone()),
             wip_check: self.wip.clone(),
             pr_state_labels: self.pr_state.clone(),
+            renovate_stability: self.renovate_stability.clone(),
             bypass_rules: self.bypass_rules.clone(),
             issue_propagation: self.issue_propagation.clone(),
             bot_mention: app_defaults.bot_mention.clone(),
@@ -2083,6 +2189,7 @@ impl PolicySet {
             size: app.pr_size_check.clone(),
             wip: app.wip_check.clone(),
             pr_state: app.pr_state_labels.clone(),
+            renovate_stability: app.renovate_stability.clone(),
             // `ApplicationDefaults` carries no issue-propagation settings — issue propagation
             // is a repository-level opt-in feature, so the app tier always contributes
             // `IssuePropagationConfig::default()` (both flags `false`).
@@ -2121,6 +2228,7 @@ impl PolicySet {
             size: pr.size_policies.clone(),
             wip: pr.wip_policies.clone(),
             pr_state: pr.pr_state_policies.clone(),
+            renovate_stability: pr.renovate_stability.clone(),
             issue_propagation: pr.issue_propagation.clone(),
             change_type_labels: repo.change_type_labels.clone().unwrap_or_default(),
             bypass_rules,

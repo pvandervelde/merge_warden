@@ -11,7 +11,8 @@
 
 use crate::config::{
     ChangeTypeLabelConfig, CurrentPullRequestValidationConfiguration, KeywordLabelsConfig,
-    PrStateLabelsConfig, CONVENTIONAL_COMMIT_REGEX, KEYWORD_LABEL_COMMENT_MARKER,
+    PrStateLabelsConfig, RenovateStabilityConfig, CONVENTIONAL_COMMIT_REGEX,
+    KEYWORD_LABEL_COMMENT_MARKER, RENOVATE_STABILITY_CHECK_CONTEXT,
 };
 use crate::errors::MergeWardenError;
 use crate::size::{PrSizeCategory, PrSizeInfo};
@@ -2803,6 +2804,175 @@ pub async fn manage_pr_state_labels<P: PullRequestProvider>(
                 pr_number = pr_number,
                 label = %target,
                 "Applied PR state label"
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Applies or removes the Renovate stability label based on the current HEAD commit status.
+///
+/// Fetches commit statuses for `head_sha`, filters by [`RENOVATE_STABILITY_CHECK_CONTEXT`],
+/// and applies or removes `config.pending_stability_label` accordingly.
+///
+/// This function is a no-op when:
+/// - `config.enabled` is `false`
+/// - no status entry for `renovate/stability-days` is present on `head_sha`
+///
+/// Label operations are idempotent: adding a label that is already present and
+/// removing a label that is absent are both safe and do not return errors.
+///
+/// # Arguments
+///
+/// * `provider`    - The Git provider implementation
+/// * `repo_owner`  - Repository owner
+/// * `repo_name`   - Repository name
+/// * `pr_number`   - Pull request number
+/// * `head_sha`    - HEAD commit SHA whose statuses are inspected
+/// * `config`      - Renovate stability label configuration
+pub async fn manage_renovate_stability_label<P: PullRequestProvider + Sync>(
+    provider: &P,
+    repo_owner: &str,
+    repo_name: &str,
+    pr_number: u64,
+    head_sha: &str,
+    config: &RenovateStabilityConfig,
+) -> Result<(), MergeWardenError> {
+    if !config.enabled {
+        debug!(
+            repository_owner = repo_owner,
+            repository = repo_name,
+            pr_number = pr_number,
+            "Renovate stability label management disabled — skipping"
+        );
+        return Ok(());
+    }
+
+    let statuses = provider
+        .get_commit_statuses(repo_owner, repo_name, head_sha)
+        .await
+        .map_err(|e| {
+            MergeWardenError::FailedToUpdatePullRequest(format!(
+                "Failed to fetch commit statuses: {e}"
+            ))
+        })?;
+
+    // Take the first (newest) entry for the renovate stability context.
+    let status = statuses
+        .iter()
+        .find(|s| s.context == RENOVATE_STABILITY_CHECK_CONTEXT);
+
+    let status = match status {
+        Some(s) => s,
+        None => {
+            debug!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                pr_number = pr_number,
+                "No renovate stability status found on HEAD commit — skipping"
+            );
+            return Ok(());
+        }
+    };
+
+    let label_name = config.pending_stability_label.clone();
+
+    match status.state.as_str() {
+        "pending" | "error" | "failure" => {
+            info!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                pr_number = pr_number,
+                state = %status.state,
+                label = %label_name,
+                "Renovate stability period active — applying label"
+            );
+
+            // Ensure the label exists in the repository before adding it to the PR.
+            let available = provider
+                .list_available_labels(repo_owner, repo_name)
+                .await
+                .map_err(|e| {
+                    MergeWardenError::FailedToUpdatePullRequest(format!(
+                        "Failed to list repository labels: {e}"
+                    ))
+                })?;
+
+            if !available.iter().any(|l| l.name == label_name) {
+                provider
+                    .create_label(
+                        repo_owner,
+                        repo_name,
+                        &label_name,
+                        "986ee2",
+                        Some("PR is waiting for Renovate stability period"),
+                    )
+                    .await
+                    .map_err(|e| {
+                        MergeWardenError::FailedToUpdatePullRequest(format!(
+                            "Failed to create stability label: {e}"
+                        ))
+                    })?;
+            }
+
+            provider
+                .add_labels(
+                    repo_owner,
+                    repo_name,
+                    pr_number,
+                    std::slice::from_ref(&label_name),
+                )
+                .await
+                .map_err(|e| {
+                    MergeWardenError::FailedToUpdatePullRequest(format!(
+                        "Failed to add stability label: {e}"
+                    ))
+                })?;
+
+            info!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                pr_number = pr_number,
+                label = %label_name,
+                "Applied Renovate stability label"
+            );
+        }
+        "success" => {
+            info!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                pr_number = pr_number,
+                label = %label_name,
+                "Renovate stability period elapsed — removing label"
+            );
+
+            // Providers are expected to treat a missing label (404) as Ok(()).
+            // Any remaining error is a genuine API failure.
+            provider
+                .remove_label(repo_owner, repo_name, pr_number, &label_name)
+                .await
+                .map_err(|e| {
+                    MergeWardenError::FailedToUpdatePullRequest(format!(
+                        "Failed to remove stability label: {e}"
+                    ))
+                })?;
+
+            info!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                pr_number = pr_number,
+                label = %label_name,
+                "Removed Renovate stability label"
+            );
+        }
+        state => {
+            debug!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                pr_number = pr_number,
+                state = %state,
+                "Unknown commit status state for renovate stability — skipping"
             );
         }
     }

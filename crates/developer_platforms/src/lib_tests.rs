@@ -182,6 +182,24 @@ impl PullRequestProvider for MockApiProvider {
         // Mock implementation - returns empty list
         Ok(vec![])
     }
+
+    async fn get_commit_statuses(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<crate::models::CommitStatus>, Error> {
+        Ok(vec![])
+    }
+
+    async fn find_pull_requests_for_commit(
+        &self,
+        _repo_owner: &str,
+        _repo_name: &str,
+        _commit_sha: &str,
+    ) -> Result<Vec<u64>, Error> {
+        Ok(vec![])
+    }
 }
 
 #[cfg(test)]

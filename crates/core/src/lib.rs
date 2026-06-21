@@ -390,6 +390,44 @@ impl<P: PullRequestProvider + ConfigFetcher + std::fmt::Debug> MergeWarden<P> {
         }
     }
 
+    /// Applies or removes the Renovate stability label for a pull request based
+    /// on the current commit status for the `renovate/stability-days` context.
+    ///
+    /// Errors are logged at `warn` level and never propagated — this is a
+    /// best-effort side-effect that must not block the overall PR check.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner` - The owner of the repository
+    /// * `repo_name` - The name of the repository
+    /// * `pr` - The pull request being processed
+    #[instrument]
+    async fn communicate_renovate_stability_status(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr: &PullRequest,
+    ) {
+        if let Err(e) = labels::manage_renovate_stability_label(
+            &self.provider,
+            repo_owner,
+            repo_name,
+            pr.number,
+            &pr.head_sha,
+            &self.config.renovate_stability,
+        )
+        .await
+        {
+            warn!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                pull_request = pr.number,
+                error = %e,
+                "Failed to manage Renovate stability label"
+            );
+        }
+    }
+
     /// Handles side effects for WIP status changes on a pull request.
     ///
     /// When `is_wip` is `true`:
@@ -1769,6 +1807,8 @@ Please update the PR body to include a valid work item reference."#;
     ///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
     ///     # async fn list_pr_reviews(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> { unimplemented!() }
+    ///     # async fn get_commit_statuses(&self, _: &str, _: &str, _: &str) -> Result<Vec<merge_warden_developer_platforms::models::CommitStatus>, Error> { Ok(vec![]) }
+    ///     # async fn find_pull_requests_for_commit(&self, _: &str, _: &str, _: &str) -> Result<Vec<u64>, Error> { Ok(vec![]) }
     /// }
     ///
     /// #[async_trait]
@@ -2004,6 +2044,8 @@ Please update the PR body to include a valid work item reference."#;
     ///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
     ///     # async fn list_pr_reviews(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> { unimplemented!() }
+    ///     # async fn get_commit_statuses(&self, _: &str, _: &str, _: &str) -> Result<Vec<merge_warden_developer_platforms::models::CommitStatus>, Error> { Ok(vec![]) }
+    ///     # async fn find_pull_requests_for_commit(&self, _: &str, _: &str, _: &str) -> Result<Vec<u64>, Error> { Ok(vec![]) }
     /// }
     ///
     /// #[async_trait]
@@ -2074,6 +2116,10 @@ Please update the PR body to include a valid work item reference."#;
         // Runs before the draft early-return so the draft label is applied even
         // when we skip the full validation.
         self.communicate_pr_state_labels(repo_owner, repo_name, &pr)
+            .await;
+
+        // Manage the Renovate stability label based on current commit status.
+        self.communicate_renovate_stability_status(repo_owner, repo_name, &pr)
             .await;
 
         // If the pull request is a draft then we still run validation so developers can
@@ -2581,6 +2627,8 @@ Please update the PR body to include a valid work item reference."#;
     ///     # async fn update_pr_check_status(&self, _: &str, _: &str, _: u64, _: &str, _: &str, _: &str, _: &str) -> Result<(), Error> { unimplemented!() }
     ///     # async fn get_pull_request_files(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::PullRequestFile>, Error> { unimplemented!() }
     ///     # async fn list_pr_reviews(&self, _: &str, _: &str, _: u64) -> Result<Vec<merge_warden_developer_platforms::models::Review>, Error> { unimplemented!() }
+    ///     # async fn get_commit_statuses(&self, _: &str, _: &str, _: &str) -> Result<Vec<merge_warden_developer_platforms::models::CommitStatus>, Error> { Ok(vec![]) }
+    ///     # async fn find_pull_requests_for_commit(&self, _: &str, _: &str, _: &str) -> Result<Vec<u64>, Error> { Ok(vec![]) }
     /// }
     ///
     /// #[async_trait]

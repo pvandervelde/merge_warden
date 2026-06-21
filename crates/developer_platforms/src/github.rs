@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use base64::Engine;
 use github_bot_sdk::{
-    client::{parse_link_header, CreateCommentRequest, InstallationClient},
+    client::{parse_link_header, CreateCommentRequest, CreateLabelRequest, InstallationClient},
     error::ApiError,
 };
 use serde_json::json;
@@ -10,8 +10,8 @@ use tracing::{debug, error, info, instrument, warn};
 use crate::{
     errors::Error,
     models::{
-        Comment, IssueMetadata, IssueMilestone, IssueProject, Label, PullRequest, PullRequestFile,
-        RepositoryContext, Review, User,
+        Comment, CommitStatus, IssueMetadata, IssueMilestone, IssueProject, Label, PullRequest,
+        PullRequestFile, RepositoryContext, Review, User,
     },
     ConfigFetcher, IssueMetadataProvider, PullRequestProvider, RepositoryMetadataProvider,
 };
@@ -727,12 +727,26 @@ impl PullRequestProvider for GitHubProvider {
         pr_number: u64,
         label: &str,
     ) -> Result<(), Error> {
-        self.client
+        match self
+            .client
             .pull_requests()
             .remove_label(repo_owner, repo_name, pr_number, label)
             .await
-            .map(|_| ())
-            .map_err(|e| {
+        {
+            Ok(_) => Ok(()),
+            // GitHub returns 404 when the label is not present on the PR.
+            // Treat as a no-op so callers can remove labels idempotently.
+            Err(ApiError::NotFound) => {
+                debug!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr_number,
+                    label,
+                    "Label not present on PR during remove — treating as no-op"
+                );
+                Ok(())
+            }
+            Err(e) => {
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -741,8 +755,12 @@ impl PullRequestProvider for GitHubProvider {
                     error = %e,
                     "Failed to remove label from pull request"
                 );
-                Error::FailedToUpdatePullRequest(format!("Failed to remove label '{}'", label))
-            })
+                Err(Error::FailedToUpdatePullRequest(format!(
+                    "Failed to remove label '{}'",
+                    label
+                )))
+            }
+        }
     }
 
     /// Creates or updates a GitHub check run for the pull request.
@@ -958,6 +976,181 @@ impl PullRequestProvider for GitHubProvider {
         );
 
         Ok(all_reviews)
+    }
+
+    /// Fetches commit statuses for the given commit SHA.
+    ///
+    /// Calls `GET /repos/{owner}/{repo}/commits/{sha}/statuses` and returns the
+    /// first page of results as a [`Vec<CommitStatus>`].  GitHub returns statuses
+    /// newest-first; callers wishing to use the most recent entry per context should
+    /// take the first occurrence of each context value.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidResponse`] for non-200 responses (including 404).
+    /// Returns the appropriate [`Error`] variant for auth/rate-limit failures.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, sha = commit_sha))]
+    async fn get_commit_statuses(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        commit_sha: &str,
+    ) -> Result<Vec<CommitStatus>, Error> {
+        let path = format!(
+            "/repos/{}/{}/commits/{}/statuses",
+            repo_owner, repo_name, commit_sha
+        );
+
+        let response = match self.client.get(&path).await {
+            Ok(r) => r,
+            Err(e) => {
+                error!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    sha = commit_sha,
+                    error = %e,
+                    "Failed to fetch commit statuses"
+                );
+                return Err(map_api_error(e));
+            }
+        };
+
+        if !response.status().is_success() {
+            error!(
+                owner = repo_owner,
+                repo = repo_name,
+                sha = commit_sha,
+                status = response.status().as_u16(),
+                "Non-success status fetching commit statuses"
+            );
+            return Err(Error::InvalidResponse);
+        }
+
+        let items: Vec<serde_json::Value> =
+            response.json().await.map_err(|_| Error::InvalidResponse)?;
+
+        let statuses: Vec<CommitStatus> = items
+            .into_iter()
+            .filter_map(|v| {
+                let context = v["context"].as_str()?.to_string();
+                let state = v["state"].as_str()?.to_string();
+                let description = v["description"].as_str().map(|s| s.to_string());
+                Some(CommitStatus {
+                    context,
+                    state,
+                    description,
+                })
+            })
+            .collect();
+
+        debug!(
+            owner = repo_owner,
+            repo = repo_name,
+            sha = commit_sha,
+            count = statuses.len(),
+            "Fetched commit statuses"
+        );
+
+        Ok(statuses)
+    }
+
+    /// Finds open pull requests whose HEAD commit matches `commit_sha`.
+    ///
+    /// Calls `GET /repos/{owner}/{repo}/commits/{sha}/pulls` and returns the
+    /// PR numbers from the response array.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidResponse`] for non-200 responses (including 404).
+    /// Returns the appropriate [`Error`] variant for auth/rate-limit failures.
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, sha = commit_sha))]
+    async fn find_pull_requests_for_commit(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        commit_sha: &str,
+    ) -> Result<Vec<u64>, Error> {
+        let path = format!(
+            "/repos/{}/{}/commits/{}/pulls",
+            repo_owner, repo_name, commit_sha
+        );
+
+        let response = match self.client.get(&path).await {
+            Ok(r) => r,
+            Err(e) => {
+                error!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    sha = commit_sha,
+                    error = %e,
+                    "Failed to find pull requests for commit"
+                );
+                return Err(map_api_error(e));
+            }
+        };
+
+        if !response.status().is_success() {
+            error!(
+                owner = repo_owner,
+                repo = repo_name,
+                sha = commit_sha,
+                status = response.status().as_u16(),
+                "Non-success status finding pull requests for commit"
+            );
+            return Err(Error::InvalidResponse);
+        }
+
+        let items: Vec<serde_json::Value> =
+            response.json().await.map_err(|_| Error::InvalidResponse)?;
+
+        let pr_numbers: Vec<u64> = items
+            .into_iter()
+            .filter_map(|v| v["number"].as_u64())
+            .collect();
+
+        debug!(
+            owner = repo_owner,
+            repo = repo_name,
+            sha = commit_sha,
+            count = pr_numbers.len(),
+            "Found pull requests for commit"
+        );
+
+        Ok(pr_numbers)
+    }
+
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, label = name))]
+    async fn create_label(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        name: &str,
+        color: &str,
+        description: Option<&str>,
+    ) -> Result<(), Error> {
+        self.client
+            .labels()
+            .create(
+                repo_owner,
+                repo_name,
+                CreateLabelRequest {
+                    name: name.to_string(),
+                    color: color.to_string(),
+                    description: description.map(|d| d.to_string()),
+                },
+            )
+            .await
+            .map(|_| ())
+            .map_err(|e| {
+                warn!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    label = name,
+                    error = %e,
+                    "Failed to create label in repository"
+                );
+                map_api_error(e)
+            })
     }
 }
 

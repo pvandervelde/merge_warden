@@ -893,8 +893,7 @@ fn test_commit_status_round_trip_all_fields_populated() {
     };
 
     let json_str = to_string(&original).expect("Failed to serialize CommitStatus");
-    let restored: CommitStatus =
-        from_str(&json_str).expect("Failed to deserialize CommitStatus");
+    let restored: CommitStatus = from_str(&json_str).expect("Failed to deserialize CommitStatus");
 
     assert_eq!(restored.context, "renovate/stability-days");
     assert_eq!(restored.state, "success");
@@ -925,8 +924,7 @@ fn test_commit_status_round_trip_description_null() {
         parsed["description"]
     );
 
-    let restored: CommitStatus =
-        from_str(&json_str).expect("Failed to deserialize CommitStatus");
+    let restored: CommitStatus = from_str(&json_str).expect("Failed to deserialize CommitStatus");
     assert_eq!(restored.description, None);
 }
 
@@ -961,8 +959,7 @@ fn test_commit_status_state_pending_round_trips() {
     };
 
     let json_str = to_string(&status).expect("Failed to serialize CommitStatus");
-    let restored: CommitStatus =
-        from_str(&json_str).expect("Failed to deserialize CommitStatus");
+    let restored: CommitStatus = from_str(&json_str).expect("Failed to deserialize CommitStatus");
 
     assert_eq!(restored.state, "pending");
 }
@@ -977,8 +974,7 @@ fn test_commit_status_state_success_round_trips() {
     };
 
     let json_str = to_string(&status).expect("Failed to serialize CommitStatus");
-    let restored: CommitStatus =
-        from_str(&json_str).expect("Failed to deserialize CommitStatus");
+    let restored: CommitStatus = from_str(&json_str).expect("Failed to deserialize CommitStatus");
 
     assert_eq!(restored.state, "success");
 }
@@ -993,8 +989,7 @@ fn test_commit_status_state_failure_round_trips() {
     };
 
     let json_str = to_string(&status).expect("Failed to serialize CommitStatus");
-    let restored: CommitStatus =
-        from_str(&json_str).expect("Failed to deserialize CommitStatus");
+    let restored: CommitStatus = from_str(&json_str).expect("Failed to deserialize CommitStatus");
 
     assert_eq!(restored.state, "failure");
 }
@@ -1009,8 +1004,7 @@ fn test_commit_status_state_error_round_trips() {
     };
 
     let json_str = to_string(&status).expect("Failed to serialize CommitStatus");
-    let restored: CommitStatus =
-        from_str(&json_str).expect("Failed to deserialize CommitStatus");
+    let restored: CommitStatus = from_str(&json_str).expect("Failed to deserialize CommitStatus");
 
     assert_eq!(restored.state, "error");
 }
@@ -1090,8 +1084,7 @@ fn test_commit_status_json_field_names_match_github_api_contract() {
     };
 
     let json_str = to_string(&status).expect("Failed to serialize CommitStatus");
-    let parsed: serde_json::Value =
-        serde_json::from_str(&json_str).expect("Failed to parse JSON");
+    let parsed: serde_json::Value = serde_json::from_str(&json_str).expect("Failed to parse JSON");
 
     assert!(
         parsed.get("context").is_some(),
@@ -1121,8 +1114,7 @@ fn test_commit_status_context_field_with_slashes_and_dots_preserved() {
     };
 
     let json_str = to_string(&status).expect("Failed to serialize CommitStatus");
-    let restored: CommitStatus =
-        from_str(&json_str).expect("Failed to deserialize CommitStatus");
+    let restored: CommitStatus = from_str(&json_str).expect("Failed to deserialize CommitStatus");
 
     assert_eq!(restored.context, original_context);
 }
@@ -1140,8 +1132,7 @@ fn test_commit_status_description_some_value_round_trips_correctly() {
     };
 
     let json_str = to_string(&original).expect("Failed to serialize CommitStatus");
-    let restored: CommitStatus =
-        from_str(&json_str).expect("Failed to deserialize CommitStatus");
+    let restored: CommitStatus = from_str(&json_str).expect("Failed to deserialize CommitStatus");
 
     assert!(
         restored.description.is_some(),
