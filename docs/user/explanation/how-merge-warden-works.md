@@ -109,6 +109,22 @@ Requests with a missing or invalid `X-Hub-Signature-256` header are rejected wit
 
 ---
 
+## Automatic configuration file validation
+
+When a pull request modifies `.github/merge-warden.toml`, Merge Warden automatically
+fetches the version of that file at the PR's head commit and validates it.
+
+- If the file is **invalid** (bad TOML or an unsupported `schemaVersion`), Merge Warden
+  posts a warning comment on the PR describing the errors. This comment is updated on every
+  subsequent push to the PR branch.
+- If the file is **valid**, any existing warning comment is automatically deleted.
+
+This validation is purely informational — it does not affect the Merge Warden check result
+and cannot block merging. Its purpose is to give contributors early feedback before a
+broken config lands on the default branch.
+
+---
+
 ## What Merge Warden does not do
 
 - It does not merge or close pull requests.

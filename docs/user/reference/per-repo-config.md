@@ -121,6 +121,34 @@ Controls propagation of issue metadata onto pull requests.
 
 ---
 
+## `[policies.pullRequests.renovateStability]`
+
+Controls the Renovate stability-days label. When enabled, Merge Warden watches for the
+`renovate/stability-days` commit status on the PR's head commit and applies a label while
+the status is pending.
+
+This section is **enabled by default**. Omitting it is equivalent to:
+
+```toml
+[policies.pullRequests.renovateStability]
+enabled = true
+pending_stability_label = "pr-validation: pending-stability"
+```
+
+| Field | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `enabled` | bool | `true` | When `true`, the `pending_stability_label` is applied while the Renovate stability period has not elapsed. The label is removed when the status becomes `success`. |
+| `pending_stability_label` | string | `"pr-validation: pending-stability"` | Label applied while the `renovate/stability-days` status is `pending`, `error`, or `failure`. |
+
+> **Note:** The label is purely informational and never affects the Merge Warden check
+> result. The merge rule for `enabled` is OR: once either tier enables this feature it
+> stays enabled. To disable it for a specific repository, set `enabled = false` explicitly
+> in that repository's `.github/merge-warden.toml`. Setting `enabled = false` in the
+> application-level configuration only suppresses the feature for repositories that have
+> no per-repo config file.
+
+---
+
 ## `[policies.bypassRules.*]`
 
 Each bypass section has the same shape. Three bypass policies are available:
@@ -205,6 +233,41 @@ Hex colour codes used when creating fallback labels. One entry per commit type.
 | `prefix_match` | bool | `true` | Match label name that starts with a common prefix and the candidate (e.g. `type: feat`). |
 | `description_match` | bool | `true` | Match label whose description contains one of the candidate values. |
 | `common_prefixes` | array of strings | `["type:", "kind:", "category:"]` | Prefixes used when `prefix_match` is enabled. |
+
+### `[change_type_labels.keyword_labels]`
+
+Controls labels that are applied when specific keywords are detected in the PR title or
+body. All four fields are optional; omit a field to use the built-in default label name.
+
+| Field | Type | Default | Trigger condition |
+| :--- | :--- | :--- | :--- |
+| `breaking_change` | string | `"breaking-change"` | PR title contains `!:` (breaking-change conventional commit), or PR body contains the phrase `breaking change` or `breaking-change`. |
+| `security` | string | `"security"` | PR body contains the word `security` or `vulnerability`. |
+| `hotfix` | string | `"hotfix"` | PR body contains the word `hotfix`. |
+| `tech_debt` | string | `"tech-debt"` | PR body contains `tech debt`, `tech-debt`, `technical debt`, or `technical-debt`. |
+
+Keyword matching uses word-boundary detection and is case-insensitive. Negation context
+is also detected — phrases such as "no breaking change" or "doesn't introduce a security
+issue" do not trigger the corresponding label.
+
+When a keyword label is applied, Merge Warden posts an explanatory comment on the PR.
+The comment includes the suppression command that can be used to prevent the label from
+being re-applied. See [Suppress keyword-triggered labels](../how-to/configure-label-suppression.md).
+
+**Example — custom label names:**
+
+```toml
+schemaVersion = 1
+
+[change_type_labels]
+enabled = true
+
+[change_type_labels.keyword_labels]
+breaking_change = "semver: breaking"
+security        = "sec: vulnerability"
+hotfix          = "priority: hotfix"
+tech_debt       = "quality: tech-debt"
+```
 
 ---
 

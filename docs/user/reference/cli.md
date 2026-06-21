@@ -52,8 +52,8 @@ merge-warden checkpr --provider github
 merge-warden checkpr --provider github --config /path/to/config.toml
 ```
 
-The server listens on `http://localhost:3000` by default. Configure your GitHub App webhook
-URL (or smee relay target) to `http://localhost:3000/api/github/webhook`.
+The server listens on `http://localhost:3100` by default. Configure your GitHub App webhook
+URL (or smee relay target) to `http://localhost:3100/api/github/webhook`.
 
 **Log level:** Controlled by the `MERGE_WARDEN_LOG` environment variable. The server
 container uses `RUST_LOG`; the CLI binary uses `MERGE_WARDEN_LOG`. See [Environment variables](environment-variables.md).
@@ -126,8 +126,9 @@ Prompts interactively for:
 
 1. **App ID** — the numeric App ID from your GitHub App settings page
 2. **Path to private key** — the filesystem path to the downloaded `.pem` file
+3. **Webhook secret** — the secret configured in the GitHub App webhook settings
 
-Credentials are stored in the system keyring under the `merge_warden_cli` service.
+All three values are stored in the system keyring under the `merge_warden_cli` service.
 
 ```bash
 merge-warden auth github app
@@ -138,6 +139,8 @@ merge-warden auth github app
 # 123456
 # Path to private key file:
 # /home/user/.config/merge-warden/private-key.pem
+# Webhook secret:
+# <your-webhook-secret>
 ```
 
 #### `auth github token` — Personal access token authentication
@@ -182,7 +185,7 @@ auth_method = "app"
 
 [webhooks]
 # Webhook server port
-port = 3000
+port = 3100
 
 [policies]
 # Application-level policy defaults — see app-config reference

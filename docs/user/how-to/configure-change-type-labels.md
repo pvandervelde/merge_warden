@@ -106,7 +106,41 @@ All three are enabled by default. Disable any strategy by setting it to `false`.
 
 ---
 
+## Keyword-triggered labels
+
+In addition to commit-type labels, Merge Warden can apply labels based on keywords found
+anywhere in the PR title or body. These are configured under
+`[change_type_labels.keyword_labels]` and work independently of the commit-type prefix.
+
+| Keyword trigger | Default label |
+| :--- | :--- |
+| `!:` in title, or `breaking change` / `breaking-change` in body | `breaking-change` |
+| `security` or `vulnerability` in body | `security` |
+| `hotfix` in body | `hotfix` |
+| `tech debt` / `technical debt` in body | `tech-debt` |
+
+To use different label names:
+
+```toml
+[change_type_labels]
+enabled = true
+
+[change_type_labels.keyword_labels]
+breaking_change = "semver: breaking"
+security        = "sec: vulnerability"
+hotfix          = "priority: hotfix"
+tech_debt       = "quality: tech-debt"
+```
+
+When a keyword label is applied, Merge Warden posts a comment on the PR explaining which
+keyword triggered it and showing the command to suppress it. See
+[Suppress keyword-triggered labels](configure-label-suppression.md).
+
+---
+
 ## Related
 
-- [Full per-repo config schema](../reference/per-repo-config.md#change_type_labels)
+- [Full per-repo config schema — keyword_labels](../reference/per-repo-config.md#change_type_labelskeyword_labels)
+- [Full per-repo config schema — change_type_labels](../reference/per-repo-config.md#change_type_labels)
+- [Suppress keyword-triggered labels](configure-label-suppression.md)
 - [Configure PR title validation](configure-pr-title-validation.md)
