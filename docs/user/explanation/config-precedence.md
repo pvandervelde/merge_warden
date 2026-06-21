@@ -8,7 +8,7 @@ description: "How compiled-in defaults, application config, and per-repository c
 Merge Warden resolves settings from up to four layers. Higher layers override lower ones.
 
 ```
-Per-repository .github/merge-warden.toml    ← highest priority (repo can override org defaults)
+Per-repository .github/merge-warden.toml    ← highest per-repo priority (overrides org defaults, not org enforced)
         ↓  overrides
 Org-level policy [defaults] section          ← org defaults (overridable by repo)
         ↑
