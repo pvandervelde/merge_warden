@@ -33,6 +33,26 @@ Top-level policy defaults.
 | `enable_work_item_validation` | bool | `false` | `[workItem] required` |
 | `default_work_item_pattern` | string | *(GitHub issue patterns)* | `[workItem] pattern` |
 | `default_missing_work_item_label` | string | *(none)* | `[workItem] label_if_missing` |
+| `bot_mention` | string | `"@merge-warden"` | *(none — app-level only)* |
+
+### `bot_mention`
+
+The mention prefix that PR participants use to issue bot commands in PR comments.
+The only current command is label suppression:
+
+```
+@merge-warden suppress: <label-name>
+```
+
+If your GitHub App is installed under a different name (for example because you host
+your own fork), set `bot_mention` to match your App's mention handle:
+
+```toml
+[policies]
+bot_mention = "@acme-merge-warden[bot]"
+```
+
+This field has no per-repo equivalent. It is controlled solely by the operator.
 
 ---
 
@@ -84,6 +104,61 @@ for details.
 
 ---
 
+## `[policies.renovate_stability]`
+
+Controls the Renovate stability-days label management feature at the application level.
+
+| Field | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `enabled` | bool | `true` | When `true`, the `pending_stability_label` is applied to a PR while its `renovate/stability-days` commit status is `pending`, `error`, or `failure`. Removed when the status becomes `success`. |
+| `pending_stability_label` | string | `"pr-validation: pending-stability"` | Name of the label applied during the stability wait period. |
+
+The merge rule for `enabled` is OR: once either the application tier or the per-repo
+tier enables this feature, it stays enabled. To disable for all repositories, set
+`enabled = false` here (individual repos cannot override it back to `false`).
+
+**Example:**
+
+```toml
+[policies.renovate_stability]
+enabled = true
+pending_stability_label = "renovate: stability-pending"
+```
+
+See [Configure Renovate stability labels](../how-to/configure-renovate-stability.md)
+and [Per-repository configuration schema — renovateStability](per-repo-config.md#policiespullrequestsrenovatestability).
+
+---
+
+## `[org_policy_source]`
+
+Optional. When present, the server fetches a central org-level policy TOML file on
+every PR event and inserts it into the configuration resolution chain.
+
+| Field | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `owner` | string | *(required)* | GitHub organisation or user name that owns the policy repository. |
+| `repo` | string | *(required)* | Name of the repository that holds the org policy file. |
+| `path` | string | *(required)* | Path to the org policy TOML file within the repository, relative to the repository root. |
+| `fail_if_unreachable` | bool | `false` | When `true`, an unreachable or unparseable org policy file causes PR processing to abort with an error. When `false`, failures degrade gracefully to three-tier resolution. A missing file (`404`) always degrades gracefully regardless of this setting. |
+
+**Example:**
+
+```toml
+[org_policy_source]
+owner               = "my-org"
+repo                = "platform-configs"
+path                = "merge-warden/org-policy.toml"
+fail_if_unreachable = false
+```
+
+The GitHub App must have `Contents: Read` permission on the policy repository.
+
+See [Configure an organisation-level policy](../how-to/configure-org-policy.md) for
+setup instructions and the org policy file format.
+
+---
+
 ## `[policies.bypass_rules.*]`
 
 Three bypass sections are available: `title_convention`, `work_items`, `size`.
@@ -103,6 +178,13 @@ overridden by per-repo configs.
 ## Complete example
 
 ```toml
+# Optional — enable org-level policy from a central repository.
+# [org_policy_source]
+# owner               = "my-org"
+# repo                = "platform-configs"
+# path                = "merge-warden/org-policy.toml"
+# fail_if_unreachable = false
+
 [policies]
 enable_title_validation       = true
 default_invalid_title_label   = "pr-issue: invalid-title-format"
@@ -110,16 +192,21 @@ default_invalid_title_label   = "pr-issue: invalid-title-format"
 enable_work_item_validation      = true
 default_missing_work_item_label  = "pr-issue: missing-work-item"
 
+# Bot mention prefix for label-suppression commands posted in PR comments.
+# Change this if your GitHub App is installed under a different name.
+# bot_mention = "@merge-warden"
+
 [policies.pr_size_check]
-enabled          = false
+enabled           = false
 fail_on_oversized = false
-label_prefix     = "size/"
-add_comment      = true
+label_prefix      = "size/"
+add_comment       = true
+ignore_deletions  = false
 
 [policies.wip_check]
-enforce_wip_blocking  = true
-wip_label             = "WIP"
-wip_title_patterns    = ["WIP", "wip:", "[wip]", "draft:", "Draft:"]
+enforce_wip_blocking     = true
+wip_label                = "WIP"
+wip_title_patterns       = ["WIP", "wip:", "[wip]", "draft:", "Draft:"]
 wip_description_patterns = []
 
 [policies.pr_state_labels]
@@ -127,6 +214,10 @@ enabled        = true
 draft_label    = "status: draft"
 review_label   = "status: in-review"
 approved_label = "status: approved"
+
+[policies.renovate_stability]
+enabled                = true
+pending_stability_label = "pr-validation: pending-stability"
 
 [policies.bypass_rules.title_convention]
 enabled = false

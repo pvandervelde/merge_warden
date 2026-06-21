@@ -44,8 +44,11 @@ size limits, and more.
 - [Configure PR state lifecycle labels](how-to/configure-pr-state-labels.md)
 - [Configure issue metadata propagation](how-to/configure-issue-propagation.md)
 - [Configure change-type labels](how-to/configure-change-type-labels.md)
+- [Configure Renovate stability labels](how-to/configure-renovate-stability.md)
+- [Suppress keyword-triggered labels](how-to/configure-label-suppression.md)
 - [Configure bypass rules](how-to/configure-bypass-rules.md)
 - [Set application-level policy defaults](how-to/set-app-level-defaults.md)
+- [Configure an organisation-level policy](how-to/configure-org-policy.md)
 
 ## Reference
 
