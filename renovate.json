@@ -14,20 +14,19 @@
     "automerge": false
   },
   "osvVulnerabilityAlerts": true,
-  "minimumReleaseAge": "48 hours",
+  "minimumReleaseAge": "3 days",
   "internalChecksFilter": "strict",
   "packageRules": [
     {
-      "description": "Security patches bypass the 48h delay — merge fast but still require review",
-      "matchCategories": [
-        "security"
+      "description": "Batch noisy minor/patch updates into one weekly PR instead of daily ratcheting",
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
       ],
-      "minimumReleaseAge": "0 hours",
-      "automerge": false,
-      "labels": [
-        "security",
-        "dependencies"
-      ]
+      "schedule": [
+        "before 4am on Monday"
+      ],
+      "minimumReleaseAge": "1 day"
     },
     {
       "description": "Major version bumps need manual review and an extended stabilisation window",
@@ -49,6 +48,25 @@
       "schedule": [
         "on the first day of the month"
       ]
+    },
+    {
+      "description": "Security patches bypass the 48h delay — merge fast but still require review",
+      "matchUpdateTypes": [
+        "minor",
+        "patch"
+      ],
+      "matchCategories": [
+        "security"
+      ],
+      "minimumReleaseAge": "0 hours",
+      "schedule": [
+        "at any time"
+      ],
+      "automerge": false,
+      "labels": [
+        "security",
+        "dependencies"
+      ]
     }
   ],
   "pinDigests": true,
@@ -58,7 +76,9 @@
       "before 4am on Monday"
     ]
   },
-  "prConcurrentLimit": 10,
+  "prConcurrentLimit": 20,
   "prHourlyLimit": 2,
+  "prCreation": "not-pending",
+  "postUpdateOptions": [],
   "ignoreScripts": true
 }
