@@ -2942,36 +2942,24 @@ pub async fn manage_renovate_stability_label<P: PullRequestProvider + Sync>(
                 "Renovate stability period elapsed — removing label"
             );
 
-            match provider
+            // Providers are expected to treat a missing label (404) as Ok(()).
+            // Any remaining error is a genuine API failure.
+            provider
                 .remove_label(repo_owner, repo_name, pr_number, &label_name)
                 .await
-            {
-                Ok(()) => {
-                    info!(
-                        repository_owner = repo_owner,
-                        repository = repo_name,
-                        pr_number = pr_number,
-                        label = %label_name,
-                        "Removed Renovate stability label"
-                    );
-                }
-                Err(merge_warden_developer_platforms::errors::Error::InvalidResponse) => {
-                    // GitHub returns 404 when the label is not present on the PR.
-                    // Treat as a no-op — idempotent removal.
-                    debug!(
-                        repository_owner = repo_owner,
-                        repository = repo_name,
-                        pr_number = pr_number,
-                        label = %label_name,
-                        "Stability label already absent; skipping remove"
-                    );
-                }
-                Err(e) => {
-                    return Err(MergeWardenError::FailedToUpdatePullRequest(format!(
+                .map_err(|e| {
+                    MergeWardenError::FailedToUpdatePullRequest(format!(
                         "Failed to remove stability label: {e}"
-                    )));
-                }
-            }
+                    ))
+                })?;
+
+            info!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                pr_number = pr_number,
+                label = %label_name,
+                "Removed Renovate stability label"
+            );
         }
         state => {
             debug!(

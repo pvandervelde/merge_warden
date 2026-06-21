@@ -652,7 +652,7 @@ async fn test_remove_label_success() {
 }
 
 #[tokio::test]
-async fn test_remove_label_not_found_is_error() {
+async fn test_remove_label_not_found_is_noop() {
     let server = MockServer::start().await;
 
     Mock::given(method("DELETE"))
@@ -666,7 +666,10 @@ async fn test_remove_label_not_found_is_error() {
         .remove_label("owner", "repo", 5, "nonexistent")
         .await;
 
-    assert!(matches!(result, Err(Error::FailedToUpdatePullRequest(_))));
+    assert!(
+        result.is_ok(),
+        "404 on remove_label must be treated as a no-op"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -1704,7 +1707,10 @@ async fn test_get_commit_statuses_preserves_api_order() {
         .expect("should succeed");
 
     assert_eq!(result.len(), 2);
-    assert_eq!(result[0].state, "pending", "first entry must be newest (as returned by API)");
+    assert_eq!(
+        result[0].state, "pending",
+        "first entry must be newest (as returned by API)"
+    );
     assert_eq!(result[1].state, "success");
 }
 
@@ -1735,7 +1741,10 @@ async fn test_get_commit_statuses_maps_fields_correctly() {
     let status = &result[0];
     assert_eq!(status.context, "renovate/stability-days");
     assert_eq!(status.state, "success");
-    assert_eq!(status.description, Some("All stability checks passed".to_string()));
+    assert_eq!(
+        status.description,
+        Some("All stability checks passed".to_string())
+    );
 }
 
 /// Spec assertion: description may be null / absent.

@@ -4745,14 +4745,13 @@ fn stability_config_enabled() -> CurrentPullRequestValidationConfiguration {
 
 #[tokio::test]
 async fn process_pull_request_pending_stability_applies_label() {
-    let mut provider = DynamicMockGitProvider::new()
-        .with_commit_statuses(vec![
-            merge_warden_developer_platforms::models::CommitStatus {
-                context: "renovate/stability-days".to_string(),
-                state: "pending".to_string(),
-                description: None,
-            },
-        ]);
+    let mut provider = DynamicMockGitProvider::new().with_commit_statuses(vec![
+        merge_warden_developer_platforms::models::CommitStatus {
+            context: "renovate/stability-days".to_string(),
+            state: "pending".to_string(),
+            description: None,
+        },
+    ]);
     provider.add_pull_request(make_pr_for_stability(1));
 
     let warden = MergeWarden::with_config(provider, stability_config_enabled());
@@ -4772,14 +4771,13 @@ async fn process_pull_request_pending_stability_applies_label() {
 
 #[tokio::test]
 async fn process_pull_request_success_stability_removes_label() {
-    let mut provider = DynamicMockGitProvider::new()
-        .with_commit_statuses(vec![
-            merge_warden_developer_platforms::models::CommitStatus {
-                context: "renovate/stability-days".to_string(),
-                state: "success".to_string(),
-                description: None,
-            },
-        ]);
+    let mut provider = DynamicMockGitProvider::new().with_commit_statuses(vec![
+        merge_warden_developer_platforms::models::CommitStatus {
+            context: "renovate/stability-days".to_string(),
+            state: "success".to_string(),
+            description: None,
+        },
+    ]);
     provider.add_pull_request(make_pr_for_stability(1));
 
     let warden = MergeWarden::with_config(provider, stability_config_enabled());
@@ -4800,14 +4798,13 @@ async fn process_pull_request_success_stability_removes_label() {
 
 #[tokio::test]
 async fn process_pull_request_no_stability_context_is_noop() {
-    let mut provider = DynamicMockGitProvider::new()
-        .with_commit_statuses(vec![
-            merge_warden_developer_platforms::models::CommitStatus {
-                context: "ci/build".to_string(),
-                state: "success".to_string(),
-                description: None,
-            },
-        ]);
+    let mut provider = DynamicMockGitProvider::new().with_commit_statuses(vec![
+        merge_warden_developer_platforms::models::CommitStatus {
+            context: "ci/build".to_string(),
+            state: "success".to_string(),
+            description: None,
+        },
+    ]);
     provider.add_pull_request(make_pr_for_stability(1));
 
     let warden = MergeWarden::with_config(provider, stability_config_enabled());
@@ -4827,14 +4824,13 @@ async fn process_pull_request_no_stability_context_is_noop() {
 
 #[tokio::test]
 async fn process_pull_request_stability_disabled_is_noop() {
-    let mut provider = DynamicMockGitProvider::new()
-        .with_commit_statuses(vec![
-            merge_warden_developer_platforms::models::CommitStatus {
-                context: "renovate/stability-days".to_string(),
-                state: "pending".to_string(),
-                description: None,
-            },
-        ]);
+    let mut provider = DynamicMockGitProvider::new().with_commit_statuses(vec![
+        merge_warden_developer_platforms::models::CommitStatus {
+            context: "renovate/stability-days".to_string(),
+            state: "pending".to_string(),
+            description: None,
+        },
+    ]);
     provider.add_pull_request(make_pr_for_stability(1));
 
     let config = CurrentPullRequestValidationConfiguration {
@@ -4866,14 +4862,13 @@ async fn process_pull_request_stability_error_does_not_propagate() {
     // should still complete (errors are logged at warn, not returned).
     // DynamicMockGitProvider does not error on list_available_labels, so
     // this test primarily exercises the path without panicking.
-    let mut provider = DynamicMockGitProvider::new()
-        .with_commit_statuses(vec![
-            merge_warden_developer_platforms::models::CommitStatus {
-                context: "renovate/stability-days".to_string(),
-                state: "pending".to_string(),
-                description: None,
-            },
-        ]);
+    let mut provider = DynamicMockGitProvider::new().with_commit_statuses(vec![
+        merge_warden_developer_platforms::models::CommitStatus {
+            context: "renovate/stability-days".to_string(),
+            state: "pending".to_string(),
+            description: None,
+        },
+    ]);
     provider.add_pull_request(make_pr_for_stability(1));
 
     let warden = MergeWarden::with_config(provider, stability_config_enabled());
@@ -4886,14 +4881,13 @@ async fn process_pull_request_stability_error_does_not_propagate() {
 
 #[tokio::test]
 async fn process_pull_request_draft_receives_stability_label() {
-    let mut provider = DynamicMockGitProvider::new()
-        .with_commit_statuses(vec![
-            merge_warden_developer_platforms::models::CommitStatus {
-                context: "renovate/stability-days".to_string(),
-                state: "pending".to_string(),
-                description: None,
-            },
-        ]);
+    let mut provider = DynamicMockGitProvider::new().with_commit_statuses(vec![
+        merge_warden_developer_platforms::models::CommitStatus {
+            context: "renovate/stability-days".to_string(),
+            state: "pending".to_string(),
+            description: None,
+        },
+    ]);
     let mut pr = make_pr_for_stability(1);
     pr.draft = true;
     provider.add_pull_request(pr);
@@ -4917,14 +4911,13 @@ async fn process_pull_request_draft_receives_stability_label() {
 async fn process_pull_request_check_conclusion_unaffected_by_stability() {
     // A valid PR with pending stability status should still pass the title/body
     // checks and produce a "success" check-status conclusion.
-    let mut provider = DynamicMockGitProvider::new()
-        .with_commit_statuses(vec![
-            merge_warden_developer_platforms::models::CommitStatus {
-                context: "renovate/stability-days".to_string(),
-                state: "pending".to_string(),
-                description: None,
-            },
-        ]);
+    let mut provider = DynamicMockGitProvider::new().with_commit_statuses(vec![
+        merge_warden_developer_platforms::models::CommitStatus {
+            context: "renovate/stability-days".to_string(),
+            state: "pending".to_string(),
+            description: None,
+        },
+    ]);
     provider.add_pull_request(make_pr_for_stability(1));
 
     let warden = MergeWarden::with_config(provider, stability_config_enabled());
@@ -4934,10 +4927,7 @@ async fn process_pull_request_check_conclusion_unaffected_by_stability() {
         .unwrap();
 
     let updates = warden.provider.get_check_status_updates();
-    let conclusion = updates
-        .last()
-        .map(|u| u.conclusion.as_str())
-        .unwrap_or("");
+    let conclusion = updates.last().map(|u| u.conclusion.as_str()).unwrap_or("");
     // The stability label does not affect the Merge Warden check conclusion.
     assert!(
         conclusion == "success" || conclusion == "failure",

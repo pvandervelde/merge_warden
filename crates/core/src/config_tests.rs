@@ -6552,7 +6552,10 @@ async fn test_conditional_policy_toml_with_no_org_policy_source_ignores_conditio
 #[test]
 fn test_renovate_stability_config_default_enabled_is_true() {
     let config = crate::config::RenovateStabilityConfig::default();
-    assert!(config.enabled, "RenovateStabilityConfig::default must have enabled=true");
+    assert!(
+        config.enabled,
+        "RenovateStabilityConfig::default must have enabled=true"
+    );
 }
 
 /// Spec assertion: RenovateStabilityConfig::default() → label == RENOVATE_STABILITY_LABEL.
@@ -6646,8 +6649,7 @@ fn test_renovate_stability_config_merge_custom_label_wins() {
     };
     let merged = crate::config::RenovateStabilityConfig::merge(&base, &over);
     assert_eq!(
-        merged.pending_stability_label,
-        "custom-stability-label",
+        merged.pending_stability_label, "custom-stability-label",
         "non-default over label must win"
     );
 }
@@ -6665,8 +6667,7 @@ fn test_renovate_stability_config_merge_default_over_label_defers_to_base() {
     };
     let merged = crate::config::RenovateStabilityConfig::merge(&base, &over);
     assert_eq!(
-        merged.pending_stability_label,
-        "base-custom-label",
+        merged.pending_stability_label, "base-custom-label",
         "when over has the default label, base custom label wins"
     );
 }

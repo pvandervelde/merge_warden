@@ -1959,7 +1959,9 @@ impl RenovateStabilityConfig {
     /// Merges `over` on top of `base` (lower-priority).
     ///
     /// Field-level rules:
-    /// - `enabled`: `base.enabled || over.enabled` — once enabled in either tier, stays enabled
+    /// - `enabled`: `base.enabled || over.enabled` — once enabled in either tier, stays enabled.
+    ///   This means a repo-level `enabled = false` cannot override an app-level `enabled = true`.
+    ///   To disable for all repos, set `enabled = false` at the application defaults level.
     /// - `pending_stability_label`: `over` wins if non-empty and differs from the default label;
     ///   otherwise `base` is used
     pub(crate) fn merge(base: &Self, over: &Self) -> Self {

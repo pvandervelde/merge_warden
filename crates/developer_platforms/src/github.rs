@@ -727,12 +727,26 @@ impl PullRequestProvider for GitHubProvider {
         pr_number: u64,
         label: &str,
     ) -> Result<(), Error> {
-        self.client
+        match self
+            .client
             .pull_requests()
             .remove_label(repo_owner, repo_name, pr_number, label)
             .await
-            .map(|_| ())
-            .map_err(|e| {
+        {
+            Ok(_) => Ok(()),
+            // GitHub returns 404 when the label is not present on the PR.
+            // Treat as a no-op so callers can remove labels idempotently.
+            Err(ApiError::NotFound) => {
+                debug!(
+                    owner = repo_owner,
+                    repo = repo_name,
+                    pr = pr_number,
+                    label,
+                    "Label not present on PR during remove — treating as no-op"
+                );
+                Ok(())
+            }
+            Err(e) => {
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -741,8 +755,12 @@ impl PullRequestProvider for GitHubProvider {
                     error = %e,
                     "Failed to remove label from pull request"
                 );
-                Error::FailedToUpdatePullRequest(format!("Failed to remove label '{}'", label))
-            })
+                Err(Error::FailedToUpdatePullRequest(format!(
+                    "Failed to remove label '{}'",
+                    label
+                )))
+            }
+        }
     }
 
     /// Creates or updates a GitHub check run for the pull request.
@@ -1101,6 +1119,7 @@ impl PullRequestProvider for GitHubProvider {
         Ok(pr_numbers)
     }
 
+    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, label = name))]
     async fn create_label(
         &self,
         repo_owner: &str,

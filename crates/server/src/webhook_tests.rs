@@ -2,7 +2,7 @@ use axum::{http::StatusCode, response::IntoResponse};
 use chrono::Utc;
 use github_bot_sdk::{
     client::{ClientConfig, GitHubClient, OwnerType, Repository, RepositoryOwner},
-    events::{EventPayload, EventEnvelope},
+    events::{EventEnvelope, EventPayload},
     webhook::WebhookHandler,
 };
 use merge_warden_core::config::ApplicationDefaults;

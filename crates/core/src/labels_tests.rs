@@ -5610,8 +5610,6 @@ struct StabilityMockProvider {
     available_labels: Vec<Label>,
     applied_labels: Arc<Mutex<Vec<Label>>>,
     create_label_calls: Arc<Mutex<Vec<String>>>,
-    /// When `true`, `remove_label` returns `Error::InvalidResponse` (404).
-    remove_label_404: bool,
 }
 
 impl StabilityMockProvider {
@@ -5621,17 +5619,11 @@ impl StabilityMockProvider {
             available_labels: vec![],
             applied_labels: Arc::new(Mutex::new(vec![])),
             create_label_calls: Arc::new(Mutex::new(vec![])),
-            remove_label_404: false,
         }
     }
 
     fn with_available_labels(mut self, labels: Vec<Label>) -> Self {
         self.available_labels = labels;
-        self
-    }
-
-    fn with_remove_label_err(mut self, _err: Error) -> Self {
-        self.remove_label_404 = true;
         self
     }
 
@@ -5646,12 +5638,7 @@ impl StabilityMockProvider {
 
 #[async_trait]
 impl PullRequestProvider for StabilityMockProvider {
-    async fn get_pull_request(
-        &self,
-        _: &str,
-        _: &str,
-        _: u64,
-    ) -> Result<PullRequest, Error> {
+    async fn get_pull_request(&self, _: &str, _: &str, _: u64) -> Result<PullRequest, Error> {
         unimplemented!()
     }
 
@@ -5663,12 +5650,7 @@ impl PullRequestProvider for StabilityMockProvider {
         Ok(())
     }
 
-    async fn list_comments(
-        &self,
-        _: &str,
-        _: &str,
-        _: u64,
-    ) -> Result<Vec<Comment>, Error> {
+    async fn list_comments(&self, _: &str, _: &str, _: u64) -> Result<Vec<Comment>, Error> {
         Ok(vec![])
     }
 
@@ -5676,13 +5658,7 @@ impl PullRequestProvider for StabilityMockProvider {
         Ok(self.available_labels.clone())
     }
 
-    async fn add_labels(
-        &self,
-        _: &str,
-        _: &str,
-        _: u64,
-        labels: &[String],
-    ) -> Result<(), Error> {
+    async fn add_labels(&self, _: &str, _: &str, _: u64, labels: &[String]) -> Result<(), Error> {
         let mut applied = self.applied_labels.lock().unwrap();
         for l in labels {
             applied.push(Label {
@@ -5694,19 +5670,10 @@ impl PullRequestProvider for StabilityMockProvider {
     }
 
     async fn remove_label(&self, _: &str, _: &str, _: u64, _: &str) -> Result<(), Error> {
-        if self.remove_label_404 {
-            Err(Error::InvalidResponse)
-        } else {
-            Ok(())
-        }
+        Ok(())
     }
 
-    async fn list_applied_labels(
-        &self,
-        _: &str,
-        _: &str,
-        _: u64,
-    ) -> Result<Vec<Label>, Error> {
+    async fn list_applied_labels(&self, _: &str, _: &str, _: u64) -> Result<Vec<Label>, Error> {
         Ok(self.applied_labels.lock().unwrap().clone())
     }
 
@@ -5767,7 +5734,10 @@ impl PullRequestProvider for StabilityMockProvider {
         _color: &str,
         _description: Option<&str>,
     ) -> Result<(), Error> {
-        self.create_label_calls.lock().unwrap().push(name.to_string());
+        self.create_label_calls
+            .lock()
+            .unwrap()
+            .push(name.to_string());
         Ok(())
     }
 }
@@ -5814,19 +5784,16 @@ async fn manage_renovate_stability_label_pending_adds_label() {
     let config = default_stability_config();
 
     crate::labels::manage_renovate_stability_label(
-        &provider,
-        "owner",
-        "repo",
-        1,
-        "abc123",
-        &config,
+        &provider, "owner", "repo", 1, "abc123", &config,
     )
     .await
     .unwrap();
 
     let applied = provider.applied_labels();
     assert!(
-        applied.iter().any(|l| l.name == config.pending_stability_label),
+        applied
+            .iter()
+            .any(|l| l.name == config.pending_stability_label),
         "stability label should be applied for pending status"
     );
 }
@@ -5837,19 +5804,16 @@ async fn manage_renovate_stability_label_error_adds_label() {
     let config = default_stability_config();
 
     crate::labels::manage_renovate_stability_label(
-        &provider,
-        "owner",
-        "repo",
-        1,
-        "abc123",
-        &config,
+        &provider, "owner", "repo", 1, "abc123", &config,
     )
     .await
     .unwrap();
 
     let applied = provider.applied_labels();
     assert!(
-        applied.iter().any(|l| l.name == config.pending_stability_label),
+        applied
+            .iter()
+            .any(|l| l.name == config.pending_stability_label),
         "stability label should be applied for error status"
     );
 }
@@ -5860,19 +5824,16 @@ async fn manage_renovate_stability_label_failure_adds_label() {
     let config = default_stability_config();
 
     crate::labels::manage_renovate_stability_label(
-        &provider,
-        "owner",
-        "repo",
-        1,
-        "abc123",
-        &config,
+        &provider, "owner", "repo", 1, "abc123", &config,
     )
     .await
     .unwrap();
 
     let applied = provider.applied_labels();
     assert!(
-        applied.iter().any(|l| l.name == config.pending_stability_label),
+        applied
+            .iter()
+            .any(|l| l.name == config.pending_stability_label),
         "stability label should be applied for failure status"
     );
 }
@@ -5904,9 +5865,11 @@ async fn manage_renovate_stability_label_success_removes_label() {
 
 #[test]
 async fn manage_renovate_stability_label_success_absent_label_is_noop() {
-    // remove_label returns 404 (InvalidResponse) — should be Ok(())
-    let provider = StabilityMockProvider::new(vec![success_status()])
-        .with_remove_label_err(Error::InvalidResponse);
+    // Simulates the case where the provider handles 404 internally and returns
+    // Ok(()) (the GitHubProvider does this).  manage_renovate_stability_label
+    // should propagate the Ok(()) cleanly with no error.
+    let provider = StabilityMockProvider::new(vec![success_status()]);
+    // remove_label_404 = false (default) — provider returns Ok(())
 
     let result = crate::labels::manage_renovate_stability_label(
         &provider,
@@ -5918,7 +5881,11 @@ async fn manage_renovate_stability_label_success_absent_label_is_noop() {
     )
     .await;
 
-    assert!(result.is_ok(), "404 on remove should be treated as no-op");
+    assert!(
+        result.is_ok(),
+        "absent label remove should be a no-op: {:?}",
+        result
+    );
 }
 
 #[test]
@@ -5932,12 +5899,7 @@ async fn manage_renovate_stability_label_no_context_is_noop() {
     let config = default_stability_config();
 
     crate::labels::manage_renovate_stability_label(
-        &provider,
-        "owner",
-        "repo",
-        1,
-        "abc123",
-        &config,
+        &provider, "owner", "repo", 1, "abc123", &config,
     )
     .await
     .unwrap();
@@ -5956,12 +5918,7 @@ async fn manage_renovate_stability_label_disabled_is_noop() {
     let provider = StabilityMockProvider::new(vec![pending_status()]);
 
     crate::labels::manage_renovate_stability_label(
-        &provider,
-        "owner",
-        "repo",
-        1,
-        "abc123",
-        &config,
+        &provider, "owner", "repo", 1, "abc123", &config,
     )
     .await
     .unwrap();
@@ -5984,19 +5941,16 @@ async fn manage_renovate_stability_label_uses_newest_entry() {
     let config = default_stability_config();
 
     crate::labels::manage_renovate_stability_label(
-        &provider,
-        "owner",
-        "repo",
-        1,
-        "abc123",
-        &config,
+        &provider, "owner", "repo", 1, "abc123", &config,
     )
     .await
     .unwrap();
 
     let applied = provider.applied_labels();
     assert!(
-        applied.iter().any(|l| l.name == config.pending_stability_label),
+        applied
+            .iter()
+            .any(|l| l.name == config.pending_stability_label),
         "pending (newest) entry should win"
     );
 }
@@ -6008,12 +5962,7 @@ async fn manage_renovate_stability_label_creates_label_if_missing() {
     let config = default_stability_config();
 
     crate::labels::manage_renovate_stability_label(
-        &provider,
-        "owner",
-        "repo",
-        1,
-        "abc123",
-        &config,
+        &provider, "owner", "repo", 1, "abc123", &config,
     )
     .await
     .unwrap();
@@ -6028,7 +5977,9 @@ async fn manage_renovate_stability_label_creates_label_if_missing() {
 
     let applied = provider.applied_labels();
     assert!(
-        applied.iter().any(|l| l.name == config.pending_stability_label),
+        applied
+            .iter()
+            .any(|l| l.name == config.pending_stability_label),
         "label should be applied after creation"
     );
 }

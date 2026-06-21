@@ -310,10 +310,7 @@ impl MergeWardenWebhookHandler {
     ///
     /// Errors for individual PRs are logged at `warn` and do not abort
     /// processing of remaining PRs.
-    pub async fn handle_status_event(
-        &self,
-        envelope: &EventEnvelope,
-    ) -> Result<(), ServerError> {
+    pub async fn handle_status_event(&self, envelope: &EventEnvelope) -> Result<(), ServerError> {
         let payload = envelope.payload.raw();
 
         let context = payload["context"].as_str().unwrap_or("");
@@ -387,43 +384,44 @@ impl MergeWardenWebhookHandler {
 
         let merge_warden_config_path = ".github/merge-warden.toml";
 
+        // All PRs in the loop share the same repository, so the config is
+        // identical for each.  Load it once before entering the loop to avoid
+        // redundant API calls (including the org-policy fetch).
+        let validation_config = match resolve_pull_request_config(
+            repo_owner,
+            repo_name,
+            merge_warden_config_path,
+            &provider,
+            &self.policies,
+            Some(&provider),
+        )
+        .await
+        {
+            Ok(config) => config,
+            Err(ConfigLoadError::OrgPolicyUnavailable(ref msg)) => {
+                warn!(
+                    repository_owner = repo_owner.as_str(),
+                    repository = repo_name.as_str(),
+                    org_policy_error = msg.as_str(),
+                    "Org policy unreachable during status event processing; using defaults"
+                );
+                CurrentPullRequestValidationConfiguration::from_app_defaults(&self.policies)
+            }
+            Err(e) => {
+                warn!(
+                    repository_owner = repo_owner.as_str(),
+                    repository = repo_name.as_str(),
+                    error = %e,
+                    "Failed to resolve config during status event; using defaults"
+                );
+                CurrentPullRequestValidationConfiguration::from_app_defaults(&self.policies)
+            }
+        };
+
         for pr_number in pr_numbers {
             let issue_provider = provider.clone();
 
-            let validation_config = match resolve_pull_request_config(
-                repo_owner,
-                repo_name,
-                merge_warden_config_path,
-                &provider,
-                &self.policies,
-                Some(&provider),
-            )
-            .await
-            {
-                Ok(config) => config,
-                Err(ConfigLoadError::OrgPolicyUnavailable(ref msg)) => {
-                    warn!(
-                        repository_owner = repo_owner.as_str(),
-                        repository = repo_name.as_str(),
-                        pull_request = pr_number,
-                        org_policy_error = msg.as_str(),
-                        "Org policy unreachable for PR during status event processing; using defaults"
-                    );
-                    CurrentPullRequestValidationConfiguration::from_app_defaults(&self.policies)
-                }
-                Err(e) => {
-                    warn!(
-                        repository_owner = repo_owner.as_str(),
-                        repository = repo_name.as_str(),
-                        pull_request = pr_number,
-                        error = %e,
-                        "Failed to resolve config for PR during status event; using defaults"
-                    );
-                    CurrentPullRequestValidationConfiguration::from_app_defaults(&self.policies)
-                }
-            };
-
-            let warden = MergeWarden::with_config(provider.clone(), validation_config)
+            let warden = MergeWarden::with_config(provider.clone(), validation_config.clone())
                 .with_issue_provider(Box::new(issue_provider));
 
             if let Err(e) = warden
