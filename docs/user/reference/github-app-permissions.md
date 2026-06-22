@@ -16,6 +16,7 @@ on the GitHub App that Merge Warden uses. Create or update the app at
 | Permission | Level | Why it is needed |
 | :--- | :--- | :--- |
 | Checks | Read & Write | Create and update check runs on pull requests |
+| Commit statuses | Read | Read commit statuses to detect Renovate stability-days transitions |
 | Contents | Read | Read `.github/merge-warden.toml` from the default branch |
 | Issues | Read | Read issue metadata for milestone and project propagation (GitHub issues only) |
 | Labels | Read & Write | Apply labels to pull requests; create fallback labels when none match |
@@ -52,6 +53,7 @@ Subscribe the GitHub App to the following events:
 
 | Event | Why it is needed |
 | :--- | :--- |
+| Commit statuses | Trigger Renovate stability-days label updates when a commit status transitions (e.g. `pending` → `success`) |
 | Pull request | Trigger processing when a PR is opened, edited, synchronised, reopened, or converted from draft |
 | Pull request review | Trigger state-label updates when a review is submitted |
 
