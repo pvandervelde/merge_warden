@@ -46,6 +46,15 @@ label_if_missing = "pr-issue: invalid-title-format"
 # [enforced.policies.pullRequests.wip]
 # enforce_wip_blocking = true
 
+# Uncomment to enforce bot bypasses org-wide (repos cannot remove these users from the bypass list).
+# [enforced.policies.bypassRules.title_convention]
+# enabled = true
+# users   = ["renovate[bot]", "dependabot[bot]"]
+#
+# [enforced.policies.bypassRules.work_items]
+# enabled = true
+# users   = ["renovate[bot]", "dependabot[bot]"]
+
 # ---------------------------------------------------------------------------
 # [defaults] — org-wide defaults that CAN be overridden by per-repo config.
 #
@@ -76,6 +85,20 @@ add_comment = true
 # security       = "security"
 # hotfix         = "hotfix"
 # tech_debt      = "tech-debt"
+
+# Org-wide default bypass rules for well-known automation bots.
+# Repos may override these by specifying their own [policies.bypassRules.*] sections.
+# [defaults.policies.bypassRules.title_convention]
+# enabled = true
+# users   = ["renovate[bot]", "dependabot[bot]", "release-regent[bot]"]
+#
+# [defaults.policies.bypassRules.work_items]
+# enabled = true
+# users   = ["renovate[bot]", "dependabot[bot]", "release-regent[bot]"]
+#
+# [defaults.policies.bypassRules.size]
+# enabled = true
+# users   = ["renovate[bot]", "dependabot[bot]", "release-regent[bot]"]
 
 # ---------------------------------------------------------------------------
 # [[conditional_policies]] — policies applied only when a condition matches.
