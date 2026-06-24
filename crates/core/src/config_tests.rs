@@ -5617,6 +5617,54 @@ users = []
     );
 }
 
+// AC8: repo sets enabled=true, users=[] → opt-out neutralises org default.
+// The effective bypass list must be empty (the opt-out succeeded) and the
+// rule must still be enabled (so it is active but with no allowed users).
+#[tokio::test]
+async fn test_resolve_repo_opt_out_empty_users_neutralises_org_default() {
+    let org_toml = r#"
+schemaVersion = 1
+
+[enforced]
+
+[defaults.policies.bypassRules.title_convention]
+enabled = true
+users = ["renovate[bot]"]
+"#;
+    // Repo explicitly opts out by setting enabled=true with an empty users list.
+    let repo_toml = r#"
+schemaVersion = 1
+
+[policies.bypassRules.title_convention]
+enabled = true
+users = []
+"#;
+
+    let fetcher = two_file_fetcher_shared::TwoFileFetcher {
+        repo_content: Some(repo_toml.to_string()),
+        org_content: Some(org_toml.to_string()),
+        org_path: "org-policy.toml".to_string(),
+    };
+
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(make_org_policy_source());
+
+    let result =
+        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
+            .await
+            .unwrap();
+
+    assert!(
+        result.bypass_rules.title_convention().users().is_empty(),
+        "opt-out must produce an empty users list: the org default bypass list \
+         must be neutralised when repo sets enabled=true with users=[]"
+    );
+    assert!(
+        result.bypass_rules.title_convention().enabled(),
+        "the title_convention rule must still be enabled even after the opt-out"
+    );
+}
+
 // ============================================================
 // load_org_policy — additional completeness tests
 // ============================================================

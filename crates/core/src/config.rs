@@ -2745,6 +2745,51 @@ pub async fn resolve_pull_request_config(
         effective_ps = effective_ps.merge(cd);
     }
     effective_ps = effective_ps.merge(&repo_ps);
+
+    // Warn when a repo has opted out of an org-default bypass list by setting
+    // `enabled = true, users = []`.  This silently neutralises the org default
+    // (the effective bypass list becomes empty) and is otherwise invisible to
+    // platform operators.  We emit one structured warning per affected sub-rule
+    // so that log-based alerting can detect the situation.
+    //
+    // We do NOT warn when the org default itself had an empty users list — that
+    // is the normal "no default configured" case, not an opt-out.
+    {
+        let check_opt_out = |sub_rule_name: &str,
+                             org_rule: &BypassRule,
+                             effective_rule: &BypassRule| {
+            if !org_rule.users().is_empty()
+                && effective_rule.enabled()
+                && effective_rule.users().is_empty()
+            {
+                warn!(
+                    repository_owner = repo_owner,
+                    repository = repo_name,
+                    sub_rule = sub_rule_name,
+                    "Repo has opted out of the org-default bypass user list by \
+                     setting enabled=true with an empty users list; the effective \
+                     bypass list for this rule is now empty"
+                );
+            }
+        };
+
+        check_opt_out(
+            "title_convention",
+            org_defaults_ps.bypass_rules.title_convention(),
+            effective_ps.bypass_rules.title_convention(),
+        );
+        check_opt_out(
+            "work_items",
+            org_defaults_ps.bypass_rules.work_item_convention(),
+            effective_ps.bypass_rules.work_item_convention(),
+        );
+        check_opt_out(
+            "size",
+            org_defaults_ps.bypass_rules.size(),
+            effective_ps.bypass_rules.size(),
+        );
+    }
+
     for ce in &conditional_enforced_policies {
         effective_ps = effective_ps.merge(ce);
     }
