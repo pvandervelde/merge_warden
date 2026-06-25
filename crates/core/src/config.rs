@@ -1002,18 +1002,22 @@ impl BypassRules {
     }
 }
 
-/// Per-repository bypass-rule overrides parsed from `[policies.bypassRules.*]` in
-/// `.github/merge-warden.toml`.
+/// Bypass-rule configuration used at multiple policy tiers.
 ///
-/// Each sub-field is `Option<BypassRule>`.  When a sub-table is absent from the
-/// repository TOML the field is `None`, and callers fall back to the server-level
-/// default for that rule.  This allows a repo to override individual categories
-/// without silently discarding the server defaults for the others.
+/// This struct is shared by repository-level (`[policies.bypassRules.*]` in
+/// `.github/merge-warden.toml`), org-level defaults (`[defaults.policies.bypassRules.*]`),
+/// and org-level enforced overrides (`[enforced.policies.bypassRules.*]`) in the
+/// org-policy file.
+///
+/// Each sub-field is `Option<BypassRule>`.  When a sub-table is absent the field is
+/// `None`, and callers fall back to the next tier in the merge chain for that rule.
+/// This allows any tier to override individual categories without silently discarding
+/// the defaults from lower-priority tiers for the others.
 ///
 /// # Examples
 ///
 /// ```toml
-/// # Override title bypass only; work_items and size inherit server defaults.
+/// # Override title bypass only; work_items and size inherit defaults.
 /// [policies.bypassRules.title_convention]
 /// enabled = true
 /// users = ["release-bot"]
@@ -2755,24 +2759,29 @@ pub async fn resolve_pull_request_config(
     // We do NOT warn when the org default itself had an empty users list — that
     // is the normal "no default configured" case, not an opt-out.
     {
-        let check_opt_out = |sub_rule_name: &str,
-                             org_rule: &BypassRule,
-                             effective_rule: &BypassRule| {
-            if !org_rule.users().is_empty()
-                && effective_rule.enabled()
-                && effective_rule.users().is_empty()
-            {
-                warn!(
-                    repository_owner = repo_owner,
-                    repository = repo_name,
-                    sub_rule = sub_rule_name,
-                    "Repo has opted out of the org-default bypass user list by \
-                     setting enabled=true with an empty users list; the effective \
-                     bypass list for this rule is now empty"
-                );
-            }
-        };
+        let check_opt_out =
+            |sub_rule_name: &str, org_rule: &BypassRule, effective_rule: &BypassRule| {
+                if !org_rule.users().is_empty()
+                    && effective_rule.enabled()
+                    && effective_rule.users().is_empty()
+                {
+                    warn!(
+                        repository_owner = repo_owner,
+                        repository = repo_name,
+                        sub_rule = sub_rule_name,
+                        "Repo has opted out of the org-default bypass user list by \
+                     setting enabled=true with an empty users list; the intermediate \
+                     bypass list after the repo merge is now empty (org-enforced \
+                     policies applied later in the chain may still override this)"
+                    );
+                }
+            };
 
+        // Note: conditional_defaults bypass users (merged before repo_ps) are not
+        // monitored here — only opt-outs of org_defaults are detected.  Conditional
+        // bypass rules are not a documented feature; this gap is intentional scope
+        // deferral.  If conditional bypass support is added, this closure should also
+        // compare against the conditional-defaults baseline.
         check_opt_out(
             "title_convention",
             org_defaults_ps.bypass_rules.title_convention(),
