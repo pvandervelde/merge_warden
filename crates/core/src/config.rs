@@ -1002,18 +1002,22 @@ impl BypassRules {
     }
 }
 
-/// Per-repository bypass-rule overrides parsed from `[policies.bypassRules.*]` in
-/// `.github/merge-warden.toml`.
+/// Bypass-rule configuration used at multiple policy tiers.
 ///
-/// Each sub-field is `Option<BypassRule>`.  When a sub-table is absent from the
-/// repository TOML the field is `None`, and callers fall back to the server-level
-/// default for that rule.  This allows a repo to override individual categories
-/// without silently discarding the server defaults for the others.
+/// This struct is shared by repository-level (`[policies.bypassRules.*]` in
+/// `.github/merge-warden.toml`), org-level defaults (`[defaults.policies.bypassRules.*]`),
+/// and org-level enforced overrides (`[enforced.policies.bypassRules.*]`) in the
+/// org-policy file.
+///
+/// Each sub-field is `Option<BypassRule>`.  When a sub-table is absent the field is
+/// `None`, and callers fall back to the next tier in the merge chain for that rule.
+/// This allows any tier to override individual categories without silently discarding
+/// the defaults from lower-priority tiers for the others.
 ///
 /// # Examples
 ///
 /// ```toml
-/// # Override title bypass only; work_items and size inherit server defaults.
+/// # Override title bypass only; work_items and size inherit defaults.
 /// [policies.bypassRules.title_convention]
 /// enabled = true
 /// users = ["release-bot"]
@@ -1063,6 +1067,29 @@ impl BypassRulesConfig {
     /// Returns the per-repo size bypass rule, if configured.
     pub fn size(&self) -> Option<&BypassRule> {
         self.size.as_ref()
+    }
+
+    /// Converts this config into a [`BypassRules`] value.
+    ///
+    /// Each sub-rule that is present is used directly; absent sub-rules become
+    /// [`BypassRule::default()`] (disabled, no users) so they register as
+    /// "unconfigured" and let the higher-priority merge tier win.
+    ///
+    /// Use together with [`Option::map`] and [`unwrap_or_default`] to handle
+    /// an absent `bypassRules` section:
+    ///
+    /// ```ignore
+    /// let opt: Option<BypassRulesConfig> = None;
+    /// let rules: BypassRules = opt.as_ref().map(BypassRulesConfig::to_bypass_rules).unwrap_or_default();
+    /// ```
+    ///
+    /// [`unwrap_or_default`]: Option::unwrap_or_default
+    pub(crate) fn to_bypass_rules(&self) -> BypassRules {
+        BypassRules::new_with_size(
+            self.title_convention().cloned().unwrap_or_default(),
+            self.work_item_convention().cloned().unwrap_or_default(),
+            self.size().cloned().unwrap_or_default(),
+        )
     }
 }
 
@@ -2074,11 +2101,22 @@ impl PolicySet {
     ///
     /// # Bypass rules
     ///
-    /// [`BypassRules`] are always set to [`BypassRules::default()`] (i.e. no bypass
-    /// rules) regardless of what appears in the org policy section. Bypass rules are
-    /// a per-repository security concern and may only be configured at the repository
-    /// tier (`[bypass_rules]` in the repository TOML). Org policies cannot grant
-    /// bypass permissions across repositories.
+    /// [`BypassRules`] are supported in org policy sections (`[enforced]` and
+    /// `[defaults]`). When a `[*.policies.bypassRules.*]` block is present in the
+    /// org policy TOML, it is parsed and reflected in the returned [`PolicySet`].
+    ///
+    /// Merge semantics (handled by [`BypassRules::merge`] further up the call
+    /// stack):
+    ///
+    /// - **`[defaults.policies.bypassRules.*]`** — org-wide defaults that individual
+    ///   repositories *can* override with their own `.github/merge-warden.toml`.
+    /// - **`[enforced.policies.bypassRules.*]`** — org-wide bypass rules that
+    ///   repositories *cannot* remove. The enforced tier always wins during the
+    ///   final merge.
+    ///
+    /// When `bypass_rules` is absent from the section, [`BypassRules::default()`]
+    /// (i.e. no bypass rules, all sub-rules unconfigured) is returned so that
+    /// absent fields do not interfere with the merge chain.
     ///
     /// [`from_repository_config`]: PolicySet::from_repository_config
     pub(crate) fn from_org_section(section: &OrgPolicySectionRaw) -> PolicySet {
@@ -2092,7 +2130,12 @@ impl PolicySet {
             renovate_stability: pr.renovate_stability.clone(),
             issue_propagation: pr.issue_propagation.clone(),
             change_type_labels: section.change_type_labels.clone().unwrap_or_default(),
-            bypass_rules: BypassRules::default(),
+            bypass_rules: section
+                .policies
+                .bypass_rules
+                .as_ref()
+                .map(BypassRulesConfig::to_bypass_rules)
+                .unwrap_or_default(),
         }
     }
 
@@ -2214,14 +2257,12 @@ impl PolicySet {
         // `Option<BypassRule>`). We convert each present sub-rule directly; absent
         // sub-rules become `BypassRule::default()` (disabled, no users) so they
         // register as "unconfigured" and let the app-defaults rule win during merge.
-        let bypass_rules = match &repo.policies.bypass_rules {
-            None => BypassRules::default(),
-            Some(brc) => BypassRules::new_with_size(
-                brc.title_convention().cloned().unwrap_or_default(),
-                brc.work_item_convention().cloned().unwrap_or_default(),
-                brc.size().cloned().unwrap_or_default(),
-            ),
-        };
+        let bypass_rules = repo
+            .policies
+            .bypass_rules
+            .as_ref()
+            .map(BypassRulesConfig::to_bypass_rules)
+            .unwrap_or_default();
         PolicySet {
             title: pr.title_policies.clone(),
             work_item: pr.work_item_policies.clone(),
@@ -2708,6 +2749,56 @@ pub async fn resolve_pull_request_config(
         effective_ps = effective_ps.merge(cd);
     }
     effective_ps = effective_ps.merge(&repo_ps);
+
+    // Warn when a repo has opted out of an org-default bypass list by setting
+    // `enabled = true, users = []`.  This silently neutralises the org default
+    // (the effective bypass list becomes empty) and is otherwise invisible to
+    // platform operators.  We emit one structured warning per affected sub-rule
+    // so that log-based alerting can detect the situation.
+    //
+    // We do NOT warn when the org default itself had an empty users list — that
+    // is the normal "no default configured" case, not an opt-out.
+    {
+        let check_opt_out =
+            |sub_rule_name: &str, org_rule: &BypassRule, effective_rule: &BypassRule| {
+                if !org_rule.users().is_empty()
+                    && effective_rule.enabled()
+                    && effective_rule.users().is_empty()
+                {
+                    warn!(
+                        repository_owner = repo_owner,
+                        repository = repo_name,
+                        sub_rule = sub_rule_name,
+                        "Repo has opted out of the org-default bypass user list by \
+                     setting enabled=true with an empty users list; the intermediate \
+                     bypass list after the repo merge is now empty (org-enforced \
+                     policies applied later in the chain may still override this)"
+                    );
+                }
+            };
+
+        // Note: conditional_defaults bypass users (merged before repo_ps) are not
+        // monitored here — only opt-outs of org_defaults are detected.  Conditional
+        // bypass rules are not a documented feature; this gap is intentional scope
+        // deferral.  If conditional bypass support is added, this closure should also
+        // compare against the conditional-defaults baseline.
+        check_opt_out(
+            "title_convention",
+            org_defaults_ps.bypass_rules.title_convention(),
+            effective_ps.bypass_rules.title_convention(),
+        );
+        check_opt_out(
+            "work_items",
+            org_defaults_ps.bypass_rules.work_item_convention(),
+            effective_ps.bypass_rules.work_item_convention(),
+        );
+        check_opt_out(
+            "size",
+            org_defaults_ps.bypass_rules.size(),
+            effective_ps.bypass_rules.size(),
+        );
+    }
+
     for ce in &conditional_enforced_policies {
         effective_ps = effective_ps.merge(ce);
     }

@@ -37,14 +37,49 @@ label_if_missing = "pr-issue: invalid-title-format"
 # required = true
 # label_if_missing = "pr-issue: missing-work-item"
 
-# Uncomment to enforce PR size checking org-wide.
+# Uncomment to enforce PR size checking org-wide (including size thresholds and
+# file exclusions that repositories cannot relax).
 # [enforced.policies.pullRequests.prSize]
 # enabled = true
 # fail_on_oversized = false
+# label_prefix = "size/"
+# add_comment = true
+# # When true, only additions count; deleted lines do not inflate the PR size.
+# ignore_deletions = false
+# # Glob patterns for files excluded from the line count.
+# excluded_file_patterns = ["*.md", "*.txt", "docs/**", "**/*.lock"]
+#
+# [enforced.policies.pullRequests.prSize.thresholds]
+# xs = 10
+# s  = 50
+# m  = 100
+# l  = 250
+# xl = 500
 
 # Uncomment to enforce WIP blocking org-wide.
 # [enforced.policies.pullRequests.wip]
 # enforce_wip_blocking = true
+
+# Uncomment to enforce PR state lifecycle labels org-wide.
+# [enforced.policies.pullRequests.prState]
+# enabled = true
+# draft_label    = "status: draft"
+# review_label   = "status: in-review"
+# approved_label = "status: approved"
+
+# Uncomment to enforce issue metadata propagation org-wide.
+# [enforced.policies.pullRequests.issuePropagation]
+# sync_milestone_from_issue = true
+# sync_project_from_issue   = true
+
+# Uncomment to enforce bot bypasses org-wide (repos cannot remove these users from the bypass list).
+# [enforced.policies.bypassRules.title_convention]
+# enabled = true
+# users   = ["renovate[bot]", "dependabot[bot]"]
+#
+# [enforced.policies.bypassRules.work_items]
+# enabled = true
+# users   = ["renovate[bot]", "dependabot[bot]"]
 
 # ---------------------------------------------------------------------------
 # [defaults] — org-wide defaults that CAN be overridden by per-repo config.
@@ -66,16 +101,88 @@ enabled = true
 fail_on_oversized = false
 label_prefix = "size/"
 add_comment = true
+# When true, only additions count; deleted lines do not inflate the PR size.
+ignore_deletions = false
+# Glob patterns for files excluded from the line count.
+excluded_file_patterns = ["*.md", "*.txt", "docs/**", "**/*.lock"]
+
+# Optional: override the default size tier line-count boundaries.
+[defaults.policies.pullRequests.prSize.thresholds]
+xs = 10
+s  = 50
+m  = 100
+l  = 250
+xl = 500
+
+# Org-wide default for PR state lifecycle labels.
+# Repos may override individual label names or disable the feature entirely.
+# [defaults.policies.pullRequests.prState]
+# enabled = true
+# draft_label    = "status: draft"
+# review_label   = "status: in-review"
+# approved_label = "status: approved"
+
+# Org-wide default for issue metadata propagation.
+# [defaults.policies.pullRequests.issuePropagation]
+# sync_milestone_from_issue = false
+# sync_project_from_issue   = false
 
 # Change-type label defaults at org level.
-# Repos may override individual label names.
+# Repos may override individual label names or the fallback settings.
 # [defaults.change_type_labels]
 # enabled = true
+#
+# [defaults.change_type_labels.conventional_commit_mappings]
+# feat     = ["enhancement", "feature"]
+# fix      = ["bug", "bugfix", "fix"]
+# docs     = ["documentation", "docs"]
+# style    = ["style", "formatting"]
+# refactor = ["refactor", "refactoring"]
+# perf     = ["performance", "optimization"]
+# test     = ["test", "tests", "testing"]
+# chore    = ["chore", "maintenance"]
+# ci       = ["ci", "continuous integration"]
+# build    = ["build", "dependencies"]
+# revert   = ["revert"]
+#
+# [defaults.change_type_labels.fallback_label_settings]
+# # Template for created label names. Use {change_type} as a placeholder.
+# name_format      = "type: {change_type}"
+# # When true, a new repository label is created if no existing label matches.
+# create_if_missing = true
+#
+# [defaults.change_type_labels.fallback_label_settings.color_scheme]
+# feat     = "#0075ca"
+# fix      = "#d73a4a"
+# docs     = "#0052cc"
+# style    = "#f9d0c4"
+# refactor = "#fef2c0"
+# perf     = "#a2eeef"
+# test     = "#d4edda"
+# chore    = "#e1e4e8"
+# ci       = "#fbca04"
+# build    = "#c5def5"
+# revert   = "#b60205"
+#
 # [defaults.change_type_labels.keyword_labels]
 # breaking_change = "breaking-change"
-# security       = "security"
-# hotfix         = "hotfix"
-# tech_debt      = "tech-debt"
+# security        = "security"
+# hotfix          = "hotfix"
+# tech_debt       = "tech-debt"
+
+# Org-wide default bypass rules for well-known automation bots.
+# Repos may override these by specifying their own [policies.bypassRules.*] sections.
+# [defaults.policies.bypassRules.title_convention]
+# enabled = true
+# users   = ["renovate[bot]", "dependabot[bot]", "release-regent[bot]"]
+#
+# [defaults.policies.bypassRules.work_items]
+# enabled = true
+# users   = ["renovate[bot]", "dependabot[bot]", "release-regent[bot]"]
+#
+# [defaults.policies.bypassRules.size]
+# enabled = true
+# users   = ["renovate[bot]", "dependabot[bot]", "release-regent[bot]"]
 
 # ---------------------------------------------------------------------------
 # [[conditional_policies]] — policies applied only when a condition matches.
