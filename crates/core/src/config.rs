@@ -1064,6 +1064,29 @@ impl BypassRulesConfig {
     pub fn size(&self) -> Option<&BypassRule> {
         self.size.as_ref()
     }
+
+    /// Converts this config into a [`BypassRules`] value.
+    ///
+    /// Each sub-rule that is present is used directly; absent sub-rules become
+    /// [`BypassRule::default()`] (disabled, no users) so they register as
+    /// "unconfigured" and let the higher-priority merge tier win.
+    ///
+    /// Use together with [`Option::map`] and [`unwrap_or_default`] to handle
+    /// an absent `bypassRules` section:
+    ///
+    /// ```ignore
+    /// let opt: Option<BypassRulesConfig> = None;
+    /// let rules: BypassRules = opt.as_ref().map(BypassRulesConfig::to_bypass_rules).unwrap_or_default();
+    /// ```
+    ///
+    /// [`unwrap_or_default`]: Option::unwrap_or_default
+    pub(crate) fn to_bypass_rules(&self) -> BypassRules {
+        BypassRules::new_with_size(
+            self.title_convention().cloned().unwrap_or_default(),
+            self.work_item_convention().cloned().unwrap_or_default(),
+            self.size().cloned().unwrap_or_default(),
+        )
+    }
 }
 
 /// Configuration for propagating issue metadata to pull requests.
@@ -2103,14 +2126,12 @@ impl PolicySet {
             renovate_stability: pr.renovate_stability.clone(),
             issue_propagation: pr.issue_propagation.clone(),
             change_type_labels: section.change_type_labels.clone().unwrap_or_default(),
-            bypass_rules: match &section.policies.bypass_rules {
-                None => BypassRules::default(),
-                Some(brc) => BypassRules::new_with_size(
-                    brc.title_convention().cloned().unwrap_or_default(),
-                    brc.work_item_convention().cloned().unwrap_or_default(),
-                    brc.size().cloned().unwrap_or_default(),
-                ),
-            },
+            bypass_rules: section
+                .policies
+                .bypass_rules
+                .as_ref()
+                .map(BypassRulesConfig::to_bypass_rules)
+                .unwrap_or_default(),
         }
     }
 
@@ -2232,14 +2253,12 @@ impl PolicySet {
         // `Option<BypassRule>`). We convert each present sub-rule directly; absent
         // sub-rules become `BypassRule::default()` (disabled, no users) so they
         // register as "unconfigured" and let the app-defaults rule win during merge.
-        let bypass_rules = match &repo.policies.bypass_rules {
-            None => BypassRules::default(),
-            Some(brc) => BypassRules::new_with_size(
-                brc.title_convention().cloned().unwrap_or_default(),
-                brc.work_item_convention().cloned().unwrap_or_default(),
-                brc.size().cloned().unwrap_or_default(),
-            ),
-        };
+        let bypass_rules = repo
+            .policies
+            .bypass_rules
+            .as_ref()
+            .map(BypassRulesConfig::to_bypass_rules)
+            .unwrap_or_default();
         PolicySet {
             title: pr.title_policies.clone(),
             work_item: pr.work_item_policies.clone(),
