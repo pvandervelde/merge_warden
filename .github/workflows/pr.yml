@@ -42,7 +42,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - name: Install osv-scanner
-        uses: taiki-e/install-action@6bd56108367fcf832720b0ee9c372084f856e8e5 # v2
+        uses: taiki-e/install-action@9bcaee1dcae34154180f412e2fa69355a7cda9f6 # v2
         with:
           tool: osv-scanner
       - name: Scan Rust dependencies
@@ -155,7 +155,7 @@ jobs:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
       - name: Install cargo-audit
-        uses: taiki-e/install-action@6bd56108367fcf832720b0ee9c372084f856e8e5 # v2
+        uses: taiki-e/install-action@9bcaee1dcae34154180f412e2fa69355a7cda9f6 # v2
         with:
           tool: cargo-audit
       - name: Run security audit
@@ -299,7 +299,7 @@ jobs:
         run: rustup update stable
 
       - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@6bd56108367fcf832720b0ee9c372084f856e8e5 # v2
+        uses: taiki-e/install-action@9bcaee1dcae34154180f412e2fa69355a7cda9f6 # v2
         with:
           tool: cargo-llvm-cov@0.6.10
 
