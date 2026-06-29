@@ -5282,10 +5282,7 @@ fn test_from_org_section_size_bypass_populated_from_section() {
         "size bypass must be enabled when org section configures it"
     );
     assert!(
-        ps.bypass_rules
-            .size()
-            .users()
-            .contains(&"size-skip-bot"),
+        ps.bypass_rules.size().users().contains(&"size-skip-bot"),
         "size-skip-bot must be present in size bypass users"
     );
 }
@@ -5620,6 +5617,11 @@ users = []
 // AC8: repo sets enabled=true, users=[] → opt-out neutralises org default.
 // The effective bypass list must be empty (the opt-out succeeded) and the
 // rule must still be enabled (so it is active but with no allowed users).
+//
+// Note: this test does not assert that `warn!` fires.  Verifying tracing output
+// would require the `tracing-test` crate (`#[traced_test]`).  The gap is deliberate
+// to keep the dependency surface small; a future refactor that silently removes the
+// warning will not be caught by this test alone.
 #[tokio::test]
 async fn test_resolve_repo_opt_out_empty_users_neutralises_org_default() {
     let org_toml = r#"
