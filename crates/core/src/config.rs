@@ -2074,11 +2074,22 @@ impl PolicySet {
     ///
     /// # Bypass rules
     ///
-    /// [`BypassRules`] are always set to [`BypassRules::default()`] (i.e. no bypass
-    /// rules) regardless of what appears in the org policy section. Bypass rules are
-    /// a per-repository security concern and may only be configured at the repository
-    /// tier (`[bypass_rules]` in the repository TOML). Org policies cannot grant
-    /// bypass permissions across repositories.
+    /// [`BypassRules`] are supported in org policy sections (`[enforced]` and
+    /// `[defaults]`). When a `[*.policies.bypassRules.*]` block is present in the
+    /// org policy TOML, it is parsed and reflected in the returned [`PolicySet`].
+    ///
+    /// Merge semantics (handled by [`BypassRules::merge`] further up the call
+    /// stack):
+    ///
+    /// - **`[defaults.policies.bypassRules.*]`** — org-wide defaults that individual
+    ///   repositories *can* override with their own `.github/merge-warden.toml`.
+    /// - **`[enforced.policies.bypassRules.*]`** — org-wide bypass rules that
+    ///   repositories *cannot* remove. The enforced tier always wins during the
+    ///   final merge.
+    ///
+    /// When `bypass_rules` is absent from the section, [`BypassRules::default()`]
+    /// (i.e. no bypass rules, all sub-rules unconfigured) is returned so that
+    /// absent fields do not interfere with the merge chain.
     ///
     /// [`from_repository_config`]: PolicySet::from_repository_config
     pub(crate) fn from_org_section(section: &OrgPolicySectionRaw) -> PolicySet {
@@ -2092,7 +2103,14 @@ impl PolicySet {
             renovate_stability: pr.renovate_stability.clone(),
             issue_propagation: pr.issue_propagation.clone(),
             change_type_labels: section.change_type_labels.clone().unwrap_or_default(),
-            bypass_rules: BypassRules::default(),
+            bypass_rules: match &section.policies.bypass_rules {
+                None => BypassRules::default(),
+                Some(brc) => BypassRules::new_with_size(
+                    brc.title_convention().cloned().unwrap_or_default(),
+                    brc.work_item_convention().cloned().unwrap_or_default(),
+                    brc.size().cloned().unwrap_or_default(),
+                ),
+            },
         }
     }
 

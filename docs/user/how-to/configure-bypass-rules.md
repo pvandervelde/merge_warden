@@ -63,6 +63,13 @@ For stricter control, define bypass lists in the **application-level configurati
 (`MERGE_WARDEN_CONFIG_FILE`), which is controlled by the operator and cannot be overridden
 by repository maintainers. See [Set application-level policy defaults](set-app-level-defaults.md).
 
+Bypass rules **can also be set in the org-level policy file** (`merge-warden-org-policy.toml`), giving platform teams a central place to configure standard bot bypasses:
+
+- **`[defaults.policies.bypassRules.*]`** — org-wide defaults that individual repositories *can* override with their own `.github/merge-warden.toml`.
+- **`[enforced.policies.bypassRules.*]`** — org-wide bypass rules that repositories *cannot* remove. Use this to ensure automation bots are never blocked by policy checks across all repositories.
+
+> **Opt-out caveat:** A repository cannot opt out of an org-default bypass by setting `enabled = false` with an empty `users` list — the merge engine treats that combination as "unconfigured" and the org default flows through. To explicitly clear a bypass list inherited from org defaults, set `enabled = true` with an empty `users` list.
+
 ---
 
 ## Related
