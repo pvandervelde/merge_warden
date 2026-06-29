@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-06-29
+
+### Bug Fixes
+
+- **release**: use predicate-path for SBOM attestation (#318) [4c6d1a5621d50e82bb3f9f3a8f4445e8768d30ae]
+- **release**: use predicate-path instead of predicate for SBOM attestation [76103a9cbb20a8e60ff124c183d95cadb4490c5c]
+
 ## [0.7.0] - 2026-06-29
 
 ### Features
@@ -1061,4 +1068,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## 0.0.0
 
 - Created project
+
 
