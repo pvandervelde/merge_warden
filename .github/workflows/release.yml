@@ -189,7 +189,7 @@ jobs:
         with:
           subject-path: ${{ env.ARCHIVE }}
           predicate-type: https://spdx.dev/Document
-          predicate: ${{ env.SBOM_PATH }}
+          predicate-path: ${{ env.SBOM_PATH }}
 
   build-server:
     name: Build Server - ${{ matrix.target }}
@@ -274,7 +274,7 @@ jobs:
         with:
           subject-path: target/${{ matrix.target }}/release/merge_warden_server
           predicate-type: https://spdx.dev/Document
-          predicate: sbom-${{ matrix.target }}.spdx.json
+          predicate-path: sbom-${{ matrix.target }}.spdx.json
 
   publish-release:
     name: Publish Release
