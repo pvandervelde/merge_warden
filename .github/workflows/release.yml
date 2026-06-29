@@ -194,7 +194,7 @@ jobs:
   build-server:
     name: Build Server - ${{ matrix.target }}
     needs: resolve-version
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       id-token: write # required to sign attestations via Sigstore/Fulcio
