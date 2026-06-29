@@ -96,6 +96,22 @@ but that individual teams may need to adjust.
 
 ---
 
+## Available policy settings
+
+| Config key | Fields |
+| :--- | :--- |
+| `[*.policies.pullRequests.prTitle]` | `required`, `pattern`, `label_if_missing` |
+| `[*.policies.pullRequests.workItem]` | `required`, `pattern`, `label_if_missing` |
+| `[*.policies.pullRequests.prSize]` | `enabled`, `fail_on_oversized`, `label_prefix`, `add_comment` |
+| `[*.policies.pullRequests.wip]` | `enforce_wip_blocking` |
+| `[*.policies.bypassRules.title_convention]` | `enabled`, `users` |
+| `[*.policies.bypassRules.work_items]` | `enabled`, `users` |
+| `[*.policies.bypassRules.size]` | `enabled`, `users` |
+
+Replace `*` with `enforced` or `defaults` as appropriate.
+
+---
+
 ## Conditional policies
 
 A `[[conditional_policies]]` block applies only to repositories that match its condition.
