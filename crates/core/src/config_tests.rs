@@ -5208,16 +5208,192 @@ fn test_from_org_section_change_type_labels_none_becomes_default() {
     );
 }
 
+// AC1: title_convention bypass in org section is reflected in the returned PolicySet.
 #[test]
-fn test_from_org_section_bypass_rules_always_default() {
-    // Org policy sections carry no bypass rules; they must always be BypassRules::default().
+fn test_from_org_section_bypass_rules_populated_from_section() {
     let mut section = OrgPolicySectionRaw::default();
+    section.policies.bypass_rules = Some(BypassRulesConfig {
+        title_convention: Some(BypassRule::new(
+            true,
+            vec!["renovate[bot]".to_string(), "dependabot[bot]".to_string()],
+        )),
+        work_items: None,
+        size: None,
+    });
+    let ps = PolicySet::from_org_section(&section);
+    assert!(
+        ps.bypass_rules.title_convention().enabled(),
+        "title_convention bypass must be enabled when org section configures it"
+    );
+    assert!(
+        ps.bypass_rules
+            .title_convention()
+            .users()
+            .contains(&"renovate[bot]"),
+        "renovate[bot] must be present in title_convention bypass users"
+    );
+    assert!(
+        ps.bypass_rules
+            .title_convention()
+            .users()
+            .contains(&"dependabot[bot]"),
+        "dependabot[bot] must be present in title_convention bypass users"
+    );
+}
+
+// AC2a: work_items bypass in org section is reflected in the returned PolicySet.
+#[test]
+fn test_from_org_section_work_items_bypass_populated_from_section() {
+    let mut section = OrgPolicySectionRaw::default();
+    section.policies.bypass_rules = Some(BypassRulesConfig {
+        title_convention: None,
+        work_items: Some(BypassRule::new(
+            true,
+            vec!["release-regent[bot]".to_string()],
+        )),
+        size: None,
+    });
+    let ps = PolicySet::from_org_section(&section);
+    assert!(
+        ps.bypass_rules.work_item_convention().enabled(),
+        "work_item_convention bypass must be enabled when org section configures it"
+    );
+    assert!(
+        ps.bypass_rules
+            .work_item_convention()
+            .users()
+            .contains(&"release-regent[bot]"),
+        "release-regent[bot] must be present in work_item_convention bypass users"
+    );
+}
+
+// AC2b: size bypass in org section is reflected in the returned PolicySet.
+#[test]
+fn test_from_org_section_size_bypass_populated_from_section() {
+    let mut section = OrgPolicySectionRaw::default();
+    section.policies.bypass_rules = Some(BypassRulesConfig {
+        title_convention: None,
+        work_items: None,
+        size: Some(BypassRule::new(true, vec!["size-skip-bot".to_string()])),
+    });
+    let ps = PolicySet::from_org_section(&section);
+    assert!(
+        ps.bypass_rules.size().enabled(),
+        "size bypass must be enabled when org section configures it"
+    );
+    assert!(
+        ps.bypass_rules
+            .size()
+            .users()
+            .contains(&"size-skip-bot"),
+        "size-skip-bot must be present in size bypass users"
+    );
+}
+
+// AC3: absent bypass_rules section → BypassRules::default() (no regression).
+#[test]
+fn test_from_org_section_absent_bypass_rules_returns_default() {
+    let mut section = OrgPolicySectionRaw::default();
+    // Deliberately set other fields to confirm bypass_rules is independently defaulted.
     section.policies.pull_requests.title_policies.required = true;
     let ps = PolicySet::from_org_section(&section);
     assert_eq!(
         ps.bypass_rules,
         BypassRules::default(),
-        "from_org_section must not populate bypass_rules"
+        "from_org_section must return BypassRules::default() when bypass_rules is absent"
+    );
+}
+
+// Adversarial: all three bypass rules populated simultaneously — none must be dropped.
+#[test]
+fn test_from_org_section_all_three_bypass_rules_populated() {
+    let mut section = OrgPolicySectionRaw::default();
+    section.policies.bypass_rules = Some(BypassRulesConfig {
+        title_convention: Some(BypassRule::new(true, vec!["title-bot".to_string()])),
+        work_items: Some(BypassRule::new(true, vec!["wi-bot".to_string()])),
+        size: Some(BypassRule::new(true, vec!["size-bot".to_string()])),
+    });
+    let ps = PolicySet::from_org_section(&section);
+    assert!(
+        ps.bypass_rules
+            .title_convention()
+            .users()
+            .contains(&"title-bot"),
+        "title-bot must be preserved"
+    );
+    assert!(
+        ps.bypass_rules
+            .work_item_convention()
+            .users()
+            .contains(&"wi-bot"),
+        "wi-bot must be preserved"
+    );
+    assert!(
+        ps.bypass_rules.size().users().contains(&"size-bot"),
+        "size-bot must be preserved"
+    );
+}
+
+// Adversarial: partial config (only title_convention) → absent rules become BypassRule::default().
+#[test]
+fn test_from_org_section_partial_bypass_rules_absent_sub_rules_are_default() {
+    let mut section = OrgPolicySectionRaw::default();
+    section.policies.bypass_rules = Some(BypassRulesConfig {
+        title_convention: Some(BypassRule::new(true, vec!["title-bot".to_string()])),
+        work_items: None,
+        size: None,
+    });
+    let ps = PolicySet::from_org_section(&section);
+    // The absent sub-rules must be BypassRule::default() (disabled, no users).
+    assert_eq!(
+        ps.bypass_rules.work_item_convention(),
+        &BypassRule::default(),
+        "absent work_items sub-rule must default to BypassRule::default()"
+    );
+    assert_eq!(
+        ps.bypass_rules.size(),
+        &BypassRule::default(),
+        "absent size sub-rule must default to BypassRule::default()"
+    );
+}
+
+// Stub-killer: result is NOT equal to BypassRules::default() when bypass rules are configured.
+#[test]
+fn test_from_org_section_bypass_rules_not_default_when_configured() {
+    let mut section = OrgPolicySectionRaw::default();
+    section.policies.bypass_rules = Some(BypassRulesConfig {
+        title_convention: Some(BypassRule::new(true, vec!["some-bot".to_string()])),
+        work_items: None,
+        size: None,
+    });
+    let ps = PolicySet::from_org_section(&section);
+    assert_ne!(
+        ps.bypass_rules,
+        BypassRules::default(),
+        "from_org_section must not return BypassRules::default() when bypass_rules is configured"
+    );
+}
+
+// Users list with multiple entries is preserved exactly (no truncation or reordering).
+#[test]
+fn test_from_org_section_bypass_rules_multiple_users_preserved_exactly() {
+    let users = vec![
+        "renovate[bot]".to_string(),
+        "dependabot[bot]".to_string(),
+        "release-regent[bot]".to_string(),
+    ];
+    let mut section = OrgPolicySectionRaw::default();
+    section.policies.bypass_rules = Some(BypassRulesConfig {
+        title_convention: Some(BypassRule::new(true, users.clone())),
+        work_items: None,
+        size: None,
+    });
+    let ps = PolicySet::from_org_section(&section);
+    let actual: Vec<&str> = ps.bypass_rules.title_convention().users();
+    assert_eq!(
+        actual,
+        vec!["renovate[bot]", "dependabot[bot]", "release-regent[bot]"],
+        "all users must be preserved in the original order"
     );
 }
 
@@ -5229,6 +5405,216 @@ fn test_from_org_section_empty_section_returns_default_policy_set() {
     assert!(!ps.work_item.required);
     assert!(!ps.size.enabled);
     assert!(!ps.wip.enforce_wip_blocking);
+}
+
+// ============================================================
+// resolve_pull_request_config — org bypass rules merge chain tests
+// ============================================================
+//
+// AC4: org defaults bypass rules flow through when repo has no bypass config.
+#[tokio::test]
+async fn test_resolve_org_defaults_bypass_rules_flow_through_when_repo_has_none() {
+    let org_toml = r#"
+schemaVersion = 1
+
+[enforced]
+
+[defaults.policies.bypassRules.title_convention]
+enabled = true
+users = ["renovate[bot]", "dependabot[bot]"]
+"#;
+    // Repo has no bypass rules at all.
+    let repo_toml = r#"
+schemaVersion = 1
+
+[policies.pullRequests.prTitle]
+required = true
+pattern = "^REPO:"
+"#;
+
+    let fetcher = two_file_fetcher_shared::TwoFileFetcher {
+        repo_content: Some(repo_toml.to_string()),
+        org_content: Some(org_toml.to_string()),
+        org_path: "org-policy.toml".to_string(),
+    };
+
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(make_org_policy_source());
+
+    let result =
+        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
+            .await
+            .unwrap();
+
+    assert!(
+        result
+            .bypass_rules
+            .title_convention()
+            .users()
+            .contains(&"renovate[bot]"),
+        "org defaults title_convention bypass must flow through when repo has no bypass config"
+    );
+    assert!(
+        result
+            .bypass_rules
+            .title_convention()
+            .users()
+            .contains(&"dependabot[bot]"),
+        "dependabot[bot] from org defaults must flow through when repo has no bypass config"
+    );
+}
+
+// AC5: per-repo bypass rules override org defaults.
+#[tokio::test]
+async fn test_resolve_repo_bypass_rules_override_org_defaults() {
+    let org_toml = r#"
+schemaVersion = 1
+
+[enforced]
+
+[defaults.policies.bypassRules.title_convention]
+enabled = true
+users = ["org-default-bot"]
+"#;
+    // Repo overrides with a different set of users.
+    let repo_toml = r#"
+schemaVersion = 1
+
+[policies.bypassRules.title_convention]
+enabled = true
+users = ["repo-specific-bot"]
+"#;
+
+    let fetcher = two_file_fetcher_shared::TwoFileFetcher {
+        repo_content: Some(repo_toml.to_string()),
+        org_content: Some(org_toml.to_string()),
+        org_path: "org-policy.toml".to_string(),
+    };
+
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(make_org_policy_source());
+
+    let result =
+        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
+            .await
+            .unwrap();
+
+    assert!(
+        result
+            .bypass_rules
+            .title_convention()
+            .users()
+            .contains(&"repo-specific-bot"),
+        "repo bypass rule must win over org defaults"
+    );
+    assert!(
+        !result
+            .bypass_rules
+            .title_convention()
+            .users()
+            .contains(&"org-default-bot"),
+        "org-default-bot must not appear when repo override is configured"
+    );
+}
+
+// AC6: org enforced bypass rules override repo config.
+#[tokio::test]
+async fn test_resolve_org_enforced_bypass_rules_override_repo() {
+    let org_toml = r#"
+schemaVersion = 1
+
+[enforced.policies.bypassRules.title_convention]
+enabled = true
+users = ["org-enforced-bot"]
+
+[defaults]
+"#;
+    // Repo configures its own different bypass users.
+    let repo_toml = r#"
+schemaVersion = 1
+
+[policies.bypassRules.title_convention]
+enabled = true
+users = ["repo-bot"]
+"#;
+
+    let fetcher = two_file_fetcher_shared::TwoFileFetcher {
+        repo_content: Some(repo_toml.to_string()),
+        org_content: Some(org_toml.to_string()),
+        org_path: "org-policy.toml".to_string(),
+    };
+
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(make_org_policy_source());
+
+    let result =
+        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
+            .await
+            .unwrap();
+
+    assert!(
+        result
+            .bypass_rules
+            .title_convention()
+            .users()
+            .contains(&"org-enforced-bot"),
+        "org enforced bypass rule must override repo bypass config"
+    );
+    assert!(
+        !result
+            .bypass_rules
+            .title_convention()
+            .users()
+            .contains(&"repo-bot"),
+        "repo-bot must not appear when org enforced bypass overrides it"
+    );
+}
+
+// AC7: repo with enabled=false, users=[] is "unconfigured" → org defaults still win.
+// This documents the existing BypassRules::merge() semantics applied to the org layer.
+#[tokio::test]
+async fn test_resolve_repo_unconfigured_bypass_does_not_suppress_org_defaults() {
+    let org_toml = r#"
+schemaVersion = 1
+
+[enforced]
+
+[defaults.policies.bypassRules.title_convention]
+enabled = true
+users = ["org-default-bot"]
+"#;
+    // Repo explicitly sets enabled=false and empty users — this is "unconfigured"
+    // per BypassRules::merge semantics (is_configured returns false), so org defaults win.
+    let repo_toml = r#"
+schemaVersion = 1
+
+[policies.bypassRules.title_convention]
+enabled = false
+users = []
+"#;
+
+    let fetcher = two_file_fetcher_shared::TwoFileFetcher {
+        repo_content: Some(repo_toml.to_string()),
+        org_content: Some(org_toml.to_string()),
+        org_path: "org-policy.toml".to_string(),
+    };
+
+    let mut app = ApplicationDefaults::default();
+    app.org_policy_source = Some(make_org_policy_source());
+
+    let result =
+        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
+            .await
+            .unwrap();
+
+    assert!(
+        result
+            .bypass_rules
+            .title_convention()
+            .users()
+            .contains(&"org-default-bot"),
+        "org default bypass must win when repo sets enabled=false and users=[] (unconfigured)"
+    );
 }
 
 // ============================================================
