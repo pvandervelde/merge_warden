@@ -1,0 +1,3 @@
+{
+    "window.title": "merge-warden - ${activeRepositoryBranchName}${separator}${activeEditorShort}${dirty}"
+}
