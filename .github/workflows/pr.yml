@@ -32,6 +32,11 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Disable HTTP/2 multiplexing to avoid curl "Error in the HTTP2 framing
+  # layer" transient failures when downloading crates from crates.io.
+  CARGO_HTTP_MULTIPLEXING: "false"
+  # Retry failed network operations up to 3 times before giving up.
+  CARGO_NET_RETRY: "3"
 
 jobs:
   # ── Security gate (runs first, blocks everything else) ────────────────────
@@ -378,6 +383,60 @@ jobs:
           platforms: linux/amd64 # arm64 cross-compilation is validated in release.yml
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # ── CLI cross-target build validation ────────────────────────────────────
+  # Mirrors the matrix used by release.yml so cross-compilation failures are
+  # caught on PRs rather than at release time.
+
+  build-cli-validate:
+    name: Validate CLI build - ${{ matrix.target }}
+    needs: [security-gate, changes]
+    if: needs.changes.outputs.integration == 'true'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+          - target: x86_64-unknown-linux-musl
+            os: ubuntu-22.04
+          - target: x86_64-pc-windows-msvc
+            os: windows-2022
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: taiki-e/setup-cross-toolchain-action@3d9770ce98eb7dbcf378563182a5e8031165f75b # v1
+        with:
+          target: ${{ matrix.target }}
+        if: startsWith(matrix.os, 'ubuntu') && !contains(matrix.target, '-musl')
+
+      - uses: taiki-e/install-action@9bcaee1dcae34154180f412e2fa69355a7cda9f6 # v2
+        with:
+          tool: cross
+        if: contains(matrix.target, '-musl')
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+
+      - name: Set static CRT for Windows
+        run: echo "RUSTFLAGS=${RUSTFLAGS} -C target-feature=+crt-static" >>
+          "${GITHUB_ENV}"
+        shell: bash
+        if: endsWith(matrix.target, 'windows-msvc')
+
+      - name: Build CLI binary (musl via cross)
+        run: cross build --target ${{ matrix.target }} --bin merge-warden
+        if: contains(matrix.target, '-musl')
+
+      - name: Build CLI binary
+        run: cargo build --target ${{ matrix.target }} --bin merge-warden
+        if: "!contains(matrix.target, '-musl')"
 
   # ── Integration Tests ─────────────────────────────────────────────────────
 

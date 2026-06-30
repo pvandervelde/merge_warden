@@ -23,6 +23,13 @@ permissions:
   id-token: write # sign attestations via Sigstore/Fulcio
   attestations: write # store attestations in GitHub
 
+env:
+  # Disable HTTP/2 multiplexing to avoid curl "Error in the HTTP2 framing
+  # layer" transient failures when downloading crates from crates.io.
+  CARGO_HTTP_MULTIPLEXING: "false"
+  # Retry failed network operations up to 3 times before giving up.
+  CARGO_NET_RETRY: "3"
+
 jobs:
   resolve-version:
     name: Resolve Release Version
