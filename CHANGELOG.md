@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2026-06-30
+
+### Bug Fixes
+
+- **ci**: prevent crates.io HTTP2 download failures and catch them in PR builds [8d0e0c897494b226b9249154c2b84e47796cdf80]
+- **ci**: prevent crates.io HTTP2 download failures and catch them in PR builds (#322) [57d957125445f58a1365c3dff0cda70bff2e22e0]
+- **ci**: promote cargo network env vars to workflow level [ee299cf0a09a407479fd94ec59bbeba383e63694]
+
+
+### Chores
+
+- Adding a VSCode settings file to get a sensible window title [9df38d0f53ddddba6d157aadb6f6faf5440fbfa8]
+- Adding a VSCode settings file to get a sensible window title (#321) [c19c013e5fb47329585c96552f277829f168f804]
+
 ## [0.7.1] - 2026-06-29
 
 ### Bug Fixes
@@ -1068,5 +1082,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## 0.0.0
 
 - Created project
+
 
 
