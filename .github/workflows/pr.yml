@@ -32,6 +32,11 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  # Disable HTTP/2 multiplexing to avoid curl "Error in the HTTP2 framing
+  # layer" transient failures when downloading crates from crates.io.
+  CARGO_HTTP_MULTIPLEXING: "false"
+  # Retry failed network operations up to 3 times before giving up.
+  CARGO_NET_RETRY: "3"
 
 jobs:
   # ── Security gate (runs first, blocks everything else) ────────────────────
@@ -389,12 +394,6 @@ jobs:
     if: needs.changes.outputs.integration == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
-    env:
-      # Disable HTTP/2 multiplexing to avoid curl "Error in the HTTP2 framing
-      # layer" transient failures when downloading crates from crates.io.
-      CARGO_HTTP_MULTIPLEXING: "false"
-      # Retry failed network operations up to 3 times before giving up.
-      CARGO_NET_RETRY: "3"
     strategy:
       fail-fast: false
       matrix:
