@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.3] - 2026-07-02
+
+### Bug Fixes
+
+- **ci**: stage server release assets before upload [3682938010df2f5618edb348f41d07df683d5960]
+- release asset upload by excluding server artifact directories (#326) [3fed6ffe7a330c5cb70ce333b0d1b6d6164a3a00]
+
+
+### Chores
+
+- Initial plan [39f4efb56a9fa55051f71299f22b61e069e43729]
+
 ## [0.7.2] - 2026-07-01
 
 ### Bug Fixes
@@ -1084,6 +1096,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## 0.0.0
 
 - Created project
+
 
 
 
