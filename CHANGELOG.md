@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.4] - 2026-07-02
+
+### Bug Fixes
+
+- correct artifact paths in Publish Container Image workflow (#328) [bf9eec487337ed194e91feeb685df0d6ce85cb1e]
+- correct binary paths in publish-container stage step [f1ed6827ee71eef3dd733eb22cd029e410fdf2a3]
+
 ## [0.7.3] - 2026-07-02
 
 ### Bug Fixes
@@ -1096,6 +1103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## 0.0.0
 
 - Created project
+
 
 
 
