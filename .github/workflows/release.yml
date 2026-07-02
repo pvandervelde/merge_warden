@@ -331,12 +331,26 @@ jobs:
           gh release upload "${RELEASE_VERSION}" artifacts/cli/* --clobber \
             --repo "${{ github.repository }}"
 
+      - name: Stage server release assets
+        env:
+          RELEASE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
+        run: |
+          for server_binary in artifacts/server/target/*/release/merge_warden_server; do
+            target="$(basename "$(dirname "$(dirname "${server_binary}")")")"
+            release_binary="artifacts/server/merge-warden-server-${RELEASE_VERSION}-${target}"
+            cp "${server_binary}" "${release_binary}"
+            sha256sum "${release_binary}" > "${release_binary}.sha256"
+          done
+
       - name: Upload server artifacts to GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           RELEASE_VERSION: ${{ needs.resolve-version.outputs.release_version }}
         run: |
-          gh release upload "${RELEASE_VERSION}" artifacts/server/* --clobber \
+          gh release upload "${RELEASE_VERSION}" \
+            artifacts/server/merge-warden-server-* \
+            artifacts/server/sbom-*.spdx.json \
+            --clobber \
             --repo "${{ github.repository }}"
 
   publish-container:
