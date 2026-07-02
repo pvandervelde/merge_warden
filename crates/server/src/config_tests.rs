@@ -473,3 +473,148 @@ fn load_config_returns_config_error_for_malformed_toml() {
         r
     );
 }
+
+// ---------------------------------------------------------------------------
+// QueueServerConfig::to_queue_config
+// ---------------------------------------------------------------------------
+
+#[test]
+fn to_queue_config_memory_provider_succeeds() {
+    let cfg = QueueServerConfig {
+        provider: "memory".to_string(),
+        queue_name: "test-queue".to_string(),
+        concurrency: 2,
+        namespace: None,
+    };
+    let result = cfg.to_queue_config();
+    assert!(result.is_ok(), "memory provider must succeed: {:?}", result);
+}
+
+#[test]
+fn to_queue_config_empty_string_provider_defaults_to_memory() {
+    let cfg = QueueServerConfig {
+        provider: "".to_string(),
+        queue_name: "test-queue".to_string(),
+        concurrency: 1,
+        namespace: None,
+    };
+    let result = cfg.to_queue_config();
+    assert!(result.is_ok(), "empty provider must use in-memory: {:?}", result);
+}
+
+#[test]
+fn to_queue_config_unknown_provider_returns_config_error() {
+    let cfg = QueueServerConfig {
+        provider: "kafka".to_string(),
+        queue_name: "test-queue".to_string(),
+        concurrency: 1,
+        namespace: None,
+    };
+    let result = cfg.to_queue_config();
+    assert!(
+        matches!(result, Err(ServerError::ConfigError(_))),
+        "unknown provider must return ConfigError, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn to_queue_config_azure_without_namespace_returns_missing_env_var_error() {
+    let cfg = QueueServerConfig {
+        provider: "azure".to_string(),
+        queue_name: "test-queue".to_string(),
+        concurrency: 1,
+        namespace: None,
+    };
+    let result = cfg.to_queue_config();
+    assert!(
+        matches!(result, Err(ServerError::MissingEnvVar(_))),
+        "azure provider without namespace must return MissingEnvVar, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn to_queue_config_azure_with_namespace_succeeds() {
+    let cfg = QueueServerConfig {
+        provider: "azure".to_string(),
+        queue_name: "test-queue".to_string(),
+        concurrency: 1,
+        namespace: Some("mynamespace".to_string()),
+    };
+    let result = cfg.to_queue_config();
+    assert!(result.is_ok(), "azure provider with namespace must succeed: {:?}", result);
+}
+
+#[test]
+fn to_queue_config_aws_succeeds_without_credentials() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    let _env = EnvGuard::prepare(
+        &[],
+        &["AWS_REGION", "AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"],
+    );
+
+    let cfg = QueueServerConfig {
+        provider: "aws".to_string(),
+        queue_name: "test-queue".to_string(),
+        concurrency: 1,
+        namespace: None,
+    };
+    let result = cfg.to_queue_config();
+    assert!(result.is_ok(), "aws provider must succeed: {:?}", result);
+}
+
+// ---------------------------------------------------------------------------
+// load_config — queue mode concurrency edge cases
+// ---------------------------------------------------------------------------
+
+#[test]
+fn load_config_queue_mode_errors_on_non_numeric_concurrency() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    let _env = EnvGuard::prepare(
+        &[
+            ("MERGE_WARDEN_RECEIVER_MODE", "queue"),
+            ("MERGE_WARDEN_QUEUE_PROVIDER", "memory"),
+            ("MERGE_WARDEN_QUEUE_CONCURRENCY", "abc"),
+        ],
+        &[
+            "MERGE_WARDEN_PORT",
+            "MERGE_WARDEN_RECEIVER_MODE",
+            "MERGE_WARDEN_CONFIG_FILE",
+            "MERGE_WARDEN_QUEUE_PROVIDER",
+            "MERGE_WARDEN_QUEUE_CONCURRENCY",
+        ],
+    );
+
+    let r = load_config();
+    assert!(
+        matches!(&r, Err(ServerError::InvalidEnvVar { name, .. }) if name == "MERGE_WARDEN_QUEUE_CONCURRENCY"),
+        "Expected InvalidEnvVar(MERGE_WARDEN_QUEUE_CONCURRENCY), got: {:?}",
+        r
+    );
+}
+
+#[test]
+fn load_config_queue_mode_uses_default_queue_name_when_absent() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    let _env = EnvGuard::prepare(
+        &[
+            ("MERGE_WARDEN_RECEIVER_MODE", "queue"),
+            ("MERGE_WARDEN_QUEUE_PROVIDER", "memory"),
+        ],
+        &[
+            "MERGE_WARDEN_PORT",
+            "MERGE_WARDEN_RECEIVER_MODE",
+            "MERGE_WARDEN_CONFIG_FILE",
+            "MERGE_WARDEN_QUEUE_PROVIDER",
+            "MERGE_WARDEN_QUEUE_NAME",
+            "MERGE_WARDEN_QUEUE_CONCURRENCY",
+        ],
+    );
+
+    let r = load_config();
+    assert!(r.is_ok(), "{:?}", r);
+    let q = r.unwrap().queue.expect("queue config must be Some in queue mode");
+    assert_eq!(q.queue_name, "merge-warden-events");
+    assert_eq!(q.concurrency, 4);
+}

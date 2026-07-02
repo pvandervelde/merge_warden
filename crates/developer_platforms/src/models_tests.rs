@@ -1,4 +1,5 @@
 use super::*;
+use proptest::prelude::*;
 use serde_json::{from_str, to_string};
 
 #[test]
@@ -1203,4 +1204,77 @@ fn test_commit_status_description_none_serializes_as_null_key_present() {
          got: {}",
         parsed["description"]
     );
+}
+
+// ── Property-based serde round-trip tests ─────────────────────────────────
+
+proptest! {
+    /// `User` survives a serialize→deserialize round-trip with no data loss.
+    #[test]
+    fn prop_user_serde_round_trip(id: u64, login in "[a-zA-Z0-9_-]{1,39}") {
+        let original = User { id, login };
+        let json = to_string(&original).expect("serialize User");
+        let restored: User = from_str(&json).expect("deserialize User");
+        prop_assert_eq!(restored.id, original.id);
+        prop_assert_eq!(restored.login, original.login);
+    }
+
+    /// `Label` survives a serialize→deserialize round-trip with no data loss.
+    #[test]
+    fn prop_label_serde_round_trip(
+        name in "[a-zA-Z0-9 _-]{1,50}",
+        description in proptest::option::of("[a-zA-Z0-9 .,!?]{0,100}"),
+    ) {
+        let original = Label { name, description };
+        let json = to_string(&original).expect("serialize Label");
+        let restored: Label = from_str(&json).expect("deserialize Label");
+        prop_assert_eq!(restored.name, original.name);
+        prop_assert_eq!(restored.description, original.description);
+    }
+
+    /// `PullRequestFile` survives a serialize→deserialize round-trip with no data loss.
+    #[test]
+    fn prop_pull_request_file_serde_round_trip(
+        filename in "[a-zA-Z0-9/_.-]{1,100}",
+        additions: u32,
+        deletions: u32,
+        changes: u32,
+        status in "(added|modified|deleted|renamed|copied)",
+    ) {
+        let original = PullRequestFile {
+            filename,
+            additions,
+            deletions,
+            changes,
+            status,
+        };
+        let json = to_string(&original).expect("serialize PullRequestFile");
+        let restored: PullRequestFile = from_str(&json).expect("deserialize PullRequestFile");
+        prop_assert_eq!(restored.filename, original.filename);
+        prop_assert_eq!(restored.additions, original.additions);
+        prop_assert_eq!(restored.deletions, original.deletions);
+        prop_assert_eq!(restored.changes, original.changes);
+        prop_assert_eq!(restored.status, original.status);
+    }
+
+    /// `Comment` survives a serialize→deserialize round-trip with no data loss.
+    #[test]
+    fn prop_comment_serde_round_trip(
+        id: u64,
+        body in "[a-zA-Z0-9 .,!?\n]{0,500}",
+        user_id: u64,
+        user_login in "[a-zA-Z0-9_-]{1,39}",
+    ) {
+        let original = Comment {
+            id,
+            body,
+            user: User { id: user_id, login: user_login },
+        };
+        let json = to_string(&original).expect("serialize Comment");
+        let restored: Comment = from_str(&json).expect("deserialize Comment");
+        prop_assert_eq!(restored.id, original.id);
+        prop_assert_eq!(restored.body, original.body);
+        prop_assert_eq!(restored.user.id, original.user.id);
+        prop_assert_eq!(restored.user.login, original.user.login);
+    }
 }

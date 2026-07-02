@@ -5983,3 +5983,275 @@ async fn manage_renovate_stability_label_creates_label_if_missing() {
         "label should be applied after creation"
     );
 }
+
+// ── Private-function unit tests ───────────────────────────────────────────
+
+// These tests reach private helpers via `use super::*;` which is already at
+// the top of the test module.
+
+// ── strip_punct ────────────────────────────────────────────────────────────
+
+#[test]
+async fn strip_punct_removes_trailing_comma() {
+    assert_eq!(super::strip_punct("no,"), "no");
+}
+
+#[test]
+async fn strip_punct_removes_leading_paren() {
+    assert_eq!(super::strip_punct("(no)"), "no");
+}
+
+#[test]
+async fn strip_punct_preserves_apostrophe() {
+    assert_eq!(super::strip_punct("don't"), "don't");
+}
+
+#[test]
+async fn strip_punct_preserves_hyphen() {
+    assert_eq!(super::strip_punct("tech-debt"), "tech-debt");
+}
+
+#[test]
+async fn strip_punct_returns_empty_string_unchanged() {
+    assert_eq!(super::strip_punct(""), "");
+}
+
+#[test]
+async fn strip_punct_removes_colon() {
+    assert_eq!(super::strip_punct("no:"), "no");
+}
+
+// ── find_clause_boundary ───────────────────────────────────────────────────
+
+#[test]
+async fn find_clause_boundary_returns_none_for_empty_string() {
+    assert_eq!(super::find_clause_boundary(""), None);
+}
+
+#[test]
+async fn find_clause_boundary_returns_none_for_plain_text() {
+    assert_eq!(super::find_clause_boundary("hello world"), None);
+}
+
+#[test]
+async fn find_clause_boundary_finds_period() {
+    assert_eq!(super::find_clause_boundary("hello. world"), Some(5));
+}
+
+#[test]
+async fn find_clause_boundary_finds_question_mark() {
+    assert_eq!(super::find_clause_boundary("really? yes"), Some(6));
+}
+
+#[test]
+async fn find_clause_boundary_finds_semicolon() {
+    assert_eq!(super::find_clause_boundary("a; b"), Some(1));
+}
+
+#[test]
+async fn find_clause_boundary_finds_exclamation_not_followed_by_bracket() {
+    assert_eq!(super::find_clause_boundary("stop! now"), Some(4));
+}
+
+#[test]
+async fn find_clause_boundary_ignores_markdown_image_exclamation() {
+    let input = "no breaking change ![logo](url)";
+    assert_eq!(super::find_clause_boundary(input), None);
+}
+
+#[test]
+async fn find_clause_boundary_finds_newline() {
+    let input = "line one\nline two";
+    assert_eq!(super::find_clause_boundary(input), Some(8));
+}
+
+// ── is_keyword_negated ────────────────────────────────────────────────────
+
+#[test]
+async fn is_keyword_negated_returns_false_for_empty_before_keyword() {
+    assert!(!super::is_keyword_negated("breaking change", 0..15));
+}
+
+#[test]
+async fn is_keyword_negated_returns_true_when_no_precedes_keyword() {
+    let text = "no breaking change";
+    assert!(super::is_keyword_negated(text, 3..18));
+}
+
+#[test]
+async fn is_keyword_negated_returns_true_when_not_precedes_keyword() {
+    let text = "this is not a security issue";
+    assert!(super::is_keyword_negated(text, 14..22));
+}
+
+#[test]
+async fn is_keyword_negated_returns_false_when_negation_is_in_earlier_clause() {
+    let text = "no issue. breaking change";
+    assert!(!super::is_keyword_negated(text, 10..25));
+}
+
+#[test]
+async fn is_keyword_negated_returns_false_when_more_than_five_words_back() {
+    let text = "no one two three four five breaking change";
+    let start = text.find("breaking").unwrap();
+    assert!(!super::is_keyword_negated(text, start..start + 15));
+}
+
+// ── parse_suppressed_labels ───────────────────────────────────────────────
+
+#[test]
+async fn parse_suppressed_labels_returns_empty_for_no_comments() {
+    let result = super::parse_suppressed_labels(&[], "@merge-warden");
+    assert!(result.is_empty());
+}
+
+#[test]
+async fn parse_suppressed_labels_extracts_label_from_matching_comment() {
+    let comments = vec![make_comment(
+        1,
+        "alice",
+        "@merge-warden suppress: breaking-change",
+    )];
+    let result = super::parse_suppressed_labels(&comments, "@merge-warden");
+    assert_eq!(result.get("breaking-change").map(|s| s.as_str()), Some("alice"));
+}
+
+#[test]
+async fn parse_suppressed_labels_is_case_insensitive_for_bot_mention() {
+    let comments = vec![make_comment(
+        1,
+        "bob",
+        "@Merge-Warden suppress: security",
+    )];
+    let result = super::parse_suppressed_labels(&comments, "@merge-warden");
+    assert!(result.contains_key("security"), "should match case-insensitively");
+}
+
+#[test]
+async fn parse_suppressed_labels_skips_bot_explanation_comments() {
+    use crate::config::KEYWORD_LABEL_COMMENT_MARKER;
+    let bot_comment = format!("{} breaking-change --> explanation", KEYWORD_LABEL_COMMENT_MARKER);
+    let comments = vec![make_comment(1, "bot", &bot_comment)];
+    let result = super::parse_suppressed_labels(&comments, "@merge-warden");
+    assert!(result.is_empty(), "bot explanation comments must not be treated as suppression commands");
+}
+
+#[test]
+async fn parse_suppressed_labels_first_commenter_wins() {
+    let comments = vec![
+        make_comment(1, "alice", "@merge-warden suppress: hotfix"),
+        make_comment(2, "bob", "@merge-warden suppress: hotfix"),
+    ];
+    let result = super::parse_suppressed_labels(&comments, "@merge-warden");
+    assert_eq!(result.get("hotfix").map(|s| s.as_str()), Some("alice"));
+}
+
+// ── build_keyword_label_comment ───────────────────────────────────────────
+
+#[test]
+async fn build_keyword_label_comment_contains_label_name() {
+    let comment = super::build_keyword_label_comment("breaking-change", "@merge-warden");
+    assert!(comment.contains("breaking-change"));
+}
+
+#[test]
+async fn build_keyword_label_comment_contains_bot_mention_in_suppress_command() {
+    let comment = super::build_keyword_label_comment("security", "@my-bot");
+    assert!(comment.contains("@my-bot suppress: security"));
+}
+
+#[test]
+async fn build_keyword_label_comment_contains_html_marker() {
+    use crate::config::KEYWORD_LABEL_COMMENT_MARKER;
+    let comment = super::build_keyword_label_comment("hotfix", "@merge-warden");
+    assert!(comment.contains(KEYWORD_LABEL_COMMENT_MARKER));
+}
+
+// ── add_hardcoded_type_label ──────────────────────────────────────────────
+
+#[test]
+async fn add_hardcoded_type_label_feat_produces_feature() {
+    let mut labels = Vec::new();
+    super::add_hardcoded_type_label(&mut labels, "feat");
+    assert_eq!(labels, ["feature"]);
+}
+
+#[test]
+async fn add_hardcoded_type_label_fix_produces_bug() {
+    let mut labels = Vec::new();
+    super::add_hardcoded_type_label(&mut labels, "fix");
+    assert_eq!(labels, ["bug"]);
+}
+
+#[test]
+async fn add_hardcoded_type_label_docs_produces_documentation() {
+    let mut labels = Vec::new();
+    super::add_hardcoded_type_label(&mut labels, "docs");
+    assert_eq!(labels, ["documentation"]);
+}
+
+#[test]
+async fn add_hardcoded_type_label_unknown_type_adds_nothing() {
+    let mut labels = Vec::new();
+    super::add_hardcoded_type_label(&mut labels, "unknown");
+    assert!(labels.is_empty());
+}
+
+#[test]
+async fn add_hardcoded_type_label_all_known_types() {
+    let cases = [
+        ("style", "style"),
+        ("refactor", "refactor"),
+        ("perf", "performance"),
+        ("test", "testing"),
+        ("build", "build"),
+        ("ci", "ci"),
+        ("chore", "chore"),
+        ("revert", "revert"),
+    ];
+    for (input, expected) in cases {
+        let mut labels = Vec::new();
+        super::add_hardcoded_type_label(&mut labels, input);
+        assert_eq!(labels, [expected], "input '{}' should produce '{}'", input, expected);
+    }
+}
+
+// ── get_category_description ──────────────────────────────────────────────
+
+#[test]
+async fn get_category_description_returns_non_empty_for_all_categories() {
+    use crate::size::PrSizeCategory;
+    for cat in [
+        PrSizeCategory::XS,
+        PrSizeCategory::S,
+        PrSizeCategory::M,
+        PrSizeCategory::L,
+        PrSizeCategory::XL,
+        PrSizeCategory::XXL,
+    ] {
+        let desc = super::get_category_description(&cat);
+        assert!(!desc.is_empty(), "description for {:?} must not be empty", cat);
+    }
+}
+
+// ── generate_oversized_pr_comment ─────────────────────────────────────────
+
+#[test]
+async fn generate_oversized_pr_comment_contains_category_and_line_count() {
+    use crate::size::{PrSizeInfo, SizeThresholds};
+    use merge_warden_developer_platforms::models::PullRequestFile;
+
+    let files = vec![PullRequestFile {
+        filename: "src/big.rs".to_string(),
+        additions: 400,
+        deletions: 200,
+        changes: 600,
+        status: "modified".to_string(),
+    }];
+    let thresholds = SizeThresholds::default();
+    let size_info = PrSizeInfo::from_files_with_exclusions(&files, &thresholds, &[], false);
+
+    let comment = crate::labels::generate_oversized_pr_comment(&size_info);
+    assert!(comment.contains("XXL"), "comment must mention the category XXL");
+    assert!(comment.contains("600"), "comment must mention the line count");
+}

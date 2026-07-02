@@ -648,3 +648,35 @@ fn test_pr_size_info_from_files_with_exclusions_ignore_deletions_true() {
     assert_eq!(size_info.included_files.len(), 1);
     assert_eq!(size_info.excluded_files.len(), 1);
 }
+
+// ── Property-based tests ───────────────────────────────────────────────────
+
+use proptest::prelude::*;
+
+proptest! {
+    /// `PrSizeCategory::from_line_count` must be monotonically non-decreasing:
+    /// a larger line count must never produce a smaller category.
+    #[test]
+    fn prop_from_line_count_is_monotone(a: u32, b: u32) {
+        let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+        prop_assert!(
+            PrSizeCategory::from_line_count(lo) <= PrSizeCategory::from_line_count(hi),
+            "from_line_count({}) > from_line_count({})",
+            lo, hi
+        );
+    }
+
+    /// `PrSizeCategory::from_line_count_with_thresholds` with default thresholds
+    /// must also be monotonically non-decreasing.
+    #[test]
+    fn prop_from_line_count_with_thresholds_is_monotone(a: u32, b: u32) {
+        let thresholds = SizeThresholds::default();
+        let (lo, hi) = if a <= b { (a, b) } else { (b, a) };
+        prop_assert!(
+            PrSizeCategory::from_line_count_with_thresholds(lo, &thresholds)
+                <= PrSizeCategory::from_line_count_with_thresholds(hi, &thresholds),
+            "from_line_count_with_thresholds({}) > from_line_count_with_thresholds({})",
+            lo, hi
+        );
+    }
+}

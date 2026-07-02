@@ -7146,3 +7146,79 @@ proptest! {
         prop_assert_eq!(merged.enabled, base_en || over_en);
     }
 }
+
+// ── Additional property-based tests ──────────────────────────────────────
+
+proptest! {
+    /// `IssuePropagationConfig::merge` is commutative for the boolean OR flags.
+    #[test]
+    fn prop_issue_propagation_merge_enabled_is_or(
+        base_milestone: bool, over_milestone: bool,
+        base_project: bool, over_project: bool,
+    ) {
+        let base = IssuePropagationConfig {
+            sync_milestone_from_issue: base_milestone,
+            sync_project_from_issue: base_project,
+        };
+        let over = IssuePropagationConfig {
+            sync_milestone_from_issue: over_milestone,
+            sync_project_from_issue: over_project,
+        };
+        let m1 = IssuePropagationConfig::merge(&base, &over);
+        let m2 = IssuePropagationConfig::merge(&over, &base);
+        // Both fields use `base || over`, so merge must be commutative.
+        prop_assert_eq!(m1.sync_milestone_from_issue, m2.sync_milestone_from_issue);
+        prop_assert_eq!(m1.sync_project_from_issue, m2.sync_project_from_issue);
+    }
+
+    /// `WorkItemPolicyConfig::merge` `required` field satisfies OR commutativity.
+    #[test]
+    fn prop_work_item_policy_merge_required_is_or(base_req: bool, over_req: bool) {
+        let base = WorkItemPolicyConfig {
+            required: base_req,
+            ..WorkItemPolicyConfig::default()
+        };
+        let over = WorkItemPolicyConfig {
+            required: over_req,
+            ..WorkItemPolicyConfig::default()
+        };
+        let merged = WorkItemPolicyConfig::merge(&base, &over);
+        prop_assert_eq!(merged.required, base_req || over_req);
+    }
+
+    /// `PrSizeCheckConfig::merge` `enabled` field satisfies OR commutativity.
+    #[test]
+    fn prop_pr_size_check_merge_enabled_is_or(base_en: bool, over_en: bool) {
+        let base = PrSizeCheckConfig {
+            enabled: base_en,
+            ..PrSizeCheckConfig::default()
+        };
+        let over = PrSizeCheckConfig {
+            enabled: over_en,
+            ..PrSizeCheckConfig::default()
+        };
+        let merged = PrSizeCheckConfig::merge(&base, &over);
+        prop_assert_eq!(merged.enabled, base_en || over_en);
+    }
+
+    /// `WipCheckConfig::merge` `enforce_wip_blocking` field satisfies OR commutativity.
+    #[test]
+    fn prop_wip_check_merge_enforce_is_or(base_en: bool, over_en: bool) {
+        let base = WipCheckConfig {
+            enforce_wip_blocking: base_en,
+            ..WipCheckConfig::default()
+        };
+        let over = WipCheckConfig {
+            enforce_wip_blocking: over_en,
+            ..WipCheckConfig::default()
+        };
+        let merged = WipCheckConfig::merge(&base, &over);
+        prop_assert_eq!(merged.enforce_wip_blocking, base_en || over_en);
+    }
+
+    /// `validate_config_content` must never panic on arbitrary string input.
+    #[test]
+    fn prop_validate_config_content_never_panics(input in ".*") {
+        let _ = validate_config_content(&input);
+    }
+}

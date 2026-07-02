@@ -1,0 +1,40 @@
+[package]
+name = "merge-warden-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+
+[dependencies.merge_warden_core]
+path = "../crates/core"
+
+[dependencies.merge_warden_developer_platforms]
+path = "../crates/developer_platforms"
+
+# Keep the fuzz crate outside the main workspace to avoid requiring
+# the nightly toolchain for regular builds.
+[workspace]
+members = ["."]
+
+[[bin]]
+name = "diagnose_pr_title"
+path = "fuzz_targets/diagnose_pr_title.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "extract_issue_reference"
+path = "fuzz_targets/extract_issue_reference.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "validate_config_content"
+path = "fuzz_targets/validate_config_content.rs"
+test = false
+doc = false

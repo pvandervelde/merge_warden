@@ -46,7 +46,7 @@ mod tests;
 ///
 /// The [`WebhookReceiver`] uses this only for HMAC-SHA256 signature validation.
 /// The `get_private_key` and `get_app_id` methods are not called in this path.
-struct WebhookSecretProvider {
+pub(super) struct WebhookSecretProvider {
     /// The webhook signing secret used for HMAC-SHA256 validation.
     ///
     /// Stored as a plain `String` (not `SecretString`) because:
@@ -486,7 +486,7 @@ impl WebhookHandler for MergeWardenWebhookHandler {
 /// The channel capacity provides back-pressure: if the processing loop falls
 /// behind, sends will yield until a slot is available.
 pub(crate) struct ChannelForwardingHandler {
-    sender: mpsc::Sender<crate::ingress::EventEnvelope>,
+    pub(crate) sender: mpsc::Sender<crate::ingress::EventEnvelope>,
 }
 
 #[async_trait]

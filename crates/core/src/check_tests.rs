@@ -500,6 +500,19 @@ fn should_return_invalid_when_title_missing_space_after_colon() {
     assert!(!result.is_valid());
     assert!(!result.was_bypassed());
     assert!(result.bypass_info().is_none());
+    let diagnosis = result.diagnosis.as_ref().expect("Expected Some(diagnosis)");
+    assert!(
+        diagnosis
+            .issues
+            .contains(&TitleIssue::MissingSpaceAfterColon),
+        "Expected MissingSpaceAfterColon in issues: {:?}",
+        diagnosis.issues
+    );
+    assert!(
+        !diagnosis.issues.contains(&TitleIssue::EmptyDescription),
+        "EmptyDescription must NOT appear for a title that only lacks a space: {:?}",
+        diagnosis.issues
+    );
 }
 
 #[test]
@@ -514,6 +527,19 @@ fn should_return_invalid_when_title_has_empty_description() {
     assert!(!result.is_valid());
     assert!(!result.was_bypassed());
     assert!(result.bypass_info().is_none());
+    let diagnosis = result.diagnosis.as_ref().expect("Expected Some(diagnosis)");
+    assert!(
+        diagnosis.issues.contains(&TitleIssue::EmptyDescription),
+        "Expected EmptyDescription in issues: {:?}",
+        diagnosis.issues
+    );
+    assert!(
+        !diagnosis
+            .issues
+            .contains(&TitleIssue::MissingSpaceAfterColon),
+        "MissingSpaceAfterColon must NOT appear when description is empty (space is present): {:?}",
+        diagnosis.issues
+    );
 }
 
 #[test]
@@ -1933,4 +1959,60 @@ fn should_return_invalid_with_empty_scope_in_diagnosis_when_title_has_empty_scop
         "Expected EmptyScope issue in diagnosis, got: {:?}",
         diagnosis.issues
     );
+}
+
+// ── Property-based tests ───────────────────────────────────────────────────
+
+use proptest::prelude::*;
+
+proptest! {
+    /// `diagnose_pr_title` must never panic on arbitrary Unicode input.
+    #[test]
+    fn prop_diagnose_pr_title_never_panics(input in ".*") {
+        let _ = diagnose_pr_title(&input);
+    }
+
+    /// When the title does not match the conventional-commit regex,
+    /// `diagnose_pr_title` must return at least one issue.
+    #[test]
+    fn prop_diagnose_invalid_title_has_issues(input in ".*") {
+        use regex::Regex;
+        use crate::config::CONVENTIONAL_COMMIT_REGEX;
+        let regex = Regex::new(CONVENTIONAL_COMMIT_REGEX).unwrap();
+        let diag = diagnose_pr_title(&input);
+        if !regex.is_match(&input) {
+            prop_assert!(
+                !diag.issues.is_empty(),
+                "diagnose_pr_title returned no issues for input that fails regex: {:?}",
+                input
+            );
+        }
+    }
+
+    /// `extract_closing_issue_reference` must never panic on arbitrary input.
+    #[test]
+    fn prop_extract_closing_issue_reference_never_panics(input in ".*") {
+        let _ = extract_closing_issue_reference(&input);
+    }
+
+    /// `extract_any_issue_reference` must never panic on arbitrary input.
+    #[test]
+    fn prop_extract_any_issue_reference_never_panics(input in ".*") {
+        let _ = extract_any_issue_reference(&input);
+    }
+
+    /// Every result from `extract_closing_issue_reference` must also be returned
+    /// (or superseded) by `extract_any_issue_reference`, since the any-variant
+    /// is strictly more permissive.
+    #[test]
+    fn prop_closing_ref_implies_any_ref(input in ".*") {
+        if let Some(closing) = extract_closing_issue_reference(&input) {
+            let any = extract_any_issue_reference(&input);
+            prop_assert!(
+                any.is_some(),
+                "extract_any_issue_reference returned None but extract_closing returned {:?}",
+                closing
+            );
+        }
+    }
 }

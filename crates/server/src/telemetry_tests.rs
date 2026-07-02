@@ -70,6 +70,32 @@ fn from_env_never_fails() {
     let _cfg = TelemetryConfig::from_env();
 }
 
+#[test]
+fn from_env_reads_custom_service_version() {
+    let _lock = TELEM_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::remove_var("OTEL_EXPORTER_OTLP_ENDPOINT");
+    std::env::remove_var("OTEL_SERVICE_NAME");
+    std::env::set_var("OTEL_SERVICE_VERSION", "1.2.3");
+
+    let cfg = TelemetryConfig::from_env();
+
+    std::env::remove_var("OTEL_SERVICE_VERSION");
+
+    assert_eq!(cfg.service_version, "1.2.3");
+}
+
+#[test]
+fn from_env_uses_cargo_pkg_version_when_service_version_absent() {
+    let _lock = TELEM_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    std::env::remove_var("OTEL_EXPORTER_OTLP_ENDPOINT");
+    std::env::remove_var("OTEL_SERVICE_NAME");
+    std::env::remove_var("OTEL_SERVICE_VERSION");
+
+    let cfg = TelemetryConfig::from_env();
+    // The default is the crate version — just verify it is non-empty.
+    assert!(!cfg.service_version.is_empty(), "service_version must not be empty when var is absent");
+}
+
 // ---------------------------------------------------------------------------
 // init_telemetry — console-only path
 // ---------------------------------------------------------------------------
