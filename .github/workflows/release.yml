@@ -392,8 +392,8 @@ jobs:
       - name: Stage binaries for Docker build
         run: |
           mkdir -p binaries/amd64 binaries/arm64
-          cp server-artifacts/server-x86_64-unknown-linux-gnu/merge_warden_server binaries/amd64/merge_warden_server
-          cp server-artifacts/server-aarch64-unknown-linux-gnu/merge_warden_server binaries/arm64/merge_warden_server
+          cp server-artifacts/server-x86_64-unknown-linux-gnu/target/x86_64-unknown-linux-gnu/release/merge_warden_server binaries/amd64/merge_warden_server
+          cp server-artifacts/server-aarch64-unknown-linux-gnu/target/aarch64-unknown-linux-gnu/release/merge_warden_server binaries/arm64/merge_warden_server
           chmod +x binaries/amd64/merge_warden_server binaries/arm64/merge_warden_server
 
       - name: Log in to GitHub Container Registry
