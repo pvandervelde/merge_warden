@@ -191,6 +191,10 @@ pub fn load_secrets() -> Result<ServerSecrets, ServerError>;
 /// - `ServerError::MissingEnvVar("MERGE_WARDEN_QUEUE_PROVIDER")` when
 ///   `receiver_mode == Queue` and the variable is absent.
 /// - `ServerError::ConfigError` if the TOML file exists but cannot be parsed.
+/// - `ServerError::ConfigError` if any pattern in `application_defaults.repository_scope`
+///   (`include_patterns` or `exclude_patterns`) fails glob-pattern validation — see
+///   `validate_repository_scope_patterns` in
+///   [core-config-validation.md](./core-config-validation.md#repository-scope-filtering-additions).
 ///
 /// # Guarantees
 /// - Absent TOML config file is NOT an error; `ApplicationDefaults::default()` is used.

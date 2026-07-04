@@ -510,6 +510,61 @@ can still be merged. The comment exists to surface the problem early, not to gat
 This matches the existing runtime behaviour: if the file is absent or unreadable on the
 default branch, Merge Warden falls back to application defaults without blocking anything.
 
+## Repository Scope Filtering
+
+Large GitHub organisations can hit GitHub App install-scope limits that prevent an operator
+from selecting individual repositories at installation time — past a certain organisation
+size, GitHub only offers "All repositories" as an install option. When that happens, Merge
+Warden receives webhooks for every repository in the organisation, including ones it was never
+intended to act on.
+
+`repository_scope` lets the operator declare, in application-level configuration, which
+repositories Merge Warden should actually process — independent of which repositories the
+GitHub App installation can technically reach.
+
+### How Repository Scope Filtering Works
+
+`[repository_scope]` is an optional top-level section of the `ApplicationDefaults` TOML
+(loaded via `MERGE_WARDEN_CONFIG_FILE`, same as every other `ApplicationDefaults` field):
+
+```toml
+[repository_scope]
+include_patterns = ["payments-*", "checkout", "billing-?"]
+exclude_patterns = ["payments-legacy"]
+```
+
+- `include_patterns` — glob patterns (`*` = any sequence, `?` = single character) matched
+  case-insensitively against the bare repository name. A repository must match at least one
+  entry to be processed.
+- `exclude_patterns` — glob patterns that take precedence over `include_patterns`. A
+  repository matching an exclude pattern is never processed, even if it also matches an
+  include pattern. Defaults to an empty list when the key is omitted.
+- Omitting the entire `[repository_scope]` section processes every repository — full
+  backward compatibility with deployments that predate this feature.
+- Setting `include_patterns = []` explicitly processes no repositories at all; this is a
+  deliberate fail-closed "pause everything" lever, independent of `exclude_patterns`.
+
+### Not a `PolicySet` Tier
+
+Repository scope filtering is **not** a policy tier and does not participate in the
+`PolicySet::merge` chain described above. It is a binary, app-level gate evaluated once per
+event, before any repository-specific configuration (org policy, repo config, conditional
+policies) is loaded. An out-of-scope repository never reaches `resolve_pull_request_config`
+or any part of the merge chain — see
+[event-processing.md](../architecture/event-processing.md#repository-scope-filtering) for the
+exact point in the pipeline where the check runs.
+
+### Backward Compatibility for Repository Scope Filtering
+
+Because the section is optional and defaults to "process everything" when absent, deployments
+that do not set `repository_scope` see no behavioural change.
+
+### Related Types
+
+See [core-config-validation.md](../interfaces/core-config-validation.md#repository-scope-filtering-additions)
+for the `RepositoryScope` struct, the `is_repository_in_scope` matching function, and the
+`validate_repository_scope_patterns` startup validator.
+
 ## Related Specifications
 
 - [Validation Engine](./validation-engine.md) - How configuration drives validation behavior

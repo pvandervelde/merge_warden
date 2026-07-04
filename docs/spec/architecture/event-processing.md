@@ -30,6 +30,14 @@ begins, eliminating timeout risk regardless of how long processing takes.
 > receiver service is responsible for that verification; merge_warden is a pure
 > queue consumer and never sees raw webhook payloads.
 
+> **Repository scope filtering runs first, before any other processing.** Large
+> organisations can be forced to install the GitHub App with "All repositories" access
+> (see [configuration-system.md](../design/configuration-system.md#repository-scope-filtering)),
+> which means merge_warden may receive webhooks for repositories the operator never
+> intended it to act on. `handle_event` checks the incoming repository name against the
+> configured `repository_scope` before any repository-specific data is fetched, so an
+> out-of-scope repository never triggers a config load, org-policy fetch, or GitHub API call.
+
 ---
 
 ## Receiver Modes
@@ -154,6 +162,10 @@ ProcessableEvent { envelope, ack }
   ▼
 MergeWardenWebhookHandler::handle_event(envelope)
   │
+  ├─ Repository scope check (see Repository Scope Filtering below)
+  │    ├─ Err (unparseable payload) → return Ok(())  (fail-closed; filtered_total++)
+  │    └─ Ok(false) (out of scope)  → return Ok(())  (filtered_total++)
+  │
   ├─ event_type == "status" ?
   │    └─ handle_status_event(envelope)  (see Status Event Routing below)
   │
@@ -188,6 +200,47 @@ Acknowledgement
                  webhook mode:  no-op  (event is simply not retried)
                  queue mode:    session.dead_letter_message(reason) + close_session()
 ```
+
+---
+
+## Repository Scope Filtering
+
+This check runs first inside `handle_event` — before the `event_type` dispatch branches
+and before the first GitHub API call (`installation_by_id`). It exists because a GitHub App
+installed with "All repositories" scope (see
+[configuration-system.md](../design/configuration-system.md#repository-scope-filtering))
+receives webhooks for repositories the operator never intended Merge Warden to act on.
+
+```text
+Repository scope check
+  │
+  ├─ Extract repo_name from envelope.payload["repository"]["name"]
+  │    └─ Missing or malformed → FAIL CLOSED
+  │         log warn!(repo_name = ?, event_type, delivery_id,
+  │                    "repository name unparseable in webhook payload; skipping")
+  │         merge_warden.webhook.filtered_total{reason="unparseable_payload"} += 1
+  │         return Ok(())
+  │
+  └─ is_repository_in_scope(&app_defaults.repository_scope, &repo_name)
+       ├─ true  → continue to event_type dispatch
+       └─ false → log info!(repo_name, event_type, delivery_id,
+                             "repository not in configured scope; skipping")
+                  merge_warden.webhook.filtered_total{reason="out_of_scope"} += 1
+                  return Ok(())
+```
+
+**Key design decisions:**
+
+- This is a binary gate, not a `PolicySet` tier — it is evaluated before the
+  org-policy/repo-config/conditional-policy merge chain begins and is not wired into
+  `resolve_pull_request_config`.
+- Runs identically for both webhook mode and queue mode, since both converge on the same
+  `run_event_processor` → `handle_event` path.
+- `Ok(())` is returned in both filtered cases — the event is acknowledged via
+  `ack.complete()` exactly like any other no-op branch; no new error type is introduced for
+  the control-flow path itself.
+- Extracting `repository.name` is pure JSON field access on the already-deserialised
+  payload; no GitHub API call is made before this check completes.
 
 ---
 
@@ -312,6 +365,8 @@ See [configuration-management.md](../operations/configuration-management.md) and
 | Message deserialisation (queue mode) | Malformed JSON | Message dead-lettered; loop continues |
 | Unknown schema version | `schema_version != 1` | Message dead-lettered; loop continues |
 | EventEnvelope reconstruction | SDK parse error | Message dead-lettered; loop continues |
+| Repository scope check | Repository not in configured `repository_scope` | Logged at `info`; `ack.complete()`; `merge_warden.webhook.filtered_total{reason="out_of_scope"}` incremented; returns `Ok(())` before any repo-config/org-policy fetch |
+| Repository scope check | `repository.name` missing or malformed in payload | Fail-closed: logged at `warn`; `ack.complete()`; `merge_warden.webhook.filtered_total{reason="unparseable_payload"}` incremented; returns `Ok(())` |
 | Status event — commit lookup | `find_pull_requests_for_commit` API error | Returned as `ProcessingError`; `ack.reject()` → dead-letter (queue) or logged (webhook) |
 | Status event — PR re-evaluation | `get_commit_statuses` API error inside `process_pull_request` | Logged at `warn`; does not propagate; processing continues for remaining PRs |
 | Config file fetch (config check) | File not found at head SHA | Treated as absent; no comment posted; no error |

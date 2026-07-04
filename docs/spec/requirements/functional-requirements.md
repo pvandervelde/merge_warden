@@ -209,6 +209,41 @@ stability period has elapsed.
 **Priority:** Medium
 **Dependencies:** FR-001 (Pull Request Validation), FR-002 (Configuration Management)
 
+### FR-009: Repository Scope Filtering
+
+**Requirement:** The system shall allow operators to restrict which repositories it actively
+processes, independent of which repositories the GitHub App installation can technically
+access.
+
+**Description:**
+
+- Support organisations large enough that GitHub only offers "All repositories" as an
+  install-scope option, forcing the GitHub App installation to receive webhooks for
+  repositories it was never intended to act on
+- Allow operators to declare an allow-list of repository name glob patterns
+  (`include_patterns`) and an optional deny-list (`exclude_patterns`) in application-level
+  configuration
+- Evaluate the scope check as the first step of event processing — before the `event_type`
+  dispatch branches and before any repository-specific data (config file, org policy,
+  topics, custom properties) is fetched
+- Default to processing every repository when no scope configuration is present, preserving
+  full backward compatibility with deployments that predate this feature
+
+**Acceptance Criteria:**
+
+- ✅ Absent `[repository_scope]` configuration processes events for every repository (no filtering)
+- ✅ `[repository_scope]` present with an empty `include_patterns` list processes no repositories (fail-closed "pause everything" lever), regardless of `exclude_patterns`
+- ✅ Glob wildcards `*` (any sequence) and `?` (single character) are supported in both `include_patterns` and `exclude_patterns`
+- ✅ A repository name matching `exclude_patterns` is excluded even when it also matches `include_patterns` (exclude takes precedence over include)
+- ✅ Repository name matching is case-insensitive
+- ✅ A webhook payload with a missing or malformed `repository.name` field is treated as out of scope (fail-closed)
+- ✅ Filtered events (out of scope or unparseable payload) are acknowledged (`ack.complete()`) without further processing and without returning an error
+- ✅ No `.github/merge-warden.toml`, org-policy, topics, or custom-properties fetch occurs for an out-of-scope repository
+- ✅ No GitHub API call is made on behalf of a filtered repository (the scope check runs before `installation_by_id`)
+
+**Priority:** High
+**Dependencies:** FR-002 (Configuration Management), FR-001 (Pull Request Validation)
+
 ## Detailed Functional Specifications
 
 ### Pull Request Title Validation
