@@ -473,3 +473,162 @@ fn load_config_returns_config_error_for_malformed_toml() {
         r
     );
 }
+
+// ---------------------------------------------------------------------------
+// load_config — repository_scope (FR-009: Repository Scope Filtering)
+//
+// See docs/spec/interfaces/server-config.md and
+// docs/spec/security/threat-model.md#all-repositories-installation-scope for
+// the "startup pattern validation fails fast" requirement.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn load_config_defaults_repository_scope_to_none_when_config_file_absent() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    let _env = EnvGuard::prepare(
+        &[],
+        &[
+            "MERGE_WARDEN_PORT",
+            "MERGE_WARDEN_RECEIVER_MODE",
+            "MERGE_WARDEN_CONFIG_FILE",
+        ],
+    );
+
+    let r = load_config();
+    assert!(r.is_ok(), "{:?}", r);
+    assert!(
+        r.unwrap().application_defaults.repository_scope.is_none(),
+        "repository_scope must default to None when no config file is provided"
+    );
+}
+
+#[test]
+fn load_config_reads_valid_repository_scope_from_toml_file() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+
+    let mut path = std::env::temp_dir();
+    path.push("merge_warden_server_valid_repo_scope_test.toml");
+    std::fs::write(
+        &path,
+        "[policies.repository_scope]\ninclude_patterns = [\"payments-*\"]\nexclude_patterns = [\"payments-legacy\"]\n",
+    )
+    .unwrap();
+
+    let _env = EnvGuard::prepare(
+        &[("MERGE_WARDEN_CONFIG_FILE", path.to_str().unwrap())],
+        &[
+            "MERGE_WARDEN_PORT",
+            "MERGE_WARDEN_RECEIVER_MODE",
+            "MERGE_WARDEN_CONFIG_FILE",
+        ],
+    );
+
+    let r = load_config();
+    let _ = std::fs::remove_file(&path);
+
+    assert!(r.is_ok(), "{:?}", r);
+    let scope = r
+        .unwrap()
+        .application_defaults
+        .repository_scope
+        .expect("repository_scope should be Some when [policies.repository_scope] is present");
+    assert_eq!(scope.include_patterns, vec!["payments-*".to_string()]);
+    assert_eq!(scope.exclude_patterns, vec!["payments-legacy".to_string()]);
+}
+
+/// Security requirement (threat-model.md — "Startup pattern validation"):
+/// an invalid pattern in `repository_scope` must fail `load_config()` at
+/// startup rather than silently matching nothing (or everything) at
+/// webhook-handling time.
+#[test]
+fn load_config_returns_config_error_for_invalid_repository_scope_include_pattern() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+
+    let mut path = std::env::temp_dir();
+    path.push("merge_warden_server_invalid_repo_scope_include_test.toml");
+    std::fs::write(
+        &path,
+        "[policies.repository_scope]\ninclude_patterns = [\"payments-[\"]\n",
+    )
+    .unwrap();
+
+    let _env = EnvGuard::prepare(
+        &[("MERGE_WARDEN_CONFIG_FILE", path.to_str().unwrap())],
+        &[
+            "MERGE_WARDEN_PORT",
+            "MERGE_WARDEN_RECEIVER_MODE",
+            "MERGE_WARDEN_CONFIG_FILE",
+        ],
+    );
+
+    let r = load_config();
+    let _ = std::fs::remove_file(&path);
+
+    assert!(
+        matches!(r, Err(ServerError::ConfigError(_))),
+        "Expected ConfigError for invalid repository_scope include pattern, got: {:?}",
+        r
+    );
+}
+
+#[test]
+fn load_config_returns_config_error_for_invalid_repository_scope_exclude_pattern() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+
+    let mut path = std::env::temp_dir();
+    path.push("merge_warden_server_invalid_repo_scope_exclude_test.toml");
+    std::fs::write(
+        &path,
+        "[policies.repository_scope]\ninclude_patterns = [\"payments-*\"]\nexclude_patterns = [\"payments-[\"]\n",
+    )
+    .unwrap();
+
+    let _env = EnvGuard::prepare(
+        &[("MERGE_WARDEN_CONFIG_FILE", path.to_str().unwrap())],
+        &[
+            "MERGE_WARDEN_PORT",
+            "MERGE_WARDEN_RECEIVER_MODE",
+            "MERGE_WARDEN_CONFIG_FILE",
+        ],
+    );
+
+    let r = load_config();
+    let _ = std::fs::remove_file(&path);
+
+    assert!(
+        matches!(r, Err(ServerError::ConfigError(_))),
+        "Expected ConfigError for invalid repository_scope exclude pattern, got: {:?}",
+        r
+    );
+}
+
+#[test]
+fn load_config_succeeds_when_repository_scope_include_patterns_is_empty_list() {
+    // An empty include_patterns list is a valid (fail-closed) configuration,
+    // not a startup error — load_config must not reject it.
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+
+    let mut path = std::env::temp_dir();
+    path.push("merge_warden_server_empty_include_repo_scope_test.toml");
+    std::fs::write(&path, "[policies.repository_scope]\ninclude_patterns = []\n").unwrap();
+
+    let _env = EnvGuard::prepare(
+        &[("MERGE_WARDEN_CONFIG_FILE", path.to_str().unwrap())],
+        &[
+            "MERGE_WARDEN_PORT",
+            "MERGE_WARDEN_RECEIVER_MODE",
+            "MERGE_WARDEN_CONFIG_FILE",
+        ],
+    );
+
+    let r = load_config();
+    let _ = std::fs::remove_file(&path);
+
+    assert!(r.is_ok(), "{:?}", r);
+    let scope = r
+        .unwrap()
+        .application_defaults
+        .repository_scope
+        .expect("repository_scope should be Some");
+    assert!(scope.include_patterns.is_empty());
+}
