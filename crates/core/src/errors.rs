@@ -30,6 +30,14 @@ pub enum ConfigLoadError {
     /// (fetch error message or parse error detail).
     #[error("Org policy unavailable: {0}")]
     OrgPolicyUnavailable(String),
+
+    /// A `repository_scope` include or exclude pattern could not be compiled.
+    ///
+    /// The inner `String` contains the offending pattern text (not the
+    /// underlying regex error), so operators can locate the bad entry in
+    /// their configuration file.
+    #[error("Invalid repository scope pattern: {0}")]
+    InvalidRepositoryScopePattern(String),
 }
 
 /// Main error type for Merge Warden operations.

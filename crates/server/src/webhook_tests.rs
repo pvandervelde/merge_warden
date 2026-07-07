@@ -125,6 +125,11 @@ fn make_pull_request_envelope(
     let mut payload = json!({
         "action": "opened",
         "pull_request": { "number": pr_number },
+        // Real GitHub webhook bodies always carry a top-level "repository"
+        // object; the repository-scope gate reads its "name" field from
+        // here (the raw JSON), not from the structured `repo` argument
+        // above, per docs/spec/architecture/event-processing.md.
+        "repository": { "name": repo_name },
     });
     if let Some(id) = installation_id {
         payload["installation"] = json!({ "id": id });
@@ -147,6 +152,10 @@ fn make_status_envelope_with_scope_fixtures(
         "context": context,
         "sha": "deadbeef",
         "state": "pending",
+        // See the equivalent comment in `make_pull_request_envelope` — the
+        // repository-scope gate reads "repository.name" from the raw JSON
+        // payload, which real GitHub webhook bodies always include.
+        "repository": { "name": repo_name },
     });
     if let Some(id) = installation_id {
         payload["installation"] = json!({ "id": id });
