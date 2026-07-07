@@ -2383,9 +2383,22 @@ pub(crate) fn pattern_matches(pattern: &str, file_path: &str) -> bool {
 /// the (expected to be unreachable given the allow-list) case that the
 /// translated regex fails to compile.
 fn compile_repository_scope_pattern(pattern: &str) -> Result<regex::Regex, ()> {
-    // TODO: implement — character allow-list glob translation.
-    let _ = pattern;
-    unimplemented!("compile_repository_scope_pattern")
+    let mut translated = String::with_capacity(pattern.len() * 2);
+    for ch in pattern.chars() {
+        match ch {
+            '*' => translated.push_str(".*"),
+            '?' => translated.push('.'),
+            '.' => translated.push_str(r"\."),
+            c if c.is_ascii_alphanumeric() || c == '-' || c == '_' => translated.push(c),
+            _ => return Err(()),
+        }
+    }
+
+    let anchored = format!("^{}$", translated);
+    regex::RegexBuilder::new(&anchored)
+        .case_insensitive(true)
+        .build()
+        .map_err(|_| ())
 }
 
 /// Returns `true` if `repo_name` is in scope according to `scope`.
@@ -2409,7 +2422,7 @@ fn compile_repository_scope_pattern(pattern: &str) -> Result<regex::Regex, ()> {
 ///
 /// # Examples
 ///
-/// ```no_run
+/// ```
 /// use merge_warden_core::config::{is_repository_in_scope, RepositoryScope};
 ///
 /// let scope = Some(RepositoryScope {
@@ -2421,9 +2434,32 @@ fn compile_repository_scope_pattern(pattern: &str) -> Result<regex::Regex, ()> {
 /// assert!(!is_repository_in_scope(&scope, "checkout"));
 /// ```
 pub fn is_repository_in_scope(scope: &Option<RepositoryScope>, repo_name: &str) -> bool {
-    // TODO: implement — see docs/spec/interfaces/core-config-validation.md.
-    let _ = (scope, repo_name);
-    unimplemented!("is_repository_in_scope")
+    let scope = match scope {
+        Some(scope) => scope,
+        None => return true,
+    };
+
+    if scope.include_patterns.is_empty() {
+        return false;
+    }
+
+    let is_included = scope.include_patterns.iter().any(|pattern| {
+        compile_repository_scope_pattern(pattern)
+            .map(|regex| regex.is_match(repo_name))
+            .unwrap_or(false)
+    });
+
+    if !is_included {
+        return false;
+    }
+
+    let is_excluded = scope.exclude_patterns.iter().any(|pattern| {
+        compile_repository_scope_pattern(pattern)
+            .map(|regex| regex.is_match(repo_name))
+            .unwrap_or(false)
+    });
+
+    !is_excluded
 }
 
 /// Validates every pattern in `scope`'s `include_patterns` and
@@ -2441,7 +2477,7 @@ pub fn is_repository_in_scope(scope: &Option<RepositoryScope>, repo_name: &str) 
 ///
 /// # Examples
 ///
-/// ```no_run
+/// ```
 /// use merge_warden_core::config::{validate_repository_scope_patterns, RepositoryScope};
 ///
 /// let scope = Some(RepositoryScope {
@@ -2453,9 +2489,21 @@ pub fn is_repository_in_scope(scope: &Option<RepositoryScope>, repo_name: &str) 
 pub fn validate_repository_scope_patterns(
     scope: &Option<RepositoryScope>,
 ) -> Result<(), ConfigLoadError> {
-    // TODO: implement — see docs/spec/interfaces/core-config-validation.md.
-    let _ = scope;
-    unimplemented!("validate_repository_scope_patterns")
+    let scope = match scope {
+        Some(scope) => scope,
+        None => return Ok(()),
+    };
+
+    for pattern in scope
+        .include_patterns
+        .iter()
+        .chain(scope.exclude_patterns.iter())
+    {
+        compile_repository_scope_pattern(pattern)
+            .map_err(|_| ConfigLoadError::InvalidRepositoryScopePattern(pattern.clone()))?;
+    }
+
+    Ok(())
 }
 
 /// Loads the merge-warden configuration from the given path.

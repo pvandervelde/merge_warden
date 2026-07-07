@@ -6,7 +6,10 @@ use std::{fmt, path::PathBuf};
 #[path = "config_tests.rs"]
 mod tests;
 
-use merge_warden_core::config::ApplicationDefaults;
+use merge_warden_core::{
+    config::{validate_repository_scope_patterns, ApplicationDefaults},
+    errors::ConfigLoadError,
+};
 
 use crate::errors::ServerError;
 
@@ -290,6 +293,18 @@ pub fn load_config() -> Result<ServerConfig, ServerError> {
         info!("No MERGE_WARDEN_CONFIG_FILE set; using compiled-in application defaults");
         ApplicationDefaults::default()
     };
+
+    // --- Repository scope pattern validation (FR-009) ---
+    // Fail fast at startup rather than silently matching nothing (or
+    // everything) at webhook-handling time.
+    validate_repository_scope_patterns(&application_defaults.repository_scope).map_err(
+        |e| match e {
+            ConfigLoadError::InvalidRepositoryScopePattern(p) => {
+                ServerError::ConfigError(format!("Invalid repository_scope pattern: {}", p))
+            }
+            other => ServerError::ConfigError(other.to_string()),
+        },
+    )?;
 
     // --- Queue config (only in queue mode) ---
     let queue = if receiver_mode == ReceiverMode::Queue {
