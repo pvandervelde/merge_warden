@@ -78,8 +78,10 @@ fn make_test_handler_with_scope(scope: Option<RepositoryScope>) -> MergeWardenWe
         .config(ClientConfig::default())
         .build()
         .expect("GitHub client must build");
-    let mut policies = ApplicationDefaults::default();
-    policies.repository_scope = scope;
+    let policies = ApplicationDefaults {
+        repository_scope: scope,
+        ..ApplicationDefaults::default()
+    };
     MergeWardenWebhookHandler::new(github_client, policies)
 }
 
@@ -562,10 +564,8 @@ async fn handle_event_outcome_matches_is_repository_in_scope_for_pull_request_ev
     ];
 
     for repo_name in cases {
-        let expected_in_scope = merge_warden_core::config::is_repository_in_scope(
-            &Some(scope.clone()),
-            repo_name,
-        );
+        let expected_in_scope =
+            merge_warden_core::config::is_repository_in_scope(&Some(scope.clone()), repo_name);
         let envelope = make_pull_request_envelope(repo_name, 1, None);
         let result = handler.handle_event(&envelope).await;
 
@@ -592,10 +592,8 @@ async fn handle_event_outcome_matches_is_repository_in_scope_for_status_events()
     let cases = ["allowed-api", "allowed-legacy", "not-covered"];
 
     for repo_name in cases {
-        let expected_in_scope = merge_warden_core::config::is_repository_in_scope(
-            &Some(scope.clone()),
-            repo_name,
-        );
+        let expected_in_scope =
+            merge_warden_core::config::is_repository_in_scope(&Some(scope.clone()), repo_name);
         let envelope = make_status_envelope_with_scope_fixtures(
             repo_name,
             merge_warden_core::config::RENOVATE_STABILITY_CHECK_CONTEXT,

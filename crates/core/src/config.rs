@@ -2401,6 +2401,21 @@ fn compile_repository_scope_pattern(pattern: &str) -> Result<regex::Regex, ()> {
         .map_err(|_| ())
 }
 
+/// Returns `true` if `repo_name` matches at least one pattern in `patterns`.
+///
+/// Each pattern is compiled via [`compile_repository_scope_pattern`]; a
+/// pattern that fails to compile matches nothing rather than panicking (the
+/// same panic-free contract as [`is_repository_in_scope`], which is the sole
+/// caller of this helper for both its `include_patterns` and
+/// `exclude_patterns` checks).
+fn matches_any_repository_scope_pattern(patterns: &[String], repo_name: &str) -> bool {
+    patterns.iter().any(|pattern| {
+        compile_repository_scope_pattern(pattern)
+            .map(|regex| regex.is_match(repo_name))
+            .unwrap_or(false)
+    })
+}
+
 /// Returns `true` if `repo_name` is in scope according to `scope`.
 ///
 /// # Contract
@@ -2443,23 +2458,11 @@ pub fn is_repository_in_scope(scope: &Option<RepositoryScope>, repo_name: &str) 
         return false;
     }
 
-    let is_included = scope.include_patterns.iter().any(|pattern| {
-        compile_repository_scope_pattern(pattern)
-            .map(|regex| regex.is_match(repo_name))
-            .unwrap_or(false)
-    });
-
-    if !is_included {
+    if !matches_any_repository_scope_pattern(&scope.include_patterns, repo_name) {
         return false;
     }
 
-    let is_excluded = scope.exclude_patterns.iter().any(|pattern| {
-        compile_repository_scope_pattern(pattern)
-            .map(|regex| regex.is_match(repo_name))
-            .unwrap_or(false)
-    });
-
-    !is_excluded
+    !matches_any_repository_scope_pattern(&scope.exclude_patterns, repo_name)
 }
 
 /// Validates every pattern in `scope`'s `include_patterns` and
