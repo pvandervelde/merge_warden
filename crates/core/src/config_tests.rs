@@ -7592,6 +7592,240 @@ fn test_validate_repository_scope_patterns_reports_first_invalid_pattern_fail_fa
 }
 
 // ---------------------------------------------------------------------------
+// QA audit (post-implementation): mutation-analysis kill tests
+//
+// Each test below was written after manually enumerating plausible mutants
+// against the real implementation and empirically confirming (by temporarily
+// applying the mutation, running the full existing suite, observing it pass,
+// then reverting) that no existing test detects the change. See
+// docs/spec/test-coverage.md for the full audit report.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_validate_repository_scope_patterns_rejects_space_character() {
+    // Space is not in the documented allow-list (ASCII letters, digits, '-',
+    // '_', '.', plus the '*'/'?' wildcards) but, unlike '[', it is NOT itself
+    // invalid regex syntax. A character-allowlist guard that was silently
+    // bypassed (e.g. `c if c.is_ascii_alphanumeric() || c == '-' || c == '_'`
+    // weakened to always match) would let this pattern compile successfully
+    // as a literal match instead of being rejected — the existing "invalid
+    // pattern" fixtures all use '[', which fails regex compilation on its own
+    // and so cannot distinguish "the allow-list rejected this" from "the
+    // allow-list was bypassed but the resulting regex happened to be
+    // malformed anyway". Confirmed empirically: replacing the allow-list
+    // guard with `true` leaves all 38 pre-existing repository-scope tests
+    // (core) and 22 webhook-level tests green.
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["payments api".to_string()],
+        exclude_patterns: vec![],
+    });
+    let result = validate_repository_scope_patterns(&scope);
+    assert!(
+        matches!(
+            &result,
+            Err(ConfigLoadError::InvalidRepositoryScopePattern(p)) if p == "payments api"
+        ),
+        "space is not an allowed pattern character and must be rejected: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_validate_repository_scope_patterns_rejects_at_sign_character() {
+    // Same rationale as the space test above, using a different character
+    // that is also regex-harmless on its own ('@' has no special meaning to
+    // the `regex` crate), to guard against a mutant that special-cases one
+    // rejected character but not the class as a whole.
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["payments@api".to_string()],
+        exclude_patterns: vec![],
+    });
+    let result = validate_repository_scope_patterns(&scope);
+    assert!(
+        matches!(
+            &result,
+            Err(ConfigLoadError::InvalidRepositoryScopePattern(p)) if p == "payments@api"
+        ),
+        "'@' is not an allowed pattern character and must be rejected: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_is_repository_in_scope_unparseable_pattern_never_matches() {
+    // Per the documented contract on `matches_any_repository_scope_pattern`,
+    // an include or exclude pattern that fails to compile (e.g. it slipped
+    // past startup validation, or `validate_repository_scope_patterns` was
+    // never called for this scope) must be treated as "matches nothing", not
+    // "matches everything" and not a panic. This targets the
+    // `.unwrap_or(false)` fallback directly: flipping it to
+    // `.unwrap_or(true)` leaves the entire pre-existing repository-scope test
+    // suite green (confirmed empirically), because none of those tests ever
+    // put an uncompilable pattern into a scope actually passed to
+    // `is_repository_in_scope`.
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["payments-[".to_string()], // never compiles
+        exclude_patterns: vec![],
+    });
+    assert!(
+        !is_repository_in_scope(&scope, "payments-api"),
+        "an unparseable include pattern must never silently match a repository name"
+    );
+    assert!(
+        !is_repository_in_scope(&scope, "anything-else"),
+        "an unparseable include pattern must never silently match a repository name"
+    );
+}
+
+#[test]
+fn test_validate_repository_scope_patterns_include_violation_reported_before_exclude() {
+    // The doc comment on `validate_repository_scope_patterns` specifies
+    // patterns are checked "in that order": include_patterns THEN
+    // exclude_patterns, reporting the FIRST failure (fail fast). The existing
+    // "reports first invalid pattern" test only puts multiple invalid
+    // patterns inside include_patterns, so it cannot detect a mutant that
+    // swaps iteration order to check exclude_patterns before
+    // include_patterns — with only one list populated, order doesn't matter.
+    // This test puts an invalid pattern in BOTH lists, so only the correct
+    // (include-first) order reports the include-list violation. Confirmed
+    // empirically: swapping `.include_patterns.iter().chain(exclude...)` to
+    // `.exclude_patterns.iter().chain(include...)` leaves the entire
+    // pre-existing suite green.
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["payments-[".to_string()],
+        exclude_patterns: vec!["billing-[".to_string()],
+    });
+    let result = validate_repository_scope_patterns(&scope);
+    assert!(
+        matches!(
+            &result,
+            Err(ConfigLoadError::InvalidRepositoryScopePattern(p)) if p == "payments-["
+        ),
+        "expected the include-list violation to be reported first (fail fast, in-order), got: {:?}",
+        result
+    );
+}
+
+// ---------------------------------------------------------------------------
+// QA audit (post-implementation): adversarial input probing
+//
+// Manual fuzz-substitute probing (cargo-fuzz is not configured in this
+// repo). See docs/spec/test-coverage.md for the full audit report.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_is_repository_in_scope_many_wildcards_does_not_exhibit_catastrophic_backtracking() {
+    // Classic ReDoS shape: many overlapping '*' wildcards followed by a
+    // literal terminal character that never appears in the haystack,
+    // matched against a long string sharing the wildcards' literal prefix.
+    // A backtracking regex engine (e.g. naive PCRE-style) exhibits
+    // exponential blowup on this shape. The `regex` crate's automata-based
+    // engine is documented to guarantee linear-time matching; this test
+    // pins that guarantee down empirically rather than trusting it blindly,
+    // since `is_repository_in_scope` is reachable from untrusted webhook
+    // input (`repo_name`) combined with operator-authored patterns.
+    let pattern: String = "a*".repeat(30) + "z"; // 'z' is an allowed literal char
+    let scope = Some(RepositoryScope {
+        include_patterns: vec![pattern],
+        exclude_patterns: vec![],
+    });
+    // Shares the 'a' prefix with the pattern but never ends in 'z' --
+    // the worst case for a backtracking engine.
+    let haystack = "a".repeat(60);
+
+    let start = std::time::Instant::now();
+    let result = is_repository_in_scope(&scope, &haystack);
+    let elapsed = start.elapsed();
+
+    assert!(
+        !result,
+        "a pattern requiring a trailing 'z' must not match a haystack with none"
+    );
+    assert!(
+        elapsed.as_millis() < 500,
+        "pattern matching took {:?}, exceeding the linear-time budget -- possible catastrophic backtracking",
+        elapsed
+    );
+}
+
+#[test]
+fn test_is_repository_in_scope_very_long_pattern_and_repo_name_does_not_hang() {
+    // A pathologically long, but individually valid, pattern and repo name.
+    // Must complete quickly and must not panic (e.g. on regex compilation
+    // limits or allocation).
+    let pattern: String = "a?".repeat(2_000) + "*";
+    let scope = Some(RepositoryScope {
+        include_patterns: vec![pattern],
+        exclude_patterns: vec![],
+    });
+    let haystack = "a".repeat(5_000);
+
+    let start = std::time::Instant::now();
+    let _ = is_repository_in_scope(&scope, &haystack); // must not panic or hang
+    let elapsed = start.elapsed();
+
+    assert!(
+        elapsed.as_millis() < 1000,
+        "matching a very long pattern/haystack took {:?}, exceeding the time budget",
+        elapsed
+    );
+}
+
+#[test]
+fn test_is_repository_in_scope_unicode_repo_name_never_panics_and_does_not_falsely_match() {
+    // Repository names are attacker-influenced (they originate in the raw
+    // GitHub webhook JSON body). None of these adversarial Unicode variants
+    // should panic, and none should be treated as equal to the plain-ASCII
+    // pattern "payments-api" -- they all contain extra/foreign code points,
+    // so an anchored full-string match must reject them.
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["payments-api".to_string()],
+        exclude_patterns: vec![],
+    });
+    let adversarial_names = [
+        "payments-api\u{200F}",  // trailing RTL mark
+        "payments\u{0301}-api",  // combining acute accent injected mid-string
+        "\u{1F4A5}payments-api", // emoji prefix (multi-byte UTF-8)
+        "payments-api\u{1F4A5}", // emoji suffix
+        "\u{202E}payments-api",  // RTL override at start
+        "\u{0000}payments-api",  // embedded NUL
+    ];
+    for name in adversarial_names {
+        assert!(
+            !is_repository_in_scope(&scope, name),
+            "adversarial unicode variant {:?} must not match the literal ASCII pattern",
+            name
+        );
+    }
+}
+
+#[test]
+fn test_validate_repository_scope_patterns_rejects_unicode_pattern_characters() {
+    // Emoji, RTL marks, and combining diacritics are all outside the
+    // documented ASCII allow-list and must be rejected at startup
+    // validation -- not silently accepted, and not a panic.
+    let adversarial_patterns = [
+        "payments-\u{1F4A5}",
+        "payments\u{0301}-api",
+        "\u{202E}payments-api",
+        "payments-api\u{200F}",
+    ];
+    for pattern in adversarial_patterns {
+        let scope = Some(RepositoryScope {
+            include_patterns: vec![pattern.to_string()],
+            exclude_patterns: vec![],
+        });
+        let result = validate_repository_scope_patterns(&scope);
+        assert!(
+            result.is_err(),
+            "pattern {:?} contains non-ASCII characters and must be rejected: {:?}",
+            pattern,
+            result
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Property-based tests (Tier 3)
 // ---------------------------------------------------------------------------
 

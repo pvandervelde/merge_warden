@@ -581,6 +581,164 @@ async fn handle_event_outcome_matches_is_repository_in_scope_for_pull_request_ev
     }
 }
 
+// ---------------------------------------------------------------------------
+// QA audit (post-implementation): adversarial input probing
+//
+// Manual fuzz-substitute probing (cargo-fuzz is not configured in this
+// repo). See docs/spec/test-coverage.md for the full audit report.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn handle_event_treats_object_repository_name_as_malformed() {
+    let handler = make_test_handler_with_scope(None);
+    let raw_repository = json!({ "id": 1, "name": { "nested": "value" }, "full_name": "owner/x" });
+    let envelope = make_envelope_with_raw_repository_name(
+        "pull_request",
+        raw_repository,
+        json!({ "action": "opened", "pull_request": { "number": 1 } }),
+    );
+
+    let result = handler.handle_event(&envelope).await;
+
+    assert!(
+        result.is_ok(),
+        "object-valued repository.name must be treated as malformed (fail-closed), not panic: {:?}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn handle_event_treats_array_repository_name_as_malformed() {
+    let handler = make_test_handler_with_scope(None);
+    let raw_repository = json!({ "id": 1, "name": ["a", "b"], "full_name": "owner/x" });
+    let envelope = make_envelope_with_raw_repository_name(
+        "pull_request",
+        raw_repository,
+        json!({ "action": "opened", "pull_request": { "number": 1 } }),
+    );
+
+    let result = handler.handle_event(&envelope).await;
+
+    assert!(
+        result.is_ok(),
+        "array-valued repository.name must be treated as malformed (fail-closed), not panic: {:?}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn handle_event_treats_null_repository_name_as_malformed() {
+    let handler = make_test_handler_with_scope(None);
+    let raw_repository = json!({ "id": 1, "name": null, "full_name": "owner/x" });
+    let envelope = make_envelope_with_raw_repository_name(
+        "pull_request",
+        raw_repository,
+        json!({ "action": "opened", "pull_request": { "number": 1 } }),
+    );
+
+    let result = handler.handle_event(&envelope).await;
+
+    assert!(
+        result.is_ok(),
+        "null-valued repository.name must be treated as malformed (fail-closed), not panic: {:?}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn handle_event_treats_entirely_null_repository_object_as_malformed() {
+    // Simulates a payload where "repository" itself is `null` rather than an
+    // object with a missing/malformed "name" field -- probes that indexing
+    // `Value::Null["name"]` (serde_json returns a static Null rather than
+    // panicking) is handled safely by the scope gate.
+    let handler = make_test_handler_with_scope(None);
+    let envelope = make_envelope_with_raw_repository_name(
+        "pull_request",
+        json!(null),
+        json!({ "action": "opened", "pull_request": { "number": 1 } }),
+    );
+
+    let result = handler.handle_event(&envelope).await;
+
+    assert!(
+        result.is_ok(),
+        "a null 'repository' object must not panic and must be treated as malformed: {:?}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn handle_event_repository_name_containing_embedded_null_byte_does_not_panic() {
+    // Embedded NUL bytes are valid inside a JSON string; the scope gate must
+    // not panic on them, and the '.*' wildcard translation must treat the
+    // NUL byte as an ordinary character for matching purposes.
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["payments-*".to_string()],
+        exclude_patterns: vec![],
+    });
+    let handler = make_test_handler_with_scope(scope);
+    let raw_repository = json!({ "id": 1, "name": "payments-\u{0000}api", "full_name": "owner/x" });
+    let envelope = make_envelope_with_raw_repository_name(
+        "pull_request",
+        raw_repository,
+        json!({ "action": "opened", "pull_request": { "number": 1 } }),
+    );
+
+    let result = handler.handle_event(&envelope).await;
+
+    // "payments-\0api" matches "payments-*" (the wildcard's '.*' matches the
+    // NUL byte like any other character), so the event is in scope and
+    // dispatch proceeds -- reaching the offline "Missing installation ID"
+    // discriminator proves no panic occurred and scope matching succeeded.
+    assert_err_contains(&result, "Missing installation ID");
+}
+
+// ---------------------------------------------------------------------------
+// QA audit (post-implementation): mutation-analysis kill test
+//
+// See docs/spec/test-coverage.md for the full audit report. Confirmed
+// empirically: changing the scope-gate's `is_repository_in_scope` call to
+// read `envelope.repository.name` (the SDK-populated structured field)
+// instead of the raw-JSON-derived `repo_name` leaves the entire pre-existing
+// webhook-level scope-gate test suite (22 tests) green, because every other
+// fixture in this file sets the structured and raw repository names to the
+// same value.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn handle_event_scope_decision_uses_raw_repository_name_not_structured_field() {
+    // The envelope's *structured* `Repository.name` is a well-formed but
+    // UNRELATED placeholder ("structured-field-placeholder-should-be-ignored",
+    // set by `make_envelope_with_raw_repository_name`), while the *raw* JSON
+    // payload's "repository.name" is "blocked-repo". The configured scope
+    // matches everything EXCEPT "blocked-repo".
+    //
+    // - Correct implementation (reads raw JSON): repo_name = "blocked-repo",
+    //   which matches the exclude pattern -> filtered -> Ok(()).
+    // - Structured-field mutant: repo_name = the placeholder string, which
+    //   matches "*" and does NOT match the "blocked-repo" exclude pattern ->
+    //   treated as in-scope -> dispatch proceeds -> distinguishable error
+    //   (no installation.id in the payload) instead of a silent Ok(()).
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["*".to_string()],
+        exclude_patterns: vec!["blocked-repo".to_string()],
+    });
+    let handler = make_test_handler_with_scope(scope);
+    let envelope = make_envelope_with_raw_repository_name(
+        "pull_request",
+        json!({ "id": 1, "name": "blocked-repo", "full_name": "owner/blocked-repo" }),
+        json!({ "action": "opened", "pull_request": { "number": 1 } }),
+    );
+
+    let result = handler.handle_event(&envelope).await;
+
+    assert!(
+        result.is_ok(),
+        "scope decision must be based on the raw JSON repository name, not the SDK-populated structured field: {:?}",
+        result
+    );
+}
+
 #[tokio::test]
 async fn handle_event_outcome_matches_is_repository_in_scope_for_status_events() {
     let scope = RepositoryScope {
