@@ -610,7 +610,11 @@ fn load_config_succeeds_when_repository_scope_include_patterns_is_empty_list() {
 
     let mut path = std::env::temp_dir();
     path.push("merge_warden_server_empty_include_repo_scope_test.toml");
-    std::fs::write(&path, "[policies.repository_scope]\ninclude_patterns = []\n").unwrap();
+    std::fs::write(
+        &path,
+        "[policies.repository_scope]\ninclude_patterns = []\n",
+    )
+    .unwrap();
 
     let _env = EnvGuard::prepare(
         &[("MERGE_WARDEN_CONFIG_FILE", path.to_str().unwrap())],
