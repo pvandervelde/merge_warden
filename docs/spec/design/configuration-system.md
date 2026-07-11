@@ -524,11 +524,12 @@ GitHub App installation can technically reach.
 
 ### How Repository Scope Filtering Works
 
-`[repository_scope]` is an optional top-level section of the `ApplicationDefaults` TOML
-(loaded via `MERGE_WARDEN_CONFIG_FILE`, same as every other `ApplicationDefaults` field):
+`[policies.repository_scope]` is an optional section of the `ApplicationDefaults` TOML
+(loaded via `MERGE_WARDEN_CONFIG_FILE`, same as every other `ApplicationDefaults` field, all of
+which live under the file's top-level `[policies]` table):
 
 ```toml
-[repository_scope]
+[policies.repository_scope]
 include_patterns = ["payments-*", "checkout", "billing-?"]
 exclude_patterns = ["payments-legacy"]
 ```
@@ -539,7 +540,7 @@ exclude_patterns = ["payments-legacy"]
 - `exclude_patterns` — glob patterns that take precedence over `include_patterns`. A
   repository matching an exclude pattern is never processed, even if it also matches an
   include pattern. Defaults to an empty list when the key is omitted.
-- Omitting the entire `[repository_scope]` section processes every repository — full
+- Omitting the entire `[policies.repository_scope]` section processes every repository — full
   backward compatibility with deployments that predate this feature.
 - Setting `include_patterns = []` explicitly processes no repositories at all; this is a
   deliberate fail-closed "pause everything" lever, independent of `exclude_patterns`.

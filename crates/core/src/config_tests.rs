@@ -7524,6 +7524,27 @@ fn test_validate_repository_scope_patterns_empty_pattern_lists_are_ok() {
     assert!(validate_repository_scope_patterns(&scope).is_ok());
 }
 
+#[test]
+fn test_validate_repository_scope_patterns_rejects_empty_string_pattern() {
+    // An empty-string *entry* within a non-empty list (distinct from the
+    // list itself being empty, tested above) would compile to `^$`, which
+    // can never usefully match — `handle_event` already discards empty
+    // repository names as malformed before `is_repository_in_scope` is
+    // called. Rejecting it at startup turns a silent dead no-op in an
+    // operator's config into an actionable error.
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["".to_string()],
+        exclude_patterns: vec![],
+    });
+    assert!(
+        matches!(
+            validate_repository_scope_patterns(&scope),
+            Err(ConfigLoadError::InvalidRepositoryScopePattern(p)) if p.is_empty()
+        ),
+        "empty-string pattern must be rejected as invalid"
+    );
+}
+
 // NOTE (test-design gap — see report to Tech Lead / architect):
 // The spec documents only '*' and '?' as recognised glob wildcards; every
 // other character is matched literally. Given the codebase's existing

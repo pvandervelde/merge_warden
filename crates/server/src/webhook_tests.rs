@@ -353,9 +353,11 @@ async fn handle_event_processes_in_scope_repository_for_status_event() {
 }
 
 #[tokio::test]
-async fn handle_event_treats_missing_repository_name_as_out_of_scope() {
+async fn handle_event_treats_missing_repository_name_as_malformed() {
     // No repository_scope configured at all (None) — fail-closed on an
-    // unparseable repository name must still apply.
+    // unparseable repository name must still apply. This exercises the
+    // raw-parse guard (missing "name" key), not `is_repository_in_scope`
+    // returning false — no scope filtering decision is made here.
     let handler = make_test_handler_with_scope(None);
     let raw_repository = json!({ "id": 1, "full_name": "owner/unknown" }); // no "name" key
     let envelope = make_envelope_with_raw_repository_name(

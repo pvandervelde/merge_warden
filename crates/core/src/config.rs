@@ -561,7 +561,7 @@ pub struct OrgPolicySource {
 /// # TOML example
 ///
 /// ```toml
-/// [repository_scope]
+/// [policies.repository_scope]
 /// include_patterns = ["payments-*", "checkout"]
 /// exclude_patterns = ["payments-legacy"]
 /// ```
@@ -2379,10 +2379,22 @@ pub(crate) fn pattern_matches(pattern: &str, file_path: &str) -> bool {
 /// metacharacter — only `*` and `?` act as wildcards here.
 ///
 /// # Errors
-/// Returns `Err(())` when `pattern` contains a disallowed character, or in
-/// the (expected to be unreachable given the allow-list) case that the
-/// translated regex fails to compile.
+/// Returns `Err(())` when `pattern` is empty, contains a disallowed
+/// character, or in the (expected to be unreachable given the allow-list)
+/// case that the translated regex fails to compile.
+///
+/// An empty pattern is rejected outright rather than accepted as `^$`: it
+/// would compile successfully but could never usefully match, since
+/// `handle_event` already discards empty repository names as malformed
+/// before `is_repository_in_scope` is ever called — an empty-string pattern
+/// in an operator's config is always a mistake, not a meaningful "match
+/// nothing" entry, so it is caught here at startup instead of silently
+/// becoming a dead no-op.
 fn compile_repository_scope_pattern(pattern: &str) -> Result<regex::Regex, ()> {
+    if pattern.is_empty() {
+        return Err(());
+    }
+
     let mut translated = String::with_capacity(pattern.len() * 2);
     for ch in pattern.chars() {
         match ch {
@@ -2404,10 +2416,10 @@ fn compile_repository_scope_pattern(pattern: &str) -> Result<regex::Regex, ()> {
 /// Returns `true` if `repo_name` matches at least one pattern in `patterns`.
 ///
 /// Each pattern is compiled via [`compile_repository_scope_pattern`]; a
-/// pattern that fails to compile matches nothing rather than panicking (the
-/// same panic-free contract as [`is_repository_in_scope`], which is the sole
-/// caller of this helper for both its `include_patterns` and
-/// `exclude_patterns` checks).
+/// pattern that fails to compile matches nothing rather than panicking —
+/// the same panic-free contract [`is_repository_in_scope`] relies on when it
+/// calls this helper once for `include_patterns` and once for
+/// `exclude_patterns`.
 fn matches_any_repository_scope_pattern(patterns: &[String], repo_name: &str) -> bool {
     patterns.iter().any(|pattern| {
         compile_repository_scope_pattern(pattern)

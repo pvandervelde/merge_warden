@@ -1,9 +1,10 @@
 # Test Coverage: FR-009 Repository Scope Filtering
 
-Status: **RED** — test suite committed before implementation. Compiles with `cargo check
---tests` producing only "item does not exist" errors against the not-yet-implemented interface
-(`RepositoryScope`, `ApplicationDefaults.repository_scope`, `is_repository_in_scope`,
-`validate_repository_scope_patterns`, `ConfigLoadError::InvalidRepositoryScopePattern`).
+Status: **GREEN** — implementation complete; all tests passing (`cargo test --workspace`: 1250
+passed, 4 ignored, zero regressions). `RepositoryScope`, `ApplicationDefaults.repository_scope`,
+`is_repository_in_scope`, `validate_repository_scope_patterns`, and
+`ConfigLoadError::InvalidRepositoryScopePattern` are all implemented; see
+`crates/core/src/config.rs` and `crates/core/src/errors.rs`.
 
 ## Scope
 
