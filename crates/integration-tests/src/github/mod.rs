@@ -513,7 +513,7 @@ impl TestBotInstance {
                 Err(e) => {
                     eprintln!(
                         "[webhook-server] process_pull_request({}/{} PR#{}) failed: {:?}",
-                        owner, &repo.name, pr.number, e
+                        owner, repo.name, pr.number, e
                     );
                 }
             }
