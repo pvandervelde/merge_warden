@@ -742,6 +742,7 @@ fn test_application_defaults_bypass_rules_serialization() {
         renovate_stability: crate::config::RenovateStabilityConfig::default(),
         bot_mention: "@merge-warden".to_string(),
         org_policy_source: None,
+        repository_scope: None,
     };
 
     let serialized =
@@ -7144,5 +7145,782 @@ proptest! {
         };
         let merged = crate::config::RenovateStabilityConfig::merge(&base, &over);
         prop_assert_eq!(merged.enabled, base_en || over_en);
+    }
+}
+
+// ============================================================
+// FR-009: Repository Scope Filtering
+//
+// RepositoryScope / is_repository_in_scope / validate_repository_scope_patterns
+//
+// See docs/spec/requirements/functional-requirements.md#fr-009-repository-scope-filtering
+// See docs/spec/interfaces/core-config-validation.md#repository-scope-filtering-additions
+// ============================================================
+
+// ---------------------------------------------------------------------------
+// RepositoryScope — defaults & TOML round-trip (Tier 1: specification tests)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_repository_scope_default_has_empty_pattern_lists() {
+    let scope = RepositoryScope::default();
+    assert!(
+        scope.include_patterns.is_empty(),
+        "RepositoryScope::default() must have empty include_patterns"
+    );
+    assert!(
+        scope.exclude_patterns.is_empty(),
+        "RepositoryScope::default() must have empty exclude_patterns"
+    );
+}
+
+#[test]
+fn test_application_defaults_default_has_no_repository_scope() {
+    let defaults = ApplicationDefaults::default();
+    assert!(
+        defaults.repository_scope.is_none(),
+        "repository_scope must default to None for full backward compatibility"
+    );
+}
+
+#[test]
+fn test_application_defaults_toml_absent_repository_scope_section_is_none() {
+    // No [repository_scope] section at all in the TOML document.
+    let toml_str = "enable_title_validation = true\n";
+    let parsed: ApplicationDefaults = toml::from_str(toml_str).expect("should parse");
+    assert!(
+        parsed.repository_scope.is_none(),
+        "absent [repository_scope] section must deserialize to None"
+    );
+}
+
+#[test]
+fn test_application_defaults_toml_repository_scope_with_both_pattern_lists() {
+    let toml_str = r#"
+        [repository_scope]
+        include_patterns = ["payments-*", "checkout"]
+        exclude_patterns = ["payments-legacy"]
+    "#;
+    let parsed: ApplicationDefaults = toml::from_str(toml_str).expect("should parse");
+    let scope = parsed
+        .repository_scope
+        .expect("[repository_scope] section must deserialize to Some");
+    assert_eq!(
+        scope.include_patterns,
+        vec!["payments-*".to_string(), "checkout".to_string()]
+    );
+    assert_eq!(scope.exclude_patterns, vec!["payments-legacy".to_string()]);
+}
+
+#[test]
+fn test_application_defaults_toml_repository_scope_exclude_patterns_default_when_omitted() {
+    let toml_str = r#"
+        [repository_scope]
+        include_patterns = ["payments-*"]
+    "#;
+    let parsed: ApplicationDefaults = toml::from_str(toml_str).expect("should parse");
+    let scope = parsed
+        .repository_scope
+        .expect("[repository_scope] section must deserialize to Some");
+    assert_eq!(scope.include_patterns, vec!["payments-*".to_string()]);
+    assert!(
+        scope.exclude_patterns.is_empty(),
+        "exclude_patterns must default to an empty list when the key is omitted from TOML"
+    );
+}
+
+#[test]
+fn test_policy_set_from_application_defaults_ignores_repository_scope() {
+    // Catalog slice: repository_scope is a sibling field on ApplicationDefaults,
+    // NOT part of the PolicySet merge chain. Two ApplicationDefaults values that
+    // differ ONLY in repository_scope must produce identical PolicySets.
+    let mut without_scope = ApplicationDefaults::default();
+    without_scope.repository_scope = None;
+
+    let mut with_restrictive_scope = ApplicationDefaults::default();
+    with_restrictive_scope.repository_scope = Some(RepositoryScope {
+        include_patterns: vec![],
+        exclude_patterns: vec![],
+    });
+
+    let ps_without = PolicySet::from_application_defaults(&without_scope);
+    let ps_with = PolicySet::from_application_defaults(&with_restrictive_scope);
+
+    assert_eq!(
+        ps_without, ps_with,
+        "repository_scope must not influence PolicySet::from_application_defaults output"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// is_repository_in_scope — contract tests (Tier 1: specification tests)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_is_repository_in_scope_none_scope_processes_every_repository() {
+    assert!(is_repository_in_scope(&None, "any-repo-name"));
+    assert!(is_repository_in_scope(&None, "ANYTHING-GOES-123"));
+}
+
+#[test]
+fn test_is_repository_in_scope_empty_include_patterns_processes_nothing() {
+    let scope = Some(RepositoryScope {
+        include_patterns: vec![],
+        exclude_patterns: vec![],
+    });
+    assert!(!is_repository_in_scope(&scope, "payments-api"));
+}
+
+#[test]
+fn test_is_repository_in_scope_empty_include_wins_even_with_wildcard_exclude() {
+    // Fail-closed: an empty include list processes zero repositories,
+    // regardless of what exclude_patterns contains.
+    let scope = Some(RepositoryScope {
+        include_patterns: vec![],
+        exclude_patterns: vec!["nonexistent".to_string()],
+    });
+    assert!(!is_repository_in_scope(&scope, "payments-api"));
+}
+
+#[test]
+fn test_is_repository_in_scope_wildcard_star_matches_any_sequence() {
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["payments-*".to_string()],
+        exclude_patterns: vec![],
+    });
+    assert!(is_repository_in_scope(&scope, "payments-api"));
+    assert!(!is_repository_in_scope(&scope, "checkout"));
+}
+
+#[test]
+fn test_is_repository_in_scope_wildcard_question_mark_matches_single_char() {
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["billing-?".to_string()],
+        exclude_patterns: vec![],
+    });
+    assert!(
+        is_repository_in_scope(&scope, "billing-1"),
+        "'?' must match exactly one character"
+    );
+    assert!(
+        !is_repository_in_scope(&scope, "billing-12"),
+        "'?' must not match two characters"
+    );
+}
+
+#[test]
+fn test_is_repository_in_scope_question_mark_requires_exactly_one_char_not_zero() {
+    // Boundary: N-1 — zero characters after the dash must not satisfy a single '?'.
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["billing-?".to_string()],
+        exclude_patterns: vec![],
+    });
+    assert!(
+        !is_repository_in_scope(&scope, "billing-"),
+        "'?' must require exactly one character, not zero"
+    );
+}
+
+#[test]
+fn test_is_repository_in_scope_two_question_marks_require_exactly_two_chars() {
+    // Boundary: N / N+1 — two '?' wildcards must match exactly two characters.
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["billing-??".to_string()],
+        exclude_patterns: vec![],
+    });
+    assert!(!is_repository_in_scope(&scope, "billing-1"));
+    assert!(is_repository_in_scope(&scope, "billing-12"));
+    assert!(!is_repository_in_scope(&scope, "billing-123"));
+}
+
+#[test]
+fn test_is_repository_in_scope_exclude_overrides_wildcard_include() {
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["*".to_string()],
+        exclude_patterns: vec!["payments-legacy".to_string()],
+    });
+    assert!(
+        !is_repository_in_scope(&scope, "payments-legacy"),
+        "exclude_patterns must take precedence over a matching include_patterns entry"
+    );
+    assert!(
+        is_repository_in_scope(&scope, "any-other-repo"),
+        "all other repositories must still match the wildcard include"
+    );
+}
+
+#[test]
+fn test_is_repository_in_scope_exclude_wins_when_same_pattern_matches_both_lists() {
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["payments-api".to_string()],
+        exclude_patterns: vec!["payments-api".to_string()],
+    });
+    assert!(
+        !is_repository_in_scope(&scope, "payments-api"),
+        "a repo matching both an include and an exclude pattern must be excluded"
+    );
+}
+
+#[test]
+fn test_is_repository_in_scope_matching_is_case_insensitive_for_include() {
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["payments-*".to_string()],
+        exclude_patterns: vec![],
+    });
+    assert!(
+        is_repository_in_scope(&scope, "Payments-API"),
+        "include matching must be case-insensitive"
+    );
+}
+
+#[test]
+fn test_is_repository_in_scope_matching_is_case_insensitive_for_exclude() {
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["*".to_string()],
+        exclude_patterns: vec!["Payments-Legacy".to_string()],
+    });
+    assert!(
+        !is_repository_in_scope(&scope, "payments-legacy"),
+        "exclude matching must be case-insensitive"
+    );
+}
+
+#[test]
+fn test_is_repository_in_scope_no_match_returns_false() {
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["foo".to_string()],
+        exclude_patterns: vec![],
+    });
+    assert!(!is_repository_in_scope(&scope, "bar"));
+}
+
+// ---------------------------------------------------------------------------
+// is_repository_in_scope — adversarial / stub-killing tests (Tier 2)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_is_repository_in_scope_multiple_include_patterns_use_or_semantics() {
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["foo".to_string(), "bar".to_string()],
+        exclude_patterns: vec![],
+    });
+    assert!(is_repository_in_scope(&scope, "foo"));
+    assert!(is_repository_in_scope(&scope, "bar"));
+    assert!(!is_repository_in_scope(&scope, "baz"));
+}
+
+#[test]
+fn test_is_repository_in_scope_multiple_exclude_patterns_use_or_semantics() {
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["*".to_string()],
+        exclude_patterns: vec!["foo".to_string(), "bar".to_string()],
+    });
+    assert!(!is_repository_in_scope(&scope, "foo"));
+    assert!(!is_repository_in_scope(&scope, "bar"));
+    assert!(is_repository_in_scope(&scope, "baz"));
+}
+
+#[test]
+fn test_is_repository_in_scope_pattern_is_anchored_not_substring() {
+    // A hardcoded `contains()`-based stub would incorrectly match "myapp" or
+    // "app2" against the pattern "app". Matching must be a full-string glob
+    // match, not a substring search.
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["app".to_string()],
+        exclude_patterns: vec![],
+    });
+    assert!(is_repository_in_scope(&scope, "app"));
+    assert!(
+        !is_repository_in_scope(&scope, "myapp"),
+        "pattern must be anchored at the start of the repository name"
+    );
+    assert!(
+        !is_repository_in_scope(&scope, "app2"),
+        "pattern must be anchored at the end of the repository name"
+    );
+}
+
+#[test]
+fn test_is_repository_in_scope_literal_dot_is_not_a_wildcard() {
+    // A naive glob->regex translator that forgets to escape non-wildcard regex
+    // metacharacters would let '.' match any character. The spec documents
+    // only '*' and '?' as wildcards; '.' must be treated as a literal.
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["app.service".to_string()],
+        exclude_patterns: vec![],
+    });
+    assert!(is_repository_in_scope(&scope, "app.service"));
+    assert!(
+        !is_repository_in_scope(&scope, "appXservice"),
+        "'.' in a pattern must match only a literal dot, not 'any character'"
+    );
+}
+
+#[test]
+fn test_is_repository_in_scope_hardcoded_true_stub_caught_by_empty_include() {
+    // Kills a stub that always returns `true` regardless of input.
+    let scope = Some(RepositoryScope {
+        include_patterns: vec![],
+        exclude_patterns: vec![],
+    });
+    assert!(!is_repository_in_scope(&scope, "anything"));
+}
+
+#[test]
+fn test_is_repository_in_scope_hardcoded_false_stub_caught_by_none_scope() {
+    // Kills a stub that always returns `false` regardless of input.
+    assert!(is_repository_in_scope(&None, "anything"));
+}
+
+#[test]
+fn test_is_repository_in_scope_empty_repo_name_does_not_match_nonempty_pattern() {
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["payments-*".to_string()],
+        exclude_patterns: vec![],
+    });
+    assert!(!is_repository_in_scope(&scope, ""));
+}
+
+#[test]
+fn test_is_repository_in_scope_bare_wildcard_matches_empty_repo_name() {
+    // '*' means "any sequence", including the empty sequence.
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["*".to_string()],
+        exclude_patterns: vec![],
+    });
+    assert!(is_repository_in_scope(&scope, ""));
+}
+
+// ---------------------------------------------------------------------------
+// validate_repository_scope_patterns — contract tests (Tier 1 + Tier 2)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_validate_repository_scope_patterns_none_scope_is_ok() {
+    assert!(validate_repository_scope_patterns(&None).is_ok());
+}
+
+#[test]
+fn test_validate_repository_scope_patterns_valid_patterns_are_ok() {
+    let scope = Some(RepositoryScope {
+        include_patterns: vec![
+            "payments-*".to_string(),
+            "checkout".to_string(),
+            "billing-?".to_string(),
+        ],
+        exclude_patterns: vec!["payments-legacy".to_string()],
+    });
+    assert!(validate_repository_scope_patterns(&scope).is_ok());
+}
+
+#[test]
+fn test_validate_repository_scope_patterns_empty_pattern_lists_are_ok() {
+    // An empty include list is a valid (if fail-closed) configuration — it is
+    // not a pattern-compilation error, so it must not be rejected here.
+    let scope = Some(RepositoryScope {
+        include_patterns: vec![],
+        exclude_patterns: vec![],
+    });
+    assert!(validate_repository_scope_patterns(&scope).is_ok());
+}
+
+#[test]
+fn test_validate_repository_scope_patterns_rejects_empty_string_pattern() {
+    // An empty-string *entry* within a non-empty list (distinct from the
+    // list itself being empty, tested above) would compile to `^$`, which
+    // can never usefully match — `handle_event` already discards empty
+    // repository names as malformed before `is_repository_in_scope` is
+    // called. Rejecting it at startup turns a silent dead no-op in an
+    // operator's config into an actionable error.
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["".to_string()],
+        exclude_patterns: vec![],
+    });
+    assert!(
+        matches!(
+            validate_repository_scope_patterns(&scope),
+            Err(ConfigLoadError::InvalidRepositoryScopePattern(p)) if p.is_empty()
+        ),
+        "empty-string pattern must be rejected as invalid"
+    );
+}
+
+// NOTE (test-design gap — see report to Tech Lead / architect):
+// The spec documents only '*' and '?' as recognised glob wildcards; every
+// other character is matched literally. Given the codebase's existing
+// `pattern_matches` precedent (escape-then-substitute via `regex::escape`),
+// a fully spec-compliant translator could in principle accept almost any
+// input string without a compile failure. An unmatched '[' is used below as
+// the "invalid pattern" fixture because it is the most common shape of glob
+// input that fails regex compilation regardless of whether the
+// implementation supports POSIX bracket-class passthrough or a naive
+// (unescaped) substitution scheme. If the chosen implementation escapes '['
+// as a plain literal, this fixture will need to be replaced — flag any such
+// mismatch back to the architect for `assertions.md` clarification.
+#[test]
+fn test_validate_repository_scope_patterns_rejects_invalid_include_pattern() {
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["payments-[".to_string()],
+        exclude_patterns: vec![],
+    });
+    let result = validate_repository_scope_patterns(&scope);
+    assert!(
+        matches!(
+            &result,
+            Err(ConfigLoadError::InvalidRepositoryScopePattern(p)) if p == "payments-["
+        ),
+        "expected InvalidRepositoryScopePattern(\"payments-[\"), got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_validate_repository_scope_patterns_rejects_invalid_exclude_pattern() {
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["payments-*".to_string()],
+        exclude_patterns: vec!["payments-[".to_string()],
+    });
+    let result = validate_repository_scope_patterns(&scope);
+    assert!(
+        matches!(
+            &result,
+            Err(ConfigLoadError::InvalidRepositoryScopePattern(p)) if p == "payments-["
+        ),
+        "expected InvalidRepositoryScopePattern(\"payments-[\"), got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_validate_repository_scope_patterns_reports_first_invalid_pattern_fail_fast() {
+    let scope = Some(RepositoryScope {
+        include_patterns: vec![
+            "valid-one".to_string(),
+            "payments-[".to_string(),
+            "also-[invalid".to_string(),
+        ],
+        exclude_patterns: vec![],
+    });
+    let result = validate_repository_scope_patterns(&scope);
+    assert!(
+        matches!(
+            &result,
+            Err(ConfigLoadError::InvalidRepositoryScopePattern(p)) if p == "payments-["
+        ),
+        "expected the FIRST invalid pattern to be reported (fail fast), got: {:?}",
+        result
+    );
+}
+
+// ---------------------------------------------------------------------------
+// QA audit (post-implementation): mutation-analysis kill tests
+//
+// Each test below was written after manually enumerating plausible mutants
+// against the real implementation and empirically confirming (by temporarily
+// applying the mutation, running the full existing suite, observing it pass,
+// then reverting) that no existing test detects the change. See
+// docs/spec/test-coverage.md for the full audit report.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_validate_repository_scope_patterns_rejects_space_character() {
+    // Space is not in the documented allow-list (ASCII letters, digits, '-',
+    // '_', '.', plus the '*'/'?' wildcards) but, unlike '[', it is NOT itself
+    // invalid regex syntax. A character-allowlist guard that was silently
+    // bypassed (e.g. `c if c.is_ascii_alphanumeric() || c == '-' || c == '_'`
+    // weakened to always match) would let this pattern compile successfully
+    // as a literal match instead of being rejected — the existing "invalid
+    // pattern" fixtures all use '[', which fails regex compilation on its own
+    // and so cannot distinguish "the allow-list rejected this" from "the
+    // allow-list was bypassed but the resulting regex happened to be
+    // malformed anyway". Confirmed empirically: replacing the allow-list
+    // guard with `true` leaves all 38 pre-existing repository-scope tests
+    // (core) and 22 webhook-level tests green.
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["payments api".to_string()],
+        exclude_patterns: vec![],
+    });
+    let result = validate_repository_scope_patterns(&scope);
+    assert!(
+        matches!(
+            &result,
+            Err(ConfigLoadError::InvalidRepositoryScopePattern(p)) if p == "payments api"
+        ),
+        "space is not an allowed pattern character and must be rejected: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_validate_repository_scope_patterns_rejects_at_sign_character() {
+    // Same rationale as the space test above, using a different character
+    // that is also regex-harmless on its own ('@' has no special meaning to
+    // the `regex` crate), to guard against a mutant that special-cases one
+    // rejected character but not the class as a whole.
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["payments@api".to_string()],
+        exclude_patterns: vec![],
+    });
+    let result = validate_repository_scope_patterns(&scope);
+    assert!(
+        matches!(
+            &result,
+            Err(ConfigLoadError::InvalidRepositoryScopePattern(p)) if p == "payments@api"
+        ),
+        "'@' is not an allowed pattern character and must be rejected: {:?}",
+        result
+    );
+}
+
+#[test]
+fn test_is_repository_in_scope_unparseable_pattern_never_matches() {
+    // Per the documented contract on `matches_any_repository_scope_pattern`,
+    // an include or exclude pattern that fails to compile (e.g. it slipped
+    // past startup validation, or `validate_repository_scope_patterns` was
+    // never called for this scope) must be treated as "matches nothing", not
+    // "matches everything" and not a panic. This targets the
+    // `.unwrap_or(false)` fallback directly: flipping it to
+    // `.unwrap_or(true)` leaves the entire pre-existing repository-scope test
+    // suite green (confirmed empirically), because none of those tests ever
+    // put an uncompilable pattern into a scope actually passed to
+    // `is_repository_in_scope`.
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["payments-[".to_string()], // never compiles
+        exclude_patterns: vec![],
+    });
+    assert!(
+        !is_repository_in_scope(&scope, "payments-api"),
+        "an unparseable include pattern must never silently match a repository name"
+    );
+    assert!(
+        !is_repository_in_scope(&scope, "anything-else"),
+        "an unparseable include pattern must never silently match a repository name"
+    );
+}
+
+#[test]
+fn test_validate_repository_scope_patterns_include_violation_reported_before_exclude() {
+    // The doc comment on `validate_repository_scope_patterns` specifies
+    // patterns are checked "in that order": include_patterns THEN
+    // exclude_patterns, reporting the FIRST failure (fail fast). The existing
+    // "reports first invalid pattern" test only puts multiple invalid
+    // patterns inside include_patterns, so it cannot detect a mutant that
+    // swaps iteration order to check exclude_patterns before
+    // include_patterns — with only one list populated, order doesn't matter.
+    // This test puts an invalid pattern in BOTH lists, so only the correct
+    // (include-first) order reports the include-list violation. Confirmed
+    // empirically: swapping `.include_patterns.iter().chain(exclude...)` to
+    // `.exclude_patterns.iter().chain(include...)` leaves the entire
+    // pre-existing suite green.
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["payments-[".to_string()],
+        exclude_patterns: vec!["billing-[".to_string()],
+    });
+    let result = validate_repository_scope_patterns(&scope);
+    assert!(
+        matches!(
+            &result,
+            Err(ConfigLoadError::InvalidRepositoryScopePattern(p)) if p == "payments-["
+        ),
+        "expected the include-list violation to be reported first (fail fast, in-order), got: {:?}",
+        result
+    );
+}
+
+// ---------------------------------------------------------------------------
+// QA audit (post-implementation): adversarial input probing
+//
+// Manual fuzz-substitute probing (cargo-fuzz is not configured in this
+// repo). See docs/spec/test-coverage.md for the full audit report.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_is_repository_in_scope_many_wildcards_does_not_exhibit_catastrophic_backtracking() {
+    // Classic ReDoS shape: many overlapping '*' wildcards followed by a
+    // literal terminal character that never appears in the haystack,
+    // matched against a long string sharing the wildcards' literal prefix.
+    // A backtracking regex engine (e.g. naive PCRE-style) exhibits
+    // exponential blowup on this shape. The `regex` crate's automata-based
+    // engine is documented to guarantee linear-time matching; this test
+    // pins that guarantee down empirically rather than trusting it blindly,
+    // since `is_repository_in_scope` is reachable from untrusted webhook
+    // input (`repo_name`) combined with operator-authored patterns.
+    let pattern: String = "a*".repeat(30) + "z"; // 'z' is an allowed literal char
+    let scope = Some(RepositoryScope {
+        include_patterns: vec![pattern],
+        exclude_patterns: vec![],
+    });
+    // Shares the 'a' prefix with the pattern but never ends in 'z' --
+    // the worst case for a backtracking engine.
+    let haystack = "a".repeat(60);
+
+    let start = std::time::Instant::now();
+    let result = is_repository_in_scope(&scope, &haystack);
+    let elapsed = start.elapsed();
+
+    assert!(
+        !result,
+        "a pattern requiring a trailing 'z' must not match a haystack with none"
+    );
+    assert!(
+        elapsed.as_millis() < 500,
+        "pattern matching took {:?}, exceeding the linear-time budget -- possible catastrophic backtracking",
+        elapsed
+    );
+}
+
+#[test]
+fn test_is_repository_in_scope_very_long_pattern_and_repo_name_does_not_hang() {
+    // A pathologically long, but individually valid, pattern and repo name.
+    // Must complete quickly and must not panic (e.g. on regex compilation
+    // limits or allocation).
+    let pattern: String = "a?".repeat(2_000) + "*";
+    let scope = Some(RepositoryScope {
+        include_patterns: vec![pattern],
+        exclude_patterns: vec![],
+    });
+    let haystack = "a".repeat(5_000);
+
+    let start = std::time::Instant::now();
+    let _ = is_repository_in_scope(&scope, &haystack); // must not panic or hang
+    let elapsed = start.elapsed();
+
+    assert!(
+        elapsed.as_millis() < 1000,
+        "matching a very long pattern/haystack took {:?}, exceeding the time budget",
+        elapsed
+    );
+}
+
+#[test]
+fn test_is_repository_in_scope_unicode_repo_name_never_panics_and_does_not_falsely_match() {
+    // Repository names are attacker-influenced (they originate in the raw
+    // GitHub webhook JSON body). None of these adversarial Unicode variants
+    // should panic, and none should be treated as equal to the plain-ASCII
+    // pattern "payments-api" -- they all contain extra/foreign code points,
+    // so an anchored full-string match must reject them.
+    let scope = Some(RepositoryScope {
+        include_patterns: vec!["payments-api".to_string()],
+        exclude_patterns: vec![],
+    });
+    let adversarial_names = [
+        "payments-api\u{200F}",  // trailing RTL mark
+        "payments\u{0301}-api",  // combining acute accent injected mid-string
+        "\u{1F4A5}payments-api", // emoji prefix (multi-byte UTF-8)
+        "payments-api\u{1F4A5}", // emoji suffix
+        "\u{202E}payments-api",  // RTL override at start
+        "\u{0000}payments-api",  // embedded NUL
+    ];
+    for name in adversarial_names {
+        assert!(
+            !is_repository_in_scope(&scope, name),
+            "adversarial unicode variant {:?} must not match the literal ASCII pattern",
+            name
+        );
+    }
+}
+
+#[test]
+fn test_validate_repository_scope_patterns_rejects_unicode_pattern_characters() {
+    // Emoji, RTL marks, and combining diacritics are all outside the
+    // documented ASCII allow-list and must be rejected at startup
+    // validation -- not silently accepted, and not a panic.
+    let adversarial_patterns = [
+        "payments-\u{1F4A5}",
+        "payments\u{0301}-api",
+        "\u{202E}payments-api",
+        "payments-api\u{200F}",
+    ];
+    for pattern in adversarial_patterns {
+        let scope = Some(RepositoryScope {
+            include_patterns: vec![pattern.to_string()],
+            exclude_patterns: vec![],
+        });
+        let result = validate_repository_scope_patterns(&scope);
+        assert!(
+            result.is_err(),
+            "pattern {:?} contains non-ASCII characters and must be rejected: {:?}",
+            pattern,
+            result
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Property-based tests (Tier 3)
+// ---------------------------------------------------------------------------
+
+proptest! {
+    #[test]
+    fn prop_is_repository_in_scope_none_scope_always_true(
+        repo_name in "[a-zA-Z][a-zA-Z0-9_-]{0,20}"
+    ) {
+        prop_assert!(is_repository_in_scope(&None, &repo_name));
+    }
+
+    #[test]
+    fn prop_is_repository_in_scope_empty_include_always_false(
+        repo_name in "[a-zA-Z][a-zA-Z0-9_-]{0,20}",
+        exclude in proptest::collection::vec("[a-zA-Z][a-zA-Z0-9_-]{0,10}", 0..3)
+    ) {
+        let scope = Some(RepositoryScope {
+            include_patterns: vec![],
+            exclude_patterns: exclude,
+        });
+        prop_assert!(!is_repository_in_scope(&scope, &repo_name));
+    }
+
+    #[test]
+    fn prop_is_repository_in_scope_exact_literal_pattern_matches_case_insensitively(
+        repo_name in "[a-zA-Z][a-zA-Z0-9_-]{0,20}"
+    ) {
+        let scope = Some(RepositoryScope {
+            include_patterns: vec![repo_name.to_uppercase()],
+            exclude_patterns: vec![],
+        });
+        prop_assert!(is_repository_in_scope(&scope, &repo_name));
+    }
+
+    #[test]
+    fn prop_is_repository_in_scope_identical_include_and_exclude_pattern_always_excludes(
+        repo_name in "[a-zA-Z][a-zA-Z0-9_-]{0,20}"
+    ) {
+        let scope = Some(RepositoryScope {
+            include_patterns: vec![repo_name.clone()],
+            exclude_patterns: vec![repo_name.clone()],
+        });
+        prop_assert!(!is_repository_in_scope(&scope, &repo_name));
+    }
+
+    #[test]
+    fn prop_is_repository_in_scope_never_panics_on_glob_like_input(
+        repo_name in "[a-zA-Z0-9*?._-]{0,20}",
+        pattern in "[a-zA-Z0-9*?._-]{0,20}"
+    ) {
+        // Restricted to characters that any reasonable glob->regex translator
+        // should treat as valid (letters, digits, the documented wildcards,
+        // and common literal separators) — brackets/backslashes are exercised
+        // separately via validate_repository_scope_patterns, whose entire
+        // purpose is to reject invalid patterns before they ever reach this
+        // function.
+        let scope = Some(RepositoryScope {
+            include_patterns: vec![pattern],
+            exclude_patterns: vec![],
+        });
+        let _ = is_repository_in_scope(&scope, &repo_name); // must not panic
+    }
+
+    #[test]
+    fn prop_validate_repository_scope_patterns_never_panics_on_arbitrary_input(
+        pattern in ".*"
+    ) {
+        // validate_repository_scope_patterns exists specifically to safely
+        // reject untrusted operator input at startup — it must never panic,
+        // no matter how malformed the pattern text is.
+        let scope = Some(RepositoryScope {
+            include_patterns: vec![pattern],
+            exclude_patterns: vec![],
+        });
+        let _ = validate_repository_scope_patterns(&scope); // must not panic
     }
 }

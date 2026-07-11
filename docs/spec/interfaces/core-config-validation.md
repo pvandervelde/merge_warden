@@ -388,6 +388,145 @@ async fn communicate_renovate_stability_status(
 
 ---
 
+## Repository Scope Filtering Additions
+
+The following types, constants, and functions are added to `crates/core/src/config.rs` as part of
+[FR-009 (Repository Scope Filtering)](../requirements/functional-requirements.md#fr-009-repository-scope-filtering).
+
+### New Type: `RepositoryScope`
+
+Location: `crates/core/src/config.rs`
+
+```rust
+/// Declares which repositories Merge Warden actively processes, independent of
+/// which repositories the GitHub App installation can access.
+///
+/// Needed because large organisations may be forced to install the GitHub App
+/// with "All repositories" scope (install-scope limits prevent selecting
+/// individual repositories once an org exceeds a certain size), which means
+/// the service receives webhooks for repositories it should not act on.
+///
+/// # Matching semantics
+///
+/// See [`is_repository_in_scope`] for the full precedence contract. In short:
+/// exclude always wins over include, and an explicitly empty `include_patterns`
+/// matches nothing.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
+pub struct RepositoryScope {
+    /// Glob patterns (`*` = any sequence, `?` = single character) matched
+    /// case-insensitively against the bare repository name (not `owner/repo`).
+    pub include_patterns: Vec<String>,
+
+    /// Glob patterns that take precedence over `include_patterns` when matched.
+    ///
+    /// Defaults to an empty list (no exclusions) when the key is omitted from TOML.
+    #[serde(default)]
+    pub exclude_patterns: Vec<String>,
+}
+```
+
+### Extension to `ApplicationDefaults`
+
+```rust
+pub struct ApplicationDefaults {
+    // ... existing fields unchanged ...
+
+    /// Optional repository scope filter.
+    ///
+    /// When `None`, every repository the installation receives webhooks for
+    /// is processed — identical to pre-FR-009 behaviour.
+    #[serde(default)]
+    pub repository_scope: Option<RepositoryScope>,
+}
+```
+
+### New Function: `is_repository_in_scope`
+
+```rust
+/// Determines whether `repo_name` should be processed, given the configured
+/// `RepositoryScope`.
+///
+/// # Contract
+///
+/// - `scope` is `None` → `true` (no scope configured; process everything).
+/// - `scope.include_patterns` is empty → `false` (explicit "pause everything" lever),
+///   regardless of `exclude_patterns`.
+/// - Otherwise → `true` iff `repo_name` matches at least one pattern in
+///   `include_patterns` AND does not match any pattern in `exclude_patterns`.
+///
+/// Matching is case-insensitive (`repo_name` and each pattern are lowercased
+/// before comparison, consistent with the topic-matching convention in
+/// [conditional-policies.md](./conditional-policies.md)) and is performed
+/// against the bare repository name only — `owner/repo` matching is not supported.
+///
+/// # Arguments
+///
+/// * `scope` — the configured repository scope, or `None`.
+/// * `repo_name` — bare repository name extracted from the webhook payload.
+pub fn is_repository_in_scope(scope: &Option<RepositoryScope>, repo_name: &str) -> bool {
+    todo!("See docs/spec/architecture/event-processing.md#repository-scope-filtering")
+}
+```
+
+### New Function: `validate_repository_scope_patterns`
+
+```rust
+/// Compiles every pattern in `include_patterns` and `exclude_patterns` to confirm
+/// each one translates to a valid anchored regex, without retaining the compiled form.
+///
+/// Called once by `load_config()` at startup (see
+/// [server-config.md](./server-config.md#load_config)) so that a typo in an
+/// operator-authored pattern fails fast at process start rather than silently
+/// matching nothing (or everything) at webhook-handling time.
+///
+/// # Errors
+///
+/// Returns `ConfigurationError::InvalidRepositoryScopePattern(String)` on the
+/// first invalid pattern encountered, where the `String` is the offending
+/// pattern text. Validation stops at the first failure (fail fast).
+pub fn validate_repository_scope_patterns(
+    scope: &Option<RepositoryScope>,
+) -> Result<(), ConfigurationError> {
+    todo!("See docs/spec/design/configuration-system.md#repository-scope-filtering")
+}
+```
+
+### New Variant: `ConfigurationError::InvalidRepositoryScopePattern`
+
+```rust
+pub enum ConfigurationError {
+    // ... existing variants unchanged ...
+
+    /// A pattern in `repository_scope.include_patterns` or
+    /// `repository_scope.exclude_patterns` is not a valid glob pattern.
+    ///
+    /// The inner `String` is the offending pattern text, surfaced verbatim so
+    /// operators can locate it in their TOML file.
+    InvalidRepositoryScopePattern(String),
+}
+```
+
+### Testing Requirements for `RepositoryScope` and `is_repository_in_scope`
+
+#### Config unit tests (`crates/core/src/config_tests.rs`)
+
+- `RepositoryScope` default: `include_patterns` empty, `exclude_patterns` empty
+- TOML round-trip: a `[repository_scope]` block with both `include_patterns` and `exclude_patterns` parses correctly
+- TOML round-trip: `[repository_scope]` with `include_patterns` only (no `exclude_patterns` key) parses with `exclude_patterns = []`
+- `is_repository_in_scope`: `scope = None` → `true` for any `repo_name` (absent scope)
+- `is_repository_in_scope`: `scope = Some(RepositoryScope { include_patterns: vec![], .. })` → `false`, regardless of `exclude_patterns` (empty include)
+- `is_repository_in_scope`: `include_patterns = ["payments-*"]` → `"payments-api"` matches, `"checkout"` does not (wildcard match)
+- `is_repository_in_scope`: `include_patterns = ["billing-?"]` → `"billing-1"` matches, `"billing-12"` does not (single-char wildcard)
+- `is_repository_in_scope`: `include_patterns = ["*"]`, `exclude_patterns = ["payments-legacy"]` → `"payments-legacy"` is excluded; all other names match (exclude overrides include)
+- `is_repository_in_scope`: repo name matches both an include and an exclude pattern → excluded (exclude takes precedence)
+- `is_repository_in_scope`: matching is case-insensitive (`"Payments-API"` matches `include_patterns = ["payments-*"]`)
+- `validate_repository_scope_patterns`: all valid patterns → `Ok(())`
+- `validate_repository_scope_patterns`: one invalid pattern in `include_patterns` → `Err(ConfigurationError::InvalidRepositoryScopePattern(_))` (invalid pattern rejected at load)
+- `validate_repository_scope_patterns`: one invalid pattern in `exclude_patterns` → `Err(ConfigurationError::InvalidRepositoryScopePattern(_))`
+- `validate_repository_scope_patterns`: `scope = None` → `Ok(())`
+
+---
+
 ## Testing Requirements
 
 ### Unit tests (`crates/core/src/config_tests.rs`)

@@ -269,6 +269,12 @@ impl QueueIngress {
 ///    b. Run the core `check_pull_request` (or equivalent) logic.
 ///    c. On success: call `event.ack.complete().await`.
 ///    d. On domain error: call `event.ack.reject(&err.to_string()).await`.
+///
+///    Repository-scope-filtered events — whether in scope, out of scope, or carrying an
+///    unparseable payload (see
+///    [event-processing.md](../architecture/event-processing.md#repository-scope-filtering)) —
+///    are all resolved inside step 2b's core processing call and fall under the success
+///    case (2c); no changes to `EventIngress` or `EventAcknowledger` are required.
 /// 3. On `Ok(None)`: break, return `Ok(())`.
 /// 4. On `Err(e)`: return `Err(e)` (caller decides whether to restart).
 ///

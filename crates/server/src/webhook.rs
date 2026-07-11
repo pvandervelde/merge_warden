@@ -22,7 +22,8 @@ use github_bot_sdk::{
 };
 use merge_warden_core::{
     config::{
-        resolve_pull_request_config, ApplicationDefaults, CurrentPullRequestValidationConfiguration,
+        is_repository_in_scope, resolve_pull_request_config, ApplicationDefaults,
+        CurrentPullRequestValidationConfiguration,
     },
     errors::ConfigLoadError,
     MergeWarden,
@@ -455,6 +456,37 @@ impl WebhookHandler for MergeWardenWebhookHandler {
         &self,
         envelope: &EventEnvelope,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+        // FR-009: Repository Scope Filtering.
+        //
+        // Extracted from the RAW webhook JSON body (`envelope.payload.raw()`),
+        // not the SDK-populated `envelope.repository.name` structured field —
+        // the scope gate is defined as inspecting the wire payload before any
+        // SDK interpretation of it. See docs/spec/architecture/event-processing.md
+        // ("Repository Scope Filtering").
+        let raw_repo_name = envelope.payload.raw()["repository"]["name"].as_str();
+        let repo_name = match raw_repo_name {
+            Some(name) if !name.is_empty() => name,
+            _ => {
+                warn!(
+                    repo_name = ?raw_repo_name,
+                    event_type = %envelope.event_type,
+                    delivery_id = ?envelope.metadata.delivery_id,
+                    "repository name unparseable in webhook payload; skipping"
+                );
+                return Ok(());
+            }
+        };
+
+        if !is_repository_in_scope(&self.policies.repository_scope, repo_name) {
+            info!(
+                repo_name,
+                event_type = %envelope.event_type,
+                delivery_id = ?envelope.metadata.delivery_id,
+                "repository not in configured scope; skipping"
+            );
+            return Ok(());
+        }
+
         if envelope.event_type == "status" {
             return self
                 .handle_status_event(envelope)

@@ -654,7 +654,12 @@ impl<P: PullRequestProvider + ConfigFetcher + std::fmt::Debug> MergeWarden<P> {
                     // Add invalid title label
                     let result = self
                         .provider
-                        .add_labels(repo_owner, repo_name, pr.number, &[title_label.to_string()])
+                        .add_labels(
+                            repo_owner,
+                            repo_name,
+                            pr.number,
+                            std::slice::from_ref(title_label),
+                        )
                         .await;
 
                     match result {
@@ -1002,7 +1007,7 @@ Please update the PR title to match the conventional commit message guidelines."
                             repo_owner,
                             repo_name,
                             pr.number,
-                            &[work_item_label.to_string()],
+                            std::slice::from_ref(work_item_label),
                         )
                         .await;
                     match result {

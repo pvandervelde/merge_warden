@@ -114,6 +114,25 @@ enabled = false
 # Label applied when the PR has at least one approving review.
 # approved_label = "status: approved"
 
+# Repository scope filtering — restricts which repositories Merge Warden
+# actively processes, independent of which repositories the GitHub App
+# installation can technically reach (relevant for large organisations
+# forced to install with "All repositories" scope).
+#
+# Omit this entire section to process every repository the installation
+# receives webhooks for (default, full backward compatibility).
+# [policies.repository_scope]
+# Glob patterns (`*` = any sequence, `?` = single character) matched
+# case-insensitively against the bare repository name. A repository must
+# match at least one entry to be processed. Setting this to an empty list
+# ([]) is a deliberate fail-closed "pause everything" lever.
+# include_patterns = ["payments-*", "checkout", "billing-?"]
+
+# Glob patterns that take precedence over include_patterns — a repository
+# matching an exclude pattern is never processed, even if it also matches
+# an include pattern. Defaults to an empty list when omitted.
+# exclude_patterns = ["payments-legacy"]
+
 # Configuration for smart change type label detection
 [change_type_labels]
 # Enable intelligent change type label detection

@@ -413,6 +413,20 @@ pub struct ApplicationDefaults {
     /// merged into the resolution chain via [`resolve_pull_request_config`].
     #[serde(default)]
     pub org_policy_source: Option<OrgPolicySource>,
+
+    /// Optional repository allow/deny scope filter.
+    ///
+    /// When `None` (default), merge-warden processes events for every
+    /// repository the GitHub App is installed on — full backward
+    /// compatibility with pre-FR-009 behaviour.
+    ///
+    /// When `Some`, this is a webhook-ingress-level gate applied by
+    /// [`crate::config::is_repository_in_scope`] — it is deliberately NOT
+    /// part of the [`PolicySet`] merge chain (see
+    /// [`PolicySet::from_application_defaults`]), since it controls whether
+    /// an event is processed at all, not how it is validated.
+    #[serde(default)]
+    pub repository_scope: Option<RepositoryScope>,
 }
 
 impl ApplicationDefaults {
@@ -469,6 +483,7 @@ impl Default for ApplicationDefaults {
             renovate_stability: RenovateStabilityConfig::default(),
             bot_mention: ApplicationDefaults::default_bot_mention(),
             org_policy_source: None,
+            repository_scope: None,
         }
     }
 }
@@ -517,6 +532,55 @@ pub struct OrgPolicySource {
     /// may want to surface explicitly.
     #[serde(default)]
     pub fail_if_unreachable: bool,
+}
+
+/// Repository allow/deny scope filter (FR-009: Repository Scope Filtering).
+///
+/// Added to [`ApplicationDefaults`] as an optional field. When absent
+/// (`None`), every repository the GitHub App is installed on is processed —
+/// identical to pre-FR-009 behaviour. When present, [`is_repository_in_scope`]
+/// gates webhook processing before any per-repository configuration is
+/// loaded.
+///
+/// This is deliberately NOT part of the [`PolicySet`] merge chain: it
+/// controls whether an event is processed at all (an ingress-level
+/// decision), not how a processed pull request is validated.
+///
+/// # Pattern syntax
+///
+/// Patterns are glob-like, restricted to ASCII letters, digits, `-`, `_`,
+/// `.`, and two wildcards:
+/// - `*` matches any sequence of characters, including the empty sequence.
+/// - `?` matches exactly one character.
+///
+/// Every other character (e.g. `[`, `]`, `(`, `)`, `\`, whitespace) makes the
+/// entire pattern invalid — see [`validate_repository_scope_patterns`].
+/// Matching is case-insensitive and anchored to the full repository name
+/// (no substring matches).
+///
+/// # TOML example
+///
+/// ```toml
+/// [policies.repository_scope]
+/// include_patterns = ["payments-*", "checkout"]
+/// exclude_patterns = ["payments-legacy"]
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RepositoryScope {
+    /// Repository name patterns that are in scope (OR semantics).
+    ///
+    /// An empty list means "no repositories are in scope" — this is a
+    /// fail-closed default, distinct from `repository_scope` being absent
+    /// entirely (which means "all repositories are in scope").
+    pub include_patterns: Vec<String>,
+
+    /// Repository name patterns that are excluded from scope (OR semantics).
+    ///
+    /// Checked after `include_patterns`; a repository matching both an
+    /// include and an exclude pattern is excluded (exclude takes
+    /// precedence).
+    #[serde(default)]
+    pub exclude_patterns: Vec<String>,
 }
 
 /// Internal deserialisation type for a single condition inside a conditional policy block.
@@ -2293,6 +2357,168 @@ pub(crate) fn pattern_matches(pattern: &str, file_path: &str) -> bool {
 
     // Exact match fallback
     pattern == file_path
+}
+
+// ---------------------------------------------------------------------------
+// FR-009: Repository Scope Filtering
+// ---------------------------------------------------------------------------
+
+/// Compiles a `repository_scope` glob pattern into an anchored,
+/// case-insensitive [`regex::Regex`].
+///
+/// # Pattern syntax
+///
+/// Only ASCII letters, digits, `-`, `_`, `.`, and the two wildcards `*` (any
+/// sequence, including the empty sequence) and `?` (exactly one character)
+/// are permitted. Any other character is rejected — the caller treats this
+/// as "this pattern is invalid" rather than falling back to a partial or
+/// substring match.
+///
+/// A literal `.` in the pattern is translated to an escaped `\.` in the
+/// output regex (a literal dot), NOT left as the regex "any character"
+/// metacharacter — only `*` and `?` act as wildcards here.
+///
+/// # Errors
+/// Returns `Err(())` when `pattern` is empty, contains a disallowed
+/// character, or in the (expected to be unreachable given the allow-list)
+/// case that the translated regex fails to compile.
+///
+/// An empty pattern is rejected outright rather than accepted as `^$`: it
+/// would compile successfully but could never usefully match, since
+/// `handle_event` already discards empty repository names as malformed
+/// before `is_repository_in_scope` is ever called — an empty-string pattern
+/// in an operator's config is always a mistake, not a meaningful "match
+/// nothing" entry, so it is caught here at startup instead of silently
+/// becoming a dead no-op.
+fn compile_repository_scope_pattern(pattern: &str) -> Result<regex::Regex, ()> {
+    if pattern.is_empty() {
+        return Err(());
+    }
+
+    let mut translated = String::with_capacity(pattern.len() * 2);
+    for ch in pattern.chars() {
+        match ch {
+            '*' => translated.push_str(".*"),
+            '?' => translated.push('.'),
+            '.' => translated.push_str(r"\."),
+            c if c.is_ascii_alphanumeric() || c == '-' || c == '_' => translated.push(c),
+            _ => return Err(()),
+        }
+    }
+
+    let anchored = format!("^{}$", translated);
+    regex::RegexBuilder::new(&anchored)
+        .case_insensitive(true)
+        .build()
+        .map_err(|_| ())
+}
+
+/// Returns `true` if `repo_name` matches at least one pattern in `patterns`.
+///
+/// Each pattern is compiled via [`compile_repository_scope_pattern`]; a
+/// pattern that fails to compile matches nothing rather than panicking —
+/// the same panic-free contract [`is_repository_in_scope`] relies on when it
+/// calls this helper once for `include_patterns` and once for
+/// `exclude_patterns`.
+fn matches_any_repository_scope_pattern(patterns: &[String], repo_name: &str) -> bool {
+    patterns.iter().any(|pattern| {
+        compile_repository_scope_pattern(pattern)
+            .map(|regex| regex.is_match(repo_name))
+            .unwrap_or(false)
+    })
+}
+
+/// Returns `true` if `repo_name` is in scope according to `scope`.
+///
+/// # Contract
+/// - `scope == None` — every repository is in scope (full backward
+///   compatibility with pre-FR-009 behaviour).
+/// - `scope.include_patterns` empty — no repository is in scope,
+///   regardless of `exclude_patterns` (fail-closed).
+/// - Otherwise — in scope iff `repo_name` matches at least one
+///   `include_patterns` entry AND matches zero `exclude_patterns` entries.
+///   `exclude_patterns` always takes precedence over a matching include
+///   pattern.
+///
+/// Matching is case-insensitive and anchored to the full repository name.
+/// Any pattern that fails to compile (see
+/// [`compile_repository_scope_pattern`]) is treated as a non-match rather
+/// than causing a panic — operators are expected to catch invalid patterns
+/// at startup via [`validate_repository_scope_patterns`], not at
+/// webhook-handling time.
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_core::config::{is_repository_in_scope, RepositoryScope};
+///
+/// let scope = Some(RepositoryScope {
+///     include_patterns: vec!["payments-*".to_string()],
+///     exclude_patterns: vec!["payments-legacy".to_string()],
+/// });
+/// assert!(is_repository_in_scope(&scope, "payments-api"));
+/// assert!(!is_repository_in_scope(&scope, "payments-legacy"));
+/// assert!(!is_repository_in_scope(&scope, "checkout"));
+/// ```
+pub fn is_repository_in_scope(scope: &Option<RepositoryScope>, repo_name: &str) -> bool {
+    let scope = match scope {
+        Some(scope) => scope,
+        None => return true,
+    };
+
+    if scope.include_patterns.is_empty() {
+        return false;
+    }
+
+    if !matches_any_repository_scope_pattern(&scope.include_patterns, repo_name) {
+        return false;
+    }
+
+    !matches_any_repository_scope_pattern(&scope.exclude_patterns, repo_name)
+}
+
+/// Validates every pattern in `scope`'s `include_patterns` and
+/// `exclude_patterns` (in that order) at startup.
+///
+/// Intended to be called once during configuration loading (see
+/// `crates/server/src/config.rs::load_config`) so that a malformed pattern
+/// fails fast with a clear error, rather than silently matching nothing (or
+/// everything) at webhook-handling time.
+///
+/// # Errors
+/// Returns `Err(ConfigLoadError::InvalidRepositoryScopePattern)` on the
+/// FIRST pattern that fails to compile (fail fast) — it does not collect
+/// every invalid pattern.
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_core::config::{validate_repository_scope_patterns, RepositoryScope};
+///
+/// let scope = Some(RepositoryScope {
+///     include_patterns: vec!["payments-*".to_string()],
+///     exclude_patterns: vec![],
+/// });
+/// assert!(validate_repository_scope_patterns(&scope).is_ok());
+/// ```
+pub fn validate_repository_scope_patterns(
+    scope: &Option<RepositoryScope>,
+) -> Result<(), ConfigLoadError> {
+    let scope = match scope {
+        Some(scope) => scope,
+        None => return Ok(()),
+    };
+
+    for pattern in scope
+        .include_patterns
+        .iter()
+        .chain(scope.exclude_patterns.iter())
+    {
+        compile_repository_scope_pattern(pattern)
+            .map_err(|_| ConfigLoadError::InvalidRepositoryScopePattern(pattern.clone()))?;
+    }
+
+    Ok(())
 }
 
 /// Loads the merge-warden configuration from the given path.
