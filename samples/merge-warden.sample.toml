@@ -114,6 +114,35 @@ enabled = false
 # Label applied when the PR has at least one approving review.
 # approved_label = "status: approved"
 
+# Renovate stability-days label management — reflects the state of the
+# Renovate `renovate/stability-days` commit-status check as a label, so
+# reviewers see at a glance whether the stability period has elapsed.
+# Purely informational: never blocks merging or affects the check conclusion.
+[policies.pullRequests.renovateStability]
+# Once enabled by either this repo or the app-level default, the feature stays
+# enabled — a repo cannot use `enabled = false` to opt back out of an
+# app-level `enabled = true`. To disable everywhere, set it at the app level.
+enabled = true
+
+# Label applied while the stability period has not yet elapsed. Removed
+# automatically once the Renovate check reports success.
+pending_stability_label = "pr-validation: pending-stability"
+
+# Bypass rules — allow specific GitHub usernames to skip validations for this
+# repository. Uncomment to add or override a bypass list; omitted sub-tables
+# fall back to whatever the app-level or org-level defaults specify.
+# [policies.bypassRules.title_convention]
+# enabled = true
+# users = ["release-bot"]
+#
+# [policies.bypassRules.work_items]
+# enabled = true
+# users = ["release-bot"]
+#
+# [policies.bypassRules.size]
+# enabled = true
+# users = ["renovate[bot]", "dependabot[bot]"]
+
 # Repository scope filtering — restricts which repositories Merge Warden
 # actively processes, independent of which repositories the GitHub App
 # installation can technically reach (relevant for large organisations
@@ -182,6 +211,15 @@ chore = "#e1e4e8"    # Light gray - maintenance
 ci = "#fbca04"       # Yellow - CI/CD
 build = "#c5def5"    # Light blue - build system
 revert = "#b60205"   # Dark red - reverts
+
+# Labels applied based on keywords found in the PR title or body, independent
+# of the conventional-commit type. All fields are optional; omitted fields
+# fall back to the built-in defaults shown below.
+[change_type_labels.keyword_labels]
+breaking_change = "breaking-change"   # PR title contains `!:` or body contains "breaking change"
+security = "security"                 # PR body contains "security" or "vulnerability"
+hotfix = "hotfix"                     # PR body contains "hotfix"
+tech_debt = "tech-debt"               # PR body contains "technical debt" or "tech debt"
 
 # Configuration for the label detection strategy
 [change_type_labels.detection_strategy]

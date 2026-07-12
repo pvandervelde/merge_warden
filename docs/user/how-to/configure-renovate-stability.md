@@ -42,12 +42,11 @@ No configuration file entry is required. The defaults are:
 
 ## Disabling the feature
 
-The merge rule for `enabled` is OR: the feature is active when **either** the
-application tier or the per-repo tier has `enabled = true`. Because the per-repo
-`[policies.pullRequests.renovateStability]` section defaults to `enabled = true`, any
-repository that has a `.github/merge-warden.toml` file (even one that does not mention
-Renovate stability at all) will keep the feature enabled regardless of the
-application-level setting.
+`enabled` merges via OR, not plain override: the feature is active when **either** the
+application tier or the per-repo tier has `enabled = true`. See
+[Configuration precedence — the Renovate-stability `enabled` merge rule](../explanation/config-precedence.md#exception-the-renovate-stability-enabled-merge-rule-is-or-not-override)
+for why this means application-level `enabled = false` alone is not enough to disable the
+feature for a repository that has its own config file.
 
 To fully disable the feature for a repository, set `enabled = false` explicitly in
 that repository's `.github/merge-warden.toml`:
@@ -66,11 +65,6 @@ that have no `.github/merge-warden.toml` at all), set it in `MERGE_WARDEN_CONFIG
 [policies.renovate_stability]
 enabled = false
 ```
-
-> **Note:** The application-level `enabled = false` does not suppress the feature for
-> repositories that have their own `.github/merge-warden.toml`, because the per-repo
-> defaults contribute `enabled = true` via the OR merge rule. Repositories that need
-> the feature off must set `enabled = false` in their own config file.
 
 ---
 

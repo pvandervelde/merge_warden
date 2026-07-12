@@ -24,6 +24,9 @@ HMAC-SHA256 signature verification
     ↓  (rejected with 401 if signature is invalid)
 202 Accepted returned to GitHub  ← response sent here, before processing
     ↓
+Repository scope check (if [policies.repository_scope] is configured)
+    ↓  (out-of-scope repositories are acknowledged and dropped here — no
+    ↓   further steps run, no GitHub API call is made)
 Event routing — only pull_request and pull_request_review events proceed
     ↓
 Per-repository config loaded from .github/merge-warden.toml via GitHub API
@@ -38,9 +41,18 @@ verified, before any policy evaluation or GitHub API calls. This ensures Merge W
 responds within GitHub's 10-second webhook delivery timeout regardless of how long
 downstream processing takes. Processing happens after the response is sent.
 
-> **In `queue` mode**, the payload is additionally persisted to a queue before the response
-> is returned, and a separate consumer task performs the policy evaluation. See
-> [Webhook vs queue receiver modes](receiver-modes.md) for details.
+The repository scope check is the **first** thing evaluated once processing begins —
+before Merge Warden even looks at the event type, and before any repository-specific data
+(config file, org policy, topics, custom properties) is fetched. A webhook payload with a
+missing or unparseable `repository.name` is also treated as out of scope. See
+[How to configure repository scope filtering](../how-to/configure-repository-scope.md).
+
+> **In `queue` mode**, Merge Warden itself does not perform the steps above the repository
+> scope check. It exposes no webhook POST endpoint at all — a wholly separate receiver
+> service performs webhook receipt, HMAC verification, and enqueueing, and Merge Warden
+> consumes the resulting message from the queue. The repository scope check and everything
+> below it runs the same way regardless of receiver mode. See
+> [Webhook vs queue receiver modes](receiver-modes.md) for the full architecture.
 
 ---
 

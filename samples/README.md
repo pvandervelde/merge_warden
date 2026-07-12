@@ -29,6 +29,12 @@ Pass it to `run-local.ps1` with:
 .\samples\run-local.ps1 -Repo "owner/repo" -AppConfigFile ".\samples\app-config.sample.toml"
 ```
 
+The file includes a commented-out `[policies.repository_scope]` block for restricting
+which repositories this server instance actively processes (independent of which
+repositories the GitHub App installation can access). See
+[docs/user/how-to/configure-repository-scope.md](../docs/user/how-to/configure-repository-scope.md)
+for the allow-list and fail-closed "pause everything" examples.
+
 ---
 
 ## merge-warden.sample.toml — per-repository config

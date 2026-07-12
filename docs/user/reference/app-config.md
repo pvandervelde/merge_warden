@@ -113,13 +113,10 @@ Controls the Renovate stability-days label management feature at the application
 | `enabled` | bool | `true` | When `true`, the `pending_stability_label` is applied to a PR while its `renovate/stability-days` commit status is `pending`, `error`, or `failure`. Removed when the status becomes `success`. |
 | `pending_stability_label` | string | `"pr-validation: pending-stability"` | Name of the label applied during the stability wait period. |
 
-The merge rule for `enabled` is OR: the feature is active when either the application
-tier or the per-repo tier has `enabled = true`. Because the per-repo
-`[policies.pullRequests.renovateStability]` defaults to `enabled = true`, repositories
-with any `.github/merge-warden.toml` (even one that does not mention this section) will
-keep the feature enabled. Setting `enabled = false` here only disables the feature for
-repositories that have no per-repo config file at all. To disable the feature for a
-specific repository, set `enabled = false` in that repository's `.github/merge-warden.toml`.
+`enabled` merges via OR rather than plain override — see
+[Configuration precedence — the Renovate-stability `enabled` merge rule](../explanation/config-precedence.md#exception-the-renovate-stability-enabled-merge-rule-is-or-not-override)
+for why setting `enabled = false` here does not disable the feature for repositories that
+have their own `.github/merge-warden.toml`.
 
 **Example:**
 
@@ -179,6 +176,39 @@ overridden by per-repo configs.
 
 ---
 
+## `[policies.repository_scope]`
+
+Optional. Restricts which repositories Merge Warden actively processes, independent of
+which repositories the GitHub App installation can technically access. Has no per-repo
+equivalent — this is an operator-only, application-level setting.
+
+| Field | Type | Default | Description |
+| :--- | :--- | :--- | :--- |
+| `include_patterns` | array of strings | *(section omitted)* | Glob patterns (`*`, `?`) matched case-insensitively against the bare repository name. A repository must match at least one entry to be processed. An explicit empty list (`[]`) processes **no** repositories — a fail-closed "pause everything" lever. |
+| `exclude_patterns` | array of strings | `[]` | Glob patterns that take precedence over `include_patterns`. A repository matching an exclude pattern is never processed, even if it also matches an include pattern. |
+
+**Behaviour when the section is absent:** every repository the GitHub App is installed on
+is processed — full backward compatibility with deployments that predate this feature.
+
+**Example:**
+
+```toml
+[policies.repository_scope]
+include_patterns = ["payments-*", "checkout", "billing-?"]
+exclude_patterns = ["payments-legacy"]
+```
+
+This is evaluated as a webhook-ingress-level gate **before** the configuration resolution
+chain runs — it is not one of the tiers described in
+[Configuration precedence](../explanation/config-precedence.md), and a repository excluded
+here cannot re-include itself via its own `.github/merge-warden.toml` (that file is never
+fetched for an out-of-scope repository).
+
+See [Configure repository scope filtering](../how-to/configure-repository-scope.md) for
+worked examples and pattern syntax details.
+
+---
+
 ## Complete example
 
 ```toml
@@ -234,6 +264,13 @@ users   = []
 [policies.bypass_rules.size]
 enabled = false
 users   = []
+
+# Optional — restrict which repositories Merge Warden actively processes.
+# Omit this section entirely to process every repository the GitHub App is
+# installed on (the pre-existing, backward-compatible behaviour).
+# [policies.repository_scope]
+# include_patterns = ["payments-*", "checkout", "billing-?"]
+# exclude_patterns = ["payments-legacy"]
 ```
 
 ---
@@ -242,5 +279,6 @@ users   = []
 
 - [Per-repository configuration schema](per-repo-config.md)
 - [Set application-level defaults](../how-to/set-app-level-defaults.md)
+- [Configure repository scope filtering](../how-to/configure-repository-scope.md)
 - [Configuration precedence](../explanation/config-precedence.md)
 - [Why there are two configuration files](../explanation/two-config-files.md)

@@ -55,13 +55,10 @@ list has no effect when `enabled = false`.
 
 ## Security considerations
 
-Bypass user lists are specified in the **per-repository configuration file** (`.github/merge-warden.toml`),
-which is stored in the repository itself. Anyone with write access to the default branch can
-add themselves to a bypass list.
-
-For stricter control, define bypass lists in the **application-level configuration file**
-(`MERGE_WARDEN_CONFIG_FILE`), which is controlled by the operator and cannot be overridden
-by repository maintainers. See [Set application-level policy defaults](set-app-level-defaults.md).
+Per-repo bypass lists are editable by anyone with write access to the repository's default
+branch. For a full discussion of the security tradeoffs and why you might prefer
+application-level or org-level bypass lists instead, see
+[Bypass rules in depth](../explanation/bypass-rules.md#security-considerations).
 
 Bypass rules **can also be set in the org-level policy file** (`merge-warden-org-policy.toml`), giving platform teams a central place to configure standard bot bypasses:
 

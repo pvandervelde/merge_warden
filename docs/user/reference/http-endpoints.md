@@ -5,7 +5,13 @@ description: "HTTP endpoints exposed by the Merge Warden server."
 
 # HTTP endpoints reference
 
-The Merge Warden server exposes two HTTP endpoints on the configured port (default `3000`).
+The Merge Warden server exposes up to two HTTP endpoints on the configured port (default
+`3000`), depending on `MERGE_WARDEN_RECEIVER_MODE`.
+
+- In **`webhook` mode** (the default), both endpoints below are registered.
+- In **`queue` mode**, only `GET /health` is registered. `POST /api/github/webhook` does not
+  exist in this mode — Merge Warden is a pure queue consumer and never receives a webhook
+  payload directly. See [Webhook vs queue receiver modes](../explanation/receiver-modes.md).
 
 ---
 
@@ -70,6 +76,12 @@ All other event types are acknowledged with `202 Accepted` and discarded.
 For `pull_request` events, only the following actions trigger processing:
 `opened`, `edited`, `ready_for_review`, `reopened`, `unlocked`, `synchronize`.
 
+If `[policies.repository_scope]` is configured in the application-level config, events for
+repositories outside the configured scope are also acknowledged without any further
+processing — regardless of event type or action — and without any GitHub API call being
+made on behalf of that repository. See
+[Configure repository scope filtering](../how-to/configure-repository-scope.md).
+
 ---
 
 ## Related
@@ -77,3 +89,4 @@ For `pull_request` events, only the following actions trigger processing:
 - [Environment variables reference](environment-variables.md)
 - [GitHub App permissions](github-app-permissions.md)
 - [Webhook vs queue receiver modes](../explanation/receiver-modes.md)
+- [Configure repository scope filtering](../how-to/configure-repository-scope.md)

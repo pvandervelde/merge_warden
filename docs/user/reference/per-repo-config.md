@@ -141,11 +141,9 @@ pending_stability_label = "pr-validation: pending-stability"
 | `pending_stability_label` | string | `"pr-validation: pending-stability"` | Label applied while the `renovate/stability-days` status is `pending`, `error`, or `failure`. |
 
 > **Note:** The label is purely informational and never affects the Merge Warden check
-> result. The merge rule for `enabled` is OR: once either tier enables this feature it
-> stays enabled. To disable it for a specific repository, set `enabled = false` explicitly
-> in that repository's `.github/merge-warden.toml`. Setting `enabled = false` in the
-> application-level configuration only suppresses the feature for repositories that have
-> no per-repo config file.
+> result. `enabled` merges via OR rather than plain override — see
+> [Configuration precedence — the Renovate-stability `enabled` merge rule](../explanation/config-precedence.md#exception-the-renovate-stability-enabled-merge-rule-is-or-not-override)
+> for the full explanation and how to disable the feature for a specific repository.
 
 ---
 
