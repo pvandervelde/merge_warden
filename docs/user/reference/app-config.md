@@ -184,7 +184,7 @@ equivalent — this is an operator-only, application-level setting.
 
 | Field | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
-| `include_patterns` | array of strings | *(section omitted)* | Glob patterns (`*`, `?`) matched case-insensitively against the bare repository name. A repository must match at least one entry to be processed. An explicit empty list (`[]`) processes **no** repositories — a fail-closed "pause everything" lever. |
+| `include_patterns` | array of strings | *(section omitted)* | Glob patterns (`*`, `?`, plus literal letters, digits, `-`, `_`, `.`) matched case-insensitively against the bare repository name. A repository must match at least one entry to be processed. An explicit empty list (`[]`) processes **no** repositories — a fail-closed "pause everything" lever. |
 | `exclude_patterns` | array of strings | `[]` | Glob patterns that take precedence over `include_patterns`. A repository matching an exclude pattern is never processed, even if it also matches an include pattern. |
 
 **Behaviour when the section is absent:** every repository the GitHub App is installed on

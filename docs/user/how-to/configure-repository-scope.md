@@ -74,7 +74,7 @@ Examples:
 | `billing-?` | `billing-1`, `billing-x` | `billing-12`, `billing-` |
 | `checkout` | `checkout`, `CheckOut` (case-insensitive) | `checkout-v2` |
 
-A pattern containing characters other than letters, digits, `-`, `_`, `*`, and `?` is
+A pattern containing characters other than letters, digits, `-`, `_`, `.`, `*`, and `?` is
 rejected at server startup with a configuration error — Merge Warden fails fast rather than
 silently matching nothing (or everything) at webhook-handling time.
 

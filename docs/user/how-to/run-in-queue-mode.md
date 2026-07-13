@@ -86,6 +86,8 @@ Notes:
 - Your receiver service needs its own credential to *send* to the same namespace/queue
   (e.g. **Azure Service Bus Data Sender**).
 
+---
+
 ## Configure the Merge Warden consumer — AWS SQS
 
 ```bash
@@ -108,6 +110,8 @@ Notes:
   testing against a real SQS queue.
 - Grant the container's role permission to receive and delete messages on the target SQS
   queue. Grant your receiver service permission to send messages to the same queue.
+
+---
 
 ## Local testing — in-memory queue
 
