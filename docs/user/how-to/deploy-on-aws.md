@@ -211,3 +211,4 @@ inside the container. See [Set application-level policy defaults](set-app-level-
 - [Environment variables reference](../reference/environment-variables.md)
 - [GitHub App permissions](../reference/github-app-permissions.md)
 - [Set application-level policy defaults](set-app-level-defaults.md)
+- [Run Merge Warden in queue mode](run-in-queue-mode.md) — for high-volume or bursty traffic instead of the webhook mode shown above

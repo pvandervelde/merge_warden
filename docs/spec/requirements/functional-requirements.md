@@ -129,7 +129,7 @@ This document specifies the functional requirements that define what Merge Warde
 
 **Description:**
 
-- Deploy as Azure Functions for cloud-based webhook processing
+- Deploy as a container for cloud-based webhook processing (Azure Container Apps, AWS ECS, etc.)
 - Provide CLI tool for local and CI/CD environment usage
 - Support container-based deployments
 - Enable cross-platform compatibility
@@ -137,7 +137,7 @@ This document specifies the functional requirements that define what Merge Warde
 
 **Acceptance Criteria:**
 
-- ✅ Azure Functions deployment and operation
+- ✅ Container deployment and operation (Azure Container Apps, AWS ECS)
 - ✅ CLI tool functionality and distribution
 - ✅ Container image creation and deployment
 - ✅ Cross-platform binary compilation
@@ -402,12 +402,12 @@ Organisation permissions:
 
 ### Azure Services Integration
 
-**Azure Functions:**
+**Azure Container Apps:**
 
-- HTTP trigger for webhook processing
-- Timer trigger for maintenance tasks
-- Event-driven scaling and execution
-- Integration with Azure Monitor and Application Insights
+- HTTP ingress for webhook processing
+- Health-check endpoint (`GET /health`) for liveness/readiness probes
+- Request-driven autoscaling
+- OTLP telemetry export to Application Insights via the Azure Monitor OpenTelemetry Distro collector
 
 **Azure App Configuration:**
 

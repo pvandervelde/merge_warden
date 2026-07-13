@@ -114,24 +114,39 @@ enabled = false
 # Label applied when the PR has at least one approving review.
 # approved_label = "status: approved"
 
-# Repository scope filtering — restricts which repositories Merge Warden
-# actively processes, independent of which repositories the GitHub App
-# installation can technically reach (relevant for large organisations
-# forced to install with "All repositories" scope).
-#
-# Omit this entire section to process every repository the installation
-# receives webhooks for (default, full backward compatibility).
-# [policies.repository_scope]
-# Glob patterns (`*` = any sequence, `?` = single character) matched
-# case-insensitively against the bare repository name. A repository must
-# match at least one entry to be processed. Setting this to an empty list
-# ([]) is a deliberate fail-closed "pause everything" lever.
-# include_patterns = ["payments-*", "checkout", "billing-?"]
+# Renovate stability-days label management — reflects the state of the
+# Renovate `renovate/stability-days` commit-status check as a label, so
+# reviewers see at a glance whether the stability period has elapsed.
+# Purely informational: never blocks merging or affects the check conclusion.
+[policies.pullRequests.renovateStability]
+# Once enabled by either this repo or the app-level default, the feature stays
+# enabled — a repo cannot use `enabled = false` to opt back out of an
+# app-level `enabled = true`. To disable everywhere, set it at the app level.
+enabled = true
 
-# Glob patterns that take precedence over include_patterns — a repository
-# matching an exclude pattern is never processed, even if it also matches
-# an include pattern. Defaults to an empty list when omitted.
-# exclude_patterns = ["payments-legacy"]
+# Label applied while the stability period has not yet elapsed. Removed
+# automatically once the Renovate check reports success.
+pending_stability_label = "pr-validation: pending-stability"
+
+# Bypass rules — allow specific GitHub usernames to skip validations for this
+# repository. Uncomment to add or override a bypass list; omitted sub-tables
+# fall back to whatever the app-level or org-level defaults specify.
+# [policies.bypassRules.title_convention]
+# enabled = true
+# users = ["release-bot"]
+#
+# [policies.bypassRules.work_items]
+# enabled = true
+# users = ["release-bot"]
+#
+# [policies.bypassRules.size]
+# enabled = true
+# users = ["renovate[bot]", "dependabot[bot]"]
+
+# Repository scope filtering (which repositories Merge Warden actively
+# processes) is an application-level-only setting — it cannot be configured
+# here. Setting [policies.repository_scope] in this file has no effect; it is
+# silently ignored at parse time. See app-config.sample.toml instead.
 
 # Configuration for smart change type label detection
 [change_type_labels]
@@ -182,6 +197,15 @@ chore = "#e1e4e8"    # Light gray - maintenance
 ci = "#fbca04"       # Yellow - CI/CD
 build = "#c5def5"    # Light blue - build system
 revert = "#b60205"   # Dark red - reverts
+
+# Labels applied based on keywords found in the PR title or body, independent
+# of the conventional-commit type. All fields are optional; omitted fields
+# fall back to the built-in defaults shown below.
+[change_type_labels.keyword_labels]
+breaking_change = "breaking-change"   # PR title contains `!:` or body contains "breaking change"
+security = "security"                 # PR body contains "security" or "vulnerability"
+hotfix = "hotfix"                     # PR body contains "hotfix"
+tech_debt = "tech-debt"               # PR body contains "technical debt" or "tech debt"
 
 # Configuration for the label detection strategy
 [change_type_labels.detection_strategy]

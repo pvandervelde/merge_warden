@@ -72,12 +72,25 @@ label_if_missing = "pr-issue: invalid-title-format"
 # sync_milestone_from_issue = true
 # sync_project_from_issue   = true
 
+# Uncomment to force Renovate stability-days label management on for every
+# repo in the org. Note the merge rule is OR: an enforced `enabled = true`
+# cannot be turned off by any lower tier, but an enforced `enabled = false`
+# also cannot turn off a `true` set by a lower tier — use [defaults] instead
+# if you want repos to be able to opt in/out.
+# [enforced.policies.pullRequests.renovateStability]
+# enabled = true
+# pending_stability_label = "pr-validation: pending-stability"
+
 # Uncomment to enforce bot bypasses org-wide (repos cannot remove these users from the bypass list).
 # [enforced.policies.bypassRules.title_convention]
 # enabled = true
 # users   = ["renovate[bot]", "dependabot[bot]"]
 #
 # [enforced.policies.bypassRules.work_items]
+# enabled = true
+# users   = ["renovate[bot]", "dependabot[bot]"]
+#
+# [enforced.policies.bypassRules.size]
 # enabled = true
 # users   = ["renovate[bot]", "dependabot[bot]"]
 
@@ -126,6 +139,13 @@ xl = 500
 # [defaults.policies.pullRequests.issuePropagation]
 # sync_milestone_from_issue = false
 # sync_project_from_issue   = false
+
+# Org-wide default for Renovate stability-days label management. Repos may
+# still enable this even when it is off here (the merge rule is OR), but
+# cannot disable it once any tier has set `enabled = true`.
+# [defaults.policies.pullRequests.renovateStability]
+# enabled = true
+# pending_stability_label = "pr-validation: pending-stability"
 
 # Change-type label defaults at org level.
 # Repos may override individual label names or the fallback settings.

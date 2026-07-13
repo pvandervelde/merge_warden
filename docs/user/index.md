@@ -33,6 +33,7 @@ size limits, and more.
 - [Deploy on Azure Container Apps](how-to/deploy-on-azure.md)
 - [Deploy on AWS ECS / Fargate](how-to/deploy-on-aws.md)
 - [Run the server locally](how-to/run-locally.md)
+- [Run Merge Warden in queue mode](how-to/run-in-queue-mode.md)
 - [Test webhooks with smee relay](how-to/test-with-smee.md)
 
 **Policy configuration**
@@ -49,6 +50,7 @@ size limits, and more.
 - [Configure bypass rules](how-to/configure-bypass-rules.md)
 - [Set application-level policy defaults](how-to/set-app-level-defaults.md)
 - [Configure an organisation-level policy](how-to/configure-org-policy.md)
+- [Configure repository scope filtering](how-to/configure-repository-scope.md)
 
 ## Reference
 
