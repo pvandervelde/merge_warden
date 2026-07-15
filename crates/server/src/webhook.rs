@@ -109,6 +109,24 @@ pub struct AppState {
     pub github_client: GitHubClient,
     /// Application policy defaults loaded from configuration.
     pub policies: ApplicationDefaults,
+    /// Metric recording handles. Always present; recording is a no-op sink
+    /// when neither OTLP nor Prometheus export is configured.
+    ///
+    /// See `crate::metrics`.
+    pub metrics: crate::metrics::Metrics,
+    /// Effective metrics configuration. Primarily consulted by
+    /// [`build_router`] / [`build_queue_router`] to decide whether `GET
+    /// /metrics` should be registered.
+    pub metrics_config: crate::metrics::MetricsConfig,
+    /// Effective health-check configuration (basic vs. full dependency probing).
+    ///
+    /// See `crate::health`.
+    pub health_check_config: crate::health::HealthCheckConfig,
+    /// Queue client, present only in queue mode. Used by the health check to
+    /// probe queue connectivity/depth in "full" mode. `None` in webhook mode.
+    pub queue_client: Option<Arc<dyn queue_runtime::QueueClient>>,
+    /// Queue name paired with `queue_client`. `None` in webhook mode.
+    pub queue_name: Option<queue_runtime::QueueName>,
 }
 
 // ---------------------------------------------------------------------------
@@ -589,15 +607,6 @@ pub async fn handle_webhook(
     }
 }
 
-/// `GET /health` — liveness probe for container orchestrators.
-///
-/// Returns `200 OK` without checking external dependencies (GitHub API, queue).
-///
-/// See docs/spec/design/containerisation.md — health check
-pub async fn health_check() -> impl IntoResponse {
-    StatusCode::OK
-}
-
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -605,29 +614,38 @@ pub async fn health_check() -> impl IntoResponse {
 /// Builds the Axum [`Router`] for **webhook mode**.
 ///
 /// Routes:
-/// - `GET  /health`               → [`health_check`]
+/// - `GET  /health`               → [`crate::health::health_check_handler`]
 /// - `POST /api/github/webhook`   → [`handle_webhook`]
+/// - `GET  /metrics`               → [`crate::metrics::metrics_handler`] — registered
+///   only when `state.metrics_config.prometheus_enabled` is `true`.
 ///
 /// See docs/spec/design/containerisation.md — HTTP routes
 pub fn build_router(state: Arc<AppState>) -> Router {
+    // TODO(coder): register `/metrics` here, conditionally on
+    // `state.metrics_config.prometheus_enabled`, once `metrics_handler` is
+    // fully implemented. See `metrics_tests.rs` for the route-level contract.
     Router::new()
-        .route("/health", get(health_check))
+        .route("/health", get(crate::health::health_check_handler))
         .route("/api/github/webhook", post(handle_webhook))
         .with_state(state)
 }
 
 /// Builds the Axum [`Router`] for **queue mode**.
 ///
-/// Only the health-check route is registered — merge-warden in queue mode is
-/// a pure queue consumer and does not receive GitHub webhook POSTs.
+/// Only the health-check route (and, when enabled, the metrics route) is
+/// registered — merge-warden in queue mode is a pure queue consumer and does
+/// not receive GitHub webhook POSTs.
 ///
 /// Routes:
-/// - `GET /health` → [`health_check`]
+/// - `GET /health` → [`crate::health::health_check_handler`]
+/// - `GET /metrics` → [`crate::metrics::metrics_handler`] — registered only
+///   when `state.metrics_config.prometheus_enabled` is `true`.
 ///
 /// See docs/spec/design/containerisation.md — HTTP routes
 pub fn build_queue_router(state: Arc<AppState>) -> Router {
+    // TODO(coder): register `/metrics` conditionally, mirroring `build_router`.
     Router::new()
-        .route("/health", get(health_check))
+        .route("/health", get(crate::health::health_check_handler))
         .with_state(state)
 }
 

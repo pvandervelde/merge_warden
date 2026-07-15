@@ -6,10 +6,59 @@ use github_bot_sdk::{
 };
 use queue_runtime::{Message, QueueClientFactory, QueueName, SessionId};
 use serde_json::json;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::mpsc;
+use tracing::{
+    field::{Field, Visit},
+    span::{Attributes, Id},
+    Subscriber,
+};
+use tracing_subscriber::layer::{Context as LayerContext, Layer, SubscriberExt};
 
 use super::*;
+
+// ---------------------------------------------------------------------------
+// Test infrastructure: a minimal in-process span-capturing `tracing` Layer.
+//
+// Used to assert that `#[tracing::instrument]` annotations on ingress code
+// actually emit spans with the expected name/fields — see `.llm/task.md`
+// "Tracing Instrumentation on Critical Paths" ("Queue enqueue / dequeue
+// operations"). No extra crates required beyond `tracing`/`tracing-subscriber`,
+// which this crate already depends on.
+// ---------------------------------------------------------------------------
+
+type SpanFields = Vec<(String, String)>;
+type SpanRecord = (String, SpanFields);
+
+#[derive(Default, Clone)]
+struct CapturedSpans(Arc<Mutex<Vec<SpanRecord>>>);
+
+struct FieldVisitor(Vec<(String, String)>);
+
+impl Visit for FieldVisitor {
+    fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
+        self.0
+            .push((field.name().to_string(), format!("{:?}", value)));
+    }
+
+    fn record_str(&mut self, field: &Field, value: &str) {
+        self.0.push((field.name().to_string(), value.to_string()));
+    }
+}
+
+struct SpanCaptureLayer(CapturedSpans);
+
+impl<S: Subscriber> Layer<S> for SpanCaptureLayer {
+    fn on_new_span(&self, attrs: &Attributes<'_>, _id: &Id, _ctx: LayerContext<'_, S>) {
+        let mut visitor = FieldVisitor(Vec::new());
+        attrs.record(&mut visitor);
+        self.0
+             .0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push((attrs.metadata().name().to_string(), visitor.0));
+    }
+}
 
 // ---------------------------------------------------------------------------
 // Test helpers
@@ -383,4 +432,62 @@ async fn queue_ingress_ack_reject_sends_to_dlq() {
 
     // Rejecting (dead-lettering) the ack should succeed without error.
     assert!(event.ack.reject("processing failed").await.is_ok());
+}
+
+// ---------------------------------------------------------------------------
+// QueueIngress — tracing instrumentation (queue dequeue span)
+//
+// See .llm/task.md "Tracing Instrumentation on Critical Paths" — "Queue
+// enqueue / dequeue operations". `QueueIngress::next_event` is the dequeue
+// side addressable from this crate (the enqueue side lives in a separate
+// receiver service per `webhook::build_queue_router`'s docs — see the
+// Tester's report for this gap).
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn queue_ingress_next_event_emits_span_with_queue_name_field() {
+    let client = make_test_queue_client();
+    let queue_name = QueueName::new("span-test-queue".to_string()).unwrap();
+
+    let msg = WebhookQueueMessage {
+        schema_version: 1,
+        event_type: "pull_request".to_string(),
+        delivery_id: "del-span".to_string(),
+        received_at: Utc::now(),
+        raw_payload: minimal_pr_payload(9),
+    };
+    enqueue_message(&client, &queue_name, &msg, "owner/test-repo/9").await;
+
+    let captured = CapturedSpans::default();
+    let layer = SpanCaptureLayer(captured.clone());
+    let subscriber = tracing_subscriber::registry().with(layer);
+    // `#[tokio::test]` defaults to a current-thread runtime, so this
+    // thread-local dispatcher guard stays active across the `.await` below —
+    // there is no work-stealing thread migration to worry about.
+    let _guard = tracing::subscriber::set_default(subscriber);
+
+    let mut ingress = QueueIngress::new(Arc::clone(&client), queue_name);
+    let _event = ingress.next_event().await.unwrap();
+
+    drop(_guard);
+
+    let spans = captured.0.lock().unwrap_or_else(|e| e.into_inner());
+    let next_event_span = spans.iter().find(|(name, _)| name == "next_event");
+
+    assert!(
+        next_event_span.is_some(),
+        "expected a span named 'next_event' from #[tracing::instrument] on \
+         QueueIngress::next_event; captured spans: {:?}",
+        *spans
+    );
+
+    let (_, fields) = next_event_span.unwrap();
+    assert!(
+        fields
+            .iter()
+            .any(|(k, v)| k == "queue_name" && v.contains("span-test-queue")),
+        "expected the 'next_event' span to carry a queue_name field naming the \
+         queue being polled; got fields: {:?}",
+        fields
+    );
 }

@@ -325,6 +325,10 @@ impl QueueIngress {
 
 #[async_trait::async_trait]
 impl EventIngress for QueueIngress {
+    /// Instrumented so OTLP traces contain a span covering each dequeue
+    /// attempt (queue mode). See `.llm/task.md` — "Tracing Instrumentation on
+    /// Critical Paths" ("Queue enqueue / dequeue operations").
+    #[tracing::instrument(skip(self), fields(queue_name = %self.queue_name.as_str()))]
     async fn next_event(&mut self) -> Result<Option<ProcessableEvent>, IngressError> {
         loop {
             // Accept any available session.  `SessionNotFound` / `QueueNotFound`

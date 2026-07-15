@@ -7,7 +7,9 @@
 
 mod config;
 mod errors;
+mod health;
 mod ingress;
+mod metrics;
 mod telemetry;
 mod webhook;
 
@@ -17,6 +19,7 @@ use config::ReceiverMode;
 use errors::ServerError;
 use github_bot_sdk::client::{ClientConfig, GitHubClient};
 use merge_warden_developer_platforms::app_auth::AppAuthProvider;
+use opentelemetry::metrics::MeterProvider as _;
 use queue_runtime::{QueueClientFactory, QueueName};
 use tracing::{debug, error, info};
 
@@ -25,6 +28,15 @@ async fn main() -> Result<(), ServerError> {
     // 1. Initialise telemetry first so all subsequent log messages are captured.
     let telemetry_config = telemetry::TelemetryConfig::from_env();
     telemetry::init_telemetry(&telemetry_config)?;
+
+    // 1b. Initialise the OTel metrics pipeline (OTLP and/or Prometheus reader).
+    let metrics_config = metrics::MetricsConfig::from_env();
+    let meter_provider = metrics::init_metrics(&metrics_config)?;
+    let meter = meter_provider.meter(env!("CARGO_PKG_NAME"));
+    let metrics = metrics::Metrics::new(&meter);
+
+    // 1c. Load health-check configuration (basic vs. full dependency probing).
+    let health_check_config = health::HealthCheckConfig::from_env();
 
     info!("Starting merge-warden-server");
 
@@ -129,6 +141,11 @@ async fn main() -> Result<(), ServerError> {
         receiver: receiver_opt,
         github_client: github_client.clone(),
         policies: server_config.application_defaults.clone(),
+        metrics,
+        metrics_config,
+        health_check_config,
+        queue_client: queue_client_opt.clone(),
+        queue_name: queue_name_opt.clone(),
     });
 
     // 9. Spawn processor tasks.
