@@ -483,7 +483,8 @@ fn load_config_returns_config_error_for_malformed_toml() {
 // only maps the file's `[policies]` table onto `ApplicationDefaults`
 // (see `ServerTomlConfig` above). A regression here silently disables org-level
 // policy resolution with no startup error and no runtime log line — see
-// .llm/patch-org-policy-app-config.md for the production incident this caused.
+// ADR-003 (docs/adr/ADR-003-org-level-policy.md) for background, and PR #335
+// for the production incident this caused.
 // ---------------------------------------------------------------------------
 
 #[test]
@@ -542,11 +543,12 @@ fn load_config_reads_valid_org_policy_source_from_toml_file() {
     assert!(source.fail_if_unreachable);
 }
 
-/// Regression test for the production incident documented in
-/// `.llm/patch-org-policy-app-config.md`: a top-level `[org_policy_source]` table
-/// (rather than `[policies.org_policy_source]`) is silently ignored by the TOML
-/// parser and must not populate `ApplicationDefaults.org_policy_source`, nor cause
-/// `load_config` to fail — the file is otherwise valid TOML.
+/// Regression test for the production incident described in ADR-003
+/// (docs/adr/ADR-003-org-level-policy.md) and PR #335: a top-level
+/// `[org_policy_source]` table (rather than `[policies.org_policy_source]`) is
+/// silently ignored by the TOML parser and must not populate
+/// `ApplicationDefaults.org_policy_source`, nor cause `load_config` to fail —
+/// the file is otherwise valid TOML.
 #[test]
 fn load_config_ignores_top_level_org_policy_source_table() {
     let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());

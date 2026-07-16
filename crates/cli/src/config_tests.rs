@@ -11,7 +11,8 @@ use super::*;
 // `[org_policy_source]` table, because `AppConfig` only maps the file's `[policies]`
 // table onto `ApplicationDefaults`. A regression here silently disables org-level
 // policy resolution with no load error and no runtime log line — see
-// .llm/patch-org-policy-app-config.md for the production incident this caused.
+// ADR-003 (docs/adr/ADR-003-org-level-policy.md) for background, and PR #335
+// for the production incident this caused.
 // ---------------------------------------------------------------------------
 
 fn temp_path(name: &str) -> PathBuf {
@@ -58,11 +59,12 @@ fn load_reads_valid_org_policy_source_from_toml_file() {
     assert!(source.fail_if_unreachable);
 }
 
-/// Regression test for the production incident documented in
-/// `.llm/patch-org-policy-app-config.md`: a top-level `[org_policy_source]` table
-/// (rather than `[policies.org_policy_source]`) is silently ignored by the TOML
-/// parser and must not populate `ApplicationDefaults.org_policy_source`, nor cause
-/// `AppConfig::load` to fail — the file is otherwise valid TOML.
+/// Regression test for the production incident described in ADR-003
+/// (docs/adr/ADR-003-org-level-policy.md) and PR #335: a top-level
+/// `[org_policy_source]` table (rather than `[policies.org_policy_source]`) is
+/// silently ignored by the TOML parser and must not populate
+/// `ApplicationDefaults.org_policy_source`, nor cause `AppConfig::load` to fail —
+/// the file is otherwise valid TOML.
 #[test]
 fn load_ignores_top_level_org_policy_source_table() {
     let path = temp_path("merge_warden_cli_top_level_org_policy_source_test.toml");
