@@ -27,6 +27,8 @@ tracing-opentelemetry = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry_sdk = { workspace = true }
+opentelemetry-prometheus = "0.32.0"
+prometheus = "0.14.0"
 
 [dev-dependencies]
 # Test-only: used to drive `axum::Router` as a `tower::Service` in

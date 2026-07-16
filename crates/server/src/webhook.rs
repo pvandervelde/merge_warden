@@ -621,13 +621,15 @@ pub async fn handle_webhook(
 ///
 /// See docs/spec/design/containerisation.md — HTTP routes
 pub fn build_router(state: Arc<AppState>) -> Router {
-    // TODO(coder): register `/metrics` here, conditionally on
-    // `state.metrics_config.prometheus_enabled`, once `metrics_handler` is
-    // fully implemented. See `metrics_tests.rs` for the route-level contract.
-    Router::new()
+    let mut router = Router::new()
         .route("/health", get(crate::health::health_check_handler))
-        .route("/api/github/webhook", post(handle_webhook))
-        .with_state(state)
+        .route("/api/github/webhook", post(handle_webhook));
+
+    if state.metrics_config.prometheus_enabled {
+        router = router.route("/metrics", get(crate::metrics::metrics_handler));
+    }
+
+    router.with_state(state)
 }
 
 /// Builds the Axum [`Router`] for **queue mode**.
@@ -643,10 +645,13 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 ///
 /// See docs/spec/design/containerisation.md — HTTP routes
 pub fn build_queue_router(state: Arc<AppState>) -> Router {
-    // TODO(coder): register `/metrics` conditionally, mirroring `build_router`.
-    Router::new()
-        .route("/health", get(crate::health::health_check_handler))
-        .with_state(state)
+    let mut router = Router::new().route("/health", get(crate::health::health_check_handler));
+
+    if state.metrics_config.prometheus_enabled {
+        router = router.route("/metrics", get(crate::metrics::metrics_handler));
+    }
+
+    router.with_state(state)
 }
 
 // ---------------------------------------------------------------------------
