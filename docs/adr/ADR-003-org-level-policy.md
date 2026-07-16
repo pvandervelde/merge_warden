@@ -40,7 +40,7 @@ The four open decisions for this ADR are:
 `OrgPolicySource` is added as an optional field on `ApplicationDefaults`:
 
 ```toml
-[org_policy_source]
+[policies.org_policy_source]
 owner = "my-org"
 repo  = "org-configs"
 path  = "merge-warden-org-policy.toml"
@@ -328,7 +328,7 @@ A repo with no `workItem` config will inherit the org default `JIRA-\\d+`.
 `app-config.toml`:
 
 ```toml
-[org_policy_source]
+[policies.org_policy_source]
 owner = "my-org"
 repo  = "platform-configs"
 path  = "merge-warden/org-policy.toml"

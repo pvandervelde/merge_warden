@@ -59,11 +59,11 @@ for an annotated example covering enforced, default, and conditional policy sect
 
 ## Step 3: Point the server at the org policy file
 
-Add `[org_policy_source]` to the application-level configuration file
+Add `[policies.org_policy_source]` to the application-level configuration file
 (`MERGE_WARDEN_CONFIG_FILE`):
 
 ```toml
-[org_policy_source]
+[policies.org_policy_source]
 owner = "my-org"
 repo  = "platform-configs"
 path  = "merge-warden/org-policy.toml"
@@ -164,7 +164,7 @@ infrastructure problem that the operator may want to surface explicitly.
 
 ## Related
 
-- [Application configuration schema — org_policy_source](../reference/app-config.md#org_policy_source)
+- [Application configuration schema — org_policy_source](../reference/app-config.md#policiesorg_policy_source)
 - [Configuration precedence](../explanation/config-precedence.md)
 - [Set application-level policy defaults](set-app-level-defaults.md)
 - [Per-repository configuration schema](../reference/per-repo-config.md)

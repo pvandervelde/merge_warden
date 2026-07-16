@@ -21,7 +21,7 @@ MERGE_WARDEN_CONFIG_FILE (application defaults)
 Compiled-in defaults                         ← lowest priority
 ```
 
-The org-level policy tier is optional. When `[org_policy_source]` is not configured in
+The org-level policy tier is optional. When `[policies.org_policy_source]` is not configured in
 the application config, the system uses the three-tier model (application defaults →
 per-repository config → compiled-in defaults).
 
@@ -81,7 +81,7 @@ See [Application configuration schema](../reference/app-config.md) and
 
 ### Layer 3 — Org-level policy (optional)
 
-When `[org_policy_source]` is configured in the application-level config, the server
+When `[policies.org_policy_source]` is configured in the application-level config, the server
 fetches a central org policy TOML file on every PR event. This file has two sections:
 
 - **`[defaults]`** — org-wide defaults that individual repositories *can* override with

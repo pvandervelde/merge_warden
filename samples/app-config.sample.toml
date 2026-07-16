@@ -22,7 +22,12 @@
 #
 # See samples/merge-warden-org-policy.sample.toml for the format of that file.
 #
-# [org_policy_source]
+# org_policy_source is a field on ApplicationDefaults, the same struct as every
+# field under [policies] below — it must be nested the same way. A top-level
+# [org_policy_source] table is silently ignored (no error, no warning), which
+# leaves org policy resolution permanently skipped.
+#
+# [policies.org_policy_source]
 # owner = "my-org"
 # repo  = "platform-configs"
 # path  = "merge-warden/org-policy.toml"

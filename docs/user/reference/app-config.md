@@ -131,7 +131,7 @@ and [Per-repository configuration schema — renovateStability](per-repo-config.
 
 ---
 
-## `[org_policy_source]`
+## `[policies.org_policy_source]`
 
 Optional. When present, the server fetches a central org-level policy TOML file on
 every PR event and inserts it into the configuration resolution chain.
@@ -146,7 +146,7 @@ every PR event and inserts it into the configuration resolution chain.
 **Example:**
 
 ```toml
-[org_policy_source]
+[policies.org_policy_source]
 owner               = "my-org"
 repo                = "platform-configs"
 path                = "merge-warden/org-policy.toml"
@@ -213,7 +213,7 @@ worked examples and pattern syntax details.
 
 ```toml
 # Optional — enable org-level policy from a central repository.
-# [org_policy_source]
+# [policies.org_policy_source]
 # owner               = "my-org"
 # repo                = "platform-configs"
 # path                = "merge-warden/org-policy.toml"

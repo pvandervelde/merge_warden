@@ -475,6 +475,115 @@ fn load_config_returns_config_error_for_malformed_toml() {
 }
 
 // ---------------------------------------------------------------------------
+// load_config — org_policy_source (ADR-003: Org-Level Policy Configuration)
+//
+// `org_policy_source` is a field on `ApplicationDefaults`, exactly like
+// `repository_scope` below. It must be nested under `[policies.org_policy_source]`
+// in the file, not a top-level `[org_policy_source]` table, because `load_config`
+// only maps the file's `[policies]` table onto `ApplicationDefaults`
+// (see `ServerTomlConfig` above). A regression here silently disables org-level
+// policy resolution with no startup error and no runtime log line — see
+// .llm/patch-org-policy-app-config.md for the production incident this caused.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn load_config_defaults_org_policy_source_to_none_when_config_file_absent() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+    let _env = EnvGuard::prepare(
+        &[],
+        &[
+            "MERGE_WARDEN_PORT",
+            "MERGE_WARDEN_RECEIVER_MODE",
+            "MERGE_WARDEN_CONFIG_FILE",
+        ],
+    );
+
+    let r = load_config();
+    assert!(r.is_ok(), "{:?}", r);
+    assert!(
+        r.unwrap().application_defaults.org_policy_source.is_none(),
+        "org_policy_source must default to None when no config file is provided"
+    );
+}
+
+#[test]
+fn load_config_reads_valid_org_policy_source_from_toml_file() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+
+    let mut path = std::env::temp_dir();
+    path.push("merge_warden_server_valid_org_policy_source_test.toml");
+    std::fs::write(
+        &path,
+        "[policies.org_policy_source]\nowner = \"my-org\"\nrepo = \"platform-configs\"\npath = \"merge-warden/org-policy.toml\"\nfail_if_unreachable = true\n",
+    )
+    .unwrap();
+
+    let _env = EnvGuard::prepare(
+        &[("MERGE_WARDEN_CONFIG_FILE", path.to_str().unwrap())],
+        &[
+            "MERGE_WARDEN_PORT",
+            "MERGE_WARDEN_RECEIVER_MODE",
+            "MERGE_WARDEN_CONFIG_FILE",
+        ],
+    );
+
+    let r = load_config();
+    let _ = std::fs::remove_file(&path);
+
+    assert!(r.is_ok(), "{:?}", r);
+    let source = r
+        .unwrap()
+        .application_defaults
+        .org_policy_source
+        .expect("org_policy_source should be Some when [policies.org_policy_source] is present");
+    assert_eq!(source.owner, "my-org");
+    assert_eq!(source.repo, "platform-configs");
+    assert_eq!(source.path, "merge-warden/org-policy.toml");
+    assert!(source.fail_if_unreachable);
+}
+
+/// Regression test for the production incident documented in
+/// `.llm/patch-org-policy-app-config.md`: a top-level `[org_policy_source]` table
+/// (rather than `[policies.org_policy_source]`) is silently ignored by the TOML
+/// parser and must not populate `ApplicationDefaults.org_policy_source`, nor cause
+/// `load_config` to fail — the file is otherwise valid TOML.
+#[test]
+fn load_config_ignores_top_level_org_policy_source_table() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+
+    let mut path = std::env::temp_dir();
+    path.push("merge_warden_server_top_level_org_policy_source_test.toml");
+    std::fs::write(
+        &path,
+        "[org_policy_source]\nowner = \"my-org\"\nrepo = \"platform-configs\"\npath = \"merge-warden/org-policy.toml\"\n\n[policies]\nenable_title_validation = true\n",
+    )
+    .unwrap();
+
+    let _env = EnvGuard::prepare(
+        &[("MERGE_WARDEN_CONFIG_FILE", path.to_str().unwrap())],
+        &[
+            "MERGE_WARDEN_PORT",
+            "MERGE_WARDEN_RECEIVER_MODE",
+            "MERGE_WARDEN_CONFIG_FILE",
+        ],
+    );
+
+    let r = load_config();
+    let _ = std::fs::remove_file(&path);
+
+    assert!(r.is_ok(), "{:?}", r);
+    let defaults = r.unwrap().application_defaults;
+    assert!(
+        defaults.org_policy_source.is_none(),
+        "a top-level [org_policy_source] table must not populate ApplicationDefaults.org_policy_source"
+    );
+    assert!(
+        defaults.enable_title_validation,
+        "the [policies] table alongside the misplaced top-level table should still load normally"
+    );
+}
+
+// ---------------------------------------------------------------------------
 // load_config — repository_scope (FR-009: Repository Scope Filtering)
 //
 // See docs/spec/interfaces/server-config.md and
