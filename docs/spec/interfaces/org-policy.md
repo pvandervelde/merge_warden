@@ -27,12 +27,17 @@ stated otherwise.
 /// # TOML example
 ///
 /// ```toml
-/// [org_policy_source]
+/// [policies.org_policy_source]
 /// owner = "my-org"
 /// repo  = "platform-configs"
 /// path  = "merge-warden/org-policy.toml"
 /// # fail_if_unreachable = false   # optional; default false
 /// ```
+///
+/// Note the `[policies.*]` nesting: `org_policy_source` is a field on
+/// `ApplicationDefaults`, and the server/CLI config loaders only map the file's
+/// `[policies]` table onto `ApplicationDefaults`. A top-level `[org_policy_source]`
+/// table is silently ignored.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Deserialize, serde::Serialize)]
 pub struct OrgPolicySource {
     /// GitHub organisation or user name that owns the policy repository.

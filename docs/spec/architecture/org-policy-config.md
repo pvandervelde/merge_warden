@@ -193,14 +193,19 @@ flags are removed from this function — they now live in `resolve_pull_request_
 ```toml
 # app-config.toml — new optional section
 
-[org_policy_source]
+[policies.org_policy_source]
 owner              = "my-org"
 repo               = "platform-configs"
 path               = "merge-warden/org-policy.toml"
 # fail_if_unreachable = false   # optional; default false
 ```
 
-When `[org_policy_source]` is absent, `ApplicationDefaults.org_policy_source` is `None` and
+`org_policy_source` is a field on `ApplicationDefaults`, so — like every other field on that
+struct — it is only recognized when nested under `[policies]` in the file the server/CLI
+loader wraps `ApplicationDefaults` with. A top-level `[org_policy_source]` table is silently
+ignored.
+
+When `[policies.org_policy_source]` is absent, `ApplicationDefaults.org_policy_source` is `None` and
 the system behaves identically to the previous release.
 
 ---

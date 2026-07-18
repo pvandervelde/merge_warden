@@ -126,11 +126,11 @@ See `samples/app-config.sample.toml`.
 
 #### Tier 2 — Org Defaults (optional)
 
-Fetched from a central repository at runtime using the `[org_policy_source]` field
+Fetched from a central repository at runtime using the `[policies.org_policy_source]` field
 in the app-level config:
 
 ```toml
-[org_policy_source]
+[policies.org_policy_source]
 owner = "my-org"
 repo  = "platform-configs"
 path  = "merge-warden/org-policy.toml"

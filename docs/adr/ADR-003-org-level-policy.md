@@ -4,6 +4,12 @@ Status: Accepted
 Date: 2026-05-28
 Owners: merge_warden team
 
+> **Errata (2026-07-16, PR #335):** The TOML example in Decision 1 originally showed
+> `[org_policy_source]` (top-level). The correct form is `[policies.org_policy_source]`,
+> since `OrgPolicySource` is a field on `ApplicationDefaults`, which only maps from the
+> file's `[policies]` table. This document has been corrected in place; see PR #335 for
+> the production incident this caused.
+
 ## Context
 
 Task 5.0 adds a fourth configuration tier to Merge Warden: a designated org-wide policy repository
@@ -40,7 +46,7 @@ The four open decisions for this ADR are:
 `OrgPolicySource` is added as an optional field on `ApplicationDefaults`:
 
 ```toml
-[org_policy_source]
+[policies.org_policy_source]
 owner = "my-org"
 repo  = "org-configs"
 path  = "merge-warden-org-policy.toml"
@@ -328,7 +334,7 @@ A repo with no `workItem` config will inherit the org default `JIRA-\\d+`.
 `app-config.toml`:
 
 ```toml
-[org_policy_source]
+[policies.org_policy_source]
 owner = "my-org"
 repo  = "platform-configs"
 path  = "merge-warden/org-policy.toml"
