@@ -5,6 +5,39 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-07-18
+
+### Features
+- Implement repository scope filtering (FR-009) [af82f2420a542dc9a9f28fee4d8ae44673d8ca1c]
+- repository scope filtering (FR-009) (#331) [50ac45db56a1fbc28ff6b6c70581561b2982b5ba]
+### Bug Fixes
+- **config**: correct org_policy_source nesting in docs, ADR, and samples [492f13612635ffe61a569f26a0e9235bd63daa03]
+- **config**: correct org_policy_source nesting in docs, ADR, and samples (#335) [282d24615e88015cb5e99d551d2ad57f5858371b]
+- address PR #335 review findings on dead doc reference and ADR edit [d77edad3efcd7b568a003e3e3fe588fdecbb9c9e]
+- address PR review findings on repository scope filtering [091ac8f9c99542038ebffde62d2104f0b0329247]
+- address PR review findings on user-doc gaps [cc0db756b140302d49a4461e3a88fd1af6bbe968]
+- satisfy clippy::cloned_ref_to_slice_refs in lib.rs [655077ab93433ea4db8f322ee7b810c22dfd4f42]
+- satisfy clippy::useless_borrows_in_formatting in integration-tests [52a5aa5453aa0de995566d3750cda119709aa470]
+### Documentation
+- **spec**: add repository scope filtering design [f40cd3b77182a5bf4c81dfa944bb121a48333c08]
+- fill user-doc gaps for repository scope filtering and queue mode [383d1b5cf24a3c450770499467a80666d802698e]
+- fill user-doc gaps for repository scope filtering and queue mode (#333) [492f833db6588531c61b756c492afb3d623c0019]
+### Styles
+- run cargo fmt on config_tests.rs [e19cffdd0cc81f45dd3aa7d6aaf558adfd2953a5]
+### Code Refactoring
+- **core**: extract repository-scope pattern-match helper, fix lint/fmt [59a18e24819d9e8b02c1990f706470cabe4d7185]
+### Tests
+- **audit**: Mutation + fuzz audit for #001 repository scope filtering [1c88f00bf1fa6ab43d1f04abb2893087c1808cf0]
+- **core**: Add types, docs, and tests for repository scope filtering [f5fa9e129acb6db371ffa2ef416fc9e03c57f19e]
+- **mutation**: Kill 4 surviving mutants + add adversarial probes for FR-009 scope filtering [4d2d32e33a7f9a3033788722cf0fffc7db312ff7]
+- Add adversarial test suite for repository scope filtering (FR-009) [720b307e5ab48ad14b5d7554220eb5fb3d45e450]
+### Chores
+- **deps**: bump crossbeam-epoch to 0.9.20 [dacaf259e0cac3af6e55e63c56938a08300b04d4]
+- **deps**: update dorny/paths-filter action to v4 [42f3083818968c641c972e311ac73d3a4b1b244e]
+- **deps**: update dorny/paths-filter action to v4 (#314) [c9034c8fff80dde7cea9a573cf033baa153c59b8]
+- **deps**: update github-bot-sdk and queue-runtime to 0.2.1 [508f8d287abbb86baf65b07d2bb370d92167dafd]
+- Fix Rust formatting [eb1d05222dff1ad2533592b43a025e74a6fa0b52]
+
 ## [0.7.4] - 2026-07-02
 
 ### Bug Fixes
@@ -1103,6 +1136,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## 0.0.0
 
 - Created project
+
 
 
 
