@@ -532,11 +532,10 @@ fn load_config_reads_valid_org_policy_source_from_toml_file() {
     let _ = std::fs::remove_file(&path);
 
     assert!(r.is_ok(), "{:?}", r);
-    let source = r
-        .unwrap()
-        .application_defaults
-        .org_policy_source
-        .expect("org_policy_source should be Some when [policies.org_policy_source] is present");
+    let source =
+        r.unwrap().application_defaults.org_policy_source.expect(
+            "org_policy_source should be Some when [policies.org_policy_source] is present",
+        );
     assert_eq!(source.owner, "my-org");
     assert_eq!(source.repo, "platform-configs");
     assert_eq!(source.path, "merge-warden/org-policy.toml");
