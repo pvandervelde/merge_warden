@@ -184,8 +184,9 @@ async fn main() -> Result<(), ServerError> {
                         let ingress =
                             Box::new(ingress::QueueIngress::new(worker_client, worker_name));
                         if let Err(e) =
-                            ingress::run_event_processor(ingress, processor_state).await
+                            ingress::run_event_processor(ingress, Arc::clone(&processor_state)).await
                         {
+                            processor_state.metrics.record_worker_error();
                             error!(worker = worker_id, error = %e, "Queue processor task terminated with error");
                         }
                     })

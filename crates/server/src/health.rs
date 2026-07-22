@@ -40,6 +40,14 @@ pub enum HealthState {
     Healthy,
     /// At least one non-critical dependency is impaired, but the service can
     /// still process requests.
+    ///
+    /// No dependency check in this binary currently classifies anything as
+    /// merely "degraded" (github_api is always the whole point of this
+    /// service, so its unreachability is `Unhealthy` rather than
+    /// `Degraded`); this variant is kept as public API for a future
+    /// soft-dependency check (e.g. a queue-depth threshold once
+    /// `queue-runtime` gains a depth-query API — see `set_queue_depth`).
+    #[allow(dead_code)]
     Degraded,
     /// A critical dependency is unavailable; the service cannot reliably
     /// process requests.

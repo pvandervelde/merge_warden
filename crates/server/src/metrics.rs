@@ -79,9 +79,15 @@ impl MetricsConfig {
 pub struct Metrics {
     webhook_requests_total: Counter<u64>,
     webhook_processing_duration_ms: Histogram<f64>,
+    // These three instruments have no call site in this binary today (see the
+    // doc comments on their `record_*`/`set_*` methods below for why) but are
+    // kept as documented public API for future/out-of-process callers.
+    #[allow(dead_code)]
     queue_enqueue_duration_ms: Histogram<f64>,
     queue_processing_duration_ms: Histogram<f64>,
+    #[allow(dead_code)]
     queue_depth: Gauge<u64>,
+    #[allow(dead_code)]
     queue_age_oldest_message_secs: Gauge<f64>,
     queue_dlq_count: Counter<u64>,
     queue_worker_errors_total: Counter<u64>,
@@ -155,6 +161,7 @@ impl Metrics {
     /// enqueues messages, so it alone observes "receipt-to-enqueue" latency.
     /// This method is kept as public API for that service (or a future
     /// in-repo enqueue path) to call.
+    #[allow(dead_code)]
     pub fn record_queue_enqueue_duration_ms(&self, duration_ms: f64) {
         self.queue_enqueue_duration_ms.record(duration_ms, &[]);
     }
@@ -172,6 +179,7 @@ impl Metrics {
     /// public API for a future `queue-runtime` version (or a
     /// provider-specific side channel, e.g. polling the Azure Service Bus
     /// management API) to call.
+    #[allow(dead_code)]
     pub fn set_queue_depth(&self, depth: u64) {
         self.queue_depth.record(depth, &[]);
     }
@@ -181,6 +189,7 @@ impl Metrics {
     /// Not called anywhere in this binary, for the same reason as
     /// [`Self::set_queue_depth`] — no depth/age-query API is available on the
     /// current `queue-runtime` client traits.
+    #[allow(dead_code)]
     pub fn set_queue_age_oldest_message_secs(&self, secs: f64) {
         self.queue_age_oldest_message_secs.record(secs, &[]);
     }
@@ -207,10 +216,48 @@ impl Metrics {
 
     /// Increments the bypass-activation counter for `bypass_type` by one.
     pub fn record_bypass_activation(&self, bypass_type: &str) {
-        self.pr_bypass_activations_total.add(
-            1,
-            &[KeyValue::new("bypass_type", bypass_type.to_string())],
-        );
+        self.pr_bypass_activations_total
+            .add(1, &[KeyValue::new("bypass_type", bypass_type.to_string())]);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CoreMetricsRecorder — bridges merge_warden_core::MetricsRecorder to Metrics
+// ---------------------------------------------------------------------------
+
+/// Implements `merge_warden_core::MetricsRecorder` on top of [`Metrics`], so
+/// `crates/core`'s `MergeWarden` can report `pr.validation.duration_ms` and
+/// `pr.bypass.activations_total` without that crate depending on
+/// OpenTelemetry directly (see `.llm/task.md` gap #7 — trait injection,
+/// chosen over `tracing_opentelemetry::MetricsLayer` because the field-name
+/// convention `MetricsLayer` expects could not be verified against the
+/// pinned `tracing-opentelemetry = "0.33.0"` without a higher-risk,
+/// harder-to-test integration).
+#[derive(Clone)]
+pub struct CoreMetricsRecorder {
+    metrics: Metrics,
+}
+
+impl CoreMetricsRecorder {
+    /// Wraps `metrics` for injection into `merge_warden_core::MergeWarden::with_metrics_recorder`.
+    pub fn new(metrics: Metrics) -> Self {
+        CoreMetricsRecorder { metrics }
+    }
+}
+
+impl std::fmt::Debug for CoreMetricsRecorder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("CoreMetricsRecorder").finish()
+    }
+}
+
+impl merge_warden_core::MetricsRecorder for CoreMetricsRecorder {
+    fn record_validation_duration_ms(&self, duration_ms: f64) {
+        self.metrics.record_pr_validation_duration_ms(duration_ms);
+    }
+
+    fn record_bypass_activation(&self, bypass_type: &str) {
+        self.metrics.record_bypass_activation(bypass_type);
     }
 }
 

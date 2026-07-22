@@ -126,6 +126,14 @@ pub struct AppState {
     /// probe queue connectivity/depth in "full" mode. `None` in webhook mode.
     pub queue_client: Option<Arc<dyn queue_runtime::QueueClient>>,
     /// Queue name paired with `queue_client`. `None` in webhook mode.
+    ///
+    /// Not read anywhere yet: today, the health check's `queue` component
+    /// (see `crate::health::queue_health`) only reports whether a queue
+    /// client was constructed at startup, not a depth broken down by queue
+    /// name. Kept in `AppState` for a future depth-metric label
+    /// (`ingress.queue.depth` per-queue-name) once `queue-runtime` exposes a
+    /// depth-query API — see `crate::metrics::Metrics::set_queue_depth`.
+    #[allow(dead_code)]
     pub queue_name: Option<queue_runtime::QueueName>,
 }
 
@@ -146,6 +154,13 @@ pub struct MergeWardenWebhookHandler {
     github_client: GitHubClient,
     /// Policy defaults used when no per-repo config file is found.
     policies: ApplicationDefaults,
+    /// Metric recording handles threaded into every [`MergeWarden`] instance
+    /// this handler constructs. Defaults to an inert, no-op-observable sink
+    /// (see [`crate::metrics::Metrics`]'s `Default` impl) so existing callers
+    /// that only need [`MergeWardenWebhookHandler::new`]'s original two
+    /// parameters keep working; [`Self::with_metrics`] attaches the real
+    /// instance built at startup.
+    metrics: crate::metrics::Metrics,
 }
 
 impl MergeWardenWebhookHandler {
@@ -154,7 +169,18 @@ impl MergeWardenWebhookHandler {
         MergeWardenWebhookHandler {
             github_client,
             policies,
+            metrics: crate::metrics::Metrics::default(),
         }
+    }
+
+    /// Attaches real metric-recording instruments to this handler (builder
+    /// pattern). Every [`MergeWarden`] instance subsequently constructed by
+    /// [`Self::handle_pull_request`] / [`Self::handle_status_event`] records
+    /// `pr.validation.duration_ms` and `pr.bypass.activations_total` through
+    /// `metrics`.
+    pub fn with_metrics(mut self, metrics: crate::metrics::Metrics) -> Self {
+        self.metrics = metrics;
+        self
     }
 
     /// Processes a `pull_request` webhook event.
@@ -288,7 +314,10 @@ impl MergeWardenWebhookHandler {
         };
 
         let warden = MergeWarden::with_config(provider, validation_config)
-            .with_issue_provider(Box::new(issue_provider));
+            .with_issue_provider(Box::new(issue_provider))
+            .with_metrics_recorder(Arc::new(crate::metrics::CoreMetricsRecorder::new(
+                self.metrics.clone(),
+            )));
 
         warden
             .process_pull_request(repo_owner, repo_name, pr_number.into())
@@ -441,7 +470,10 @@ impl MergeWardenWebhookHandler {
             let issue_provider = provider.clone();
 
             let warden = MergeWarden::with_config(provider.clone(), validation_config.clone())
-                .with_issue_provider(Box::new(issue_provider));
+                .with_issue_provider(Box::new(issue_provider))
+                .with_metrics_recorder(Arc::new(crate::metrics::CoreMetricsRecorder::new(
+                    self.metrics.clone(),
+                )));
 
             if let Err(e) = warden
                 .process_pull_request(repo_owner, repo_name, pr_number)

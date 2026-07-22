@@ -441,6 +441,25 @@ impl EventIngress for QueueIngress {
 /// 3. On `Ok(None)`: break, return `Ok(())`.
 /// 4. On `Err(e)`: return `Err(e)`.
 ///
+/// # Metrics
+/// Whether this loop is draining a [`WebhookIngress`] or a [`QueueIngress`]
+/// is inferred from `state.queue_client` (queue mode iff `Some`) — both
+/// ingress modes share this single processing loop, so it is the natural
+/// place to record the mode-specific signals documented in `.llm/task.md`:
+/// - Webhook mode: `ingress.webhook.requests_total` (labelled
+///   `accepted`/`rejected`) and `ingress.webhook.processing_duration_ms`.
+/// - Queue mode: `ingress.queue.processing_duration_ms` and
+///   `ingress.queue.dlq_count` (incremented when a successfully-dequeued
+///   event fails domain processing and is dead-lettered by `ack.reject`;
+///   messages dead-lettered *inside* `QueueIngress::next_event` itself —
+///   malformed/undecodable messages that never become a `ProcessableEvent`
+///   — are not observed here).
+///
+/// `processing.success_rate` is a cumulative ratio (successes / total)
+/// tracked for the lifetime of this task; it resets only if the task itself
+/// restarts (e.g. after a panic-triggered supervisor respawn), not on a
+/// rolling window.
+///
 /// # Cancellation
 /// The function does not install its own cancellation signal.  Abort the
 /// spawned `JoinHandle` (or drop all ingress senders in webhook mode) to stop.
@@ -456,11 +475,39 @@ pub async fn run_event_processor(
     let handler = crate::webhook::MergeWardenWebhookHandler::new(
         state.github_client.clone(),
         state.policies.clone(),
-    );
+    )
+    .with_metrics(state.metrics.clone());
+
+    let is_queue_mode = state.queue_client.is_some();
+    let mut processed_count: u64 = 0;
+    let mut success_count: u64 = 0;
 
     while let Some(event) = ingress.next_event().await? {
-        match handler.handle_event(&event.envelope).await {
+        let event_type = event.envelope.event_type.clone();
+        let start = std::time::Instant::now();
+        let result = handler.handle_event(&event.envelope).await;
+        let duration_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+        if is_queue_mode {
+            state
+                .metrics
+                .record_queue_processing_duration_ms(duration_ms);
+        } else {
+            state
+                .metrics
+                .record_webhook_processing_duration_ms(&event_type, duration_ms);
+        }
+
+        processed_count += 1;
+
+        match result {
             Ok(()) => {
+                success_count += 1;
+                if !is_queue_mode {
+                    state
+                        .metrics
+                        .record_webhook_request(&event_type, "accepted");
+                }
                 if let Err(e) = event.ack.complete().await {
                     error!(error = %e, "Failed to acknowledge processed event");
                 }
@@ -468,11 +515,22 @@ pub async fn run_event_processor(
             Err(e) => {
                 let reason = e.to_string();
                 error!(error = %e, "Event processing failed; dead-lettering");
+                if is_queue_mode {
+                    state.metrics.record_dlq_message();
+                } else {
+                    state
+                        .metrics
+                        .record_webhook_request(&event_type, "rejected");
+                }
                 if let Err(ack_err) = event.ack.reject(&reason).await {
                     error!(error = %ack_err, "Failed to dead-letter failed event");
                 }
             }
         }
+
+        state
+            .metrics
+            .set_processing_success_rate(success_count as f64 / processed_count as f64);
     }
 
     Ok(())

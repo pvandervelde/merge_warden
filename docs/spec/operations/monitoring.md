@@ -95,7 +95,7 @@ When `MERGE_WARDEN_RECEIVER_MODE=queue`, the following additional signals are cr
 | `ingress.queue.age_oldest_message_secs` | Age of the oldest unprocessed message | > 300 s (5 min) |
 | `ingress.queue.dlq_count` | Messages moved to the dead-letter queue | > 0 |
 | `processing.success_rate` | Fraction of events processed without rejection | < 99.9% |
-| `ingress.queue.worker_errors` | Worker task terminations due to unrecoverable errors | > 0 |
+| `ingress.queue.worker_errors_total` | Worker task terminations due to unrecoverable errors | > 0 |
 
 ### Dead-Letter Queue Monitoring
 
