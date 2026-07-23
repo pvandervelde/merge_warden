@@ -1,7 +1,9 @@
 # Configuration Documentation Discrepancies
 
 This document lists discrepancies found between the Rust source code configuration structs
-and the user-facing reference documentation in `docs/user/reference/`.
+and the user-facing documentation under `docs/user/` (reference, how-to, explanation, and
+tutorial docs). All non-reference docs (`how-to/`, `explanation/`, `tutorials/`) were
+audited; only the items listed here were found to be inaccurate.
 
 ---
 
@@ -193,6 +195,124 @@ per-repo config, as that tier is applied after the repo tier. Only the app-level
 
 ---
 
+## 6. `configure-org-policy.md` "Available policy settings" table is incomplete
+
+**Category:** Missing from docs
+
+**Docs location:** `docs/user/how-to/configure-org-policy.md`, `## Available policy settings` table
+
+The table lists the following as the complete set of configurable org-policy settings:
+
+```
+prTitle:       required, pattern, label_if_missing
+workItem:      required, pattern, label_if_missing
+prSize:        enabled, fail_on_oversized, label_prefix, add_comment
+wip:           enforce_wip_blocking
+bypassRules.*: enabled, users
+```
+
+**Code behaviour:** The `OrgPolicySectionRaw` struct contains the full `PoliciesConfig` and an
+optional `ChangeTypeLabelConfig`, both of which expose substantially more settings than the table
+shows. The complete list of omissions:
+
+| Missing section/field | Code location |
+| :--- | :--- |
+| `[*.policies.pullRequests.prState]` (entire section) | `PrStateLabelsConfig` |
+| `[*.policies.pullRequests.issuePropagation]` (entire section) | `IssuePropagationConfig` |
+| `[*.policies.pullRequests.renovateStability]` (entire section) | `RenovateStabilityConfig` |
+| `[*.change_type_labels]` (entire section) | `ChangeTypeLabelConfig` |
+| `[*.policies.pullRequests.prSize]` — `excluded_file_patterns`, `thresholds`, `ignore_deletions` | `PrSizeCheckConfig` |
+| `[*.policies.pullRequests.wip]` — `wip_label`, `wip_title_patterns`, `wip_description_patterns` | `WipCheckConfig` |
+
+All these sections and fields are present in `samples/merge-warden-org-policy.sample.toml`.
+
+**Code location:** `crates/core/src/config.rs` — `OrgPolicySectionRaw`, `PullRequestsPoliciesConfig`,
+`PrSizeCheckConfig`, `WipCheckConfig`
+
+```rust
+pub(crate) struct OrgPolicySectionRaw {
+    pub policies: PoliciesConfig,
+    pub change_type_labels: Option<ChangeTypeLabelConfig>,
+}
+```
+
+**Impact:** Platform engineers reading `configure-org-policy.md` will believe that WIP label
+customisation, PR state labels, issue propagation, Renovate stability, and change-type labels
+cannot be controlled at the org level. In practice all of those can be set in the
+`[enforced.*]` and `[defaults.*]` sections.
+
+---
+
+## 7. `bypass-rules.md` (explanation) incorrectly states app-level bypass rules cannot be overridden
+
+**Category:** Wrong description
+
+**Config option:** `[policies.bypass_rules.*]` in the application config (`MERGE_WARDEN_CONFIG_FILE`)
+
+**Docs location:** `docs/user/explanation/bypass-rules.md`, `## Security considerations` section:
+
+> If this is a concern for your organisation, define bypass rules in the **application-level
+> configuration** (`MERGE_WARDEN_CONFIG_FILE`) instead. The application config is controlled
+> by the operator and **cannot be overridden by per-repo configs**.
+
+**Code behaviour:** This is the same underlying bug as discrepancy #5 but repeated in a different
+file. Per-repository bypass rules **can** override application-level bypass rules through
+`BypassRules::merge`. Only org-policy `[enforced]`-tier bypass rules are truly non-overridable.
+
+**Code location:** `crates/core/src/config.rs` — `BypassRules::merge`
+
+**Impact:** Security-conscious operators who want to enforce a fixed bypass list will follow this
+advice, configure app-level bypass rules, and be surprised when repositories with
+`.github/merge-warden.toml` files can still override those rules.
+
+---
+
+## 8. `configure-renovate-stability.md` — per-repo `enabled = false` cannot override app-level `enabled = true`
+
+**Category:** Wrong instruction
+
+**Config option:** `[policies.pullRequests.renovateStability] enabled`
+
+**Docs location:** `docs/user/how-to/configure-renovate-stability.md`, `## Disabling the feature`:
+
+> To fully disable the feature for a repository, set `enabled = false` explicitly in
+> that repository's `.github/merge-warden.toml`:
+>
+> ```toml
+> [policies.pullRequests.renovateStability]
+> enabled = false
+> ```
+
+**Code behaviour:** The `enabled` field for Renovate stability uses OR-merge semantics:
+
+```rust
+// RenovateStabilityConfig::merge
+enabled: base.enabled || over.enabled,
+```
+
+The compiled-in default for `RenovateStabilityConfig::default_enabled()` is `true`. Since the
+application-level defaults are the first tier in the merge chain, the accumulated base before
+reaching the repo tier already has `enabled = true`. Merging with per-repo `enabled = false`
+gives `true || false = true` — the feature remains **enabled**.
+
+The guide itself explains OR semantics one paragraph earlier and correctly states that
+"application-level `enabled = false` alone is not enough to disable the feature for a repository
+that has its own config file." It then contradicts itself by suggesting that per-repo `false` is
+sufficient.
+
+Per-repo `enabled = false` can only disable the feature for a specific repository when the
+**entire merge chain up to that point has `enabled = false`** (i.e. app defaults, org defaults,
+and all matching conditional defaults all have `enabled = false`). The guide omits this prerequisite.
+
+**Code location:** `crates/core/src/config.rs` — `RenovateStabilityConfig::merge`,
+`RenovateStabilityConfig::default_enabled`
+
+**Impact:** A repository maintainer following this guide and setting `enabled = false` in their
+`.github/merge-warden.toml` will find the Renovate stability feature still active, with no
+indication of why their configuration change had no effect.
+
+---
+
 ## Summary table
 
 | # | File | Section | Category | Short description |
@@ -202,3 +322,6 @@ per-repo config, as that tier is applied after the repo tier. Only the app-level
 | 3 | `app-config.md` | `[policies.change_type_labels]` | Missing from docs | Entire section absent from app-config reference |
 | 4 | `app-config.md` | `[policies.pr_size_check]` | Missing from docs | `thresholds` sub-section not mentioned |
 | 5 | `app-config.md` | `[policies.bypass_rules.*]` | Wrong description | Bypass rules described as non-overridable by per-repo config; they are overridable |
+| 6 | `how-to/configure-org-policy.md` | Available policy settings table | Incomplete | Table omits `prState`, `issuePropagation`, `renovateStability`, `change_type_labels`, and several `prSize`/`wip` fields |
+| 7 | `explanation/bypass-rules.md` | Security considerations | Wrong description | App-level bypass rules claimed non-overridable by per-repo config; they are overridable |
+| 8 | `how-to/configure-renovate-stability.md` | Disabling the feature | Wrong instruction | Per-repo `enabled = false` cannot override app-level `enabled = true` with OR-merge semantics |
