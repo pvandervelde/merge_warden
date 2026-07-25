@@ -68,6 +68,23 @@ fn api_error_status_code(e: &ApiError) -> u16 {
     }
 }
 
+/// Records `value` onto the named field of the *current* tracing span.
+///
+/// Every instrumented [`GitHubProvider`] method declares one or more
+/// `tracing::field::Empty` fields (conventionally `status`, plus
+/// `pr_fetch_status` / `properties_status` / `projects_status` on methods
+/// that make more than one HTTP call) in its `#[instrument]` attribute, then
+/// calls this helper once the outcome of the corresponding call is known —
+/// with either a real `response.status().as_u16()`, a literal status implied
+/// by the SDK call's documented contract (e.g. `201` after a successful
+/// `POST`), or [`api_error_status_code`]'s best-effort mapping on failure.
+///
+/// Centralising the call avoids repeating `tracing::Span::current().record(..)`
+/// at each of the (many) call sites below.
+fn record_status(field: &str, value: u16) {
+    tracing::Span::current().record(field, value);
+}
+
 /// GitHub implementation of developer platform traits.
 ///
 /// Wraps an installation-scoped [`InstallationClient`] to expose it through the
@@ -132,7 +149,7 @@ impl GitHubProvider {
         let response = match self.client.get(&path).await {
             Ok(r) => r,
             Err(e) => {
-                tracing::Span::current().record("status", api_error_status_code(&e));
+                record_status("status", api_error_status_code(&e));
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -142,7 +159,7 @@ impl GitHubProvider {
                 return Err(map_api_error(e));
             }
         };
-        tracing::Span::current().record("status", response.status().as_u16());
+        record_status("status", response.status().as_u16());
 
         if !response.status().is_success() {
             error!(
@@ -217,7 +234,7 @@ impl GitHubProvider {
         let response = match self.client.get(&url_path).await {
             Ok(r) => r,
             Err(ApiError::NotFound) => {
-                tracing::Span::current().record("status", 404u16);
+                record_status("status", 404u16);
                 debug!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -227,7 +244,7 @@ impl GitHubProvider {
                 return Ok(None);
             }
             Err(e) => {
-                tracing::Span::current().record("status", api_error_status_code(&e));
+                record_status("status", api_error_status_code(&e));
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -238,7 +255,7 @@ impl GitHubProvider {
                 return Err(map_api_error(e));
             }
         };
-        tracing::Span::current().record("status", response.status().as_u16());
+        record_status("status", response.status().as_u16());
 
         if !response.status().is_success() {
             // 404 is already handled above via ApiError::NotFound → Ok(None).
@@ -389,10 +406,10 @@ impl PullRequestProvider for GitHubProvider {
             )
             .await
             .map(|_| {
-                tracing::Span::current().record("status", 201u16);
+                record_status("status", 201u16);
             })
             .map_err(|e| {
-                tracing::Span::current().record("status", api_error_status_code(&e));
+                record_status("status", api_error_status_code(&e));
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -441,10 +458,10 @@ impl PullRequestProvider for GitHubProvider {
             .add_labels(repo_owner, repo_name, pr_number, labels.to_vec())
             .await
             .map(|_| {
-                tracing::Span::current().record("status", 200u16);
+                record_status("status", 200u16);
             })
             .map_err(|e| {
-                tracing::Span::current().record("status", api_error_status_code(&e));
+                record_status("status", api_error_status_code(&e));
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -491,10 +508,10 @@ impl PullRequestProvider for GitHubProvider {
             .delete_comment(repo_owner, repo_name, comment_id)
             .await
             .map(|_| {
-                tracing::Span::current().record("status", 204u16);
+                record_status("status", 204u16);
             })
             .map_err(|e| {
-                tracing::Span::current().record("status", api_error_status_code(&e));
+                record_status("status", api_error_status_code(&e));
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -544,7 +561,7 @@ impl PullRequestProvider for GitHubProvider {
             .get(repo_owner, repo_name, pr_number)
             .await
             .map_err(|e| {
-                tracing::Span::current().record("status", api_error_status_code(&e));
+                record_status("status", api_error_status_code(&e));
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -554,7 +571,7 @@ impl PullRequestProvider for GitHubProvider {
                 );
                 map_api_error(e)
             })?;
-        tracing::Span::current().record("status", 200u16);
+        record_status("status", 200u16);
 
         Ok(PullRequest {
             number: pr.number,
@@ -608,7 +625,7 @@ impl PullRequestProvider for GitHubProvider {
         );
 
         let response = self.client.get(&path).await.map_err(|e| {
-            tracing::Span::current().record("status", api_error_status_code(&e));
+            record_status("status", api_error_status_code(&e));
             error!(
                 owner = repo_owner,
                 repo = repo_name,
@@ -618,7 +635,7 @@ impl PullRequestProvider for GitHubProvider {
             );
             map_api_error(e)
         })?;
-        tracing::Span::current().record("status", response.status().as_u16());
+        record_status("status", response.status().as_u16());
 
         if !response.status().is_success() {
             error!(
@@ -692,7 +709,7 @@ impl PullRequestProvider for GitHubProvider {
             .get(repo_owner, repo_name, pr_number)
             .await
             .map_err(|e| {
-                tracing::Span::current().record("status", api_error_status_code(&e));
+                record_status("status", api_error_status_code(&e));
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -702,7 +719,7 @@ impl PullRequestProvider for GitHubProvider {
                 );
                 map_api_error(e)
             })?;
-        tracing::Span::current().record("status", 200u16);
+        record_status("status", 200u16);
 
         Ok(pr
             .labels
@@ -756,11 +773,11 @@ impl PullRequestProvider for GitHubProvider {
                     .collect()
             })
             .map_err(|e| {
-                tracing::Span::current().record("status", api_error_status_code(&e));
+                record_status("status", api_error_status_code(&e));
                 map_api_error(e)
             });
         if result.is_ok() {
-            tracing::Span::current().record("status", 200u16);
+            record_status("status", 200u16);
         }
         result
     }
@@ -814,11 +831,11 @@ impl PullRequestProvider for GitHubProvider {
                     .collect()
             })
             .map_err(|e| {
-                tracing::Span::current().record("status", api_error_status_code(&e));
+                record_status("status", api_error_status_code(&e));
                 map_api_error(e)
             });
         if result.is_ok() {
-            tracing::Span::current().record("status", 200u16);
+            record_status("status", 200u16);
         }
         result
     }
@@ -860,13 +877,13 @@ impl PullRequestProvider for GitHubProvider {
             .await
         {
             Ok(_) => {
-                tracing::Span::current().record("status", 200u16);
+                record_status("status", 200u16);
                 Ok(())
             }
             // GitHub returns 404 when the label is not present on the PR.
             // Treat as a no-op so callers can remove labels idempotently.
             Err(ApiError::NotFound) => {
-                tracing::Span::current().record("status", 404u16);
+                record_status("status", 404u16);
                 debug!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -877,7 +894,7 @@ impl PullRequestProvider for GitHubProvider {
                 Ok(())
             }
             Err(e) => {
-                tracing::Span::current().record("status", api_error_status_code(&e));
+                record_status("status", api_error_status_code(&e));
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -942,7 +959,7 @@ impl PullRequestProvider for GitHubProvider {
             .get(repo_owner, repo_name, pr_number)
             .await
             .map_err(|e| {
-                tracing::Span::current().record("pr_fetch_status", api_error_status_code(&e));
+                record_status("pr_fetch_status", api_error_status_code(&e));
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -952,7 +969,7 @@ impl PullRequestProvider for GitHubProvider {
                 );
                 map_api_error(e)
             })?;
-        tracing::Span::current().record("pr_fetch_status", 200u16);
+        record_status("pr_fetch_status", 200u16);
 
         let head_sha = pr.head.sha;
 
@@ -970,7 +987,7 @@ impl PullRequestProvider for GitHubProvider {
         });
 
         let response = self.client.post(&url, &payload).await.map_err(|e| {
-            tracing::Span::current().record("status", api_error_status_code(&e));
+            record_status("status", api_error_status_code(&e));
             error!(
                 owner = repo_owner,
                 repo = repo_name,
@@ -980,7 +997,7 @@ impl PullRequestProvider for GitHubProvider {
             );
             map_api_error(e)
         })?;
-        tracing::Span::current().record("status", response.status().as_u16());
+        record_status("status", response.status().as_u16());
 
         if !response.status().is_success() {
             error!(
@@ -1050,7 +1067,7 @@ impl PullRequestProvider for GitHubProvider {
             );
 
             let response = self.client.get(&path).await.map_err(|e| {
-                tracing::Span::current().record("status", api_error_status_code(&e));
+                record_status("status", api_error_status_code(&e));
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1060,7 +1077,7 @@ impl PullRequestProvider for GitHubProvider {
                 );
                 map_api_error(e)
             })?;
-            tracing::Span::current().record("status", response.status().as_u16());
+            record_status("status", response.status().as_u16());
 
             if !response.status().is_success() {
                 error!(
@@ -1160,7 +1177,7 @@ impl PullRequestProvider for GitHubProvider {
         let response = match self.client.get(&path).await {
             Ok(r) => r,
             Err(e) => {
-                tracing::Span::current().record("status", api_error_status_code(&e));
+                record_status("status", api_error_status_code(&e));
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1171,7 +1188,7 @@ impl PullRequestProvider for GitHubProvider {
                 return Err(map_api_error(e));
             }
         };
-        tracing::Span::current().record("status", response.status().as_u16());
+        record_status("status", response.status().as_u16());
 
         if !response.status().is_success() {
             error!(
@@ -1242,7 +1259,7 @@ impl PullRequestProvider for GitHubProvider {
         let response = match self.client.get(&path).await {
             Ok(r) => r,
             Err(e) => {
-                tracing::Span::current().record("status", api_error_status_code(&e));
+                record_status("status", api_error_status_code(&e));
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1253,7 +1270,7 @@ impl PullRequestProvider for GitHubProvider {
                 return Err(map_api_error(e));
             }
         };
-        tracing::Span::current().record("status", response.status().as_u16());
+        record_status("status", response.status().as_u16());
 
         if !response.status().is_success() {
             error!(
@@ -1313,10 +1330,10 @@ impl PullRequestProvider for GitHubProvider {
             )
             .await
             .map(|_| {
-                tracing::Span::current().record("status", 201u16);
+                record_status("status", 201u16);
             })
             .map_err(|e| {
-                tracing::Span::current().record("status", api_error_status_code(&e));
+                record_status("status", api_error_status_code(&e));
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1365,7 +1382,7 @@ impl IssueMetadataProvider for GitHubProvider {
         {
             Ok(i) => i,
             Err(ApiError::NotFound) => {
-                tracing::Span::current().record("status", 404u16);
+                record_status("status", 404u16);
                 debug!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1375,7 +1392,7 @@ impl IssueMetadataProvider for GitHubProvider {
                 return Ok(None);
             }
             Err(e) => {
-                tracing::Span::current().record("status", api_error_status_code(&e));
+                record_status("status", api_error_status_code(&e));
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1386,7 +1403,7 @@ impl IssueMetadataProvider for GitHubProvider {
                 return Err(map_api_error(e));
             }
         };
-        tracing::Span::current().record("status", 200u16);
+        record_status("status", 200u16);
 
         let milestone = issue.milestone.map(|m| IssueMilestone {
             number: m.number,
@@ -1403,7 +1420,7 @@ impl IssueMetadataProvider for GitHubProvider {
             .await
         {
             Ok(linked) => {
-                tracing::Span::current().record("projects_status", 200u16);
+                record_status("projects_status", 200u16);
                 linked
                     .into_iter()
                     .map(|p| IssueProject {
@@ -1414,7 +1431,7 @@ impl IssueMetadataProvider for GitHubProvider {
                     .collect()
             }
             Err(e) => {
-                tracing::Span::current().record("projects_status", api_error_status_code(&e));
+                record_status("projects_status", api_error_status_code(&e));
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1469,10 +1486,10 @@ impl IssueMetadataProvider for GitHubProvider {
             .set_milestone(repo_owner, repo_name, pr_number, milestone_number)
             .await
             .map(|_| {
-                tracing::Span::current().record("status", 200u16);
+                record_status("status", 200u16);
             })
             .map_err(|e| {
-                tracing::Span::current().record("status", api_error_status_code(&e));
+                record_status("status", api_error_status_code(&e));
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1525,7 +1542,7 @@ impl IssueMetadataProvider for GitHubProvider {
         {
             Ok(pr) => pr,
             Err(e) => {
-                tracing::Span::current().record("pr_fetch_status", api_error_status_code(&e));
+                record_status("pr_fetch_status", api_error_status_code(&e));
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1536,7 +1553,7 @@ impl IssueMetadataProvider for GitHubProvider {
                 return Err(map_api_error(e));
             }
         };
-        tracing::Span::current().record("pr_fetch_status", 200u16);
+        record_status("pr_fetch_status", 200u16);
 
         let pr_node_id = pr.node_id;
 
@@ -1547,7 +1564,7 @@ impl IssueMetadataProvider for GitHubProvider {
             .await
         {
             Ok(_) => {
-                tracing::Span::current().record("status", 200u16);
+                record_status("status", 200u16);
                 info!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1559,7 +1576,7 @@ impl IssueMetadataProvider for GitHubProvider {
                 Ok(())
             }
             Err(ApiError::NotFound) => {
-                tracing::Span::current().record("status", 404u16);
+                record_status("status", 404u16);
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1574,7 +1591,7 @@ impl IssueMetadataProvider for GitHubProvider {
                 )))
             }
             Err(e) => {
-                tracing::Span::current().record("status", api_error_status_code(&e));
+                record_status("status", api_error_status_code(&e));
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1630,7 +1647,7 @@ impl RepositoryMetadataProvider for GitHubProvider {
         // Topics are supported on all plans — any failure here is unexpected.
         let topics: Vec<String> = match topics_result {
             Ok(resp) if resp.status().is_success() => {
-                tracing::Span::current().record("status", resp.status().as_u16());
+                record_status("status", resp.status().as_u16());
                 let json: serde_json::Value =
                     resp.json().await.map_err(|_| Error::InvalidResponse)?;
                 json["names"]
@@ -1645,7 +1662,7 @@ impl RepositoryMetadataProvider for GitHubProvider {
             }
             Ok(resp) => {
                 let status = resp.status();
-                tracing::Span::current().record("status", status.as_u16());
+                record_status("status", status.as_u16());
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1655,7 +1672,7 @@ impl RepositoryMetadataProvider for GitHubProvider {
                 return Err(Error::InvalidResponse);
             }
             Err(e) => {
-                tracing::Span::current().record("status", api_error_status_code(&e));
+                record_status("status", api_error_status_code(&e));
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1669,7 +1686,7 @@ impl RepositoryMetadataProvider for GitHubProvider {
         // Custom properties: enterprise only. 403/404 degrade gracefully.
         let custom_properties = match props_result {
             Ok(resp) if resp.status().is_success() => {
-                tracing::Span::current().record("properties_status", resp.status().as_u16());
+                record_status("properties_status", resp.status().as_u16());
                 let json: serde_json::Value = match resp.json().await {
                     Ok(v) => v,
                     Err(_) => {
@@ -1696,7 +1713,7 @@ impl RepositoryMetadataProvider for GitHubProvider {
             }
             Ok(resp) => {
                 let status = resp.status().as_u16();
-                tracing::Span::current().record("properties_status", status);
+                record_status("properties_status", status);
                 if status == 403 || status == 404 {
                     // 403 = not enterprise / missing permission; 404 = not found.
                     // Both are expected on non-enterprise plans.
@@ -1721,7 +1738,7 @@ impl RepositoryMetadataProvider for GitHubProvider {
                 | ApiError::AuthorizationFailed
                 | ApiError::AuthenticationFailed),
             ) => {
-                tracing::Span::current().record("properties_status", api_error_status_code(&e));
+                record_status("properties_status", api_error_status_code(&e));
                 debug!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1730,7 +1747,7 @@ impl RepositoryMetadataProvider for GitHubProvider {
                 std::collections::HashMap::new()
             }
             Err(e) => {
-                tracing::Span::current().record("properties_status", api_error_status_code(&e));
+                record_status("properties_status", api_error_status_code(&e));
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,

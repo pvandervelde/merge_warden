@@ -50,12 +50,12 @@ impl MetricsConfig {
     /// # Errors
     /// This function never returns an error.
     pub fn from_env() -> Self {
+        let (otlp_endpoint, service_name, service_version) =
+            crate::telemetry::otel_service_metadata_from_env();
         MetricsConfig {
-            otlp_endpoint: std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok(),
-            service_name: std::env::var("OTEL_SERVICE_NAME")
-                .unwrap_or_else(|_| "merge-warden".to_string()),
-            service_version: std::env::var("OTEL_SERVICE_VERSION")
-                .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string()),
+            otlp_endpoint,
+            service_name,
+            service_version,
             prometheus_enabled: std::env::var("MERGE_WARDEN_METRICS_ENDPOINT")
                 .map(|v| v == "prometheus")
                 .unwrap_or(false),
@@ -314,13 +314,8 @@ static PROMETHEUS_REGISTRY: OnceLock<prometheus::Registry> = OnceLock::new();
 pub fn init_metrics(
     config: &MetricsConfig,
 ) -> Result<opentelemetry_sdk::metrics::SdkMeterProvider, ServerError> {
-    let resource = opentelemetry_sdk::Resource::builder()
-        .with_service_name(config.service_name.clone())
-        .with_attributes(vec![KeyValue::new(
-            "service.version",
-            config.service_version.clone(),
-        )])
-        .build();
+    let resource =
+        crate::telemetry::build_otel_resource(&config.service_name, &config.service_version);
 
     let mut builder =
         opentelemetry_sdk::metrics::SdkMeterProvider::builder().with_resource(resource);

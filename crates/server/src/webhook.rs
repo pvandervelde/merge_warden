@@ -653,13 +653,10 @@ pub async fn handle_webhook(
 ///
 /// See docs/spec/design/containerisation.md — HTTP routes
 pub fn build_router(state: Arc<AppState>) -> Router {
-    let mut router = Router::new()
+    let router = Router::new()
         .route("/health", get(crate::health::health_check_handler))
         .route("/api/github/webhook", post(handle_webhook));
-
-    if state.metrics_config.prometheus_enabled {
-        router = router.route("/metrics", get(crate::metrics::metrics_handler));
-    }
+    let router = with_metrics_route(router, &state);
 
     router.with_state(state)
 }
@@ -677,13 +674,24 @@ pub fn build_router(state: Arc<AppState>) -> Router {
 ///
 /// See docs/spec/design/containerisation.md — HTTP routes
 pub fn build_queue_router(state: Arc<AppState>) -> Router {
-    let mut router = Router::new().route("/health", get(crate::health::health_check_handler));
-
-    if state.metrics_config.prometheus_enabled {
-        router = router.route("/metrics", get(crate::metrics::metrics_handler));
-    }
+    let router = Router::new().route("/health", get(crate::health::health_check_handler));
+    let router = with_metrics_route(router, &state);
 
     router.with_state(state)
+}
+
+/// Registers `GET /metrics` on `router` when `state.metrics_config.prometheus_enabled`
+/// is `true`; returns `router` unchanged otherwise.
+///
+/// Shared by [`build_router`] and [`build_queue_router`] — both modes expose
+/// the same conditional Prometheus scrape endpoint on top of otherwise
+/// different route sets.
+fn with_metrics_route(router: Router<Arc<AppState>>, state: &AppState) -> Router<Arc<AppState>> {
+    if state.metrics_config.prometheus_enabled {
+        router.route("/metrics", get(crate::metrics::metrics_handler))
+    } else {
+        router
+    }
 }
 
 // ---------------------------------------------------------------------------

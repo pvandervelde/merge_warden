@@ -4,36 +4,23 @@ use axum::{
 };
 use chrono::Utc;
 use github_bot_sdk::{
-    client::{ClientConfig, GitHubClient, OwnerType, Repository, RepositoryOwner},
+    client::{OwnerType, Repository, RepositoryOwner},
     events::{EventEnvelope, EventPayload},
     webhook::WebhookHandler,
 };
 use merge_warden_core::config::{ApplicationDefaults, RepositoryScope};
-use merge_warden_developer_platforms::app_auth::AppAuthProvider;
-use opentelemetry::metrics::MeterProvider as _;
 use serde_json::json;
 use tower::ServiceExt as _;
 
 use super::{AppState, MergeWardenWebhookHandler};
-use crate::health::HealthCheckConfig;
-use crate::metrics::{Metrics, MetricsConfig};
+use crate::test_support::{github_client_for, test_app_state, TestAppStateOptions};
 
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
 
-/// RSA private key used only in tests.  Generated offline; never used in
-/// production.  Must be a valid PEM-encoded PKCS#8 or traditional RSA key so
-/// `AppAuthProvider` can parse it.
-const TEST_PEM: &str = include_str!("../../developer_platforms/testdata/test-rsa-key.pem");
-
 fn make_test_handler() -> MergeWardenWebhookHandler {
-    let auth = AppAuthProvider::new(12345, TEST_PEM, "https://api.github.com")
-        .expect("test RSA key must be valid");
-    let github_client = GitHubClient::builder(auth)
-        .config(ClientConfig::default())
-        .build()
-        .expect("GitHub client must build");
+    let github_client = github_client_for("https://api.github.com");
     MergeWardenWebhookHandler::new(github_client, ApplicationDefaults::default())
 }
 
@@ -78,12 +65,7 @@ fn make_status_envelope(context: &str) -> EventEnvelope {
 /// Builds a handler whose `ApplicationDefaults.repository_scope` is set to
 /// `scope`. All other policy defaults are left at their compiled-in values.
 fn make_test_handler_with_scope(scope: Option<RepositoryScope>) -> MergeWardenWebhookHandler {
-    let auth = AppAuthProvider::new(12345, TEST_PEM, "https://api.github.com")
-        .expect("test RSA key must be valid");
-    let github_client = GitHubClient::builder(auth)
-        .config(ClientConfig::default())
-        .build()
-        .expect("GitHub client must build");
+    let github_client = github_client_for("https://api.github.com");
     let policies = ApplicationDefaults {
         repository_scope: scope,
         ..ApplicationDefaults::default()
@@ -224,39 +206,10 @@ fn assert_err_contains(
 // what the handlers themselves return.
 // ---------------------------------------------------------------------------
 
-/// RSA private key used only in tests (same fixture as `make_test_handler`).
-fn make_test_github_client() -> GitHubClient {
-    let auth = AppAuthProvider::new(12345, TEST_PEM, "https://api.github.com")
-        .expect("test RSA key must be valid");
-    GitHubClient::builder(auth)
-        .config(ClientConfig::default())
-        .build()
-        .expect("GitHub client must build")
-}
-
-fn test_metrics() -> Metrics {
-    let provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder().build();
-    let meter = provider.meter("test");
-    Metrics::new(&meter)
-}
-
 fn make_test_app_state(prometheus_enabled: bool) -> std::sync::Arc<AppState> {
-    std::sync::Arc::new(AppState {
-        receiver: None,
-        github_client: make_test_github_client(),
-        policies: ApplicationDefaults::default(),
-        metrics: test_metrics(),
-        metrics_config: MetricsConfig {
-            otlp_endpoint: None,
-            service_name: "test".to_string(),
-            service_version: "0.0.0".to_string(),
-            prometheus_enabled,
-        },
-        health_check_config: HealthCheckConfig {
-            full_checks_enabled: false,
-        },
-        queue_client: None,
-        queue_name: None,
+    test_app_state(TestAppStateOptions {
+        prometheus_enabled,
+        ..Default::default()
     })
 }
 

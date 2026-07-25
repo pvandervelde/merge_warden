@@ -54,3 +54,40 @@ Add to this whenever a reusable component becomes "the standard way".
 | `RepositoryContext` | type | `merge_warden_developer_platforms::models` | Runtime metadata for a repository: `topics: Vec<String>` and `custom_properties: HashMap<String,String>`. Derives `Debug, Clone, Default, PartialEq, Eq`. Used by `PolicyCondition::matches`. | metadata, models, conditional-policy |
 | `RepositoryMetadataProvider` | trait | `merge_warden_developer_platforms` | Async port trait for fetching repository metadata. Single method: `get_repository_context(owner, name) -> Result<RepositoryContext, Error>`. Implemented by `GitHubProvider`; pass `None` in tests or callers that don't need conditional policies. | metadata, trait, port |
 | `CommitStatus` | struct | `merge_warden_developer_platforms::models` | A single GitHub commit status entry with `context: String`, `state: String`, and `description: Option<String>`. Derives `Debug, Clone, Serialize, Deserialize`. Maps from `GET /repos/{owner}/{repo}/commits/{sha}/statuses`; GitHub returns newest-first so callers use the first occurrence per context. | models, commit-status, GitHub |
+
+## `merge_warden_developer_platforms` — tracing / observability
+
+| Name | Kind | Location | Description | Tags |
+|------|------|----------|-------------|------|
+| `api_error_status_code` | fn | `merge_warden_developer_platforms::github` | Best-effort mapping from an `ApiError` to the HTTP status code most closely associated with it (404/401/403/429/504/400; `0` for errors with no HTTP equivalent). Used to populate the `status` tracing span field on `GitHubProvider` methods that call through SDK wrappers not exposing the raw `reqwest::Response`. | tracing, error-handling, github |
+| `record_status` | fn | `merge_warden_developer_platforms::github` | `(field: &str, value: u16)` — records an HTTP status code onto a named field (conventionally `status`, `pr_fetch_status`, `properties_status`, or `projects_status`) of the *current* tracing span. Call after every GitHub API call inside a `#[instrument]`-annotated `GitHubProvider` method that declared the field as `tracing::field::Empty`. Consolidates ~55 previously-duplicated `tracing::Span::current().record(...)` call sites. | tracing, span, github |
+
+## `merge_warden_core` — observability
+
+| Name | Kind | Location | Description | Tags |
+|------|------|----------|-------------|------|
+| `MetricsRecorder` | trait | `merge_warden_core` | Port trait (`Send + Sync + Debug`) for reporting `pr.validation.duration_ms` and `pr.bypass.activations_total` without introducing an OTel/infrastructure dependency into `crates/core`. Inject a real implementation via `MergeWarden::with_metrics_recorder`; see `merge_warden_server::metrics::CoreMetricsRecorder` for the production adapter. | metrics, trait, port, observability |
+| `NoopMetricsRecorder` | type | `merge_warden_core` | No-op `MetricsRecorder` implementation (`Debug, Default, Clone, Copy`); used when `MergeWarden` is constructed without `with_metrics_recorder`. | metrics, noop, observability |
+
+## `merge_warden_server` — observability (metrics / health)
+
+| Name | Kind | Location | Description | Tags |
+|------|------|----------|-------------|------|
+| `Metrics` | struct | `merge_warden_server::metrics` | Cheap-to-`Clone` facade over every OTel instrument merge-warden emits (11 counters/histograms/gauges — webhook, queue, PR-validation, bypass signals). Build once via `Metrics::new(&meter)` from the provider returned by `init_metrics`, thread through `AppState`. Has a self-contained `Default` impl (inert, reader-less provider) for callers constructed before a real provider exists. | metrics, otel, facade |
+| `MetricsConfig` | type | `merge_warden_server::metrics` | `MetricsConfig::from_env()` reads `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME`/`OTEL_SERVICE_VERSION`, and `MERGE_WARDEN_METRICS_ENDPOINT` (`"prometheus"` enables the scrape endpoint). Never fails. | metrics, config, env |
+| `init_metrics` | fn | `merge_warden_server::metrics` | Builds the `SdkMeterProvider`: attaches an OTLP `PeriodicReader` when `otlp_endpoint` is set (mirrors `telemetry::init_telemetry`'s trace pipeline) and/or an `opentelemetry-prometheus` reader when `prometheus_enabled`. Call once at startup. | metrics, otel, startup |
+| `metrics_handler` | fn (axum handler) | `merge_warden_server::metrics` | `GET /metrics` — renders the module-private Prometheus registry via `prometheus::TextEncoder`. Only registered on the router when `MetricsConfig::prometheus_enabled`. | metrics, prometheus, axum |
+| `CoreMetricsRecorder` | type | `merge_warden_server::metrics` | Production adapter implementing `merge_warden_core::MetricsRecorder` on top of `Metrics`, so `crates/core` stays OTel-free. Inject via `MergeWarden::with_metrics_recorder(Arc::new(CoreMetricsRecorder::new(metrics)))`. | metrics, adapter, core-bridge |
+| `HealthState` | enum | `merge_warden_server::health` | `Healthy`/`Degraded`/`Unhealthy`; `.http_status()` maps to `200`/`207`/`503`. Serializes lowercase. Ordered by `severity()` (higher = worse) for aggregation. | health, enum |
+| `ComponentHealth` / `HealthReport` | struct | `merge_warden_server::health` | Per-dependency (`ComponentHealth`: status/latency_ms/depth/message) and overall (`HealthReport`: status + `BTreeMap<String, ComponentHealth>`) shapes for `GET /health`'s structured JSON body. | health, json, struct |
+| `HealthCheckConfig` | type | `merge_warden_server::health` | `HealthCheckConfig::from_env()` reads `MERGE_WARDEN_HEALTH_CHECKS` (`"full"` enables real dependency probing; anything else is liveness-only). | health, config, env |
+| `with_metrics_route` | fn | `merge_warden_server::webhook` | `(router, state) -> Router` — conditionally registers `GET /metrics` on a router when `state.metrics_config.prometheus_enabled`, otherwise returns the router unchanged. Shared by `build_router` and `build_queue_router`. | routing, axum, metrics |
+| `otel_service_metadata_from_env` | fn | `merge_warden_server::telemetry` | `pub(crate)`. Reads the three env vars shared by every OTel exporter config in this crate — `OTEL_EXPORTER_OTLP_ENDPOINT`, `OTEL_SERVICE_NAME` (default `"merge-warden"`), `OTEL_SERVICE_VERSION` (default: crate version) — as a `(Option<String>, String, String)` tuple. Backs both `TelemetryConfig::from_env` and `MetricsConfig::from_env`; never fails. | config, env, otel |
+| `build_otel_resource` | fn | `merge_warden_server::telemetry` | `pub(crate) (service_name: &str, service_version: &str) -> opentelemetry_sdk::Resource`. Builds the `service.name`/`service.version` OTel resource shared by the trace pipeline (`init_telemetry`) and the metrics pipeline (`metrics::init_metrics`). | otel, resource, startup |
+
+## `merge_warden_server` — test fixtures (`#[cfg(test)]` only)
+
+| Name | Kind | Location | Description | Tags |
+|------|------|----------|-------------|------|
+| `test_support::github_client_for` | fn | `merge_warden_server::test_support` | `pub(crate)`, test-only. `(base_url: &str) -> GitHubClient`. Builds a test `GitHubClient` whose App auth targets `base_url` — pass `"https://api.github.com"` for routing/wiring tests that never dial out, or an unroutable address (e.g. `"http://127.0.0.1:1"`) for tests that need every call to fail fast. | testing, fixture, github |
+| `test_support::test_app_state` / `TestAppStateOptions` | fn / struct | `merge_warden_server::test_support` | `pub(crate)`, test-only. Builds an `Arc<AppState>` for router/handler tests from a `TestAppStateOptions` (`github_base_url`, `prometheus_enabled`, `full_checks_enabled`, `queue`, each defaulted to an inert "webhook mode, nothing enabled" baseline via `Default`). Replaces the near-identical `AppState`-literal helpers previously duplicated across `webhook_tests.rs` and `health_tests.rs`. | testing, fixture, app-state |

@@ -1,66 +1,29 @@
 use std::{sync::Arc, time::Duration};
 
 use axum::{body::to_bytes, extract::State, http::StatusCode, response::IntoResponse};
-use github_bot_sdk::client::{ClientConfig, GitHubClient};
-use merge_warden_core::config::ApplicationDefaults;
-use merge_warden_developer_platforms::app_auth::AppAuthProvider;
-use opentelemetry::metrics::MeterProvider as _;
 use queue_runtime::{QueueClientFactory, QueueName};
 
 use super::*;
-use crate::metrics::{Metrics, MetricsConfig};
+use crate::test_support::{test_app_state, TestAppStateOptions};
 use crate::webhook::AppState;
 
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
 
-const TEST_PEM: &str = include_str!("../../developer_platforms/testdata/test-rsa-key.pem");
-
-/// Builds a `GitHubClient` whose base API URL is unroutable
-/// (`127.0.0.1:1`, a loopback port nothing listens on). Connection attempts
-/// fail near-instantly (`ECONNREFUSED`) without touching the network, making
-/// this a fast, deterministic stand-in for "GitHub API unreachable".
-fn make_unreachable_github_client() -> GitHubClient {
-    let auth = AppAuthProvider::new(12345, TEST_PEM, "http://127.0.0.1:1")
-        .expect("test RSA key must be valid");
-    GitHubClient::builder(auth)
-        .config(ClientConfig::default())
-        .build()
-        .expect("GitHub client must build even with an unreachable base URL")
-}
-
-fn test_metrics() -> Metrics {
-    let provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder().build();
-    let meter = provider.meter("test");
-    Metrics::new(&meter)
-}
-
+/// Builds an `AppState` whose GitHub client points at an unroutable address
+/// (see [`TestAppStateOptions::github_base_url`]) — every health check test
+/// in this file needs "GitHub API unreachable" behaviour, so that override is
+/// baked in here rather than repeated at every call site.
 fn make_app_state(
     full_checks_enabled: bool,
     queue: Option<(Arc<dyn queue_runtime::QueueClient>, QueueName)>,
 ) -> Arc<AppState> {
-    let (queue_client, queue_name) = match queue {
-        Some((c, n)) => (Some(c), Some(n)),
-        None => (None, None),
-    };
-
-    Arc::new(AppState {
-        receiver: None,
-        github_client: make_unreachable_github_client(),
-        policies: ApplicationDefaults::default(),
-        metrics: test_metrics(),
-        metrics_config: MetricsConfig {
-            otlp_endpoint: None,
-            service_name: "test".to_string(),
-            service_version: "0.0.0".to_string(),
-            prometheus_enabled: false,
-        },
-        health_check_config: HealthCheckConfig {
-            full_checks_enabled,
-        },
-        queue_client,
-        queue_name,
+    test_app_state(TestAppStateOptions {
+        github_base_url: "http://127.0.0.1:1",
+        full_checks_enabled,
+        queue,
+        ..Default::default()
     })
 }
 

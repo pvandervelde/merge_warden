@@ -11,6 +11,8 @@ mod health;
 mod ingress;
 mod metrics;
 mod telemetry;
+#[cfg(test)]
+mod test_support;
 mod webhook;
 
 use std::sync::Arc;
