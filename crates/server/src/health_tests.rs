@@ -391,3 +391,80 @@ async fn full_mode_error_message_does_not_contain_rust_backtrace_markers() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// full_mode — GITHUB_PROBE_TIMEOUT must bound a real network hang, not just
+// an immediate ECONNREFUSED. Every other test in this file points
+// `github_client` at "http://127.0.0.1:1" (nothing listens there), which
+// fails near-instantly at the OS level — it never actually exercises the
+// `tokio::time::timeout(GITHUB_PROBE_TIMEOUT, ...)` wrapper in
+// `probe_github_api`. This test instead binds a real TCP listener that
+// accepts the connection but never writes a response, forcing the request to
+// hang mid-flight, so the only thing that can end it is our own timeout.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn full_mode_github_probe_is_bounded_when_connection_hangs_after_connect() {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("must be able to bind an ephemeral port");
+    let addr = listener.local_addr().expect("listener must have a local address");
+
+    // Accept connections and hold them open forever without writing a
+    // response. Dropped (and the task aborted) when the test function
+    // returns, since it is not awaited.
+    let _accept_task = tokio::spawn(async move {
+        loop {
+            match listener.accept().await {
+                Ok((socket, _)) => {
+                    // Leak the socket into a task that never responds so the
+                    // client's read half blocks until it hits our timeout.
+                    tokio::spawn(async move {
+                        let _socket = socket;
+                        tokio::time::sleep(Duration::from_secs(3600)).await;
+                    });
+                }
+                Err(_) => break,
+            }
+        }
+    });
+
+    let base_url = format!("http://{addr}");
+    let state = Arc::new(AppState {
+        receiver: None,
+        github_client: crate::test_support::github_client_for(&base_url),
+        policies: merge_warden_core::config::ApplicationDefaults::default(),
+        metrics: crate::metrics::Metrics::default(),
+        metrics_config: crate::metrics::MetricsConfig {
+            otlp_endpoint: None,
+            service_name: "test".to_string(),
+            service_version: "0.0.0".to_string(),
+            prometheus_enabled: false,
+        },
+        health_check_config: HealthCheckConfig {
+            full_checks_enabled: true,
+        },
+        queue_client: None,
+        queue_name: None,
+    });
+
+    // GITHUB_PROBE_TIMEOUT is 5s; allow a generous margin so this is not
+    // flaky under CI load, while still proving the handler does not hang
+    // indefinitely (the peer here never responds, ever).
+    let (status, body) = with_bound(Duration::from_secs(10), call_handler(state)).await;
+
+    assert_eq!(
+        status,
+        StatusCode::SERVICE_UNAVAILABLE,
+        "a hung GitHub connection must be reported unhealthy, not healthy: {body}"
+    );
+    assert_eq!(
+        body["checks"]["github_api"]["status"],
+        serde_json::json!("unhealthy")
+    );
+    assert_eq!(
+        body["checks"]["github_api"]["message"],
+        serde_json::json!("GitHub API request timed out"),
+        "expected the timeout-specific message, not the generic request-failed one: {body}"
+    );
+}

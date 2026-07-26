@@ -22,17 +22,33 @@ use crate::webhook::AppState;
 pub(crate) const TEST_PEM: &str =
     include_str!("../../developer_platforms/testdata/test-rsa-key.pem");
 
-/// Builds a `GitHubClient` whose GitHub App auth targets `base_url`.
+/// Builds a `GitHubClient` whose GitHub App auth AND REST API calls both
+/// target `base_url`.
 ///
 /// Use `"https://api.github.com"` for tests that only exercise routing/wiring
 /// and never make a real network call. Use an unroutable address such as
 /// `"http://127.0.0.1:1"` (a loopback port nothing listens on) for tests that
 /// need every call to fail near-instantly with `ECONNREFUSED` — a fast,
 /// deterministic stand-in for "GitHub API unreachable".
+///
+/// Both `AppAuthProvider::new`'s `api_url` argument AND
+/// `ClientConfig::github_api_url` must be set to `base_url`: they are two
+/// independent fields in the `github-bot-sdk` crate — `AppAuthProvider` uses
+/// its own `api_url` only for the installation-token exchange endpoint, while
+/// `GitHubClient::get_app()` (and other REST calls) build their request URL
+/// from `ClientConfig::github_api_url`, which defaults to the real
+/// `https://api.github.com` if left unset. Overriding only the former (as a
+/// previous version of this helper did) left `get_app()` silently making live
+/// requests to production GitHub with a throwaway test JWT/app ID on every
+/// "unreachable GitHub API" test, regardless of `base_url` — see the
+/// `full_mode_github_probe_is_bounded_when_connection_hangs_after_connect`
+/// regression test in `health_tests.rs`, which caught this by using a real
+/// local listener and observing a genuine `404 Integration not found`
+/// response from `api.github.com` instead of the intended simulated hang.
 pub(crate) fn github_client_for(base_url: &str) -> GitHubClient {
     let auth = AppAuthProvider::new(12345, TEST_PEM, base_url).expect("test RSA key must be valid");
     GitHubClient::builder(auth)
-        .config(ClientConfig::default())
+        .config(ClientConfig::default().with_github_api_url(base_url))
         .build()
         .expect("GitHub client must build even with an unreachable base URL")
 }
