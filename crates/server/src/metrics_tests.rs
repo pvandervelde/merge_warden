@@ -766,6 +766,205 @@ fn init_metrics_succeeds_when_prometheus_enabled() {
     assert!(result.is_ok(), "expected Ok, got: {:?}", result.err());
 }
 
+// ---------------------------------------------------------------------------
+// Prometheus text-exposition rendering — exercises the *actual* rendering
+// path (`build_prometheus_exporter` -> `prometheus::Registry` ->
+// `prometheus::TextEncoder`), the same chain `init_metrics` /
+// `metrics_handler` use, rather than the OTel-native `ManualReader` data
+// model the rest of this file inspects. Deliberately does not go through
+// `init_metrics`/`metrics_handler` themselves: `PROMETHEUS_REGISTRY` is a
+// process-wide `OnceLock` that only the first caller in the whole test
+// binary can populate (see the comment on `init_metrics`'s Prometheus
+// branch), so a test asserting on its contents would be order-dependent
+// across the binary. Building an isolated registry/exporter pair per test,
+// via the same `build_prometheus_exporter` helper `init_metrics` calls,
+// gives the same rendering behaviour (and actually regresses if that
+// helper's `.without_counter_suffixes()` is ever removed) with no
+// cross-test interference.
+// ---------------------------------------------------------------------------
+
+fn render_prometheus_text(record: impl FnOnce(&Metrics)) -> String {
+    use opentelemetry_sdk::metrics::SdkMeterProvider;
+
+    let registry = prometheus::Registry::new();
+    let exporter = build_prometheus_exporter(registry.clone()).expect("exporter must build");
+    let provider = SdkMeterProvider::builder().with_reader(exporter).build();
+    let meter = provider.meter("merge-warden-test");
+    let metrics = Metrics::new(&meter);
+
+    record(&metrics);
+
+    let metric_families = registry.gather();
+    let encoder = prometheus::TextEncoder::new();
+    let mut buffer = Vec::new();
+    encoder
+        .encode(&metric_families, &mut buffer)
+        .expect("encoding must not fail");
+    String::from_utf8_lossy(&buffer).into_owned()
+}
+
+/// Regression test for a confirmed bug: `opentelemetry_prometheus` (0.32.0)
+/// unconditionally appends a `_total` suffix to every monotonic counter's
+/// name, with no check for whether the (dot-sanitized) name already ends in
+/// `_total`. Four of our eleven metrics already end in `_total` per
+/// `.llm/task.md` / `docs/spec/operations/monitoring.md`
+/// (`ingress.webhook.requests_total`, `pr.bypass.activations_total`,
+/// `ingress.queue.worker_errors_total`), so without
+/// `.without_counter_suffixes()` (set in `init_metrics`) the Prometheus
+/// endpoint would expose `ingress_webhook_requests_total_total`,
+/// `pr_bypass_activations_total_total`, and
+/// `ingress_queue_worker_errors_total_total` — silently diverging from every
+/// dashboard/alert rule written against the documented metric name.
+#[test]
+fn prometheus_rendering_does_not_double_the_total_suffix_on_counters() {
+    let body = render_prometheus_text(|metrics| {
+        metrics.record_webhook_request("pull_request", "accepted");
+        metrics.record_bypass_activation("admin_override");
+        metrics.record_worker_error();
+        metrics.record_dlq_message();
+    });
+
+    assert!(
+        !body.contains("_total_total"),
+        "Prometheus output must never contain a doubled _total suffix: {body}"
+    );
+
+    for expected_name in [
+        "ingress_webhook_requests_total",
+        "pr_bypass_activations_total",
+        "ingress_queue_worker_errors_total",
+        // Counter whose OTel name does NOT already end in `_total`
+        // (`ingress.queue.dlq_count`) — must render exactly as documented,
+        // with no suffix appended (since we disabled the exporter's
+        // auto-suffix behaviour entirely via `.without_counter_suffixes()`).
+        "ingress_queue_dlq_count",
+    ] {
+        assert!(
+            body.contains(&format!("# TYPE {expected_name} counter")),
+            "expected a '# TYPE {expected_name} counter' line, got:\n{body}"
+        );
+    }
+}
+
+/// Prometheus text exposition format requires backslashes, double quotes,
+/// and newlines in label values to be escaped as `\\`, `\"`, and `\n`
+/// respectively. `event_type`/`bypass_type` values ultimately derive from
+/// GitHub webhook payload fields (event names, bypass rule identifiers) —
+/// while today's call sites only ever pass fixed, known-safe strings, the
+/// renderer itself (the `prometheus` crate) must not corrupt the exposition
+/// format if a label value ever contains these characters, since a
+/// mis-escaped line would break every downstream Prometheus text parser.
+#[test]
+fn prometheus_rendering_escapes_special_characters_in_label_values() {
+    let body = render_prometheus_text(|metrics| {
+        metrics.record_webhook_request("weird\"quote\\backslash\nnewline", "accepted");
+    });
+
+    assert!(
+        body.contains(r#"event_type="weird\"quote\\backslash\nnewline""#),
+        "expected the label value's quote, backslash, and newline to be escaped as \\\", \\\\, \
+         and \\n respectively: {body:?}"
+    );
+
+    // The escaped value must render on a single logical sample line — an
+    // unescaped literal newline would split the line format
+    // (metric{labels} value) across two lines and corrupt the sample.
+    let sample_lines: Vec<&str> = body
+        .lines()
+        .filter(|l| l.starts_with("ingress_webhook_requests_total{"))
+        .collect();
+    assert_eq!(
+        sample_lines.len(),
+        1,
+        "expected exactly one sample line for this series, got: {sample_lines:?}\nfull body: {body}"
+    );
+}
+
+/// An empty label value is a legitimate, if unusual, value (e.g. a
+/// `bypass_type` that happens to be empty) — it must still be rendered as an
+/// explicit empty string, not omitted from the label set or dropped from the
+/// series entirely.
+#[test]
+fn prometheus_rendering_keeps_empty_label_values_instead_of_omitting_them() {
+    let body = render_prometheus_text(|metrics| {
+        metrics.record_bypass_activation("");
+    });
+
+    assert!(
+        body.contains(r#"bypass_type="""#),
+        "an empty label value must still be rendered explicitly, not omitted: {body}"
+    );
+}
+
+/// Sanity check for focus area 1's "behavior under concurrent requests"
+/// question: concurrently recording through cloned `Metrics` handles from
+/// multiple threads, while concurrently scraping (`registry.gather()` +
+/// encode) from another thread, must not panic, deadlock, or lose updates.
+/// `prometheus::Registry` is internally `Arc<RwLock<...>>`-backed and OTel
+/// counters use atomics, so this is expected to hold — this test exists to
+/// catch a regression if that ever changes, not because a bug was found.
+#[test]
+fn prometheus_rendering_is_safe_under_concurrent_recording_and_scraping() {
+    use opentelemetry_sdk::metrics::SdkMeterProvider;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let registry = prometheus::Registry::new();
+    let exporter = build_prometheus_exporter(registry.clone()).expect("exporter must build");
+    let provider = SdkMeterProvider::builder().with_reader(exporter).build();
+    let meter = provider.meter("merge-warden-test");
+    let metrics = Metrics::new(&meter);
+
+    const WRITER_THREADS: usize = 8;
+    const INCREMENTS_PER_THREAD: usize = 200;
+    let stop = AtomicBool::new(false);
+
+    std::thread::scope(|scope| {
+        for _ in 0..WRITER_THREADS {
+            let metrics = metrics.clone();
+            scope.spawn(move || {
+                for _ in 0..INCREMENTS_PER_THREAD {
+                    metrics.record_dlq_message();
+                }
+            });
+        }
+
+        // Concurrent scraper: repeatedly gathers/encodes while writers are
+        // still running. Must never panic.
+        let scrape_registry = registry.clone();
+        let stop_ref = &stop;
+        let scraper = scope.spawn(move || {
+            let encoder = prometheus::TextEncoder::new();
+            while !stop_ref.load(Ordering::Relaxed) {
+                let families = scrape_registry.gather();
+                let mut buffer = Vec::new();
+                encoder
+                    .encode(&families, &mut buffer)
+                    .expect("concurrent encode must not fail");
+            }
+        });
+
+        // Give writer threads a head start before signalling the scraper to
+        // stop, so at least some scrapes overlap with in-flight writes.
+        std::thread::sleep(Duration::from_millis(50));
+        stop.store(true, Ordering::Relaxed);
+        scraper.join().expect("scraper thread must not panic");
+    });
+
+    let families = registry.gather();
+    let encoder = prometheus::TextEncoder::new();
+    let mut buffer = Vec::new();
+    encoder.encode(&families, &mut buffer).unwrap();
+    let final_body = String::from_utf8_lossy(&buffer).into_owned();
+
+    let expected_total = WRITER_THREADS * INCREMENTS_PER_THREAD;
+    assert!(
+        final_body.contains(&format!(
+            "ingress_queue_dlq_count{{otel_scope_name=\"merge-warden-test\"}} {expected_total}"
+        )),
+        "expected dlq_count to equal {expected_total} after all concurrent writers finished, got: {final_body}"
+    );
+}
+
 #[test]
 fn init_metrics_returned_provider_can_build_a_working_meter() {
     let config = MetricsConfig {

@@ -292,6 +292,38 @@ impl Default for Metrics {
 /// collector).
 static PROMETHEUS_REGISTRY: OnceLock<prometheus::Registry> = OnceLock::new();
 
+/// Builds the pull-based Prometheus [`opentelemetry_sdk::metrics::reader::MetricReader`]
+/// backing `registry`, used by both [`init_metrics`] and (to exercise the
+/// exact same builder chain, including the `_total`-suffix fix below)
+/// `metrics_tests.rs`'s Prometheus-rendering tests.
+///
+/// # Errors
+/// [`ServerError::MetricsInitFailed`] if the exporter cannot be built.
+fn build_prometheus_exporter(
+    registry: prometheus::Registry,
+) -> Result<impl opentelemetry_sdk::metrics::reader::MetricReader, ServerError> {
+    opentelemetry_prometheus::exporter()
+        .with_registry(registry)
+        // `opentelemetry_prometheus` unconditionally appends a `_total`
+        // suffix to every monotonic-sum (counter) instrument name unless
+        // this is set — it does not check whether the name already ends
+        // in `_total`. Four of our counters
+        // (`ingress.webhook.requests_total`, `pr.bypass.activations_total`,
+        // `ingress.queue.worker_errors_total`, and, after dot-sanitization,
+        // any future counter named the same way) already end in `_total`
+        // per the metric table in `.llm/task.md` /
+        // `docs/spec/operations/monitoring.md`, so without this option the
+        // Prometheus endpoint would expose them as `..._total_total`,
+        // silently diverging from the documented metric name that
+        // dashboards/alerts are written against. Disabling the built-in
+        // suffix keeps the Prometheus name identical to the OTLP name
+        // (dots replaced with underscores), matching what operators and
+        // `docs/spec/operations/monitoring.md` expect.
+        .without_counter_suffixes()
+        .build()
+        .map_err(|e| ServerError::MetricsInitFailed(format!("Prometheus exporter: {e}")))
+}
+
 // ---------------------------------------------------------------------------
 // init_metrics
 // ---------------------------------------------------------------------------
@@ -335,10 +367,7 @@ pub fn init_metrics(
 
     if config.prometheus_enabled {
         let registry = prometheus::Registry::new();
-        let exporter = opentelemetry_prometheus::exporter()
-            .with_registry(registry.clone())
-            .build()
-            .map_err(|e| ServerError::MetricsInitFailed(format!("Prometheus exporter: {e}")))?;
+        let exporter = build_prometheus_exporter(registry.clone())?;
 
         // Best-effort: if `init_metrics` is somehow called more than once with
         // Prometheus enabled (never happens in `main()`, which calls it
