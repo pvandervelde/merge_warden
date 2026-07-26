@@ -46,7 +46,8 @@ GitHub
 > **This is a two-service architecture, not a single-container mode switch.**
 > In `queue` mode, the Merge Warden server itself becomes a **pure queue
 > consumer**. It does **not** expose a webhook POST endpoint — only
-> `GET /health` is registered. A separate, independent service must receive
+> `GET /health` (and, if `MERGE_WARDEN_METRICS_ENDPOINT=prometheus` is set,
+> `GET /metrics`) is registered. A separate, independent service must receive
 > the GitHub webhook, verify the `X-Hub-Signature-256` HMAC signature, and
 > enqueue the payload. Do not point GitHub's webhook URL at the Merge Warden
 > container when running in `queue` mode — there is nothing there to receive
@@ -66,7 +67,7 @@ Separate receiver service (not Merge Warden)
                     ↓ (queue)
 
 Merge Warden container (MERGE_WARDEN_RECEIVER_MODE=queue)
-  Only route registered: GET /health
+  Routes registered: GET /health (always), GET /metrics (optional)
       ↓
   Consumer reads from queue
       ↓
@@ -77,10 +78,10 @@ Merge Warden container (MERGE_WARDEN_RECEIVER_MODE=queue)
 
 **Characteristics:**
 
-- Merge Warden's own HTTP server exposes only the health-check endpoint in
-  this mode — no `/api/github/webhook` route is registered. It never
-  validates a webhook signature and never receives a webhook payload
-  directly.
+- Merge Warden's own HTTP server exposes only the health-check endpoint (plus
+  the optional Prometheus metrics endpoint, if enabled) in this mode — no
+  `/api/github/webhook` route is registered. It never validates a webhook
+  signature and never receives a webhook payload directly.
 - `GITHUB_WEBHOOK_SECRET` is not used by Merge Warden in this mode —
   signature validation is the separate receiver service's responsibility. See
   [Environment variables reference](../reference/environment-variables.md).

@@ -16,6 +16,7 @@ automatically checks every pull request against rules you configure per reposito
 - **Issue propagation** — copies milestone and Projects v2 membership from the linked issue
 - **Change-type labels** — maps conventional commit types to repository labels
 - **Bypass rules** — per-policy lists of users who can skip validation
+- **Observability** — OTLP traces and metrics, an optional Prometheus `/metrics` endpoint, and a `/health` endpoint that can actively probe dependencies
 
 All policies are configured with a TOML file committed to each repository at
 `.github/merge-warden.toml`. A server-level config file sets the defaults that apply when
