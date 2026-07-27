@@ -113,7 +113,7 @@ rather than an empty `200`.
 This endpoint is independent of `OTEL_EXPORTER_OTLP_ENDPOINT` — you can run OTLP push export,
 the Prometheus pull endpoint, both, or neither. See
 [Environment variables reference](environment-variables.md) for the metric names, and
-[Monitoring and observability](../../spec/operations/monitoring.md) for alert-threshold
+[Monitoring and observability](https://github.com/pvandervelde/merge_warden/blob/master/docs/spec/operations/monitoring.md) for alert-threshold
 guidance.
 
 **Request:** No headers or body required.
@@ -212,4 +212,4 @@ made on behalf of that repository. See
 - [GitHub App permissions](github-app-permissions.md)
 - [Webhook vs queue receiver modes](../explanation/receiver-modes.md)
 - [Configure repository scope filtering](../how-to/configure-repository-scope.md)
-- [Monitoring and observability](../../spec/operations/monitoring.md)
+- [Monitoring and observability](https://github.com/pvandervelde/merge_warden/blob/master/docs/spec/operations/monitoring.md)

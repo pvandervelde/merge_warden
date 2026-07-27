@@ -196,7 +196,7 @@ az containerapp update \
 Point a Prometheus-compatible scraper (e.g. an Azure Monitor managed Prometheus data
 collection rule, or a self-hosted Prometheus/Grafana Agent) at
 `https://<fqdn>/metrics`. See [HTTP endpoints reference](../reference/http-endpoints.md) for
-the response format and [Monitoring and observability](../../spec/operations/monitoring.md)
+the response format and [Monitoring and observability](https://github.com/pvandervelde/merge_warden/blob/master/docs/spec/operations/monitoring.md)
 for the full metric list and alert-threshold guidance.
 
 ---

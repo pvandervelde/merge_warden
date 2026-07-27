@@ -408,7 +408,9 @@ async fn full_mode_github_probe_is_bounded_when_connection_hangs_after_connect()
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
         .await
         .expect("must be able to bind an ephemeral port");
-    let addr = listener.local_addr().expect("listener must have a local address");
+    let addr = listener
+        .local_addr()
+        .expect("listener must have a local address");
 
     // Accept connections and hold them open forever without writing a
     // response. Dropped (and the task aborted) when the test function

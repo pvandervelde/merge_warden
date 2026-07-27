@@ -4956,7 +4956,10 @@ impl MetricsRecorder for RecordingMetricsRecorder {
     }
 
     fn record_bypass_activation(&self, bypass_type: &str) {
-        self.bypass_types.lock().unwrap().push(bypass_type.to_string());
+        self.bypass_types
+            .lock()
+            .unwrap()
+            .push(bypass_type.to_string());
     }
 }
 

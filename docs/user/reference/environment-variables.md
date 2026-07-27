@@ -74,7 +74,7 @@ values — this is planned, not currently available.
 | `MERGE_WARDEN_HEALTH_CHECKS` | `basic` | Set to `full` to make `GET /health` actively probe dependencies (GitHub API reachability via an authenticated `get_app()` call, and — queue mode only — queue client connectivity). Any other value, or leaving it unset, keeps `/health` in **basic** (liveness-only) mode: it responds immediately without contacting GitHub or the queue broker, and reports every check `healthy`. See [HTTP endpoints reference](http-endpoints.md) for the full response shape and the "Queue Health Check Limitations" note below. |
 
 See the metric names, types, and labels in
-[Monitoring and observability](../../spec/operations/monitoring.md) for what
+[Monitoring and observability](https://github.com/pvandervelde/merge_warden/blob/master/docs/spec/operations/monitoring.md) for what
 `OTEL_EXPORTER_OTLP_ENDPOINT` and `MERGE_WARDEN_METRICS_ENDPOINT=prometheus` export.
 
 ### Queue Health Check Limitations
@@ -128,4 +128,4 @@ processing a PR. Do not configure alerting or dashboards that expect a `depth` f
 - [Set application-level defaults](../how-to/set-app-level-defaults.md)
 - [Run Merge Warden in queue mode](../how-to/run-in-queue-mode.md)
 - [Webhook vs queue receiver modes](../explanation/receiver-modes.md)
-- [Monitoring and observability](../../spec/operations/monitoring.md)
+- [Monitoring and observability](https://github.com/pvandervelde/merge_warden/blob/master/docs/spec/operations/monitoring.md)

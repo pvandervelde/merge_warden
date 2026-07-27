@@ -222,7 +222,7 @@ independent of the OTLP/ADOT section above — enable either, both, or neither.
 Scrape it with a self-managed Prometheus server, Amazon Managed Service for Prometheus (via
 the ADOT collector's Prometheus receiver), or any Prometheus-compatible agent. See
 [HTTP endpoints reference](../reference/http-endpoints.md) for the response format and
-[Monitoring and observability](../../spec/operations/monitoring.md) for the full metric list
+[Monitoring and observability](https://github.com/pvandervelde/merge_warden/blob/master/docs/spec/operations/monitoring.md) for the full metric list
 and alert-threshold guidance.
 
 ---
