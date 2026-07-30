@@ -86,7 +86,10 @@ depth-query API, so there is currently no data source for a live queue depth or 
 value in-process. The health check also deliberately never accepts a queue session to probe
 it, to avoid stealing a session lock away from a genuine worker task that may be concurrently
 processing a PR. Do not configure alerting or dashboards that expect a `depth` field in the
-`/health` response — it is not present.
+`/health` response — it is not present. In `full` mode, this limitation is also disclosed in
+the response body itself: the `queue` check includes a `message` field describing it even
+while `status` is `"healthy"` — do not mistake the presence of a `message` on `queue` for an
+unhealthy state; check `status`, not the presence of `message`, to detect an actual problem.
 
 ---
 

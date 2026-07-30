@@ -455,10 +455,9 @@ impl EventIngress for QueueIngress {
 ///   malformed/undecodable messages that never become a `ProcessableEvent`
 ///   — are not observed here).
 ///
-/// `processing.success_rate` is a cumulative ratio (successes / total)
-/// tracked for the lifetime of this task; it resets only if the task itself
-/// restarts (e.g. after a panic-triggered supervisor respawn), not on a
-/// rolling window.
+/// `processing.success_rate` is a rolling ratio (successes / total) computed
+/// over the most recent [`SUCCESS_RATE_WINDOW`] events processed by this task
+/// (not a lifetime cumulative ratio) — see that constant's doc comment for why.
 ///
 /// # Cancellation
 /// The function does not install its own cancellation signal.  Abort the
@@ -468,6 +467,21 @@ impl EventIngress for QueueIngress {
 ///
 /// # Errors
 /// Returns the first [`IngressError`] that is not recoverable in-loop.
+/// Number of most-recent processed events over which `processing.success_rate`
+/// is computed.
+///
+/// A lifetime cumulative ratio (successes / total-ever-processed) is a poor
+/// alerting signal: once a worker has processed a large number of events, a
+/// subsequent burst of failures barely moves the ratio (e.g. after 1M
+/// successes, 1,000 consecutive failures still reads as ~99.9% "success"),
+/// even though `docs/spec/operations/monitoring.md` recommends alerting at
+/// `< 99.9%`. Tracking a fixed-size window of the most recent outcomes instead
+/// makes the gauge responsive to a recent failure burst regardless of how long
+/// the worker has been running. 100 is a compromise between responsiveness
+/// (small windows react to a handful of failures) and stability (avoiding a
+/// single failure among very few processed events reading as 0%).
+const SUCCESS_RATE_WINDOW: usize = 100;
+
 pub async fn run_event_processor(
     mut ingress: Box<dyn EventIngress + Send>,
     state: Arc<crate::webhook::AppState>,
@@ -479,8 +493,11 @@ pub async fn run_event_processor(
     .with_metrics(state.metrics.clone());
 
     let is_queue_mode = state.queue_client.is_some();
-    let mut processed_count: u64 = 0;
-    let mut success_count: u64 = 0;
+    // Bounded ring buffer of the most recent outcomes (`true` = success), used
+    // to compute a rolling `processing.success_rate` — see
+    // `SUCCESS_RATE_WINDOW`'s doc comment for why this is not a lifetime ratio.
+    let mut recent_outcomes: std::collections::VecDeque<bool> =
+        std::collections::VecDeque::with_capacity(SUCCESS_RATE_WINDOW);
 
     while let Some(event) = ingress.next_event().await? {
         let event_type = event.envelope.event_type.clone();
@@ -498,11 +515,10 @@ pub async fn run_event_processor(
                 .record_webhook_processing_duration_ms(&event_type, duration_ms);
         }
 
-        processed_count += 1;
+        let succeeded = result.is_ok();
 
         match result {
             Ok(()) => {
-                success_count += 1;
                 if !is_queue_mode {
                     state
                         .metrics
@@ -528,9 +544,14 @@ pub async fn run_event_processor(
             }
         }
 
+        recent_outcomes.push_back(succeeded);
+        if recent_outcomes.len() > SUCCESS_RATE_WINDOW {
+            recent_outcomes.pop_front();
+        }
+        let successes_in_window = recent_outcomes.iter().filter(|s| **s).count();
         state
             .metrics
-            .set_processing_success_rate(success_count as f64 / processed_count as f64);
+            .set_processing_success_rate(successes_in_window as f64 / recent_outcomes.len() as f64);
     }
 
     Ok(())

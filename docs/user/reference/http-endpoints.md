@@ -43,6 +43,7 @@ Behaviour depends on `MERGE_WARDEN_HEALTH_CHECKS` (default `basic`):
 ```json
 {
   "status": "healthy",
+  "timestamp": "2026-07-30T12:00:00Z",
   "checks": {
     "config": { "status": "healthy" },
     "github_api": { "status": "healthy", "latency_ms": 42 },
@@ -53,12 +54,19 @@ Behaviour depends on `MERGE_WARDEN_HEALTH_CHECKS` (default `basic`):
 
 - `status` and each `checks.*.status` are one of `"healthy"`, `"degraded"`, or `"unhealthy"`.
   The overall `status` is the least-healthy value across all checks.
+- `timestamp` is the UTC time (RFC 3339) at which this response was generated. Every request
+  runs its checks fresh — nothing is cached — so this is only useful for detecting a stale
+  *copy* of a response body (e.g. one saved or forwarded by another system), not for detecting
+  staleness of the live endpoint itself.
 - `checks.queue` is present **only** when the server is running in queue mode
   (`MERGE_WARDEN_RECEIVER_MODE=queue`).
 - `latency_ms` appears only on `github_api`, only in `full` mode, and only once the probe has
   completed (it measures the round trip, whether the probe succeeded or failed).
 - A `message` field (short, non-sensitive diagnostic text — never a raw upstream error body)
-  appears on a check only when that check is not `healthy`.
+  appears on a check whenever that check is not `healthy`, **and** on `queue` in `full` mode
+  even while `healthy` — it discloses that the `queue` check cannot do a live reachability/depth
+  probe (see the next bullet), so `"healthy"` there means only "a queue client was constructed
+  at startup", not "the broker was just contacted successfully".
 - **No check ever includes a `depth` field.** The `queue` check reports connectivity only —
   see [Queue Health Check Limitations](environment-variables.md#queue-health-check-limitations)
   in the environment variables reference for why a live message count is not available.
@@ -78,7 +86,7 @@ Behaviour depends on `MERGE_WARDEN_HEALTH_CHECKS` (default `basic`):
 ```bash
 curl -i http://localhost:3000/health
 # HTTP/1.1 200 OK
-# {"status":"healthy","checks":{"config":{"status":"healthy"},"github_api":{"status":"healthy"}}}
+# {"status":"healthy","timestamp":"2026-07-30T12:00:00Z","checks":{"config":{"status":"healthy"},"github_api":{"status":"healthy"}}}
 ```
 
 **Example — full mode, queue mode, GitHub reachable:**
@@ -86,7 +94,7 @@ curl -i http://localhost:3000/health
 ```bash
 curl -i http://localhost:3000/health
 # HTTP/1.1 200 OK
-# {"status":"healthy","checks":{"config":{"status":"healthy"},"github_api":{"status":"healthy","latency_ms":42},"queue":{"status":"healthy"}}}
+# {"status":"healthy","timestamp":"2026-07-30T12:00:00Z","checks":{"config":{"status":"healthy"},"github_api":{"status":"healthy","latency_ms":42},"queue":{"status":"healthy","message":"Reports only that a queue client was constructed at startup; queue-runtime 0.2.1 exposes no depth/reachability query API, so this is not a live probe"}}}
 ```
 
 **Example — full mode, GitHub API unreachable or credentials invalid:**
@@ -94,7 +102,7 @@ curl -i http://localhost:3000/health
 ```bash
 curl -i http://localhost:3000/health
 # HTTP/1.1 503 Service Unavailable
-# {"status":"unhealthy","checks":{"config":{"status":"healthy"},"github_api":{"status":"unhealthy","latency_ms":5003,"message":"GitHub API request timed out"}}}
+# {"status":"unhealthy","timestamp":"2026-07-30T12:00:00Z","checks":{"config":{"status":"healthy"},"github_api":{"status":"unhealthy","latency_ms":5003,"message":"GitHub API request timed out"}}}
 ```
 
 ---

@@ -52,13 +52,23 @@ impl MetricsConfig {
     pub fn from_env() -> Self {
         let (otlp_endpoint, service_name, service_version) =
             crate::telemetry::otel_service_metadata_from_env();
+
+        let raw_endpoint_var = std::env::var("MERGE_WARDEN_METRICS_ENDPOINT").ok();
+        if let Some(value) = raw_endpoint_var.as_deref() {
+            if value != "prometheus" {
+                tracing::warn!(
+                    value,
+                    "Unrecognized MERGE_WARDEN_METRICS_ENDPOINT value; the only supported value \
+                     is \"prometheus\" — GET /metrics will not be registered"
+                );
+            }
+        }
+
         MetricsConfig {
             otlp_endpoint,
             service_name,
             service_version,
-            prometheus_enabled: std::env::var("MERGE_WARDEN_METRICS_ENDPOINT")
-                .map(|v| v == "prometheus")
-                .unwrap_or(false),
+            prometheus_enabled: raw_endpoint_var.as_deref() == Some("prometheus"),
         }
     }
 }
@@ -104,30 +114,63 @@ impl Metrics {
     /// same provider is safe but wasteful — call once at startup.
     pub fn new(meter: &Meter) -> Self {
         Metrics {
-            webhook_requests_total: meter.u64_counter("ingress.webhook.requests_total").build(),
+            webhook_requests_total: meter
+                .u64_counter("ingress.webhook.requests_total")
+                .with_description(
+                    "Total webhook requests received, labelled by event_type and result (accepted/rejected)",
+                )
+                .build(),
             webhook_processing_duration_ms: meter
                 .f64_histogram("ingress.webhook.processing_duration_ms")
+                .with_description("End-to-end webhook processing latency, in milliseconds")
                 .build(),
             queue_enqueue_duration_ms: meter
                 .f64_histogram("ingress.queue.enqueue_duration_ms")
+                .with_description(
+                    "Webhook receipt to message enqueued latency, in milliseconds (queue mode only)",
+                )
                 .build(),
             queue_processing_duration_ms: meter
                 .f64_histogram("ingress.queue.processing_duration_ms")
+                .with_description(
+                    "End-to-end queue event processing latency, in milliseconds (queue mode only)",
+                )
                 .build(),
-            queue_depth: meter.u64_gauge("ingress.queue.depth").build(),
+            queue_depth: meter
+                .u64_gauge("ingress.queue.depth")
+                .with_description("Approximate messages waiting in the queue (queue mode only)")
+                .build(),
             queue_age_oldest_message_secs: meter
                 .f64_gauge("ingress.queue.age_oldest_message_secs")
+                .with_description(
+                    "Age, in seconds, of the oldest unprocessed message (queue mode only)",
+                )
                 .build(),
-            queue_dlq_count: meter.u64_counter("ingress.queue.dlq_count").build(),
+            queue_dlq_count: meter
+                .u64_counter("ingress.queue.dlq_count")
+                .with_description("Messages dead-lettered (queue mode only)")
+                .build(),
             // NOTE: monitoring.md's queue-mode metric table has been updated to
             // match this name exactly (`ingress.queue.worker_errors_total`) —
             // see docs/spec/operations/monitoring.md.
             queue_worker_errors_total: meter
                 .u64_counter("ingress.queue.worker_errors_total")
+                .with_description("Unrecoverable worker task terminations (queue mode only)")
                 .build(),
-            processing_success_rate: meter.f64_gauge("processing.success_rate").build(),
-            pr_validation_duration_ms: meter.f64_histogram("pr.validation.duration_ms").build(),
-            pr_bypass_activations_total: meter.u64_counter("pr.bypass.activations_total").build(),
+            processing_success_rate: meter
+                .f64_gauge("processing.success_rate")
+                .with_description(
+                    "Rolling fraction, over the most recent processed events, of events processed without rejection",
+                )
+                .build(),
+            pr_validation_duration_ms: meter
+                .f64_histogram("pr.validation.duration_ms")
+                .with_description("Time taken to run all validation rules for a single PR, in milliseconds")
+                .build(),
+            pr_bypass_activations_total: meter
+                .u64_counter("pr.bypass.activations_total")
+                .with_description("Bypass rule activations, labelled by bypass_type")
+                .build(),
         }
     }
 
@@ -396,6 +439,11 @@ pub fn init_metrics(
 ///   lines and one sample line per recorded label combination.
 /// - `200 OK` with an empty body if no Prometheus registry was initialised
 ///   (i.e. `init_metrics` was never called with `prometheus_enabled: true`).
+// `State<Arc<AppState>>` is required so this handler's signature matches what
+// `axum::routing::get` expects on a router built `.with_state(state)` (see
+// `crate::webhook::with_metrics_route`) — the handler itself reads all metric
+// data from the process-wide `PROMETHEUS_REGISTRY` above, not from `AppState`,
+// so the extracted value is intentionally unused.
 pub async fn metrics_handler(State(_state): State<Arc<AppState>>) -> impl IntoResponse {
     let metric_families = match PROMETHEUS_REGISTRY.get() {
         Some(registry) => registry.gather(),

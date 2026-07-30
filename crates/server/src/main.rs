@@ -246,6 +246,15 @@ async fn main() -> Result<(), ServerError> {
         handle.abort();
     }
 
+    // Explicitly flush and shut down the meter provider so any metrics
+    // buffered in the OTLP PeriodicReader's current export interval are sent
+    // before the process exits, rather than relying solely on `Drop` (which
+    // the OTel SDK documents as a best-effort fallback, not a substitute for
+    // an explicit `shutdown()` call on a push exporter).
+    if let Err(e) = meter_provider.shutdown() {
+        error!(error = %e, "Failed to cleanly shut down the OTel meter provider; the last export interval's metrics may not have been flushed");
+    }
+
     Ok(())
 }
 

@@ -58,7 +58,7 @@ fn healthy_maps_to_200_ok() {
 fn degraded_maps_to_207_multi_status() {
     assert_eq!(
         HealthState::Degraded.http_status(),
-        StatusCode::from_u16(207).unwrap(),
+        StatusCode::MULTI_STATUS,
         "Degraded must map to HTTP 207 Multi-Status, not 200"
     );
 }
@@ -163,12 +163,17 @@ fn health_report_top_level_shape_matches_spec() {
 
     let report = HealthReport {
         status: HealthState::Healthy,
+        timestamp: chrono::Utc::now(),
         checks,
     };
 
     let value = serde_json::to_value(&report).unwrap();
 
     assert_eq!(value["status"], serde_json::json!("healthy"));
+    assert!(
+        value["timestamp"].is_string(),
+        "timestamp must serialize as an RFC 3339 string"
+    );
     assert_eq!(
         value["checks"]["github_api"]["status"],
         serde_json::json!("healthy")

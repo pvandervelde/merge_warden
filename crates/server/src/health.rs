@@ -61,9 +61,7 @@ impl HealthState {
     pub fn http_status(&self) -> StatusCode {
         match self {
             HealthState::Healthy => StatusCode::OK,
-            HealthState::Degraded => {
-                StatusCode::from_u16(207).expect("207 is a valid HTTP status code")
-            }
+            HealthState::Degraded => StatusCode::MULTI_STATUS,
             HealthState::Unhealthy => StatusCode::SERVICE_UNAVAILABLE,
         }
     }
@@ -94,7 +92,9 @@ pub struct ComponentHealth {
     /// Approximate queue depth, if this component is `queue`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub depth: Option<u64>,
-    /// A short, non-sensitive diagnostic message when not healthy.
+    /// A short, non-sensitive diagnostic message. Always present on failure;
+    /// also used (while still `Healthy`) to disclose a check's known
+    /// limitations, e.g. [`QUEUE_HEALTH_LIMITATION_MESSAGE`].
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
 }
@@ -117,6 +117,13 @@ impl ComponentHealth {
 pub struct HealthReport {
     /// Aggregate status derived from `checks` (the least-healthy value wins).
     pub status: HealthState,
+    /// UTC time at which this report was generated. Every `GET /health` call
+    /// runs its checks fresh (nothing is cached), so this is always
+    /// approximately "now" — it exists so orchestrators, monitoring systems,
+    /// and operators reading a saved/forwarded copy of a response body can
+    /// tell how old it is, rather than because responses are ever stale at
+    /// the point of generation.
+    pub timestamp: chrono::DateTime<chrono::Utc>,
     /// Per-dependency health, keyed by component name
     /// (`"github_api"`, `"config"`, and — queue mode only — `"queue"`).
     pub checks: BTreeMap<String, ComponentHealth>,
@@ -200,6 +207,13 @@ async fn probe_github_api(github_client: &GitHubClient) -> ComponentHealth {
     }
 }
 
+/// A short, static, non-sensitive note attached to the `queue` check in full
+/// mode, so a caller reading the `/health` response body alone (not the
+/// source code) can tell "checked and healthy" apart from "not actually
+/// checkable" — see [`queue_health`].
+const QUEUE_HEALTH_LIMITATION_MESSAGE: &str =
+    "Reports only that a queue client was constructed at startup; queue-runtime 0.2.1 exposes no depth/reachability query API, so this is not a live probe";
+
 /// Health of the queue dependency (queue mode only).
 ///
 /// `queue-runtime` 0.2.1's `QueueClient`/`SessionClient` traits expose no
@@ -210,10 +224,26 @@ async fn probe_github_api(github_client: &GitHubClient) -> ComponentHealth {
 /// "a queue client was successfully constructed at startup", which is the
 /// best signal available without risking worker contention.
 ///
+/// In full mode, [`QUEUE_HEALTH_LIMITATION_MESSAGE`] is attached so this
+/// limitation is visible in the HTTP response body itself, not only in this
+/// doc comment — an operator who enables `MERGE_WARDEN_HEALTH_CHECKS=full`
+/// expecting a real queue probe should not be misled by a bare `"healthy"`.
+/// In basic mode no message is attached, consistent with every other check
+/// in basic mode reporting a plain, message-free `healthy`.
+///
 /// See docs/user/reference/environment-variables.md — "Queue Health Check
 /// Limitations".
-fn queue_health() -> ComponentHealth {
-    ComponentHealth::healthy()
+fn queue_health(full_checks_enabled: bool) -> ComponentHealth {
+    if full_checks_enabled {
+        ComponentHealth {
+            status: HealthState::Healthy,
+            latency_ms: None,
+            depth: None,
+            message: Some(QUEUE_HEALTH_LIMITATION_MESSAGE.to_string()),
+        }
+    } else {
+        ComponentHealth::healthy()
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -253,12 +283,16 @@ pub async fn health_check_handler(State(state): State<Arc<AppState>>) -> impl In
     checks.insert("github_api".to_string(), github_health);
 
     if state.queue_client.is_some() {
-        checks.insert("queue".to_string(), queue_health());
+        checks.insert(
+            "queue".to_string(),
+            queue_health(state.health_check_config.full_checks_enabled),
+        );
     }
 
     let status = aggregate_status(checks.values());
     let report = HealthReport {
         status: status.clone(),
+        timestamp: chrono::Utc::now(),
         checks,
     };
 

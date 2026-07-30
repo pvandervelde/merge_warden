@@ -601,7 +601,10 @@ impl WebhookHandler for ChannelForwardingHandler {
 /// - `500 Internal Server Error` — unexpected processing error.
 ///
 /// See docs/spec/design/containerisation.md — HTTP routes
-#[instrument(skip(state, headers, body))]
+#[instrument(
+    skip(state, headers, body),
+    fields(event_type = tracing::field::Empty, delivery_id = tracing::field::Empty)
+)]
 pub async fn handle_webhook(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -624,6 +627,23 @@ pub async fn handle_webhook(
                 .map(|v| (k.as_str().to_lowercase(), v.to_string()))
         })
         .collect();
+
+    // Record the two fields declared on `#[instrument]` above now that the
+    // headers have been parsed, so this span carries the same event-type /
+    // delivery-id correlation identifiers already used in structured logs
+    // elsewhere (see docs/spec/operations/monitoring.md's "Structured Log
+    // Fields" table). Both are attacker-influenced but pre-signature-
+    // validation-adjacent header values, so they are recorded as-is (bounded
+    // by HTTP header size limits) rather than sanitised further — this
+    // matches the existing `event_type` label already used unsanitised on
+    // the `ingress.webhook.requests_total` metric.
+    let span = tracing::Span::current();
+    if let Some(event_type) = header_map.get("x-github-event") {
+        span.record("event_type", event_type.as_str());
+    }
+    if let Some(delivery_id) = header_map.get("x-github-delivery") {
+        span.record("delivery_id", delivery_id.as_str());
+    }
 
     let request = WebhookRequest::new(header_map, body);
     let response = receiver.receive_webhook(request).await;
