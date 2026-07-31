@@ -163,6 +163,16 @@ In the AWS console or CLI, configure the ALB target group to check:
 - **Path**: `/health`
 - **Success codes**: `200`
 
+By default (`MERGE_WARDEN_HEALTH_CHECKS=basic`, the default in the task definition above since
+it is not overridden), `/health` never contacts GitHub or the queue broker, so this is safe to
+use as both the ECS container `healthCheck` (step 3) and the ALB target group check. If you
+set `MERGE_WARDEN_HEALTH_CHECKS=full` for real dependency probing, be aware that a transient
+GitHub API outage makes `/health` return `503` (and the ECS container health check, driven by
+the same endpoint, would also start reporting `UNHEALTHY`) — appropriate for the ALB check
+(stop routing traffic to that task) but likely undesirable for the ECS container health check,
+since ECS may restart a task that isn't actually broken. See
+[Environment variables reference](../reference/environment-variables.md) for details.
+
 ---
 
 ## 6 — Configure the GitHub App webhook
@@ -196,6 +206,24 @@ definition:
 ```
 
 The ADOT collector forwards traces and metrics to CloudWatch or X-Ray.
+
+---
+
+## Optional — Expose Prometheus metrics
+
+Add `MERGE_WARDEN_METRICS_ENDPOINT=prometheus` to the container's `environment` array to
+register `GET /metrics` in Prometheus text exposition format on port `3000`. This is
+independent of the OTLP/ADOT section above — enable either, both, or neither.
+
+```json
+{ "name": "MERGE_WARDEN_METRICS_ENDPOINT", "value": "prometheus" }
+```
+
+Scrape it with a self-managed Prometheus server, Amazon Managed Service for Prometheus (via
+the ADOT collector's Prometheus receiver), or any Prometheus-compatible agent. See
+[HTTP endpoints reference](../reference/http-endpoints.md) for the response format and
+[Monitoring and observability](https://github.com/pvandervelde/merge_warden/blob/master/docs/spec/operations/monitoring.md) for the full metric list
+and alert-threshold guidance.
 
 ---
 

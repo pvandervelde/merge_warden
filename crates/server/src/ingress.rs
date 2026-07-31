@@ -325,6 +325,10 @@ impl QueueIngress {
 
 #[async_trait::async_trait]
 impl EventIngress for QueueIngress {
+    /// Instrumented so OTLP traces contain a span covering each dequeue
+    /// attempt (queue mode). See `.llm/task.md` — "Tracing Instrumentation on
+    /// Critical Paths" ("Queue enqueue / dequeue operations").
+    #[tracing::instrument(skip(self), fields(queue_name = %self.queue_name.as_str()))]
     async fn next_event(&mut self) -> Result<Option<ProcessableEvent>, IngressError> {
         loop {
             // Accept any available session.  `SessionNotFound` / `QueueNotFound`
@@ -437,6 +441,24 @@ impl EventIngress for QueueIngress {
 /// 3. On `Ok(None)`: break, return `Ok(())`.
 /// 4. On `Err(e)`: return `Err(e)`.
 ///
+/// # Metrics
+/// Whether this loop is draining a [`WebhookIngress`] or a [`QueueIngress`]
+/// is inferred from `state.queue_client` (queue mode iff `Some`) — both
+/// ingress modes share this single processing loop, so it is the natural
+/// place to record the mode-specific signals documented in `.llm/task.md`:
+/// - Webhook mode: `ingress.webhook.requests_total` (labelled
+///   `accepted`/`rejected`) and `ingress.webhook.processing_duration_ms`.
+/// - Queue mode: `ingress.queue.processing_duration_ms` and
+///   `ingress.queue.dlq_count` (incremented when a successfully-dequeued
+///   event fails domain processing and is dead-lettered by `ack.reject`;
+///   messages dead-lettered *inside* `QueueIngress::next_event` itself —
+///   malformed/undecodable messages that never become a `ProcessableEvent`
+///   — are not observed here).
+///
+/// `processing.success_rate` is a rolling ratio (successes / total) computed
+/// over the most recent [`SUCCESS_RATE_WINDOW`] events processed by this task
+/// (not a lifetime cumulative ratio) — see that constant's doc comment for why.
+///
 /// # Cancellation
 /// The function does not install its own cancellation signal.  Abort the
 /// spawned `JoinHandle` (or drop all ingress senders in webhook mode) to stop.
@@ -445,6 +467,21 @@ impl EventIngress for QueueIngress {
 ///
 /// # Errors
 /// Returns the first [`IngressError`] that is not recoverable in-loop.
+/// Number of most-recent processed events over which `processing.success_rate`
+/// is computed.
+///
+/// A lifetime cumulative ratio (successes / total-ever-processed) is a poor
+/// alerting signal: once a worker has processed a large number of events, a
+/// subsequent burst of failures barely moves the ratio (e.g. after 1M
+/// successes, 1,000 consecutive failures still reads as ~99.9% "success"),
+/// even though `docs/spec/operations/monitoring.md` recommends alerting at
+/// `< 99.9%`. Tracking a fixed-size window of the most recent outcomes instead
+/// makes the gauge responsive to a recent failure burst regardless of how long
+/// the worker has been running. 100 is a compromise between responsiveness
+/// (small windows react to a handful of failures) and stability (avoiding a
+/// single failure among very few processed events reading as 0%).
+const SUCCESS_RATE_WINDOW: usize = 100;
+
 pub async fn run_event_processor(
     mut ingress: Box<dyn EventIngress + Send>,
     state: Arc<crate::webhook::AppState>,
@@ -452,11 +489,41 @@ pub async fn run_event_processor(
     let handler = crate::webhook::MergeWardenWebhookHandler::new(
         state.github_client.clone(),
         state.policies.clone(),
-    );
+    )
+    .with_metrics(state.metrics.clone());
+
+    let is_queue_mode = state.queue_client.is_some();
+    // Bounded ring buffer of the most recent outcomes (`true` = success), used
+    // to compute a rolling `processing.success_rate` — see
+    // `SUCCESS_RATE_WINDOW`'s doc comment for why this is not a lifetime ratio.
+    let mut recent_outcomes: std::collections::VecDeque<bool> =
+        std::collections::VecDeque::with_capacity(SUCCESS_RATE_WINDOW);
 
     while let Some(event) = ingress.next_event().await? {
-        match handler.handle_event(&event.envelope).await {
+        let event_type = event.envelope.event_type.clone();
+        let start = std::time::Instant::now();
+        let result = handler.handle_event(&event.envelope).await;
+        let duration_ms = start.elapsed().as_secs_f64() * 1000.0;
+
+        if is_queue_mode {
+            state
+                .metrics
+                .record_queue_processing_duration_ms(duration_ms);
+        } else {
+            state
+                .metrics
+                .record_webhook_processing_duration_ms(&event_type, duration_ms);
+        }
+
+        let succeeded = result.is_ok();
+
+        match result {
             Ok(()) => {
+                if !is_queue_mode {
+                    state
+                        .metrics
+                        .record_webhook_request(&event_type, "accepted");
+                }
                 if let Err(e) = event.ack.complete().await {
                     error!(error = %e, "Failed to acknowledge processed event");
                 }
@@ -464,11 +531,27 @@ pub async fn run_event_processor(
             Err(e) => {
                 let reason = e.to_string();
                 error!(error = %e, "Event processing failed; dead-lettering");
+                if is_queue_mode {
+                    state.metrics.record_dlq_message();
+                } else {
+                    state
+                        .metrics
+                        .record_webhook_request(&event_type, "rejected");
+                }
                 if let Err(ack_err) = event.ack.reject(&reason).await {
                     error!(error = %ack_err, "Failed to dead-letter failed event");
                 }
             }
         }
+
+        recent_outcomes.push_back(succeeded);
+        if recent_outcomes.len() > SUCCESS_RATE_WINDOW {
+            recent_outcomes.pop_front();
+        }
+        let successes_in_window = recent_outcomes.iter().filter(|s| **s).count();
+        state
+            .metrics
+            .set_processing_success_rate(successes_in_window as f64 / recent_outcomes.len() as f64);
     }
 
     Ok(())

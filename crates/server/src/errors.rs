@@ -39,6 +39,11 @@ pub enum ServerError {
     #[error("Telemetry initialization failed: {0}")]
     TelemetryInitFailed(String),
 
+    /// The OTel metrics pipeline (OTLP exporter and/or Prometheus reader)
+    /// could not be initialised.
+    #[error("Metrics initialization failed: {0}")]
+    MetricsInitFailed(String),
+
     /// Propagated from the ingress layer.
     #[error("Ingress error: {source}")]
     IngressError {

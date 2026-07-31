@@ -9,7 +9,7 @@ use crate::{
         WORK_ITEM_REGEX,
     },
     validation_result::{BypassRuleType, ValidationResult},
-    MergeWarden,
+    MergeWarden, MetricsRecorder,
 };
 use async_trait::async_trait;
 use std::{
@@ -4932,5 +4932,241 @@ async fn process_pull_request_check_conclusion_unaffected_by_stability() {
     assert!(
         conclusion == "success" || conclusion == "failure",
         "check conclusion should be determined by title/body validations, not stability state; got '{conclusion}'"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// MetricsRecorder bridge — verifies `record_validation_duration_ms` and
+// `record_bypass_activation` fire on the right exit paths, exactly the right
+// number of times. See `.llm/task.md` / the QA audit's focus area 3.
+// ---------------------------------------------------------------------------
+
+/// Test double for `MetricsRecorder` that logs every call it receives, so
+/// tests can assert on call *count* (not just final side effects) — the
+/// thing that actually catches double-counting or missed-on-some-paths bugs.
+#[derive(Debug, Default)]
+struct RecordingMetricsRecorder {
+    durations_ms: Mutex<Vec<f64>>,
+    bypass_types: Mutex<Vec<String>>,
+}
+
+impl MetricsRecorder for RecordingMetricsRecorder {
+    fn record_validation_duration_ms(&self, duration_ms: f64) {
+        self.durations_ms.lock().unwrap().push(duration_ms);
+    }
+
+    fn record_bypass_activation(&self, bypass_type: &str) {
+        self.bypass_types
+            .lock()
+            .unwrap()
+            .push(bypass_type.to_string());
+    }
+}
+
+#[tokio::test]
+async fn metrics_recorder_records_validation_duration_exactly_once_on_success_path() {
+    let provider = MockGitProvider::new();
+    provider.set_pull_request(PullRequest {
+        number: 1,
+        title: "feat: add new feature".to_string(),
+        draft: false,
+        body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
+        milestone_number: None,
+        head_sha: String::new(),
+    });
+    let recorder = Arc::new(RecordingMetricsRecorder::default());
+
+    let warden = MergeWarden::new(provider).with_metrics_recorder(recorder.clone());
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let durations = recorder.durations_ms.lock().unwrap();
+    assert_eq!(
+        durations.len(),
+        1,
+        "record_validation_duration_ms must fire exactly once per successful \
+         process_pull_request call, got: {durations:?}"
+    );
+    assert!(
+        durations[0] >= 0.0,
+        "recorded duration must be a non-negative number of milliseconds, got {}",
+        durations[0]
+    );
+}
+
+#[tokio::test]
+async fn metrics_recorder_is_never_called_when_get_pull_request_fails() {
+    // The validation timer starts only after the PR is successfully fetched —
+    // an error this early means no validation rule ever ran, so neither
+    // instrument should fire.
+    let mut provider = ErrorMockGitProvider::new();
+    provider.with_get_pr_error();
+    let recorder = Arc::new(RecordingMetricsRecorder::default());
+
+    let warden = MergeWarden::new(provider).with_metrics_recorder(recorder.clone());
+
+    let result = warden.process_pull_request("owner", "repo", 1).await;
+
+    assert!(result.is_err());
+    assert!(
+        recorder.durations_ms.lock().unwrap().is_empty(),
+        "record_validation_duration_ms must not fire when get_pull_request fails"
+    );
+    assert!(
+        recorder.bypass_types.lock().unwrap().is_empty(),
+        "record_bypass_activation must not fire when get_pull_request fails"
+    );
+}
+
+#[tokio::test]
+async fn metrics_recorder_records_no_validation_duration_when_wip_detected() {
+    // A WIP PR takes the early-return path before the validation timer
+    // starts (see `process_pull_request`'s WIP block, which runs before
+    // `validation_start`), so no duration should be recorded — same
+    // reasoning as the "PR is WIP" contract: title/work-item/size rules
+    // never ran.
+    use crate::config::WipCheckConfig;
+
+    let mut provider = DynamicMockGitProvider::new();
+    provider.add_pull_request(PullRequest {
+        number: 500,
+        title: "WIP: add new feature".to_string(),
+        draft: false,
+        body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+        head_sha: String::new(),
+    });
+
+    let config = CurrentPullRequestValidationConfiguration {
+        wip_check: WipCheckConfig {
+            enforce_wip_blocking: true,
+            ..WipCheckConfig::default()
+        },
+        ..CurrentPullRequestValidationConfiguration::default()
+    };
+    let recorder = Arc::new(RecordingMetricsRecorder::default());
+
+    let warden = MergeWarden::with_config(provider, config).with_metrics_recorder(recorder.clone());
+
+    let result = warden
+        .process_pull_request("owner", "repo", 500)
+        .await
+        .unwrap();
+
+    assert!(result.wip_detected);
+    assert!(
+        recorder.durations_ms.lock().unwrap().is_empty(),
+        "record_validation_duration_ms must not fire when the PR is WIP-blocked \
+         before validation rules run"
+    );
+}
+
+#[tokio::test]
+async fn metrics_recorder_records_bypass_activation_exactly_once_per_bypass_not_double_counted() {
+    // Same scenario as `test_bypass_functionality_with_multiple_bypasses`
+    // (title AND work-item bypass both active for the same user/PR), but
+    // asserting on the metrics recorder's call log rather than only the
+    // returned `bypasses_used` vec — this is what actually catches a
+    // double-count (e.g. an accidental nested loop) or a miss (e.g. an
+    // `if let` that only checks the first bypass).
+    let provider = DynamicMockGitProvider::new();
+    let pr = PullRequest {
+        number: 125,
+        title: "urgent fix".to_string(),
+        draft: false,
+        body: Some("Emergency production fix".to_string()),
+        author: Some(User {
+            id: 999,
+            login: "admin-user".to_string(),
+        }),
+        milestone_number: None,
+        head_sha: String::new(),
+    };
+    let mut provider_mut = provider;
+    provider_mut.add_pull_request(pr.clone());
+
+    let config = CurrentPullRequestValidationConfiguration {
+        bypass_rules: BypassRules::new(
+            BypassRule::new(true, vec!["admin-user".to_string()]),
+            BypassRule::new(true, vec!["admin-user".to_string()]),
+        ),
+        ..Default::default()
+    };
+    let recorder = Arc::new(RecordingMetricsRecorder::default());
+
+    let warden =
+        MergeWarden::with_config(provider_mut, config).with_metrics_recorder(recorder.clone());
+
+    warden
+        .process_pull_request("owner", "repo", 125)
+        .await
+        .unwrap();
+
+    let bypass_calls = recorder.bypass_types.lock().unwrap();
+    assert_eq!(
+        bypass_calls.len(),
+        2,
+        "record_bypass_activation must fire exactly once per bypassed rule \
+         (title + work item = 2), not more (double-counted) or fewer (missed): {bypass_calls:?}"
+    );
+    let calls_set: std::collections::HashSet<&str> =
+        bypass_calls.iter().map(|s| s.as_str()).collect();
+    assert!(calls_set.contains("title_convention"));
+    assert!(calls_set.contains("work_item_reference"));
+}
+
+#[tokio::test]
+async fn metrics_recorder_records_single_bypass_activation_when_only_one_rule_bypassed() {
+    // A single bypassed rule (title only) must record exactly one activation,
+    // not one-per-configured-bypass-rule regardless of whether it fired.
+    let provider = DynamicMockGitProvider::new();
+    let pr = PullRequest {
+        number: 126,
+        title: "urgent fix".to_string(), // invalid conventional-commit title
+        draft: false,
+        body: Some("Fixes #123".to_string()), // valid work item reference
+        author: Some(User {
+            id: 999,
+            login: "admin-user".to_string(),
+        }),
+        milestone_number: None,
+        head_sha: String::new(),
+    };
+    let mut provider_mut = provider;
+    provider_mut.add_pull_request(pr.clone());
+
+    let config = CurrentPullRequestValidationConfiguration {
+        bypass_rules: BypassRules::new(
+            BypassRule::new(true, vec!["admin-user".to_string()]), // title bypass only
+            BypassRule::new(false, vec![]),                        // work item bypass disabled
+        ),
+        ..Default::default()
+    };
+    let recorder = Arc::new(RecordingMetricsRecorder::default());
+
+    let warden =
+        MergeWarden::with_config(provider_mut, config).with_metrics_recorder(recorder.clone());
+
+    warden
+        .process_pull_request("owner", "repo", 126)
+        .await
+        .unwrap();
+
+    let bypass_calls = recorder.bypass_types.lock().unwrap();
+    assert_eq!(
+        bypass_calls.as_slice(),
+        &["title_convention".to_string()],
+        "expected exactly one recorded activation for the single bypassed rule: {bypass_calls:?}"
     );
 }

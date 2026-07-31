@@ -70,6 +70,7 @@ use checks::extract_any_issue_reference;
 use indoc::formatdoc;
 use merge_warden_developer_platforms::models::{Installation, PullRequest, Repository, Review};
 use merge_warden_developer_platforms::{ConfigFetcher, IssueMetadataProvider, PullRequestProvider};
+use std::sync::Arc;
 
 pub mod checks;
 pub mod config;
@@ -167,6 +168,33 @@ pub struct WebhookPayload {
     pub installation: Option<Installation>,
 }
 
+/// Recipient for pull-request-processing metrics, injected into [`MergeWarden`]
+/// without introducing an infrastructure dependency into this crate.
+///
+/// `crates/core` is domain logic and must not depend on any specific metrics
+/// backend (OpenTelemetry, Prometheus, etc.) — see `docs/standards/code.md`
+/// module organization. Callers that want real metrics (e.g.
+/// `crates/server`) implement this trait against their own metrics type and
+/// inject it via [`MergeWarden::with_metrics_recorder`]. When no recorder is
+/// injected, [`NoopMetricsRecorder`] is used and every call is a no-op.
+pub trait MetricsRecorder: Send + Sync + std::fmt::Debug {
+    /// Records the time taken to run all validation rules for a single PR, in milliseconds.
+    fn record_validation_duration_ms(&self, duration_ms: f64);
+
+    /// Records a single bypass-rule activation for the given `bypass_type`
+    /// (e.g. `"title_convention"`, `"work_item_reference"`).
+    fn record_bypass_activation(&self, bypass_type: &str);
+}
+
+/// No-op [`MetricsRecorder`] used when no real recorder is injected.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct NoopMetricsRecorder;
+
+impl MetricsRecorder for NoopMetricsRecorder {
+    fn record_validation_duration_ms(&self, _duration_ms: f64) {}
+    fn record_bypass_activation(&self, _bypass_type: &str) {}
+}
+
 /// Main struct for validating and managing pull requests.
 ///
 /// `MergeWarden` is responsible for validating pull requests against configurable
@@ -202,6 +230,10 @@ pub struct MergeWarden<P: PullRequestProvider + std::fmt::Debug> {
     /// updates back to pull requests. When `None`, `propagate_issue_metadata` is
     /// skipped regardless of the `issue_propagation` config flags.
     issue_provider: Option<Box<dyn IssueMetadataProvider>>,
+
+    /// Recipient for validation-duration and bypass-activation metrics.
+    /// Defaults to [`NoopMetricsRecorder`]; see [`Self::with_metrics_recorder`].
+    metrics_recorder: Arc<dyn MetricsRecorder>,
 }
 
 impl<P: PullRequestProvider + ConfigFetcher + std::fmt::Debug> MergeWarden<P> {
@@ -218,7 +250,7 @@ impl<P: PullRequestProvider + ConfigFetcher + std::fmt::Debug> MergeWarden<P> {
     ///
     /// A `TitleValidationResult` containing validation status, bypass information,
     /// and structured diagnosis when the title is invalid
-    #[instrument]
+    #[instrument(fields(rule_name = "title"))]
     fn check_title(&self, pr: &PullRequest) -> checks::TitleValidationResult {
         debug!(pull_request = pr.number, "Checking PR title");
         checks::check_pr_title(
@@ -240,7 +272,7 @@ impl<P: PullRequestProvider + ConfigFetcher + std::fmt::Debug> MergeWarden<P> {
     /// # Returns
     ///
     /// A `ValidationResult` containing validation status and bypass information
-    #[instrument]
+    #[instrument(fields(rule_name = "work_item"))]
     fn check_work_item_reference(&self, pr: &PullRequest) -> validation_result::ValidationResult {
         debug!(
             pull_request = pr.number,
@@ -266,7 +298,7 @@ impl<P: PullRequestProvider + ConfigFetcher + std::fmt::Debug> MergeWarden<P> {
     /// # Returns
     ///
     /// A `ValidationResult` containing size validation status
-    #[instrument]
+    #[instrument(fields(rule_name = "size"))]
     fn check_pr_size(
         &self,
         pr_files: &[merge_warden_developer_platforms::models::PullRequestFile],
@@ -294,6 +326,7 @@ impl<P: PullRequestProvider + ConfigFetcher + std::fmt::Debug> MergeWarden<P> {
     /// # Returns
     ///
     /// `true` if the PR is detected as WIP, `false` otherwise
+    #[instrument(fields(rule_name = "wip"))]
     fn check_wip_status(&self, pr: &PullRequest) -> bool {
         for pattern in &self.config.wip_check.wip_title_patterns {
             if pr.title.contains(pattern.as_str()) {
@@ -1834,6 +1867,7 @@ Please update the PR body to include a valid work item reference."#;
             provider,
             config: CurrentPullRequestValidationConfiguration::default(),
             issue_provider: None,
+            metrics_recorder: Arc::new(NoopMetricsRecorder),
         }
     }
 
@@ -2257,6 +2291,13 @@ Please update the PR body to include a valid work item reference."#;
             }
         }
 
+        // Measures wall-clock time spent running the title/work-item/size
+        // validation rules for `pr.validation.duration_ms`. Stops just after
+        // `size_result` below — the subsequent config-file validation block
+        // is a separate concern (comment/label side effects, not a
+        // pass/fail validation rule) and is intentionally excluded.
+        let validation_start = std::time::Instant::now();
+
         // Check PR title follows the conventional commit structure if enabled
         let title_result = if self.config.enforce_title_convention {
             self.check_title(&pr)
@@ -2299,6 +2340,9 @@ Please update the PR body to include a valid work item reference."#;
         } else {
             validation_result::ValidationResult::valid()
         };
+
+        self.metrics_recorder
+            .record_validation_duration_ms(validation_start.elapsed().as_secs_f64() * 1000.0);
 
         // Validate .github/merge-warden.toml when it is part of the PR.
         if pr_files.iter().any(|f| f.filename == CONFIG_FILE_PATH) {
@@ -2367,6 +2411,15 @@ Please update the PR body to include a valid work item reference."#;
         }
         if let Some(bypass_info) = size_result.bypass_info() {
             bypasses_used.push(bypass_info.clone());
+        }
+
+        // Report each bypass activation for `pr.bypass.activations_total`.
+        for bypass_info in &bypasses_used {
+            let bypass_type = match bypass_info.rule_type {
+                validation_result::BypassRuleType::TitleConvention => "title_convention",
+                validation_result::BypassRuleType::WorkItemReference => "work_item_reference",
+            };
+            self.metrics_recorder.record_bypass_activation(bypass_type);
         }
 
         // Extract validity flags for downstream logic
@@ -2667,6 +2720,7 @@ Please update the PR body to include a valid work item reference."#;
             provider,
             config,
             issue_provider: None,
+            metrics_recorder: Arc::new(NoopMetricsRecorder),
         }
     }
 
@@ -2691,6 +2745,28 @@ Please update the PR body to include a valid work item reference."#;
     /// [`propagate_issue_metadata`]: MergeWarden::propagate_issue_metadata
     pub fn with_issue_provider(mut self, provider: Box<dyn IssueMetadataProvider>) -> Self {
         self.issue_provider = Some(provider);
+        self
+    }
+
+    /// Attaches a [`MetricsRecorder`] to this instance (builder pattern).
+    ///
+    /// When set, [`process_pull_request`] reports `pr.validation.duration_ms`
+    /// (time spent running the title/work-item/size checks) and
+    /// `pr.bypass.activations_total` (once per bypass rule that was
+    /// activated) through `recorder`. When not called, metrics are silently
+    /// discarded via [`NoopMetricsRecorder`].
+    ///
+    /// # Arguments
+    ///
+    /// * `recorder` - A shared [`MetricsRecorder`] implementation.
+    ///
+    /// # Returns
+    ///
+    /// The updated `MergeWarden` instance (builder pattern).
+    ///
+    /// [`process_pull_request`]: MergeWarden::process_pull_request
+    pub fn with_metrics_recorder(mut self, recorder: Arc<dyn MetricsRecorder>) -> Self {
+        self.metrics_recorder = recorder;
         self
     }
 }

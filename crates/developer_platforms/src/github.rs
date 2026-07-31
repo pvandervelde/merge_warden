@@ -44,6 +44,47 @@ fn map_api_error(e: ApiError) -> Error {
     }
 }
 
+/// Best-effort mapping from an [`ApiError`] to the HTTP status code most
+/// closely associated with it, for populating the `status` tracing span
+/// field on methods that call through `github_bot_sdk`'s higher-level
+/// wrappers (`self.client.issues()`, `.pull_requests()`, `.labels()`,
+/// `.projects()`, etc.), which do not expose the raw [`reqwest::Response`].
+/// Methods that call `self.client.get`/`.post` directly record the real
+/// `response.status()` instead of using this function.
+///
+/// Errors with no natural HTTP status equivalent (JSON parsing, transport,
+/// configuration, token exchange, GraphQL application errors) map to `0`,
+/// which is not a valid HTTP status and is therefore unambiguous in traces.
+fn api_error_status_code(e: &ApiError) -> u16 {
+    match e {
+        ApiError::HttpError { status, .. } => *status,
+        ApiError::NotFound => 404,
+        ApiError::AuthenticationFailed => 401,
+        ApiError::AuthorizationFailed => 403,
+        ApiError::RateLimitExceeded { .. } | ApiError::SecondaryRateLimit => 429,
+        ApiError::Timeout => 504,
+        ApiError::InvalidRequest { .. } => 400,
+        _ => 0,
+    }
+}
+
+/// Records `value` onto the named field of the *current* tracing span.
+///
+/// Every instrumented [`GitHubProvider`] method declares one or more
+/// `tracing::field::Empty` fields (conventionally `status`, plus
+/// `pr_fetch_status` / `properties_status` / `projects_status` on methods
+/// that make more than one HTTP call) in its `#[instrument]` attribute, then
+/// calls this helper once the outcome of the corresponding call is known —
+/// with either a real `response.status().as_u16()`, a literal status implied
+/// by the SDK call's documented contract (e.g. `201` after a successful
+/// `POST`), or [`api_error_status_code`]'s best-effort mapping on failure.
+///
+/// Centralising the call avoids repeating `tracing::Span::current().record(..)`
+/// at each of the (many) call sites below.
+fn record_status(field: &str, value: u16) {
+    tracing::Span::current().record(field, value);
+}
+
 /// GitHub implementation of developer platform traits.
 ///
 /// Wraps an installation-scoped [`InstallationClient`] to expose it through the
@@ -92,7 +133,12 @@ impl GitHubProvider {
     ///
     /// Returns [`Error::InvalidResponse`] if the repository cannot be reached or
     /// the response cannot be parsed.
-    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name))]
+    #[instrument(skip(self), fields(
+        owner = repo_owner,
+        repo = repo_name,
+        endpoint = "GET /repos/{owner}/{repo}",
+        status = tracing::field::Empty,
+    ))]
     async fn fetch_default_branch(
         &self,
         repo_owner: &str,
@@ -103,6 +149,7 @@ impl GitHubProvider {
         let response = match self.client.get(&path).await {
             Ok(r) => r,
             Err(e) => {
+                record_status("status", api_error_status_code(&e));
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -112,6 +159,7 @@ impl GitHubProvider {
                 return Err(map_api_error(e));
             }
         };
+        record_status("status", response.status().as_u16());
 
         if !response.status().is_success() {
             error!(
@@ -153,7 +201,14 @@ impl GitHubProvider {
     ///
     /// Returns an error for any API failure other than 404, or if the base64
     /// content cannot be decoded to valid UTF-8.
-    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, path, reference))]
+    #[instrument(skip(self), fields(
+        owner = repo_owner,
+        repo = repo_name,
+        path,
+        reference,
+        endpoint = "GET /repos/{owner}/{repo}/contents/{path}",
+        status = tracing::field::Empty,
+    ))]
     async fn fetch_file_content(
         &self,
         repo_owner: &str,
@@ -179,6 +234,7 @@ impl GitHubProvider {
         let response = match self.client.get(&url_path).await {
             Ok(r) => r,
             Err(ApiError::NotFound) => {
+                record_status("status", 404u16);
                 debug!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -188,6 +244,7 @@ impl GitHubProvider {
                 return Ok(None);
             }
             Err(e) => {
+                record_status("status", api_error_status_code(&e));
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -198,6 +255,7 @@ impl GitHubProvider {
                 return Err(map_api_error(e));
             }
         };
+        record_status("status", response.status().as_u16());
 
         if !response.status().is_success() {
             // 404 is already handled above via ApiError::NotFound → Ok(None).
@@ -322,7 +380,13 @@ impl PullRequestProvider for GitHubProvider {
     /// # Errors
     ///
     /// Returns [`Error::FailedToUpdatePullRequest`] if the API call fails for any reason.
-    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number))]
+    #[instrument(skip(self), fields(
+        owner = repo_owner,
+        repo = repo_name,
+        pr = pr_number,
+        endpoint = "POST /repos/{owner}/{repo}/issues/{pr}/comments",
+        status = tracing::field::Empty,
+    ))]
     async fn add_comment(
         &self,
         repo_owner: &str,
@@ -341,8 +405,11 @@ impl PullRequestProvider for GitHubProvider {
                 },
             )
             .await
-            .map(|_| ())
+            .map(|_| {
+                record_status("status", 201u16);
+            })
             .map_err(|e| {
+                record_status("status", api_error_status_code(&e));
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -372,7 +439,13 @@ impl PullRequestProvider for GitHubProvider {
     /// # Errors
     ///
     /// Returns [`Error::FailedToUpdatePullRequest`] if the API call fails.
-    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number))]
+    #[instrument(skip(self), fields(
+        owner = repo_owner,
+        repo = repo_name,
+        pr = pr_number,
+        endpoint = "POST /repos/{owner}/{repo}/issues/{pr}/labels",
+        status = tracing::field::Empty,
+    ))]
     async fn add_labels(
         &self,
         repo_owner: &str,
@@ -384,8 +457,11 @@ impl PullRequestProvider for GitHubProvider {
             .pull_requests()
             .add_labels(repo_owner, repo_name, pr_number, labels.to_vec())
             .await
-            .map(|_| ())
+            .map(|_| {
+                record_status("status", 200u16);
+            })
             .map_err(|e| {
+                record_status("status", api_error_status_code(&e));
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -414,7 +490,13 @@ impl PullRequestProvider for GitHubProvider {
     /// # Errors
     ///
     /// Returns [`Error::FailedToUpdatePullRequest`] if the API call fails.
-    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, comment = comment_id))]
+    #[instrument(skip(self), fields(
+        owner = repo_owner,
+        repo = repo_name,
+        comment = comment_id,
+        endpoint = "DELETE /repos/{owner}/{repo}/issues/comments/{comment_id}",
+        status = tracing::field::Empty,
+    ))]
     async fn delete_comment(
         &self,
         repo_owner: &str,
@@ -425,7 +507,11 @@ impl PullRequestProvider for GitHubProvider {
             .issues()
             .delete_comment(repo_owner, repo_name, comment_id)
             .await
+            .map(|_| {
+                record_status("status", 204u16);
+            })
             .map_err(|e| {
+                record_status("status", api_error_status_code(&e));
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -456,7 +542,13 @@ impl PullRequestProvider for GitHubProvider {
     ///
     /// Returns an error mapping through [`map_api_error`] if the API call fails
     /// (including `NotFound` → `InvalidResponse`, rate limit and auth errors).
-    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number))]
+    #[instrument(skip(self), fields(
+        owner = repo_owner,
+        repo = repo_name,
+        pr = pr_number,
+        endpoint = "GET /repos/{owner}/{repo}/pulls/{pr}",
+        status = tracing::field::Empty,
+    ))]
     async fn get_pull_request(
         &self,
         repo_owner: &str,
@@ -469,6 +561,7 @@ impl PullRequestProvider for GitHubProvider {
             .get(repo_owner, repo_name, pr_number)
             .await
             .map_err(|e| {
+                record_status("status", api_error_status_code(&e));
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -478,6 +571,7 @@ impl PullRequestProvider for GitHubProvider {
                 );
                 map_api_error(e)
             })?;
+        record_status("status", 200u16);
 
         Ok(PullRequest {
             number: pr.number,
@@ -512,7 +606,13 @@ impl PullRequestProvider for GitHubProvider {
     ///
     /// Returns [`Error::InvalidResponse`] if the API call fails or the response
     /// cannot be parsed.
-    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number))]
+    #[instrument(skip(self), fields(
+        owner = repo_owner,
+        repo = repo_name,
+        pr = pr_number,
+        endpoint = "GET /repos/{owner}/{repo}/pulls/{pr}/files",
+        status = tracing::field::Empty,
+    ))]
     async fn get_pull_request_files(
         &self,
         repo_owner: &str,
@@ -525,6 +625,7 @@ impl PullRequestProvider for GitHubProvider {
         );
 
         let response = self.client.get(&path).await.map_err(|e| {
+            record_status("status", api_error_status_code(&e));
             error!(
                 owner = repo_owner,
                 repo = repo_name,
@@ -534,6 +635,7 @@ impl PullRequestProvider for GitHubProvider {
             );
             map_api_error(e)
         })?;
+        record_status("status", response.status().as_u16());
 
         if !response.status().is_success() {
             error!(
@@ -588,7 +690,13 @@ impl PullRequestProvider for GitHubProvider {
     /// # Errors
     ///
     /// Returns an error (via [`map_api_error`]) if the pull request cannot be fetched.
-    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number))]
+    #[instrument(skip(self), fields(
+        owner = repo_owner,
+        repo = repo_name,
+        pr = pr_number,
+        endpoint = "GET /repos/{owner}/{repo}/pulls/{pr}",
+        status = tracing::field::Empty,
+    ))]
     async fn list_applied_labels(
         &self,
         repo_owner: &str,
@@ -601,6 +709,7 @@ impl PullRequestProvider for GitHubProvider {
             .get(repo_owner, repo_name, pr_number)
             .await
             .map_err(|e| {
+                record_status("status", api_error_status_code(&e));
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -610,6 +719,7 @@ impl PullRequestProvider for GitHubProvider {
                 );
                 map_api_error(e)
             })?;
+        record_status("status", 200u16);
 
         Ok(pr
             .labels
@@ -637,13 +747,19 @@ impl PullRequestProvider for GitHubProvider {
     /// # Errors
     ///
     /// Returns an error (via [`map_api_error`]) if the API call fails.
-    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name))]
+    #[instrument(skip(self), fields(
+        owner = repo_owner,
+        repo = repo_name,
+        endpoint = "GET /repos/{owner}/{repo}/labels",
+        status = tracing::field::Empty,
+    ))]
     async fn list_available_labels(
         &self,
         repo_owner: &str,
         repo_name: &str,
     ) -> Result<Vec<Label>, Error> {
-        self.client
+        let result = self
+            .client
             .labels()
             .list(repo_owner, repo_name)
             .await
@@ -656,7 +772,14 @@ impl PullRequestProvider for GitHubProvider {
                     })
                     .collect()
             })
-            .map_err(map_api_error)
+            .map_err(|e| {
+                record_status("status", api_error_status_code(&e));
+                map_api_error(e)
+            });
+        if result.is_ok() {
+            record_status("status", 200u16);
+        }
+        result
     }
 
     /// Lists all comments on a pull request.
@@ -676,14 +799,21 @@ impl PullRequestProvider for GitHubProvider {
     /// # Errors
     ///
     /// Returns an error (via [`map_api_error`]) if the API call fails.
-    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number))]
+    #[instrument(skip(self), fields(
+        owner = repo_owner,
+        repo = repo_name,
+        pr = pr_number,
+        endpoint = "GET /repos/{owner}/{repo}/issues/{pr}/comments",
+        status = tracing::field::Empty,
+    ))]
     async fn list_comments(
         &self,
         repo_owner: &str,
         repo_name: &str,
         pr_number: u64,
     ) -> Result<Vec<Comment>, Error> {
-        self.client
+        let result = self
+            .client
             .issues()
             .list_comments(repo_owner, repo_name, pr_number)
             .await
@@ -700,7 +830,14 @@ impl PullRequestProvider for GitHubProvider {
                     })
                     .collect()
             })
-            .map_err(map_api_error)
+            .map_err(|e| {
+                record_status("status", api_error_status_code(&e));
+                map_api_error(e)
+            });
+        if result.is_ok() {
+            record_status("status", 200u16);
+        }
+        result
     }
 
     /// Removes a specific label from a pull request.
@@ -719,7 +856,13 @@ impl PullRequestProvider for GitHubProvider {
     /// # Errors
     ///
     /// Returns [`Error::FailedToUpdatePullRequest`] if the API call fails.
-    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number))]
+    #[instrument(skip(self), fields(
+        owner = repo_owner,
+        repo = repo_name,
+        pr = pr_number,
+        endpoint = "DELETE /repos/{owner}/{repo}/issues/{pr}/labels/{name}",
+        status = tracing::field::Empty,
+    ))]
     async fn remove_label(
         &self,
         repo_owner: &str,
@@ -733,10 +876,14 @@ impl PullRequestProvider for GitHubProvider {
             .remove_label(repo_owner, repo_name, pr_number, label)
             .await
         {
-            Ok(_) => Ok(()),
+            Ok(_) => {
+                record_status("status", 200u16);
+                Ok(())
+            }
             // GitHub returns 404 when the label is not present on the PR.
             // Treat as a no-op so callers can remove labels idempotently.
             Err(ApiError::NotFound) => {
+                record_status("status", 404u16);
                 debug!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -747,6 +894,7 @@ impl PullRequestProvider for GitHubProvider {
                 Ok(())
             }
             Err(e) => {
+                record_status("status", api_error_status_code(&e));
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -786,7 +934,14 @@ impl PullRequestProvider for GitHubProvider {
     ///
     /// Returns an error if the pull request cannot be fetched or the check run
     /// POST fails.
-    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number))]
+    #[instrument(skip(self), fields(
+        owner = repo_owner,
+        repo = repo_name,
+        pr = pr_number,
+        endpoint = "POST /repos/{owner}/{repo}/check-runs",
+        pr_fetch_status = tracing::field::Empty,
+        status = tracing::field::Empty,
+    ))]
     async fn update_pr_check_status(
         &self,
         repo_owner: &str,
@@ -804,6 +959,7 @@ impl PullRequestProvider for GitHubProvider {
             .get(repo_owner, repo_name, pr_number)
             .await
             .map_err(|e| {
+                record_status("pr_fetch_status", api_error_status_code(&e));
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -813,6 +969,7 @@ impl PullRequestProvider for GitHubProvider {
                 );
                 map_api_error(e)
             })?;
+        record_status("pr_fetch_status", 200u16);
 
         let head_sha = pr.head.sha;
 
@@ -830,6 +987,7 @@ impl PullRequestProvider for GitHubProvider {
         });
 
         let response = self.client.post(&url, &payload).await.map_err(|e| {
+            record_status("status", api_error_status_code(&e));
             error!(
                 owner = repo_owner,
                 repo = repo_name,
@@ -839,6 +997,7 @@ impl PullRequestProvider for GitHubProvider {
             );
             map_api_error(e)
         })?;
+        record_status("status", response.status().as_u16());
 
         if !response.status().is_success() {
             error!(
@@ -883,7 +1042,13 @@ impl PullRequestProvider for GitHubProvider {
     ///
     /// Returns an error (via [`map_api_error`]) if the API call fails or the
     /// response cannot be parsed.
-    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number))]
+    #[instrument(skip(self), fields(
+        owner = repo_owner,
+        repo = repo_name,
+        pr = pr_number,
+        endpoint = "GET /repos/{owner}/{repo}/pulls/{pr}/reviews",
+        status = tracing::field::Empty,
+    ))]
     async fn list_pr_reviews(
         &self,
         repo_owner: &str,
@@ -902,6 +1067,7 @@ impl PullRequestProvider for GitHubProvider {
             );
 
             let response = self.client.get(&path).await.map_err(|e| {
+                record_status("status", api_error_status_code(&e));
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -911,6 +1077,7 @@ impl PullRequestProvider for GitHubProvider {
                 );
                 map_api_error(e)
             })?;
+            record_status("status", response.status().as_u16());
 
             if !response.status().is_success() {
                 error!(
@@ -989,7 +1156,13 @@ impl PullRequestProvider for GitHubProvider {
     ///
     /// Returns [`Error::InvalidResponse`] for non-200 responses (including 404).
     /// Returns the appropriate [`Error`] variant for auth/rate-limit failures.
-    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, sha = commit_sha))]
+    #[instrument(skip(self), fields(
+        owner = repo_owner,
+        repo = repo_name,
+        sha = commit_sha,
+        endpoint = "GET /repos/{owner}/{repo}/commits/{sha}/statuses",
+        status = tracing::field::Empty,
+    ))]
     async fn get_commit_statuses(
         &self,
         repo_owner: &str,
@@ -1004,6 +1177,7 @@ impl PullRequestProvider for GitHubProvider {
         let response = match self.client.get(&path).await {
             Ok(r) => r,
             Err(e) => {
+                record_status("status", api_error_status_code(&e));
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1014,6 +1188,7 @@ impl PullRequestProvider for GitHubProvider {
                 return Err(map_api_error(e));
             }
         };
+        record_status("status", response.status().as_u16());
 
         if !response.status().is_success() {
             error!(
@@ -1063,7 +1238,13 @@ impl PullRequestProvider for GitHubProvider {
     ///
     /// Returns [`Error::InvalidResponse`] for non-200 responses (including 404).
     /// Returns the appropriate [`Error`] variant for auth/rate-limit failures.
-    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, sha = commit_sha))]
+    #[instrument(skip(self), fields(
+        owner = repo_owner,
+        repo = repo_name,
+        sha = commit_sha,
+        endpoint = "GET /repos/{owner}/{repo}/commits/{sha}/pulls",
+        status = tracing::field::Empty,
+    ))]
     async fn find_pull_requests_for_commit(
         &self,
         repo_owner: &str,
@@ -1078,6 +1259,7 @@ impl PullRequestProvider for GitHubProvider {
         let response = match self.client.get(&path).await {
             Ok(r) => r,
             Err(e) => {
+                record_status("status", api_error_status_code(&e));
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1088,6 +1270,7 @@ impl PullRequestProvider for GitHubProvider {
                 return Err(map_api_error(e));
             }
         };
+        record_status("status", response.status().as_u16());
 
         if !response.status().is_success() {
             error!(
@@ -1119,7 +1302,13 @@ impl PullRequestProvider for GitHubProvider {
         Ok(pr_numbers)
     }
 
-    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, label = name))]
+    #[instrument(skip(self), fields(
+        owner = repo_owner,
+        repo = repo_name,
+        label = name,
+        endpoint = "POST /repos/{owner}/{repo}/labels",
+        status = tracing::field::Empty,
+    ))]
     async fn create_label(
         &self,
         repo_owner: &str,
@@ -1140,8 +1329,11 @@ impl PullRequestProvider for GitHubProvider {
                 },
             )
             .await
-            .map(|_| ())
+            .map(|_| {
+                record_status("status", 201u16);
+            })
             .map_err(|e| {
+                record_status("status", api_error_status_code(&e));
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1168,7 +1360,14 @@ impl IssueMetadataProvider for GitHubProvider {
     ///
     /// Returns [`Error::InvalidResponse`] for unexpected API responses, or the
     /// appropriate [`Error`] variant for auth/rate-limit failures.
-    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, issue = issue_number))]
+    #[instrument(skip(self), fields(
+        owner = repo_owner,
+        repo = repo_name,
+        issue = issue_number,
+        endpoint = "GET /repos/{owner}/{repo}/issues/{issue}",
+        status = tracing::field::Empty,
+        projects_status = tracing::field::Empty,
+    ))]
     async fn get_issue_metadata(
         &self,
         repo_owner: &str,
@@ -1183,6 +1382,7 @@ impl IssueMetadataProvider for GitHubProvider {
         {
             Ok(i) => i,
             Err(ApiError::NotFound) => {
+                record_status("status", 404u16);
                 debug!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1192,6 +1392,7 @@ impl IssueMetadataProvider for GitHubProvider {
                 return Ok(None);
             }
             Err(e) => {
+                record_status("status", api_error_status_code(&e));
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1202,6 +1403,7 @@ impl IssueMetadataProvider for GitHubProvider {
                 return Err(map_api_error(e));
             }
         };
+        record_status("status", 200u16);
 
         let milestone = issue.milestone.map(|m| IssueMilestone {
             number: m.number,
@@ -1217,15 +1419,19 @@ impl IssueMetadataProvider for GitHubProvider {
             .list_for_issue(repo_owner, repo_name, issue_number)
             .await
         {
-            Ok(linked) => linked
-                .into_iter()
-                .map(|p| IssueProject {
-                    number: p.number,
-                    owner_login: p.owner.login,
-                    title: p.title,
-                })
-                .collect(),
+            Ok(linked) => {
+                record_status("projects_status", 200u16);
+                linked
+                    .into_iter()
+                    .map(|p| IssueProject {
+                        number: p.number,
+                        owner_login: p.owner.login,
+                        title: p.title,
+                    })
+                    .collect()
+            }
             Err(e) => {
+                record_status("projects_status", api_error_status_code(&e));
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1260,7 +1466,14 @@ impl IssueMetadataProvider for GitHubProvider {
     /// # Errors
     ///
     /// Returns [`Error::FailedToUpdatePullRequest`] if the API call fails.
-    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number, milestone = ?milestone_number))]
+    #[instrument(skip(self), fields(
+        owner = repo_owner,
+        repo = repo_name,
+        pr = pr_number,
+        milestone = ?milestone_number,
+        endpoint = "PATCH /repos/{owner}/{repo}/pulls/{pr}",
+        status = tracing::field::Empty,
+    ))]
     async fn set_pull_request_milestone(
         &self,
         repo_owner: &str,
@@ -1272,8 +1485,11 @@ impl IssueMetadataProvider for GitHubProvider {
             .pull_requests()
             .set_milestone(repo_owner, repo_name, pr_number, milestone_number)
             .await
-            .map(|_| ())
+            .map(|_| {
+                record_status("status", 200u16);
+            })
             .map_err(|e| {
+                record_status("status", api_error_status_code(&e));
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1299,7 +1515,16 @@ impl IssueMetadataProvider for GitHubProvider {
     ///
     /// Returns [`Error::FailedToUpdatePullRequest`] if fetching the PR or calling
     /// the GraphQL mutation fails.
-    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name, pr = pr_number, project_number, project_owner = project_owner_login))]
+    #[instrument(skip(self), fields(
+        owner = repo_owner,
+        repo = repo_name,
+        pr = pr_number,
+        project_number,
+        project_owner = project_owner_login,
+        endpoint = "POST /graphql (addProjectV2ItemById)",
+        pr_fetch_status = tracing::field::Empty,
+        status = tracing::field::Empty,
+    ))]
     async fn add_pull_request_to_project(
         &self,
         repo_owner: &str,
@@ -1317,6 +1542,7 @@ impl IssueMetadataProvider for GitHubProvider {
         {
             Ok(pr) => pr,
             Err(e) => {
+                record_status("pr_fetch_status", api_error_status_code(&e));
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1327,6 +1553,7 @@ impl IssueMetadataProvider for GitHubProvider {
                 return Err(map_api_error(e));
             }
         };
+        record_status("pr_fetch_status", 200u16);
 
         let pr_node_id = pr.node_id;
 
@@ -1337,6 +1564,7 @@ impl IssueMetadataProvider for GitHubProvider {
             .await
         {
             Ok(_) => {
+                record_status("status", 200u16);
                 info!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1348,6 +1576,7 @@ impl IssueMetadataProvider for GitHubProvider {
                 Ok(())
             }
             Err(ApiError::NotFound) => {
+                record_status("status", 404u16);
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1362,6 +1591,7 @@ impl IssueMetadataProvider for GitHubProvider {
                 )))
             }
             Err(e) => {
+                record_status("status", api_error_status_code(&e));
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1395,7 +1625,13 @@ impl RepositoryMetadataProvider for GitHubProvider {
     ///
     /// Returns an error only when the topics fetch fails. Custom property failures
     /// degrade gracefully to an empty map.
-    #[instrument(skip(self), fields(owner = repo_owner, repo = repo_name))]
+    #[instrument(skip(self), fields(
+        owner = repo_owner,
+        repo = repo_name,
+        endpoint = "GET /repos/{owner}/{repo}/topics",
+        status = tracing::field::Empty,
+        properties_status = tracing::field::Empty,
+    ))]
     async fn get_repository_context(
         &self,
         repo_owner: &str,
@@ -1411,6 +1647,7 @@ impl RepositoryMetadataProvider for GitHubProvider {
         // Topics are supported on all plans — any failure here is unexpected.
         let topics: Vec<String> = match topics_result {
             Ok(resp) if resp.status().is_success() => {
+                record_status("status", resp.status().as_u16());
                 let json: serde_json::Value =
                     resp.json().await.map_err(|_| Error::InvalidResponse)?;
                 json["names"]
@@ -1425,6 +1662,7 @@ impl RepositoryMetadataProvider for GitHubProvider {
             }
             Ok(resp) => {
                 let status = resp.status();
+                record_status("status", status.as_u16());
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1434,6 +1672,7 @@ impl RepositoryMetadataProvider for GitHubProvider {
                 return Err(Error::InvalidResponse);
             }
             Err(e) => {
+                record_status("status", api_error_status_code(&e));
                 error!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1447,6 +1686,7 @@ impl RepositoryMetadataProvider for GitHubProvider {
         // Custom properties: enterprise only. 403/404 degrade gracefully.
         let custom_properties = match props_result {
             Ok(resp) if resp.status().is_success() => {
+                record_status("properties_status", resp.status().as_u16());
                 let json: serde_json::Value = match resp.json().await {
                     Ok(v) => v,
                     Err(_) => {
@@ -1473,6 +1713,7 @@ impl RepositoryMetadataProvider for GitHubProvider {
             }
             Ok(resp) => {
                 let status = resp.status().as_u16();
+                record_status("properties_status", status);
                 if status == 403 || status == 404 {
                     // 403 = not enterprise / missing permission; 404 = not found.
                     // Both are expected on non-enterprise plans.
@@ -1493,8 +1734,11 @@ impl RepositoryMetadataProvider for GitHubProvider {
                 std::collections::HashMap::new()
             }
             Err(
-                ApiError::NotFound | ApiError::AuthorizationFailed | ApiError::AuthenticationFailed,
+                e @ (ApiError::NotFound
+                | ApiError::AuthorizationFailed
+                | ApiError::AuthenticationFailed),
             ) => {
+                record_status("properties_status", api_error_status_code(&e));
                 debug!(
                     owner = repo_owner,
                     repo = repo_name,
@@ -1503,6 +1747,7 @@ impl RepositoryMetadataProvider for GitHubProvider {
                 std::collections::HashMap::new()
             }
             Err(e) => {
+                record_status("properties_status", api_error_status_code(&e));
                 warn!(
                     owner = repo_owner,
                     repo = repo_name,

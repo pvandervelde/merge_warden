@@ -168,6 +168,37 @@ Azure Container Apps supports HTTP liveness and readiness probes. Add them with
 `--health-check` flags or by editing the container app's YAML. Point both probes to
 `GET /health` on port `3000`.
 
+By default (`MERGE_WARDEN_HEALTH_CHECKS=basic`), `/health` never contacts GitHub or the
+queue broker, so it is safe to use for both probe types. If you set
+`MERGE_WARDEN_HEALTH_CHECKS=full` to get real dependency probing, be aware that a transient
+GitHub API outage will make `/health` return `503` — appropriate for a readiness probe
+(temporarily stop routing traffic to the replica) but likely undesirable for a liveness
+probe (Container Apps would restart a container that isn't actually broken, since restarting
+does not fix an external GitHub outage). See
+[Environment variables reference](../reference/environment-variables.md) for details.
+
+---
+
+## Optional — Expose Prometheus metrics
+
+Set `MERGE_WARDEN_METRICS_ENDPOINT=prometheus` to register `GET /metrics` in Prometheus text
+exposition format on the same port as the rest of the server. This is independent of the OTLP
+telemetry section below — enable either, both, or neither.
+
+```bash
+az containerapp update \
+  --name merge-warden \
+  --resource-group rg-merge-warden \
+  --set-env-vars \
+    "MERGE_WARDEN_METRICS_ENDPOINT=prometheus"
+```
+
+Point a Prometheus-compatible scraper (e.g. an Azure Monitor managed Prometheus data
+collection rule, or a self-hosted Prometheus/Grafana Agent) at
+`https://<fqdn>/metrics`. See [HTTP endpoints reference](../reference/http-endpoints.md) for
+the response format and [Monitoring and observability](https://github.com/pvandervelde/merge_warden/blob/master/docs/spec/operations/monitoring.md)
+for the full metric list and alert-threshold guidance.
+
 ---
 
 ## Optional — Enable OTLP telemetry

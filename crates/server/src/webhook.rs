@@ -109,6 +109,32 @@ pub struct AppState {
     pub github_client: GitHubClient,
     /// Application policy defaults loaded from configuration.
     pub policies: ApplicationDefaults,
+    /// Metric recording handles. Always present; recording is a no-op sink
+    /// when neither OTLP nor Prometheus export is configured.
+    ///
+    /// See `crate::metrics`.
+    pub metrics: crate::metrics::Metrics,
+    /// Effective metrics configuration. Primarily consulted by
+    /// [`build_router`] / [`build_queue_router`] to decide whether `GET
+    /// /metrics` should be registered.
+    pub metrics_config: crate::metrics::MetricsConfig,
+    /// Effective health-check configuration (basic vs. full dependency probing).
+    ///
+    /// See `crate::health`.
+    pub health_check_config: crate::health::HealthCheckConfig,
+    /// Queue client, present only in queue mode. Used by the health check to
+    /// probe queue connectivity/depth in "full" mode. `None` in webhook mode.
+    pub queue_client: Option<Arc<dyn queue_runtime::QueueClient>>,
+    /// Queue name paired with `queue_client`. `None` in webhook mode.
+    ///
+    /// Not read anywhere yet: today, the health check's `queue` component
+    /// (see `crate::health::queue_health`) only reports whether a queue
+    /// client was constructed at startup, not a depth broken down by queue
+    /// name. Kept in `AppState` for a future depth-metric label
+    /// (`ingress.queue.depth` per-queue-name) once `queue-runtime` exposes a
+    /// depth-query API — see `crate::metrics::Metrics::set_queue_depth`.
+    #[allow(dead_code)]
+    pub queue_name: Option<queue_runtime::QueueName>,
 }
 
 // ---------------------------------------------------------------------------
@@ -128,6 +154,13 @@ pub struct MergeWardenWebhookHandler {
     github_client: GitHubClient,
     /// Policy defaults used when no per-repo config file is found.
     policies: ApplicationDefaults,
+    /// Metric recording handles threaded into every [`MergeWarden`] instance
+    /// this handler constructs. Defaults to an inert, no-op-observable sink
+    /// (see [`crate::metrics::Metrics`]'s `Default` impl) so existing callers
+    /// that only need [`MergeWardenWebhookHandler::new`]'s original two
+    /// parameters keep working; [`Self::with_metrics`] attaches the real
+    /// instance built at startup.
+    metrics: crate::metrics::Metrics,
 }
 
 impl MergeWardenWebhookHandler {
@@ -136,7 +169,18 @@ impl MergeWardenWebhookHandler {
         MergeWardenWebhookHandler {
             github_client,
             policies,
+            metrics: crate::metrics::Metrics::default(),
         }
+    }
+
+    /// Attaches real metric-recording instruments to this handler (builder
+    /// pattern). Every [`MergeWarden`] instance subsequently constructed by
+    /// [`Self::handle_pull_request`] / [`Self::handle_status_event`] records
+    /// `pr.validation.duration_ms` and `pr.bypass.activations_total` through
+    /// `metrics`.
+    pub fn with_metrics(mut self, metrics: crate::metrics::Metrics) -> Self {
+        self.metrics = metrics;
+        self
     }
 
     /// Processes a `pull_request` webhook event.
@@ -270,7 +314,10 @@ impl MergeWardenWebhookHandler {
         };
 
         let warden = MergeWarden::with_config(provider, validation_config)
-            .with_issue_provider(Box::new(issue_provider));
+            .with_issue_provider(Box::new(issue_provider))
+            .with_metrics_recorder(Arc::new(crate::metrics::CoreMetricsRecorder::new(
+                self.metrics.clone(),
+            )));
 
         warden
             .process_pull_request(repo_owner, repo_name, pr_number.into())
@@ -423,7 +470,10 @@ impl MergeWardenWebhookHandler {
             let issue_provider = provider.clone();
 
             let warden = MergeWarden::with_config(provider.clone(), validation_config.clone())
-                .with_issue_provider(Box::new(issue_provider));
+                .with_issue_provider(Box::new(issue_provider))
+                .with_metrics_recorder(Arc::new(crate::metrics::CoreMetricsRecorder::new(
+                    self.metrics.clone(),
+                )));
 
             if let Err(e) = warden
                 .process_pull_request(repo_owner, repo_name, pr_number)
@@ -551,7 +601,10 @@ impl WebhookHandler for ChannelForwardingHandler {
 /// - `500 Internal Server Error` — unexpected processing error.
 ///
 /// See docs/spec/design/containerisation.md — HTTP routes
-#[instrument(skip(state, headers, body))]
+#[instrument(
+    skip(state, headers, body),
+    fields(event_type = tracing::field::Empty, delivery_id = tracing::field::Empty)
+)]
 pub async fn handle_webhook(
     State(state): State<Arc<AppState>>,
     headers: HeaderMap,
@@ -575,6 +628,23 @@ pub async fn handle_webhook(
         })
         .collect();
 
+    // Record the two fields declared on `#[instrument]` above now that the
+    // headers have been parsed, so this span carries the same event-type /
+    // delivery-id correlation identifiers already used in structured logs
+    // elsewhere (see docs/spec/operations/monitoring.md's "Structured Log
+    // Fields" table). Both are attacker-influenced but pre-signature-
+    // validation-adjacent header values, so they are recorded as-is (bounded
+    // by HTTP header size limits) rather than sanitised further — this
+    // matches the existing `event_type` label already used unsanitised on
+    // the `ingress.webhook.requests_total` metric.
+    let span = tracing::Span::current();
+    if let Some(event_type) = header_map.get("x-github-event") {
+        span.record("event_type", event_type.as_str());
+    }
+    if let Some(delivery_id) = header_map.get("x-github-delivery") {
+        span.record("delivery_id", delivery_id.as_str());
+    }
+
     let request = WebhookRequest::new(header_map, body);
     let response = receiver.receive_webhook(request).await;
 
@@ -589,15 +659,6 @@ pub async fn handle_webhook(
     }
 }
 
-/// `GET /health` — liveness probe for container orchestrators.
-///
-/// Returns `200 OK` without checking external dependencies (GitHub API, queue).
-///
-/// See docs/spec/design/containerisation.md — health check
-pub async fn health_check() -> impl IntoResponse {
-    StatusCode::OK
-}
-
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -605,30 +666,52 @@ pub async fn health_check() -> impl IntoResponse {
 /// Builds the Axum [`Router`] for **webhook mode**.
 ///
 /// Routes:
-/// - `GET  /health`               → [`health_check`]
+/// - `GET  /health`               → [`crate::health::health_check_handler`]
 /// - `POST /api/github/webhook`   → [`handle_webhook`]
+/// - `GET  /metrics`               → [`crate::metrics::metrics_handler`] — registered
+///   only when `state.metrics_config.prometheus_enabled` is `true`.
 ///
 /// See docs/spec/design/containerisation.md — HTTP routes
 pub fn build_router(state: Arc<AppState>) -> Router {
-    Router::new()
-        .route("/health", get(health_check))
-        .route("/api/github/webhook", post(handle_webhook))
-        .with_state(state)
+    let router = Router::new()
+        .route("/health", get(crate::health::health_check_handler))
+        .route("/api/github/webhook", post(handle_webhook));
+    let router = with_metrics_route(router, &state);
+
+    router.with_state(state)
 }
 
 /// Builds the Axum [`Router`] for **queue mode**.
 ///
-/// Only the health-check route is registered — merge-warden in queue mode is
-/// a pure queue consumer and does not receive GitHub webhook POSTs.
+/// Only the health-check route (and, when enabled, the metrics route) is
+/// registered — merge-warden in queue mode is a pure queue consumer and does
+/// not receive GitHub webhook POSTs.
 ///
 /// Routes:
-/// - `GET /health` → [`health_check`]
+/// - `GET /health` → [`crate::health::health_check_handler`]
+/// - `GET /metrics` → [`crate::metrics::metrics_handler`] — registered only
+///   when `state.metrics_config.prometheus_enabled` is `true`.
 ///
 /// See docs/spec/design/containerisation.md — HTTP routes
 pub fn build_queue_router(state: Arc<AppState>) -> Router {
-    Router::new()
-        .route("/health", get(health_check))
-        .with_state(state)
+    let router = Router::new().route("/health", get(crate::health::health_check_handler));
+    let router = with_metrics_route(router, &state);
+
+    router.with_state(state)
+}
+
+/// Registers `GET /metrics` on `router` when `state.metrics_config.prometheus_enabled`
+/// is `true`; returns `router` unchanged otherwise.
+///
+/// Shared by [`build_router`] and [`build_queue_router`] — both modes expose
+/// the same conditional Prometheus scrape endpoint on top of otherwise
+/// different route sets.
+fn with_metrics_route(router: Router<Arc<AppState>>, state: &AppState) -> Router<Arc<AppState>> {
+    if state.metrics_config.prometheus_enabled {
+        router.route("/metrics", get(crate::metrics::metrics_handler))
+    } else {
+        router
+    }
 }
 
 // ---------------------------------------------------------------------------

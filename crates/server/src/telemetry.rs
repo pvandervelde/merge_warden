@@ -29,14 +29,46 @@ impl TelemetryConfig {
     ///
     /// See docs/spec/interfaces/server-config.md — `TelemetryConfig::from_env()`
     pub fn from_env() -> Self {
+        let (otlp_endpoint, service_name, service_version) = otel_service_metadata_from_env();
         TelemetryConfig {
-            otlp_endpoint: std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok(),
-            service_name: std::env::var("OTEL_SERVICE_NAME")
-                .unwrap_or_else(|_| "merge-warden".to_string()),
-            service_version: std::env::var("OTEL_SERVICE_VERSION")
-                .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string()),
+            otlp_endpoint,
+            service_name,
+            service_version,
         }
     }
+}
+
+/// Reads the three environment variables shared by every OTel exporter
+/// config in this crate — traces (this module's [`TelemetryConfig`]) and
+/// metrics ([`crate::metrics::MetricsConfig`]): `OTEL_EXPORTER_OTLP_ENDPOINT`,
+/// `OTEL_SERVICE_NAME` (default `"merge-warden"`), and `OTEL_SERVICE_VERSION`
+/// (default: this crate's `CARGO_PKG_VERSION`).
+///
+/// Never fails — absent variables produce default values.
+pub(crate) fn otel_service_metadata_from_env() -> (Option<String>, String, String) {
+    (
+        std::env::var("OTEL_EXPORTER_OTLP_ENDPOINT").ok(),
+        std::env::var("OTEL_SERVICE_NAME").unwrap_or_else(|_| "merge-warden".to_string()),
+        std::env::var("OTEL_SERVICE_VERSION")
+            .unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_string()),
+    )
+}
+
+/// Builds the OTel [`opentelemetry_sdk::Resource`] shared by both the trace
+/// pipeline ([`init_telemetry`]) and the metrics pipeline
+/// ([`crate::metrics::init_metrics`]): a `service.name` plus a
+/// `service.version` attribute.
+pub(crate) fn build_otel_resource(
+    service_name: &str,
+    service_version: &str,
+) -> opentelemetry_sdk::Resource {
+    opentelemetry_sdk::Resource::builder()
+        .with_service_name(service_name.to_string())
+        .with_attributes(vec![opentelemetry::KeyValue::new(
+            "service.version",
+            service_version.to_string(),
+        )])
+        .build()
 }
 
 /// Initialises the global `tracing` subscriber.
@@ -78,13 +110,7 @@ pub fn init_telemetry(config: &TelemetryConfig) -> Result<(), ServerError> {
             .build()
             .map_err(|e| ServerError::TelemetryInitFailed(format!("OTLP exporter: {}", e)))?;
 
-        let resource = opentelemetry_sdk::Resource::builder()
-            .with_service_name(config.service_name.clone())
-            .with_attributes(vec![opentelemetry::KeyValue::new(
-                "service.version",
-                config.service_version.clone(),
-            )])
-            .build();
+        let resource = build_otel_resource(&config.service_name, &config.service_version);
 
         let provider = opentelemetry_sdk::trace::SdkTracerProvider::builder()
             .with_resource(resource)

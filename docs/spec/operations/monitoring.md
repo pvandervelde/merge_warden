@@ -10,32 +10,44 @@ This document defines the monitoring architecture, metrics collection, alerting 
 
 ### Core Components
 
-**Azure Monitor (Primary Platform)**
+**OpenTelemetry (Primary Platform — implemented)**
 
-- Application Insights for application telemetry
-- Log Analytics workspace for centralized logging
-- Azure Monitor metrics for infrastructure monitoring
-- Action Groups for alert notification
+Merge Warden's actual, implemented observability stack is cloud-agnostic OpenTelemetry, not a
+platform-specific one:
+
+- `tracing` + `tracing-opentelemetry` for structured logs and spans, exported over OTLP/HTTP
+  when `OTEL_EXPORTER_OTLP_ENDPOINT` is set (see `crates/server/src/telemetry.rs`).
+- An OTLP metrics pipeline (`crates/server/src/metrics.rs`) exporting the eleven metrics below,
+  over the same `OTEL_EXPORTER_OTLP_ENDPOINT`.
+- An optional pull-based Prometheus scrape endpoint (`GET /metrics`, opt-in via
+  `MERGE_WARDEN_METRICS_ENDPOINT=prometheus`) for operators without an OTLP collector.
+- A dependency-aware `GET /health` endpoint (`crates/server/src/health.rs`).
+
+Any OTLP-compatible backend can consume this — an OTel Collector fronting Prometheus/Grafana,
+Azure Monitor (via Application Insights' OTLP ingestion or the OTel Collector's Azure Monitor
+exporter), AWS (via the ADOT collector), or any other vendor. **Azure Monitor is one supported
+backend among several, not a hard dependency** — the KQL query examples elsewhere in this
+document assume you have chosen Azure Monitor/Application Insights as your OTLP backend; if you
+have chosen a different backend, translate them to that backend's query language instead.
 
 **Observability Stack**
 
 ```mermaid
 graph TD
-    A[Merge Warden Application] --> B[Application Insights]
-    A --> C[Log Analytics]
-    A --> D[Custom Metrics]
+    A[Merge Warden Application] --> B[tracing / tracing-opentelemetry]
+    A --> C[OTLP metrics pipeline]
+    A --> D[GET /health]
 
-    B --> E[Performance Monitoring]
-    C --> F[Log Analysis]
-    D --> G[Business Metrics]
+    B --> E[OTLP Collector or direct OTLP backend]
+    C --> E
+    C --> F["GET /metrics (optional, Prometheus format)"]
 
-    E --> H[Dashboards]
-    F --> H
-    G --> H
+    E --> G["Chosen backend: Azure Monitor, Prometheus/Grafana, etc."]
+    F --> G
 
-    E --> I[Alerting]
-    F --> I
-    G --> I
+    G --> H[Dashboards]
+    G --> I[Alerting]
+    D --> I
 
     I --> J[Incident Response]
 ```
@@ -94,8 +106,8 @@ When `MERGE_WARDEN_RECEIVER_MODE=queue`, the following additional signals are cr
 | `ingress.queue.depth` | Approximate number of messages waiting in the queue | > 100 |
 | `ingress.queue.age_oldest_message_secs` | Age of the oldest unprocessed message | > 300 s (5 min) |
 | `ingress.queue.dlq_count` | Messages moved to the dead-letter queue | > 0 |
-| `processing.success_rate` | Fraction of events processed without rejection | < 99.9% |
-| `ingress.queue.worker_errors` | Worker task terminations due to unrecoverable errors | > 0 |
+| `processing.success_rate` | Fraction of the most recent 100 processed events (per worker) completed without rejection — a rolling window, not a lifetime cumulative ratio | < 99.9% |
+| `ingress.queue.worker_errors_total` | Worker task terminations due to unrecoverable errors | > 0 |
 
 ### Dead-Letter Queue Monitoring
 

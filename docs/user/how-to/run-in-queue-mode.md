@@ -6,9 +6,10 @@ description: "Set up the separate receiver service and queue infrastructure that
 # How to run Merge Warden in queue mode
 
 `MERGE_WARDEN_RECEIVER_MODE=queue` turns the Merge Warden container into a **pure queue
-consumer**. It does not expose a webhook POST endpoint — only `GET /health` is registered.
-You must provide a **separate service** that receives the GitHub webhook, verifies its
-HMAC signature, and enqueues the payload for Merge Warden to consume.
+consumer**. It does not expose a webhook POST endpoint — only `GET /health` (and, optionally,
+`GET /metrics` — see below) is registered. You must provide a **separate service** that
+receives the GitHub webhook, verifies its HMAC signature, and enqueues the payload for Merge
+Warden to consume.
 
 If you have not already read
 [Webhook vs queue receiver modes](../explanation/receiver-modes.md), start there — this
@@ -135,12 +136,22 @@ two-service flow end-to-end.
 
 ## Verifying the deployment
 
-`GET /health` is the only route available in queue mode:
+`GET /health` is the only route always available in queue mode (`GET /metrics` is also
+available if you set `MERGE_WARDEN_METRICS_ENDPOINT=prometheus`):
 
 ```bash
 curl -i http://localhost:3000/health
 # HTTP/1.1 200 OK
+# {"status":"healthy","checks":{"config":{"status":"healthy"},"github_api":{"status":"healthy"},"queue":{"status":"healthy"}}}
 ```
+
+By default (`MERGE_WARDEN_HEALTH_CHECKS=basic`), this response does not actually contact
+GitHub or the queue broker — it is a fast liveness check that always reports `healthy` once
+the process is up. Set `MERGE_WARDEN_HEALTH_CHECKS=full` to make `/health` verify GitHub API
+reachability and confirm the queue client is still constructed; note that the `queue` check in
+`full` mode reports connectivity only, not a live message count (see
+[Queue Health Check Limitations](../reference/environment-variables.md#queue-health-check-limitations)).
+See [HTTP endpoints reference](../reference/http-endpoints.md) for the full response shape.
 
 To confirm events are flowing, open or update a pull request in a repository the GitHub
 App is installed on, and check:

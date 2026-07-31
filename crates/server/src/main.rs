@@ -7,8 +7,12 @@
 
 mod config;
 mod errors;
+mod health;
 mod ingress;
+mod metrics;
 mod telemetry;
+#[cfg(test)]
+mod test_support;
 mod webhook;
 
 use std::sync::Arc;
@@ -17,6 +21,7 @@ use config::ReceiverMode;
 use errors::ServerError;
 use github_bot_sdk::client::{ClientConfig, GitHubClient};
 use merge_warden_developer_platforms::app_auth::AppAuthProvider;
+use opentelemetry::metrics::MeterProvider as _;
 use queue_runtime::{QueueClientFactory, QueueName};
 use tracing::{debug, error, info};
 
@@ -25,6 +30,15 @@ async fn main() -> Result<(), ServerError> {
     // 1. Initialise telemetry first so all subsequent log messages are captured.
     let telemetry_config = telemetry::TelemetryConfig::from_env();
     telemetry::init_telemetry(&telemetry_config)?;
+
+    // 1b. Initialise the OTel metrics pipeline (OTLP and/or Prometheus reader).
+    let metrics_config = metrics::MetricsConfig::from_env();
+    let meter_provider = metrics::init_metrics(&metrics_config)?;
+    let meter = meter_provider.meter(env!("CARGO_PKG_NAME"));
+    let metrics = metrics::Metrics::new(&meter);
+
+    // 1c. Load health-check configuration (basic vs. full dependency probing).
+    let health_check_config = health::HealthCheckConfig::from_env();
 
     info!("Starting merge-warden-server");
 
@@ -129,6 +143,11 @@ async fn main() -> Result<(), ServerError> {
         receiver: receiver_opt,
         github_client: github_client.clone(),
         policies: server_config.application_defaults.clone(),
+        metrics,
+        metrics_config,
+        health_check_config,
+        queue_client: queue_client_opt.clone(),
+        queue_name: queue_name_opt.clone(),
     });
 
     // 9. Spawn processor tasks.
@@ -167,8 +186,9 @@ async fn main() -> Result<(), ServerError> {
                         let ingress =
                             Box::new(ingress::QueueIngress::new(worker_client, worker_name));
                         if let Err(e) =
-                            ingress::run_event_processor(ingress, processor_state).await
+                            ingress::run_event_processor(ingress, Arc::clone(&processor_state)).await
                         {
+                            processor_state.metrics.record_worker_error();
                             error!(worker = worker_id, error = %e, "Queue processor task terminated with error");
                         }
                     })
@@ -224,6 +244,15 @@ async fn main() -> Result<(), ServerError> {
     info!("HTTP server shutdown complete; aborting processor tasks");
     for handle in processor_handles {
         handle.abort();
+    }
+
+    // Explicitly flush and shut down the meter provider so any metrics
+    // buffered in the OTLP PeriodicReader's current export interval are sent
+    // before the process exits, rather than relying solely on `Drop` (which
+    // the OTel SDK documents as a best-effort fallback, not a substitute for
+    // an explicit `shutdown()` call on a push exporter).
+    if let Err(e) = meter_provider.shutdown() {
+        error!(error = %e, "Failed to cleanly shut down the OTel meter provider; the last export interval's metrics may not have been flushed");
     }
 
     Ok(())

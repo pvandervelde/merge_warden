@@ -27,6 +27,20 @@ tracing-opentelemetry = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry-otlp = { workspace = true }
 opentelemetry_sdk = { workspace = true }
+opentelemetry-prometheus = "0.32.0"
+prometheus = "0.14.0"
+
+[dev-dependencies]
+# Test-only: used to drive `axum::Router` as a `tower::Service` in
+# route-registration tests (e.g. asserting `/metrics` 404s unless enabled).
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+# Test-only: enables `opentelemetry_sdk::metrics::ManualReader` /
+# `MetricReader` / `Pipeline`, which are gated behind
+# `experimental_metrics_custom_reader` upstream. Declared as a dev-dependency
+# feature overlay (not on the main `opentelemetry_sdk` dependency above) so it
+# is only active for `cargo test`, never for the production binary.
+opentelemetry_sdk = { workspace = true, features = ["experimental_metrics_custom_reader"] }
 
 # See https://github.com/sfackler/rust-openssl/issues/1627
 [target.x86_64-unknown-linux-musl.dependencies]

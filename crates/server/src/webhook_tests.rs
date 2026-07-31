@@ -1,33 +1,26 @@
-use axum::{http::StatusCode, response::IntoResponse};
+use axum::{
+    body::Body,
+    http::{Request, StatusCode},
+};
 use chrono::Utc;
 use github_bot_sdk::{
-    client::{ClientConfig, GitHubClient, OwnerType, Repository, RepositoryOwner},
+    client::{OwnerType, Repository, RepositoryOwner},
     events::{EventEnvelope, EventPayload},
     webhook::WebhookHandler,
 };
 use merge_warden_core::config::{ApplicationDefaults, RepositoryScope};
-use merge_warden_developer_platforms::app_auth::AppAuthProvider;
 use serde_json::json;
+use tower::ServiceExt as _;
 
-use super::health_check;
-use super::MergeWardenWebhookHandler;
+use super::{AppState, MergeWardenWebhookHandler};
+use crate::test_support::{github_client_for, test_app_state, TestAppStateOptions};
 
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
 
-/// RSA private key used only in tests.  Generated offline; never used in
-/// production.  Must be a valid PEM-encoded PKCS#8 or traditional RSA key so
-/// `AppAuthProvider` can parse it.
-const TEST_PEM: &str = include_str!("../../developer_platforms/testdata/test-rsa-key.pem");
-
 fn make_test_handler() -> MergeWardenWebhookHandler {
-    let auth = AppAuthProvider::new(12345, TEST_PEM, "https://api.github.com")
-        .expect("test RSA key must be valid");
-    let github_client = GitHubClient::builder(auth)
-        .config(ClientConfig::default())
-        .build()
-        .expect("GitHub client must build");
+    let github_client = github_client_for("https://api.github.com");
     MergeWardenWebhookHandler::new(github_client, ApplicationDefaults::default())
 }
 
@@ -72,12 +65,7 @@ fn make_status_envelope(context: &str) -> EventEnvelope {
 /// Builds a handler whose `ApplicationDefaults.repository_scope` is set to
 /// `scope`. All other policy defaults are left at their compiled-in values.
 fn make_test_handler_with_scope(scope: Option<RepositoryScope>) -> MergeWardenWebhookHandler {
-    let auth = AppAuthProvider::new(12345, TEST_PEM, "https://api.github.com")
-        .expect("test RSA key must be valid");
-    let github_client = GitHubClient::builder(auth)
-        .config(ClientConfig::default())
-        .build()
-        .expect("GitHub client must build");
+    let github_client = github_client_for("https://api.github.com");
     let policies = ApplicationDefaults {
         repository_scope: scope,
         ..ApplicationDefaults::default()
@@ -211,13 +199,117 @@ fn assert_err_contains(
 }
 
 // ---------------------------------------------------------------------------
-// health_check
+// Router wiring: /health and /metrics route registration
+//
+// See metrics.rs / health.rs for the handler-level behavioural contracts —
+// these tests only assert what routes exist on the router, independent of
+// what the handlers themselves return.
 // ---------------------------------------------------------------------------
 
+fn make_test_app_state(prometheus_enabled: bool) -> std::sync::Arc<AppState> {
+    test_app_state(TestAppStateOptions {
+        prometheus_enabled,
+        ..Default::default()
+    })
+}
+
+async fn get(router: axum::Router, path: &str) -> StatusCode {
+    let request = Request::builder().uri(path).body(Body::empty()).unwrap();
+    let response = router.oneshot(request).await.unwrap();
+    response.status()
+}
+
 #[tokio::test]
-async fn health_check_returns_200_ok() {
-    let response = health_check().await.into_response();
-    assert_eq!(response.status(), StatusCode::OK);
+async fn build_router_registers_health_route() {
+    let state = make_test_app_state(false);
+    let router = super::build_router(state);
+
+    let status = get(router, "/health").await;
+
+    assert_ne!(
+        status,
+        StatusCode::NOT_FOUND,
+        "GET /health must be routed in webhook mode"
+    );
+}
+
+#[tokio::test]
+async fn build_queue_router_registers_health_route() {
+    let state = make_test_app_state(false);
+    let router = super::build_queue_router(state);
+
+    let status = get(router, "/health").await;
+
+    assert_ne!(
+        status,
+        StatusCode::NOT_FOUND,
+        "GET /health must be routed in queue mode"
+    );
+}
+
+#[tokio::test]
+async fn build_router_does_not_register_metrics_route_by_default() {
+    let state = make_test_app_state(false);
+    let router = super::build_router(state);
+
+    let status = get(router, "/metrics").await;
+
+    assert_eq!(
+        status,
+        StatusCode::NOT_FOUND,
+        "GET /metrics must 404 when MERGE_WARDEN_METRICS_ENDPOINT is unset/disabled"
+    );
+}
+
+#[tokio::test]
+async fn build_router_registers_metrics_route_when_prometheus_enabled() {
+    let state = make_test_app_state(true);
+    let router = super::build_router(state);
+
+    let status = get(router, "/metrics").await;
+
+    assert_ne!(
+        status,
+        StatusCode::NOT_FOUND,
+        "GET /metrics must be routed when metrics_config.prometheus_enabled is true"
+    );
+}
+
+#[tokio::test]
+async fn build_queue_router_does_not_register_metrics_route_by_default() {
+    let state = make_test_app_state(false);
+    let router = super::build_queue_router(state);
+
+    let status = get(router, "/metrics").await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn build_queue_router_registers_metrics_route_when_prometheus_enabled() {
+    let state = make_test_app_state(true);
+    let router = super::build_queue_router(state);
+
+    let status = get(router, "/metrics").await;
+
+    assert_ne!(
+        status,
+        StatusCode::NOT_FOUND,
+        "GET /metrics must be routed in queue mode when prometheus_enabled is true"
+    );
+}
+
+#[tokio::test]
+async fn build_router_never_registers_metrics_route_at_root_path_probe() {
+    // Adversarial: proves the 404 in the "disabled" test above is really
+    // about /metrics specifically, not a router-wide misconfiguration that
+    // 404s everything (which would make the disabled-case test vacuous).
+    let state = make_test_app_state(false);
+    let router = super::build_router(state);
+
+    let status = get(router, "/health").await;
+
+    assert_ne!(status, StatusCode::NOT_FOUND);
 }
 
 // ---------------------------------------------------------------------------
