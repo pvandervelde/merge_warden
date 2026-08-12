@@ -12,7 +12,11 @@ pub enum ConfigLoadError {
     ParseError(String),
 
     /// The configuration file uses an unsupported schema version
-    #[error("Unsupported schema version: {0}")]
+    #[error(
+        ".github/merge-warden.toml specifies schemaVersion = {0}, which is not supported. \
+         The only supported version is 1. Application defaults are being used to evaluate \
+         this PR. Update schemaVersion to 1 to apply your intended policy."
+    )]
     UnsupportedSchemaVersion(u32),
 
     /// File system I/O error occurred while reading the configuration
