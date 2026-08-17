@@ -21,7 +21,7 @@ tokio-test = "0.4"
 # GitHub API and HTTP client
 # Used only by the integration-test infrastructure (src/github/).
 # This is a testing-only dependency; no production crate uses octocrab.
-octocrab = "0.53"
+octocrab = "0.54"
 reqwest = { workspace = true, features = ["json"] }
 axum = { workspace = true }
 
