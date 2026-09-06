@@ -2537,7 +2537,9 @@ pub fn validate_repository_scope_patterns(
 ///
 /// # Returns
 /// * `Ok(())` if `schema_version == 1`
-/// * `Err(ConfigLoadError::UnsupportedSchemaVersion(schema_version))` otherwise
+/// * `Err(ConfigLoadError::UnsupportedSchemaVersion(path, schema_version))` otherwise,
+///   carrying the actual `path` this function was called with so the error message
+///   always names the file that was really loaded.
 fn validate_schema_version(
     repo_owner: &str,
     repo_name: &str,
@@ -2553,13 +2555,16 @@ fn validate_schema_version(
             "Configuration in repository has an unexpected version. Will not be able to load configuration."
         );
 
-        return Err(ConfigLoadError::UnsupportedSchemaVersion(schema_version));
+        return Err(ConfigLoadError::UnsupportedSchemaVersion(
+            path.to_string(),
+            schema_version,
+        ));
     }
     Ok(())
 }
 
 /// Loads the merge-warden configuration from the given path.
-//
+///
 /// If the file is missing, this function returns a default configuration and
 /// logs a warning. If the file has an unsupported schema version, this
 /// function returns an error rather than silently falling back to defaults.

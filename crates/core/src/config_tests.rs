@@ -246,7 +246,7 @@ async fn test_load_merge_warden_config_empty_file() {
 }
 
 /// An unsupported `schemaVersion` must cause `load_merge_warden_config` to
-/// return `Err(ConfigLoadError::UnsupportedSchemaVersion(2))` rather than
+/// return `Err(ConfigLoadError::UnsupportedSchemaVersion(path, 2))` rather than
 /// silently falling back to `Ok(RepositoryProvidedConfig::default())`.
 #[tokio::test]
 async fn test_load_merge_warden_config_invalid_schema() {
@@ -265,19 +265,23 @@ pattern = "bar"
     let result = load_merge_warden_config("a", "b", file_path, &fetcher, &app_defaults).await;
 
     match result {
-        Err(ConfigLoadError::UnsupportedSchemaVersion(version)) => {
+        Err(ConfigLoadError::UnsupportedSchemaVersion(path, version)) => {
             assert_eq!(
                 version, 2,
                 "Error must carry the actual offending schema version"
             );
+            assert_eq!(
+                path, file_path,
+                "Error must carry the actual path that was loaded, not a hardcoded constant"
+            );
         }
         Err(other) => panic!(
-            "Expected Err(ConfigLoadError::UnsupportedSchemaVersion(2)), got Err({:?})",
+            "Expected Err(ConfigLoadError::UnsupportedSchemaVersion(_, 2)), got Err({:?})",
             other
         ),
-        Ok(_) => panic!(
-            "Unsupported schemaVersion must be an error, not a silent fallback to defaults"
-        ),
+        Ok(_) => {
+            panic!("Unsupported schemaVersion must be an error, not a silent fallback to defaults")
+        }
     }
 }
 
@@ -295,6 +299,11 @@ async fn test_load_merge_warden_config_invalid_schema_error_message_is_actionabl
 
     let err = result.expect_err("Unsupported schemaVersion must return an error");
     let message = err.to_string();
+    assert!(
+        message.contains(file_path),
+        "Error message must name the actual file that was loaded, got: {}",
+        message
+    );
     assert!(
         message.contains("schemaVersion = 2"),
         "Error message must contain the offending version number, got: {}",
@@ -4817,7 +4826,7 @@ fn test_from_app_enforcement_flags_size_enabled() {
 
 /// An unsupported `schemaVersion` in a repo config must cause the private
 /// `parse_repo_config` helper to return
-/// `Err(ConfigLoadError::UnsupportedSchemaVersion(3))` rather than silently
+/// `Err(ConfigLoadError::UnsupportedSchemaVersion(path, 3))` rather than silently
 /// falling back to `Ok(RepositoryProvidedConfig::default())`.
 #[tokio::test]
 async fn test_parse_repo_config_unsupported_schema_version_returns_error() {
@@ -4832,19 +4841,23 @@ pattern = "^SHOULD-NOT-APPLY:"
     let result = parse_repo_config("owner", "repo", "path", &fetcher).await;
 
     match result {
-        Err(ConfigLoadError::UnsupportedSchemaVersion(version)) => {
+        Err(ConfigLoadError::UnsupportedSchemaVersion(path, version)) => {
             assert_eq!(
                 version, 3,
                 "Error must carry the actual offending schema version"
             );
+            assert_eq!(
+                path, "path",
+                "Error must carry the actual path that was loaded, not a hardcoded constant"
+            );
         }
         Err(other) => panic!(
-            "Expected Err(ConfigLoadError::UnsupportedSchemaVersion(3)), got Err({:?})",
+            "Expected Err(ConfigLoadError::UnsupportedSchemaVersion(_, 3)), got Err({:?})",
             other
         ),
-        Ok(_) => panic!(
-            "Unsupported schemaVersion must be an error, not a silent fallback to defaults"
-        ),
+        Ok(_) => {
+            panic!("Unsupported schemaVersion must be an error, not a silent fallback to defaults")
+        }
     }
 }
 
