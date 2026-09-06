@@ -2521,10 +2521,53 @@ pub fn validate_repository_scope_patterns(
     Ok(())
 }
 
+/// Validates that a repository-provided configuration declares the supported
+/// schema version.
+///
+/// Logs an `error!` with the repository context and returns
+/// [`ConfigLoadError::UnsupportedSchemaVersion`] when `schema_version != 1`.
+/// Used by both [`load_merge_warden_config`] and [`parse_repo_config`], which
+/// share identical logging/error behaviour for this check.
+///
+/// # Arguments
+/// * `repo_owner` - The name of the user or organisation that owns the repository
+/// * `repo_name` - The name of the repository
+/// * `path` - The path to the configuration file relative to the repository root
+/// * `schema_version` - The `schemaVersion` declared by the parsed configuration
+///
+/// # Returns
+/// * `Ok(())` if `schema_version == 1`
+/// * `Err(ConfigLoadError::UnsupportedSchemaVersion(path, schema_version))` otherwise,
+///   carrying the actual `path` this function was called with so the error message
+///   always names the file that was really loaded.
+fn validate_schema_version(
+    repo_owner: &str,
+    repo_name: &str,
+    path: &str,
+    schema_version: u32,
+) -> Result<(), ConfigLoadError> {
+    if schema_version != 1 {
+        error!(
+            repository_owner = repo_owner,
+            repository = repo_name,
+            path = path,
+            config_version = schema_version,
+            "Configuration in repository has an unexpected version. Will not be able to load configuration."
+        );
+
+        return Err(ConfigLoadError::UnsupportedSchemaVersion(
+            path.to_string(),
+            schema_version,
+        ));
+    }
+    Ok(())
+}
+
 /// Loads the merge-warden configuration from the given path.
-//
-/// If the file is missing, malformed, or has an unsupported schema version,
-/// this function returns a default configuration and logs a warning.
+///
+/// If the file is missing, this function returns a default configuration and
+/// logs a warning. If the file has an unsupported schema version, this
+/// function returns an error rather than silently falling back to defaults.
 ///
 /// # Arguments
 /// * `repo_owner` - The name of the user or organisation that owns the repository in which the configuration is stored
@@ -2535,7 +2578,9 @@ pub fn validate_repository_scope_patterns(
 ///
 /// # Returns
 /// * `Ok(RepositoryConfig)` if loaded and valid
-/// * `Err(ConfigLoadError)` if there is a problem
+/// * `Err(ConfigLoadError::UnsupportedSchemaVersion)` if the repository configuration
+///   file specifies a `schemaVersion` other than `1`
+/// * `Err(ConfigLoadError)` if there is any other problem (e.g. malformed TOML)
 pub async fn load_merge_warden_config(
     repo_owner: &str,
     repo_name: &str,
@@ -2560,46 +2605,32 @@ pub async fn load_merge_warden_config(
     };
 
     let mut config: RepositoryProvidedConfig = RepositoryProvidedConfig::default();
-    let mut is_valid_config = true;
     if let Some(content) = potential_content {
         config = toml::from_str(&content)?;
-        if config.schema_version != 1 {
-            error!(
-                repository_owner = repo_owner,
-                repository = repo_name,
-                path = path_relative_to_repository_root,
-                config_version = config.schema_version,
-                "Configuration in repository has an unexpected version. Will not be able to load configuration."
-            );
-
-            // If we can't load the configuration we just pretend it's not there
-            config = RepositoryProvidedConfig::default();
-            is_valid_config = false;
-        }
+        validate_schema_version(
+            repo_owner,
+            repo_name,
+            path_relative_to_repository_root,
+            config.schema_version,
+        )?;
     }
 
-    // Only apply application defaults if we have a valid configuration
-    if is_valid_config {
-        // Build merged policy set: application defaults → repository overrides
-        let app_ps = PolicySet::from_application_defaults(app_defaults);
-        let repo_ps = PolicySet::from_repository_config(&config);
-        let merged_ps = app_ps.merge(&repo_ps);
+    // Build merged policy set: application defaults → repository overrides
+    let app_ps = PolicySet::from_application_defaults(app_defaults);
+    let repo_ps = PolicySet::from_repository_config(&config);
+    let merged_ps = app_ps.merge(&repo_ps);
 
-        // Write merged policies back into config for conversion to CPVRC
-        config.policies.pull_requests.title_policies = merged_ps.title;
-        config.policies.pull_requests.work_item_policies = merged_ps.work_item;
-        config.policies.pull_requests.size_policies = merged_ps.size;
-        config.policies.pull_requests.wip_policies = merged_ps.wip;
-        config.policies.pull_requests.pr_state_policies = merged_ps.pr_state;
-        config.policies.pull_requests.issue_propagation = merged_ps.issue_propagation;
-        config.change_type_labels = Some(merged_ps.change_type_labels);
-        // Write bypass_rules back so to_validation_config uses the merged result
-        // rather than re-merging from the raw BypassRulesConfig sub-rules.
-        config.policies.bypass_rules =
-            Some(BypassRulesConfig::from_merged(&merged_ps.bypass_rules));
-
-        // End of valid config processing
-    }
+    // Write merged policies back into config for conversion to CPVRC
+    config.policies.pull_requests.title_policies = merged_ps.title;
+    config.policies.pull_requests.work_item_policies = merged_ps.work_item;
+    config.policies.pull_requests.size_policies = merged_ps.size;
+    config.policies.pull_requests.wip_policies = merged_ps.wip;
+    config.policies.pull_requests.pr_state_policies = merged_ps.pr_state;
+    config.policies.pull_requests.issue_propagation = merged_ps.issue_propagation;
+    config.change_type_labels = Some(merged_ps.change_type_labels);
+    // Write bypass_rules back so to_validation_config uses the merged result
+    // rather than re-merging from the raw BypassRulesConfig sub-rules.
+    config.policies.bypass_rules = Some(BypassRulesConfig::from_merged(&merged_ps.bypass_rules));
 
     info!(
         enable_title_validation = config.policies.pull_requests.title_policies.required,
@@ -2777,9 +2808,10 @@ pub(crate) async fn load_org_policy(
 /// # Returns
 ///
 /// - `Ok(RepositoryProvidedConfig)` — raw parsed config, or
-///   [`RepositoryProvidedConfig::default`] if the file is absent or has an
-///   unsupported schema version.
+///   [`RepositoryProvidedConfig::default`] if the file is absent.
 /// - `Err(ConfigLoadError::NotFound)` — the config fetcher returned an error.
+/// - `Err(ConfigLoadError::UnsupportedSchemaVersion)` — the repository
+///   configuration file specifies a `schemaVersion` other than `1`.
 /// - `Err(ConfigLoadError::...)` — TOML parse error.
 async fn parse_repo_config(
     repo_owner: &str,
@@ -2810,16 +2842,7 @@ async fn parse_repo_config(
     };
 
     let config: RepositoryProvidedConfig = toml::from_str(&content)?;
-    if config.schema_version != 1 {
-        error!(
-            repository_owner = repo_owner,
-            repository = repo_name,
-            path = path,
-            config_version = config.schema_version,
-            "Configuration in repository has an unexpected version. Will not be able to load configuration."
-        );
-        return Ok(RepositoryProvidedConfig::default());
-    }
+    validate_schema_version(repo_owner, repo_name, path, config.schema_version)?;
 
     Ok(config)
 }
@@ -2862,9 +2885,10 @@ async fn parse_repo_config(
 ///
 /// # Errors
 ///
-/// Repo config load failures (file missing, parse error) are handled internally
-/// by falling back to `PolicySet::default()` for the repo tier, matching the
-/// behaviour previously found in platform handler fallback paths.
+/// Repo config load failures (file missing, parse error, unsupported
+/// `schemaVersion`) are handled internally by falling back to
+/// `PolicySet::default()` for the repo tier, matching the behaviour previously
+/// found in platform handler fallback paths.
 pub async fn resolve_pull_request_config(
     repo_owner: &str,
     repo_name: &str,
