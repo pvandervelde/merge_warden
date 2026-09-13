@@ -19,9 +19,13 @@ ignore = [
     # The unsoundness only triggers when a custom logger calls rand::rng() during reseeding,
     # which does not apply to this application's logging configuration.
     "RUSTSEC-2026-0097",
-    # hickory-proto CPU exhaustion O(n²) name compression — transitive via queue-runtime -> async-rs -> hickory-resolver 0.26.0.
-    # Fix exists in hickory >= 0.26.1 but async-rs 0.8.4 pins hickory-resolver 0.26.0.
-    "RUSTSEC-2026-0119",
-    # hickory-net unbounded NSEC3 loop on cross-zone responses — same transitive chain as RUSTSEC-2026-0119.
-    "RUSTSEC-2026-0120",
+    # Legacy azure_core writes the authorization header value to logs — transitive via
+    # queue-runtime -> azure_messaging_servicebus 0.21.0 -> azure_core 0.21.0.
+    # azure_messaging_servicebus has no release depending on azure_core >=0.22.
+    "RUSTSEC-2026-0275",
+    # http-types Authorization/WwwAuthenticate value ASCII invariant notice — same legacy
+    # azure_core chain as RUSTSEC-2026-0275.
+    "RUSTSEC-2026-0174",
+    # event-listener !Send StackSlot unsoundness — transitive via queue-runtime's azure_core 1.1.0/lapin.
+    "RUSTSEC-2026-0221",
 ]
