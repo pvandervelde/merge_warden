@@ -1,0 +1,9 @@
+# osv-scanner configuration
+# https://google.github.io/osv-scanner/configuration/
+#
+# Ignored advisories mirror the same no-upstream-fix rationale documented in
+# deny.toml and .cargo/audit.toml.
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0275"
+reason = "Legacy azure_core writes the authorization header value to logs; transitive via queue-runtime -> azure_messaging_servicebus 0.21.0 -> azure_core 0.21.0. azure_messaging_servicebus has no release depending on azure_core >=0.22, so there is no upgrade path available in this workspace."
