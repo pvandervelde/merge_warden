@@ -11,9 +11,18 @@ pub enum ConfigLoadError {
     #[error("Failed to parse configuration file: {0}")]
     ParseError(String),
 
-    /// The configuration file uses an unsupported schema version
-    #[error("Unsupported schema version: {0}")]
-    UnsupportedSchemaVersion(u32),
+    /// The configuration file uses an unsupported schema version.
+    ///
+    /// The first field is the path of the offending configuration file (as
+    /// passed by the caller); the second is the unsupported `schemaVersion`
+    /// value found in it.
+    #[error(
+        "{0} specifies schemaVersion = {1}, which is not supported. The only \
+         supported version is 1. If application defaults are used instead, all \
+         validation checks may be disabled. Update schemaVersion to 1 to apply \
+         your intended policy."
+    )]
+    UnsupportedSchemaVersion(String, u32),
 
     /// File system I/O error occurred while reading the configuration
     #[error("IO error: {0}")]

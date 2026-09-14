@@ -245,6 +245,9 @@ async fn test_load_merge_warden_config_empty_file() {
     );
 }
 
+/// An unsupported `schemaVersion` must cause `load_merge_warden_config` to
+/// return `Err(ConfigLoadError::UnsupportedSchemaVersion(path, 2))` rather than
+/// silently falling back to `Ok(RepositoryProvidedConfig::default())`.
 #[tokio::test]
 async fn test_load_merge_warden_config_invalid_schema() {
     let file_path = "merge-warden.toml";
@@ -260,13 +263,59 @@ pattern = "bar"
     let fetcher = MockFetcher::new(Some(toml.to_string()));
     let app_defaults = ApplicationDefaults::default();
     let result = load_merge_warden_config("a", "b", file_path, &fetcher, &app_defaults).await;
-    // The code returns Ok(default) for unsupported schema version, not an error
+
+    match result {
+        Err(ConfigLoadError::UnsupportedSchemaVersion(path, version)) => {
+            assert_eq!(
+                version, 2,
+                "Error must carry the actual offending schema version"
+            );
+            assert_eq!(
+                path, file_path,
+                "Error must carry the actual path that was loaded, not a hardcoded constant"
+            );
+        }
+        Err(other) => panic!(
+            "Expected Err(ConfigLoadError::UnsupportedSchemaVersion(_, 2)), got Err({:?})",
+            other
+        ),
+        Ok(_) => {
+            panic!("Unsupported schemaVersion must be an error, not a silent fallback to defaults")
+        }
+    }
+}
+
+/// The `UnsupportedSchemaVersion` error message must be self-contained: it
+/// must name the offending version and tell the operator how to fix it.
+#[tokio::test]
+async fn test_load_merge_warden_config_invalid_schema_error_message_is_actionable() {
+    let file_path = "merge-warden.toml";
+    let toml = r#"schemaVersion = 2
+"#;
+
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let app_defaults = ApplicationDefaults::default();
+    let result = load_merge_warden_config("a", "b", file_path, &fetcher, &app_defaults).await;
+
+    let err = result.expect_err("Unsupported schemaVersion must return an error");
+    let message = err.to_string();
     assert!(
-        result.is_ok(),
-        "Should return Ok(default) for unsupported schema version"
+        message.contains(file_path),
+        "Error message must name the actual file that was loaded, got: {}",
+        message
     );
-    let config = result.unwrap();
-    assert_eq!(config, RepositoryProvidedConfig::default());
+    assert!(
+        message.contains("schemaVersion = 2"),
+        "Error message must contain the offending version number, got: {}",
+        message
+    );
+    assert!(
+        message.to_lowercase().contains("update")
+            && message.to_lowercase().contains("schemaversion")
+            && message.contains('1'),
+        "Error message must contain actionable guidance to update schemaVersion to 1, got: {}",
+        message
+    );
 }
 
 #[tokio::test]
@@ -4772,8 +4821,85 @@ fn test_from_app_enforcement_flags_size_enabled() {
 }
 
 // ============================================================
+// parse_repo_config tests
+// ============================================================
+
+/// An unsupported `schemaVersion` in a repo config must cause the private
+/// `parse_repo_config` helper to return
+/// `Err(ConfigLoadError::UnsupportedSchemaVersion(path, 3))` rather than silently
+/// falling back to `Ok(RepositoryProvidedConfig::default())`.
+#[tokio::test]
+async fn test_parse_repo_config_unsupported_schema_version_returns_error() {
+    let toml = r#"schemaVersion = 3
+
+[policies.pullRequests.prTitle]
+required = true
+pattern = "^SHOULD-NOT-APPLY:"
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+
+    let result = parse_repo_config("owner", "repo", "path", &fetcher).await;
+
+    match result {
+        Err(ConfigLoadError::UnsupportedSchemaVersion(path, version)) => {
+            assert_eq!(
+                version, 3,
+                "Error must carry the actual offending schema version"
+            );
+            assert_eq!(
+                path, "path",
+                "Error must carry the actual path that was loaded, not a hardcoded constant"
+            );
+        }
+        Err(other) => panic!(
+            "Expected Err(ConfigLoadError::UnsupportedSchemaVersion(_, 3)), got Err({:?})",
+            other
+        ),
+        Ok(_) => {
+            panic!("Unsupported schemaVersion must be an error, not a silent fallback to defaults")
+        }
+    }
+}
+
+// ============================================================
 // resolve_pull_request_config tests
 // ============================================================
+
+/// When the repo config has an unsupported `schemaVersion`,
+/// `resolve_pull_request_config` must still degrade gracefully to `Ok(...)`
+/// (per its documented fallback-to-defaults behaviour for repo config load
+/// failures), and the bad-schema repo config's policies (e.g. a distinctive
+/// title pattern) must NOT be applied — proving the erroring config was
+/// discarded entirely rather than partially trusted.
+#[tokio::test]
+async fn test_resolve_pull_request_config_unsupported_schema_version_falls_back_to_defaults() {
+    let repo_toml = r#"schemaVersion = 3
+
+[policies.pullRequests.prTitle]
+required = true
+pattern = "^SHOULD-NOT-APPLY:"
+"#;
+    let fetcher = MockFetcher::new(Some(repo_toml.to_string()));
+    let app = ApplicationDefaults::default();
+
+    let result = resolve_pull_request_config("owner", "repo", "path", &fetcher, &app, None)
+        .await
+        .expect(
+            "resolve_pull_request_config must degrade gracefully (Ok) even when \
+             the repo config has an unsupported schema version",
+        );
+
+    assert!(
+        !result.enforce_title_convention,
+        "Policies from a bad-schema-version repo config must not be applied; \
+         title enforcement should remain at its (disabled) default"
+    );
+    assert_ne!(
+        result.title_pattern, "^SHOULD-NOT-APPLY:",
+        "The distinctive title pattern from the bad-schema-version repo config \
+         must not leak into the effective configuration"
+    );
+}
 
 #[tokio::test]
 async fn test_resolve_pull_request_config_no_org_source_no_repo_file() {

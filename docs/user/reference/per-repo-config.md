@@ -9,8 +9,9 @@ Place this file at `.github/merge-warden.toml` on the **default branch** of any 
 managed by Merge Warden. The server fetches it via the GitHub API on every webhook event —
 no server restart is needed when you update it.
 
-If the file is absent or malformed, the server falls back to application-level defaults.
-With compiled-in defaults, all validation is disabled.
+If the file is absent, malformed, or specifies an unsupported `schemaVersion`, the server
+falls back to application-level defaults. With compiled-in defaults, all validation is
+disabled.
 
 The top-level `schemaVersion` field is required.
 
