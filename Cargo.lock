@@ -2666,7 +2666,7 @@ dependencies = [
  "futures",
  "github-bot-sdk",
  "hex",
- "hmac 0.12.1",
+ "hmac 0.13.0",
  "merge_warden_core",
  "merge_warden_developer_platforms",
  "mockall",
