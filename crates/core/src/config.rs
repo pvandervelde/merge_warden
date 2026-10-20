@@ -129,12 +129,18 @@ pub fn validate_config_content(content: &str) -> ConfigValidationOutcome {
     match toml::from_str::<RepositoryProvidedConfig>(content) {
         Err(e) => ConfigValidationOutcome {
             valid: false,
-            errors: vec![e.to_string()],
+            errors: vec![format!(
+                "Failed to parse `{CONFIG_FILE_PATH}`: the file contains invalid TOML syntax. \
+                 Application defaults will be used until this is fixed. Fix the TOML syntax \
+                 error in the config file on the default branch. (toml: {e})"
+            )],
         },
         Ok(config) if config.schema_version != 1 => ConfigValidationOutcome {
             valid: false,
             errors: vec![format!(
-                "schemaVersion must be 1, found {}",
+                "Failed to load `{CONFIG_FILE_PATH}`: schemaVersion must be 1, found {}. \
+                 Application defaults will be used until this is fixed. Update schemaVersion \
+                 to 1 in the config file on the default branch.",
                 config.schema_version
             )],
         },
@@ -2553,13 +2559,16 @@ fn validate_schema_version(
     metrics: &dyn MetricsRecorder,
 ) -> Result<(), ConfigLoadError> {
     if schema_version != 1 {
+        let error_detail = format!("unsupported schemaVersion {schema_version}, expected 1");
         error!(
             repository_owner = repo_owner,
             repository = repo_name,
-            path = path,
-            config_version = schema_version,
+            config_path = path,
+            error = error_detail,
             "Configuration in repository has an unexpected version. Will not be able to load configuration."
         );
+
+        metrics.record_config_load_failure(repo_owner, repo_name, "unsupported_schema_version");
 
         return Err(ConfigLoadError::UnsupportedSchemaVersion(
             path.to_string(),
@@ -2606,16 +2615,31 @@ pub async fn load_merge_warden_config(
             warn!(
                 repository_owner = repo_owner,
                 repository = repo_name,
-                path = path_relative_to_repository_root,
+                config_path = path_relative_to_repository_root,
+                error = %e,
                 "Failed to find configuration file in repository"
             );
+            metrics.record_config_load_failure(repo_owner, repo_name, "fetch_error");
             return Err(ConfigLoadError::NotFound(e.to_string()));
         }
     };
 
     let mut config: RepositoryProvidedConfig = RepositoryProvidedConfig::default();
     if let Some(content) = potential_content {
-        config = toml::from_str(&content)?;
+        config = match toml::from_str(&content) {
+            Ok(c) => c,
+            Err(e) => {
+                warn!(
+                    repository_owner = repo_owner,
+                    repository = repo_name,
+                    config_path = path_relative_to_repository_root,
+                    error = %e,
+                    "Failed to parse configuration file in repository"
+                );
+                metrics.record_config_load_failure(repo_owner, repo_name, "toml_parse_error");
+                return Err(ConfigLoadError::Toml(e));
+            }
+        };
         validate_schema_version(
             repo_owner,
             repo_name,
@@ -2713,9 +2737,10 @@ pub(crate) async fn load_org_policy(
         Ok(Some(c)) => c,
         Ok(None) => {
             warn!(
-                org_owner = source.owner.as_str(),
-                org_repo = source.repo.as_str(),
-                org_path = source.path.as_str(),
+                repository_owner = source.owner.as_str(),
+                repository = source.repo.as_str(),
+                config_path = source.path.as_str(),
+                error = "org policy file not found",
                 "Org policy file not found; using three-tier config"
             );
             return Ok(None);
@@ -2723,12 +2748,13 @@ pub(crate) async fn load_org_policy(
         Err(e) => {
             let msg = format!("Failed to fetch org policy file: {e}");
             warn!(
-                org_owner = source.owner.as_str(),
-                org_repo = source.repo.as_str(),
-                org_path = source.path.as_str(),
+                repository_owner = source.owner.as_str(),
+                repository = source.repo.as_str(),
+                config_path = source.path.as_str(),
                 error = %e,
                 "Failed to fetch org policy; using three-tier config"
             );
+            metrics.record_config_load_failure(&source.owner, &source.repo, "fetch_error");
             if source.fail_if_unreachable {
                 return Err(ConfigLoadError::OrgPolicyUnavailable(msg));
             }
@@ -2741,12 +2767,13 @@ pub(crate) async fn load_org_policy(
         Err(e) => {
             let msg = format!("Failed to parse org policy TOML: {e}");
             warn!(
-                org_owner = source.owner.as_str(),
-                org_repo = source.repo.as_str(),
-                org_path = source.path.as_str(),
+                repository_owner = source.owner.as_str(),
+                repository = source.repo.as_str(),
+                config_path = source.path.as_str(),
                 error = %e,
                 "Org policy file has parse errors; using three-tier config"
             );
+            metrics.record_config_load_failure(&source.owner, &source.repo, "toml_parse_error");
             if source.fail_if_unreachable {
                 return Err(ConfigLoadError::OrgPolicyUnavailable(msg));
             }
@@ -2760,11 +2787,17 @@ pub(crate) async fn load_org_policy(
             raw.schema_version
         );
         warn!(
-            org_owner = source.owner.as_str(),
-            org_repo = source.repo.as_str(),
-            org_path = source.path.as_str(),
+            repository_owner = source.owner.as_str(),
+            repository = source.repo.as_str(),
+            config_path = source.path.as_str(),
+            error = msg.as_str(),
             schema_version = raw.schema_version,
             "Org policy file has unsupported schema version; using three-tier config"
+        );
+        metrics.record_config_load_failure(
+            &source.owner,
+            &source.repo,
+            "unsupported_schema_version",
         );
         if source.fail_if_unreachable {
             return Err(ConfigLoadError::OrgPolicyUnavailable(msg));
@@ -2855,14 +2888,29 @@ async fn parse_repo_config(
             warn!(
                 repository_owner = repo_owner,
                 repository = repo_name,
-                path = path,
+                config_path = path,
+                error = %e,
                 "Failed to find configuration file in repository"
             );
+            metrics.record_config_load_failure(repo_owner, repo_name, "fetch_error");
             return Err(ConfigLoadError::NotFound(e.to_string()));
         }
     };
 
-    let config: RepositoryProvidedConfig = toml::from_str(&content)?;
+    let config: RepositoryProvidedConfig = match toml::from_str(&content) {
+        Ok(c) => c,
+        Err(e) => {
+            warn!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                config_path = path,
+                error = %e,
+                "Failed to parse configuration file in repository"
+            );
+            metrics.record_config_load_failure(repo_owner, repo_name, "toml_parse_error");
+            return Err(ConfigLoadError::Toml(e));
+        }
+    };
     validate_schema_version(repo_owner, repo_name, path, config.schema_version, metrics)?;
 
     Ok(config)
@@ -2942,6 +2990,7 @@ pub async fn resolve_pull_request_config(
             warn!(
                 repository_owner = repo_owner,
                 repository = repo_name,
+                config_path = config_path,
                 error = %e,
                 "Failed to load repo config in resolve_pull_request_config; using empty defaults for repo tier"
             );

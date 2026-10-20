@@ -4720,7 +4720,9 @@ async fn test_config_check_no_repost_when_error_comment_unchanged() {
     use indoc::formatdoc;
 
     let bad_toml = "schemaVersion = 99";
-    let error_lines = "- schemaVersion must be 1, found 99";
+    let error_lines = "- Failed to load `.github/merge-warden.toml`: schemaVersion must be 1, \
+         found 99. Application defaults will be used until this is fixed. Update schemaVersion \
+         to 1 in the config file on the default branch.";
     let expected_body = formatdoc! {"
         {marker}
         ⚠️ **Invalid merge-warden configuration**
