@@ -104,6 +104,7 @@ pub struct Metrics {
     processing_success_rate: Gauge<f64>,
     pr_validation_duration_ms: Histogram<f64>,
     pr_bypass_activations_total: Counter<u64>,
+    config_load_failures_total: Counter<u64>,
 }
 
 impl Metrics {
@@ -170,6 +171,12 @@ impl Metrics {
             pr_bypass_activations_total: meter
                 .u64_counter("pr.bypass.activations_total")
                 .with_description("Bypass rule activations, labelled by bypass_type")
+                .build(),
+            config_load_failures_total: meter
+                .u64_counter("config.load.failures_total")
+                .with_description(
+                    "Configuration load failures, labelled by repository_owner, repository, and failure_reason",
+                )
                 .build(),
         }
     }
@@ -275,13 +282,18 @@ impl Metrics {
     /// Never panics.
     pub fn record_config_load_failure(
         &self,
-        _repository_owner: &str,
-        _repository: &str,
-        _failure_reason: &str,
+        repository_owner: &str,
+        repository: &str,
+        failure_reason: &str,
     ) {
-        // Not yet implemented: no `config.load.failures_total` instrument exists
-        // on `Metrics` yet. See issue #337 — GREEN must add the counter to the
-        // struct/`Metrics::new` and record against it here.
+        self.config_load_failures_total.add(
+            1,
+            &[
+                KeyValue::new("repository_owner", repository_owner.to_string()),
+                KeyValue::new("repository", repository.to_string()),
+                KeyValue::new("failure_reason", failure_reason.to_string()),
+            ],
+        );
     }
 }
 

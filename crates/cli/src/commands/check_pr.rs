@@ -202,8 +202,11 @@ impl WebhookHandler for MergeWardenWebhookHandler {
             }
             Err(e) => {
                 warn!(
-                    "Failed to resolve PR config from {}: {}. Falling back to compiled-in defaults.",
-                    merge_warden_config_path, e
+                    repository_owner = repo_owner,
+                    repository = repo_name,
+                    config_path = merge_warden_config_path,
+                    error = %e,
+                    "Failed to resolve PR config; falling back to compiled-in defaults"
                 );
                 CurrentPullRequestValidationConfiguration::from_app_defaults(&self.config.policies)
             }
