@@ -2578,6 +2578,54 @@ fn validate_schema_version(
     Ok(())
 }
 
+/// Logs a `warn!` and records a `"fetch_error"` config-load-failure metric when
+/// a [`ConfigFetcher`] call fails while locating a repository configuration
+/// file, returning the mapped [`ConfigLoadError::NotFound`].
+///
+/// Used by [`load_merge_warden_config`] and [`parse_repo_config`], which share
+/// identical logging/error/metrics behaviour for this failure mode.
+fn log_and_record_fetch_failure(
+    repo_owner: &str,
+    repo_name: &str,
+    path: &str,
+    error: impl std::fmt::Display,
+    metrics: &dyn MetricsRecorder,
+) -> ConfigLoadError {
+    warn!(
+        repository_owner = repo_owner,
+        repository = repo_name,
+        config_path = path,
+        error = %error,
+        "Failed to find configuration file in repository"
+    );
+    metrics.record_config_load_failure(repo_owner, repo_name, "fetch_error");
+    ConfigLoadError::NotFound(error.to_string())
+}
+
+/// Logs a `warn!` and records a `"toml_parse_error"` config-load-failure metric
+/// when a repository configuration file fails to parse as TOML, returning the
+/// mapped [`ConfigLoadError::Toml`].
+///
+/// Used by [`load_merge_warden_config`] and [`parse_repo_config`], which share
+/// identical logging/error/metrics behaviour for this failure mode.
+fn log_and_record_toml_parse_failure(
+    repo_owner: &str,
+    repo_name: &str,
+    path: &str,
+    error: toml::de::Error,
+    metrics: &dyn MetricsRecorder,
+) -> ConfigLoadError {
+    warn!(
+        repository_owner = repo_owner,
+        repository = repo_name,
+        config_path = path,
+        error = %error,
+        "Failed to parse configuration file in repository"
+    );
+    metrics.record_config_load_failure(repo_owner, repo_name, "toml_parse_error");
+    ConfigLoadError::Toml(error)
+}
+
 /// Loads the merge-warden configuration from the given path.
 ///
 /// If the file is missing, this function returns a default configuration and
@@ -2612,15 +2660,13 @@ pub async fn load_merge_warden_config(
     {
         Ok(c) => c,
         Err(e) => {
-            warn!(
-                repository_owner = repo_owner,
-                repository = repo_name,
-                config_path = path_relative_to_repository_root,
-                error = %e,
-                "Failed to find configuration file in repository"
-            );
-            metrics.record_config_load_failure(repo_owner, repo_name, "fetch_error");
-            return Err(ConfigLoadError::NotFound(e.to_string()));
+            return Err(log_and_record_fetch_failure(
+                repo_owner,
+                repo_name,
+                path_relative_to_repository_root,
+                e,
+                metrics,
+            ));
         }
     };
 
@@ -2629,15 +2675,13 @@ pub async fn load_merge_warden_config(
         config = match toml::from_str(&content) {
             Ok(c) => c,
             Err(e) => {
-                warn!(
-                    repository_owner = repo_owner,
-                    repository = repo_name,
-                    config_path = path_relative_to_repository_root,
-                    error = %e,
-                    "Failed to parse configuration file in repository"
-                );
-                metrics.record_config_load_failure(repo_owner, repo_name, "toml_parse_error");
-                return Err(ConfigLoadError::Toml(e));
+                return Err(log_and_record_toml_parse_failure(
+                    repo_owner,
+                    repo_name,
+                    path_relative_to_repository_root,
+                    e,
+                    metrics,
+                ));
             }
         };
         validate_schema_version(
@@ -2885,30 +2929,18 @@ async fn parse_repo_config(
             return Ok(RepositoryProvidedConfig::default());
         }
         Err(e) => {
-            warn!(
-                repository_owner = repo_owner,
-                repository = repo_name,
-                config_path = path,
-                error = %e,
-                "Failed to find configuration file in repository"
-            );
-            metrics.record_config_load_failure(repo_owner, repo_name, "fetch_error");
-            return Err(ConfigLoadError::NotFound(e.to_string()));
+            return Err(log_and_record_fetch_failure(
+                repo_owner, repo_name, path, e, metrics,
+            ));
         }
     };
 
     let config: RepositoryProvidedConfig = match toml::from_str(&content) {
         Ok(c) => c,
         Err(e) => {
-            warn!(
-                repository_owner = repo_owner,
-                repository = repo_name,
-                config_path = path,
-                error = %e,
-                "Failed to parse configuration file in repository"
-            );
-            metrics.record_config_load_failure(repo_owner, repo_name, "toml_parse_error");
-            return Err(ConfigLoadError::Toml(e));
+            return Err(log_and_record_toml_parse_failure(
+                repo_owner, repo_name, path, e, metrics,
+            ));
         }
     };
     validate_schema_version(repo_owner, repo_name, path, config.schema_version, metrics)?;
