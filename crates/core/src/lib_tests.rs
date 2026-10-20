@@ -4,12 +4,12 @@ use crate::{
         BypassRule, BypassRules, ChangeTypeLabelConfig, ConventionalCommitMappings,
         CurrentPullRequestValidationConfiguration, FallbackLabelSettings, IssuePropagationConfig,
         KeywordLabelsConfig, LabelDetectionStrategy, WipCheckConfig, CONFIG_COMMENT_MARKER,
-        CONVENTIONAL_COMMIT_REGEX, MISSING_WORK_ITEM_LABEL, SIZE_COMMENT_MARKER,
+        CONFIG_FILE_PATH, CONVENTIONAL_COMMIT_REGEX, MISSING_WORK_ITEM_LABEL, SIZE_COMMENT_MARKER,
         TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL, WIP_COMMENT_MARKER, WORK_ITEM_COMMENT_MARKER,
         WORK_ITEM_REGEX,
     },
     validation_result::{BypassRuleType, ValidationResult},
-    MergeWarden, MetricsRecorder,
+    MergeWarden, MetricsRecorder, NoopMetricsRecorder,
 };
 use async_trait::async_trait;
 use std::{
@@ -4538,6 +4538,53 @@ async fn test_config_check_does_not_affect_check_conclusion() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Issue #337, assertion 7: no raw `toml::de::Error` string must ever stand
+// alone as the entire content of a PR-comment error line. This exercises
+// the full `communicate_config_validity_status` path (via
+// `process_pull_request`), not just `validate_config_content` in isolation,
+// so it also catches a regression where the comment-building code in
+// `lib.rs` re-introduces the raw string (e.g. by reformatting
+// `outcome.errors` incorrectly) even if `validate_config_content` itself is
+// fixed correctly.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_config_check_error_comment_never_contains_raw_toml_error_as_a_whole_line() {
+    let bad_toml = "not = valid = toml [[[";
+    let raw_toml_error = toml::from_str::<crate::config::RepositoryProvidedConfig>(bad_toml)
+        .expect_err("fixture must be invalid TOML")
+        .to_string();
+
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"))
+        .with_config_file(Some(bad_toml.to_string()));
+
+    let warden = MergeWarden::new(provider);
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    let config_comment = comments
+        .iter()
+        .find(|c| c.body.contains(CONFIG_COMMENT_MARKER))
+        .expect("a config validity error comment must have been posted");
+
+    let raw_error_line = format!("- {raw_toml_error}");
+    assert!(
+        !config_comment.body.contains(&raw_error_line),
+        "the raw toml::de::Error string must never appear as a whole error line in the PR \
+         comment [security]; comment body: {}",
+        config_comment.body
+    );
+    assert!(
+        config_comment.body.contains(CONFIG_FILE_PATH),
+        "the PR comment must name the config file path; comment body: {}",
+        config_comment.body
+    );
+}
+
 #[tokio::test]
 async fn test_config_check_deletes_stale_comment_when_config_becomes_valid() {
     // When there is an existing CONFIG_COMMENT_MARKER comment from a previous
@@ -4936,6 +4983,45 @@ async fn process_pull_request_check_conclusion_unaffected_by_stability() {
 }
 
 // ---------------------------------------------------------------------------
+// NoopMetricsRecorder — issue #337 assertion 5: `record_config_load_failure`
+// must be a true no-op (no panic, no observable side effect).
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn noop_metrics_recorder_record_config_load_failure_does_not_panic() {
+    let recorder = NoopMetricsRecorder;
+    recorder.record_config_load_failure("owner", "repo", "toml_parse_error");
+}
+
+#[tokio::test]
+async fn noop_metrics_recorder_record_config_load_failure_accepts_every_documented_failure_reason()
+{
+    let recorder = NoopMetricsRecorder;
+    for reason in [
+        "toml_parse_error",
+        "unsupported_schema_version",
+        "fetch_error",
+    ] {
+        recorder.record_config_load_failure("owner", "repo", reason);
+    }
+}
+
+#[tokio::test]
+async fn noop_metrics_recorder_record_config_load_failure_has_no_observable_side_effect() {
+    // `NoopMetricsRecorder` is a zero-sized unit struct (`struct NoopMetricsRecorder;`)
+    // with no internal state, so a panic is the only possible observable side
+    // effect to rule out; reaching the end of this loop already proves there
+    // is none, and `Default`/`Clone`/`Copy` round-tripping confirms no hidden
+    // state was smuggled in behind the trait object.
+    let recorder = NoopMetricsRecorder;
+    let cloned = recorder;
+    for _ in 0..1000 {
+        cloned.record_config_load_failure("owner", "repo", "fetch_error");
+    }
+    let _ = NoopMetricsRecorder::default();
+}
+
+// ---------------------------------------------------------------------------
 // MetricsRecorder bridge — verifies `record_validation_duration_ms` and
 // `record_bypass_activation` fire on the right exit paths, exactly the right
 // number of times. See `.llm/task.md` / the QA audit's focus area 3.
@@ -4948,6 +5034,12 @@ async fn process_pull_request_check_conclusion_unaffected_by_stability() {
 struct RecordingMetricsRecorder {
     durations_ms: Mutex<Vec<f64>>,
     bypass_types: Mutex<Vec<String>>,
+    /// `(repository_owner, repository, failure_reason)` tuples, one per
+    /// `record_config_load_failure` call received. Not exercised by
+    /// `process_pull_request` (config-load failures occur in `config.rs`
+    /// functions, not here) — this field exists purely so this struct keeps
+    /// satisfying the `MetricsRecorder` trait as it grows.
+    config_load_failures: Mutex<Vec<(String, String, String)>>,
 }
 
 impl MetricsRecorder for RecordingMetricsRecorder {
@@ -4960,6 +5052,19 @@ impl MetricsRecorder for RecordingMetricsRecorder {
             .lock()
             .unwrap()
             .push(bypass_type.to_string());
+    }
+
+    fn record_config_load_failure(
+        &self,
+        repository_owner: &str,
+        repository: &str,
+        failure_reason: &str,
+    ) {
+        self.config_load_failures.lock().unwrap().push((
+            repository_owner.to_string(),
+            repository.to_string(),
+            failure_reason.to_string(),
+        ));
     }
 }
 

@@ -184,6 +184,20 @@ pub trait MetricsRecorder: Send + Sync + std::fmt::Debug {
     /// Records a single bypass-rule activation for the given `bypass_type`
     /// (e.g. `"title_convention"`, `"work_item_reference"`).
     fn record_bypass_activation(&self, bypass_type: &str);
+
+    /// Records a single configuration-load failure for `repository_owner`/`repository`.
+    ///
+    /// `failure_reason` MUST be one of `"toml_parse_error"`,
+    /// `"unsupported_schema_version"`, or `"fetch_error"` — see
+    /// `crates/core/src/config.rs`'s repo- and org-policy-config loading
+    /// functions for the call sites that observe each reason. Backs the
+    /// `config.load.failures_total` counter (see `docs/spec/operations/monitoring.md`).
+    fn record_config_load_failure(
+        &self,
+        repository_owner: &str,
+        repository: &str,
+        failure_reason: &str,
+    );
 }
 
 /// No-op [`MetricsRecorder`] used when no real recorder is injected.
@@ -193,6 +207,13 @@ pub struct NoopMetricsRecorder;
 impl MetricsRecorder for NoopMetricsRecorder {
     fn record_validation_duration_ms(&self, _duration_ms: f64) {}
     fn record_bypass_activation(&self, _bypass_type: &str) {}
+    fn record_config_load_failure(
+        &self,
+        _repository_owner: &str,
+        _repository: &str,
+        _failure_reason: &str,
+    ) {
+    }
 }
 
 /// Main struct for validating and managing pull requests.

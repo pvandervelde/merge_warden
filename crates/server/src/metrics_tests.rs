@@ -3,6 +3,7 @@ use std::{
     time::Duration,
 };
 
+use merge_warden_core::MetricsRecorder;
 use opentelemetry::{metrics::MeterProvider as _, KeyValue};
 use opentelemetry_sdk::{
     error::OTelSdkResult,
@@ -693,6 +694,190 @@ fn record_bypass_activation_distinguishes_bypass_types() {
 
     assert_eq!(admin, 2);
     assert_eq!(waived, 1);
+}
+
+// ---------------------------------------------------------------------------
+// record_config_load_failure — Counter<u64>, labels: repository_owner,
+// repository, failure_reason. See issue #337 / `config.load.failures_total`
+// in `docs/spec/operations/monitoring.md`.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn record_config_load_failure_increments_counter_with_labels() {
+    let (reader, _provider, metrics) = new_test_metrics();
+
+    metrics.record_config_load_failure("acme", "widgets", "toml_parse_error");
+
+    let rm = collect(&reader);
+    let (value, is_monotonic) = u64_sum_point(
+        &rm,
+        "config.load.failures_total",
+        &[
+            ("repository_owner", "acme"),
+            ("repository", "widgets"),
+            ("failure_reason", "toml_parse_error"),
+        ],
+    )
+    .expect(
+        "expected a data point for this repository_owner/repository/failure_reason combination",
+    );
+
+    assert_eq!(value, 1);
+    assert!(
+        is_monotonic,
+        "config.load.failures_total must be a monotonic counter"
+    );
+}
+
+#[test]
+fn record_config_load_failure_distinguishes_failure_reasons() {
+    let (reader, _provider, metrics) = new_test_metrics();
+
+    metrics.record_config_load_failure("acme", "widgets", "toml_parse_error");
+    metrics.record_config_load_failure("acme", "widgets", "fetch_error");
+    metrics.record_config_load_failure("acme", "widgets", "toml_parse_error");
+
+    let rm = collect(&reader);
+    let toml_err = u64_sum_point(
+        &rm,
+        "config.load.failures_total",
+        &[
+            ("repository_owner", "acme"),
+            ("repository", "widgets"),
+            ("failure_reason", "toml_parse_error"),
+        ],
+    )
+    .expect("toml_parse_error series must exist")
+    .0;
+    let fetch_err = u64_sum_point(
+        &rm,
+        "config.load.failures_total",
+        &[
+            ("repository_owner", "acme"),
+            ("repository", "widgets"),
+            ("failure_reason", "fetch_error"),
+        ],
+    )
+    .expect("fetch_error series must exist")
+    .0;
+
+    assert_eq!(
+        toml_err, 2,
+        "toml_parse_error count must not be conflated with fetch_error"
+    );
+    assert_eq!(
+        fetch_err, 1,
+        "fetch_error count must accumulate independently"
+    );
+}
+
+#[test]
+fn record_config_load_failure_distinguishes_repositories() {
+    let (reader, _provider, metrics) = new_test_metrics();
+
+    metrics.record_config_load_failure("acme", "widgets", "fetch_error");
+    metrics.record_config_load_failure("acme", "gadgets", "fetch_error");
+
+    let rm = collect(&reader);
+    let widgets = u64_sum_point(
+        &rm,
+        "config.load.failures_total",
+        &[
+            ("repository_owner", "acme"),
+            ("repository", "widgets"),
+            ("failure_reason", "fetch_error"),
+        ],
+    )
+    .expect("widgets series must exist")
+    .0;
+    let gadgets = u64_sum_point(
+        &rm,
+        "config.load.failures_total",
+        &[
+            ("repository_owner", "acme"),
+            ("repository", "gadgets"),
+            ("failure_reason", "fetch_error"),
+        ],
+    )
+    .expect("gadgets series must exist")
+    .0;
+
+    assert_eq!(widgets, 1);
+    assert_eq!(gadgets, 1);
+}
+
+#[test]
+fn prometheus_rendering_of_config_load_failures_total_does_not_double_the_total_suffix() {
+    let body = render_prometheus_text(|metrics| {
+        metrics.record_config_load_failure("acme", "widgets", "fetch_error");
+    });
+
+    assert!(
+        !body.contains("_total_total"),
+        "Prometheus output must never contain a doubled _total suffix: {body}"
+    );
+    assert!(
+        body.contains("# TYPE config_load_failures_total counter"),
+        "expected a '# TYPE config_load_failures_total counter' line, got:\n{body}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// CoreMetricsRecorder::record_config_load_failure — verifies the
+// `merge_warden_core::MetricsRecorder` bridge actually forwards to a real
+// OTel `Counter<u64>` on `Metrics`, rather than being satisfied by a stub
+// that only implements the trait signature without recording anything.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn core_metrics_recorder_forwards_config_load_failure_to_metrics() {
+    let (reader, _provider, metrics) = new_test_metrics();
+    let recorder = CoreMetricsRecorder::new(metrics.clone());
+
+    recorder.record_config_load_failure("acme", "widgets", "unsupported_schema_version");
+
+    let rm = collect(&reader);
+    let (value, _) = u64_sum_point(
+        &rm,
+        "config.load.failures_total",
+        &[
+            ("repository_owner", "acme"),
+            ("repository", "widgets"),
+            ("failure_reason", "unsupported_schema_version"),
+        ],
+    )
+    .expect("CoreMetricsRecorder::record_config_load_failure must forward through to the real Metrics counter");
+
+    assert_eq!(value, 1);
+}
+
+#[test]
+fn core_metrics_recorder_forwards_each_config_load_failure_call_exactly_once() {
+    let (reader, _provider, metrics) = new_test_metrics();
+    let recorder = CoreMetricsRecorder::new(metrics.clone());
+
+    recorder.record_config_load_failure("acme", "widgets", "fetch_error");
+    recorder.record_config_load_failure("acme", "widgets", "fetch_error");
+    recorder.record_config_load_failure("acme", "widgets", "fetch_error");
+
+    let rm = collect(&reader);
+    let value = u64_sum_point(
+        &rm,
+        "config.load.failures_total",
+        &[
+            ("repository_owner", "acme"),
+            ("repository", "widgets"),
+            ("failure_reason", "fetch_error"),
+        ],
+    )
+    .expect("expected a data point")
+    .0;
+
+    assert_eq!(
+        value, 3,
+        "three CoreMetricsRecorder calls must forward to three counter increments, not fewer \
+         (missed forwarding) or more (double-forwarding)"
+    );
 }
 
 // ---------------------------------------------------------------------------

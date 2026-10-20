@@ -422,7 +422,7 @@ impl TestBotInstance {
                 load_merge_warden_config, ApplicationDefaults,
                 CurrentPullRequestValidationConfiguration,
             },
-            MergeWarden, WebhookPayload,
+            MergeWarden, NoopMetricsRecorder, WebhookPayload,
         };
         use merge_warden_developer_platforms::github::GitHubProvider;
         use std::sync::Arc;
@@ -497,6 +497,7 @@ impl TestBotInstance {
                 ".github/merge-warden.toml",
                 &provider,
                 &app_defaults,
+                &NoopMetricsRecorder,
             )
             .await
             {

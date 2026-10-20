@@ -5,10 +5,12 @@ use crate::config::{
     OrgPolicySource, PrSizeCheckConfig, WipCheckConfig, CONVENTIONAL_COMMIT_REGEX, WORK_ITEM_REGEX,
 };
 use crate::size::SizeThresholds;
+use crate::{MetricsRecorder, NoopMetricsRecorder};
 use async_trait::async_trait;
 use merge_warden_developer_platforms::errors::Error;
 use proptest::prelude::*;
 use regex::Regex;
+use std::sync::Mutex;
 
 use super::*;
 
@@ -212,9 +214,16 @@ async fn test_load_merge_warden_config_empty_file() {
     let file_path = "merge-warden.toml";
     let fetcher = MockFetcher::new(None);
     let app_defaults = ApplicationDefaults::default();
-    let config = load_merge_warden_config("a", "b", file_path, &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        file_path,
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     assert!(!config.policies.pull_requests.title_policies.required,);
     assert_eq!(
@@ -262,7 +271,15 @@ pattern = "bar"
 
     let fetcher = MockFetcher::new(Some(toml.to_string()));
     let app_defaults = ApplicationDefaults::default();
-    let result = load_merge_warden_config("a", "b", file_path, &fetcher, &app_defaults).await;
+    let result = load_merge_warden_config(
+        "a",
+        "b",
+        file_path,
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await;
 
     match result {
         Err(ConfigLoadError::UnsupportedSchemaVersion(path, version)) => {
@@ -295,7 +312,15 @@ async fn test_load_merge_warden_config_invalid_schema_error_message_is_actionabl
 
     let fetcher = MockFetcher::new(Some(toml.to_string()));
     let app_defaults = ApplicationDefaults::default();
-    let result = load_merge_warden_config("a", "b", file_path, &fetcher, &app_defaults).await;
+    let result = load_merge_warden_config(
+        "a",
+        "b",
+        file_path,
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await;
 
     let err = result.expect_err("Unsupported schemaVersion must return an error");
     let message = err.to_string();
@@ -329,7 +354,15 @@ pattern = "foo"
 
     let fetcher = MockFetcher::new(Some(toml.to_string()));
     let app_defaults = ApplicationDefaults::default();
-    let result = load_merge_warden_config("a", "b", file_path, &fetcher, &app_defaults).await;
+    let result = load_merge_warden_config(
+        "a",
+        "b",
+        file_path,
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await;
     assert!(matches!(result, Err(ConfigLoadError::Toml(_))));
 }
 
@@ -343,6 +376,7 @@ async fn test_load_merge_warden_config_missing_file() {
         "/nonexistent/path/merge-warden.toml",
         &fetcher,
         &app_defaults,
+        &NoopMetricsRecorder,
     )
     .await
     .unwrap();
@@ -392,9 +426,16 @@ pattern = "bar"
 
     let fetcher = MockFetcher::new(Some(toml.to_string()));
     let app_defaults = ApplicationDefaults::default();
-    let config = load_merge_warden_config("a", "b", file_path, &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        file_path,
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
     assert_eq!(
         config
             .policies
@@ -421,7 +462,15 @@ async fn test_load_merge_warden_config_only_schema_version() {
 
     let fetcher = MockFetcher::new(Some(toml.to_string()));
     let app_defaults = ApplicationDefaults::default();
-    let config = load_merge_warden_config("a", "b", file_path, &fetcher, &app_defaults).await;
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        file_path,
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await;
     // Should succeed, but policies will be defaulted
     assert!(config.is_ok());
     let config = config.unwrap();
@@ -447,9 +496,16 @@ label_if_missing = "missing-work-item"
 
     let fetcher = MockFetcher::new(Some(toml.to_string()));
     let app_defaults = ApplicationDefaults::default();
-    let config = load_merge_warden_config("a", "b", file_path, &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        file_path,
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
     assert_eq!(config.schema_version, 1);
     assert!(config.policies.pull_requests.title_policies.required);
     assert_eq!(
@@ -1191,9 +1247,16 @@ async fn test_load_merge_warden_config_app_defaults_enforce_wip_blocks_merge() {
     let mut app_defaults = ApplicationDefaults::default();
     app_defaults.wip_check.enforce_wip_blocking = true;
 
-    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        "path",
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     assert!(
         config
@@ -1218,9 +1281,16 @@ wip_title_patterns = ["WIP", "DO NOT MERGE"]
     let fetcher = MockFetcher::new(Some(toml.to_string()));
     let app_defaults = ApplicationDefaults::default();
 
-    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        "path",
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     assert!(
         config
@@ -1252,9 +1322,16 @@ async fn test_load_merge_warden_config_app_wip_label_overrides_when_repo_uses_de
     let mut app_defaults = ApplicationDefaults::default();
     app_defaults.wip_check.wip_label = Some("work-in-progress".to_string());
 
-    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        "path",
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         config.policies.pull_requests.wip_policies.wip_label,
@@ -1271,9 +1348,16 @@ async fn test_load_merge_warden_config_app_description_patterns_propagate() {
     let mut app_defaults = ApplicationDefaults::default();
     app_defaults.wip_check.wip_description_patterns = vec!["🚧".to_string()];
 
-    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        "path",
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         config
@@ -1314,9 +1398,16 @@ required = true
 "#;
     let fetcher = MockFetcher::new(Some(toml.to_string()));
     let app_defaults = ApplicationDefaults::default();
-    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        "path",
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     let propagation = &config.policies.pull_requests.issue_propagation;
     assert!(
@@ -1340,9 +1431,16 @@ sync_project_from_issue = false
 "#;
     let fetcher = MockFetcher::new(Some(toml.to_string()));
     let app_defaults = ApplicationDefaults::default();
-    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        "path",
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     let propagation = &config.policies.pull_requests.issue_propagation;
     assert!(
@@ -1366,9 +1464,16 @@ sync_project_from_issue = true
 "#;
     let fetcher = MockFetcher::new(Some(toml.to_string()));
     let app_defaults = ApplicationDefaults::default();
-    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        "path",
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     let propagation = &config.policies.pull_requests.issue_propagation;
     assert!(
@@ -1392,9 +1497,16 @@ sync_project_from_issue = true
 "#;
     let fetcher = MockFetcher::new(Some(toml.to_string()));
     let app_defaults = ApplicationDefaults::default();
-    let merge_warden_config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let merge_warden_config = load_merge_warden_config(
+        "a",
+        "b",
+        "path",
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     let validation = merge_warden_config.to_validation_config(&BypassRules::default());
     assert!(
@@ -1628,9 +1740,16 @@ security = "vulnerability"
     let fetcher = MockFetcher::new(Some(toml.to_string()));
     let app_defaults = ApplicationDefaults::default();
 
-    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        "path",
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     let kw = &config
         .change_type_labels
@@ -1678,9 +1797,16 @@ enabled = true
         .keyword_labels
         .breaking_change = Some("breaking".to_string());
 
-    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        "path",
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     let kw = &config
         .change_type_labels
@@ -1850,6 +1976,7 @@ users = []
         "merge-warden.toml",
         &fetcher,
         &app_defaults,
+        &NoopMetricsRecorder,
     )
     .await
     .expect("config should load");
@@ -1934,6 +2061,7 @@ users = ["pv-release-regent[bot]"]
         "merge-warden.toml",
         &fetcher,
         &app_defaults,
+        &NoopMetricsRecorder,
     )
     .await
     .expect("config should load");
@@ -2121,6 +2249,801 @@ fn test_validate_config_content_outcome_equality() {
         errors: vec!["some error".to_string()],
     };
     assert_ne!(a, c);
+}
+
+// ============================================================================
+// Issue #337 — observability of broken repo/org config loading
+//
+// Covers:
+//   1. `validate_config_content` malformed-TOML error message content
+//   2. `validate_config_content` unsupported-schemaVersion error message content
+//   3. structured log fields (repository_owner/repository/config_path/error)
+//      on every broken-config log call site in this module
+//   4. `MetricsRecorder::record_config_load_failure` call counts/labels
+//   7. no raw `toml::de::Error` string ever stands alone as a PR-comment line
+//
+// Assertion 5 (NoopMetricsRecorder no-op) lives in `lib_tests.rs` next to
+// `NoopMetricsRecorder`'s definition. Assertion 6 (OTel forwarding) lives in
+// `crates/server/src/metrics_tests.rs` next to the other `Metrics`/
+// `CoreMetricsRecorder` tests.
+// ============================================================================
+
+// ── validate_config_content — malformed TOML error message (assertion 1) ───
+
+#[test]
+fn test_validate_config_content_malformed_toml_error_names_config_file_path() {
+    let bad_toml = "not = valid = toml [[[";
+    let outcome = validate_config_content(bad_toml);
+
+    assert!(!outcome.valid);
+    assert_eq!(outcome.errors.len(), 1, "errors: {:?}", outcome.errors);
+    assert!(
+        outcome.errors[0].contains(CONFIG_FILE_PATH),
+        "error message must name the config file path '{}'; got: {}",
+        CONFIG_FILE_PATH,
+        outcome.errors[0]
+    );
+}
+
+#[test]
+fn test_validate_config_content_malformed_toml_error_states_next_step() {
+    let bad_toml = "not = valid = toml [[[";
+    let outcome = validate_config_content(bad_toml);
+
+    let message = outcome.errors[0].to_lowercase();
+    assert!(
+        message.contains("fix"),
+        "error message must state the next step using the word 'fix'; got: {message}"
+    );
+    assert!(
+        message.contains("default branch"),
+        "error message must tell the operator to fix the file on the default branch; got: {message}"
+    );
+}
+
+#[test]
+fn test_validate_config_content_malformed_toml_error_is_not_raw_toml_error_verbatim() {
+    let bad_toml = "not = valid = toml [[[";
+    let raw_toml_error = toml::from_str::<RepositoryProvidedConfig>(bad_toml)
+        .expect_err("fixture must be invalid TOML")
+        .to_string();
+
+    let outcome = validate_config_content(bad_toml);
+
+    assert_ne!(
+        outcome.errors[0], raw_toml_error,
+        "error message must not be the raw toml::de::Error string verbatim \
+         [security] — it must add file/impact/next-step context"
+    );
+}
+
+#[test]
+fn test_validate_config_content_malformed_toml_error_does_not_leak_internal_type_names() {
+    // "Never expose internal Rust type names ... or stack details" — a stub
+    // that just calls `format!("{e:?}")` on the error would leak
+    // `toml::de::Error { ... }`-style Debug output; a stub that panics would
+    // leak a backtrace. Neither must appear in the user-facing message.
+    let bad_toml = "not = valid = toml [[[";
+    let outcome = validate_config_content(bad_toml);
+    let message = &outcome.errors[0];
+
+    assert!(
+        !message.contains("toml::de::Error") && !message.contains("Error {"),
+        "error message must not leak internal Rust type/Debug representations; got: {message}"
+    );
+}
+
+// ── validate_config_content — unsupported schemaVersion error (assertion 2) ─
+
+#[test]
+fn test_validate_config_content_wrong_schema_version_error_names_config_file_path() {
+    let outcome = validate_config_content("schemaVersion = 2");
+
+    assert!(!outcome.valid);
+    assert!(
+        outcome.errors[0].contains(CONFIG_FILE_PATH),
+        "error message must name the config file path '{}'; got: {}",
+        CONFIG_FILE_PATH,
+        outcome.errors[0]
+    );
+}
+
+#[test]
+fn test_validate_config_content_wrong_schema_version_error_states_offending_version() {
+    let outcome = validate_config_content("schemaVersion = 7");
+
+    assert!(
+        outcome.errors[0].contains('7'),
+        "error message must state the offending schemaVersion value (7); got: {}",
+        outcome.errors[0]
+    );
+}
+
+#[test]
+fn test_validate_config_content_wrong_schema_version_error_states_next_step() {
+    let outcome = validate_config_content("schemaVersion = 2");
+
+    let message = outcome.errors[0].to_lowercase();
+    assert!(
+        message.contains("schemaversion") || message.contains("schema version"),
+        "error message must mention schemaVersion; got: {message}"
+    );
+    assert!(
+        message.contains("update") || message.contains("fix") || message.contains("set"),
+        "error message must state an actionable next step; got: {message}"
+    );
+}
+
+// ── validate_schema_version — structured log fields + metrics (assertion 3, 4) ──
+
+/// Minimal test double for `MetricsRecorder` that logs every
+/// `record_config_load_failure` call it receives (owner, repo, reason),
+/// so tests can assert on call *count* and *labels* precisely — catching
+/// double-counting, missed calls, and swapped `failure_reason` labels.
+#[derive(Debug, Default)]
+struct SpyMetricsRecorder {
+    config_load_failures: Mutex<Vec<(String, String, String)>>,
+    validation_durations_ms: Mutex<Vec<f64>>,
+    bypass_activations: Mutex<Vec<String>>,
+}
+
+impl SpyMetricsRecorder {
+    fn config_load_failure_calls(&self) -> Vec<(String, String, String)> {
+        self.config_load_failures.lock().unwrap().clone()
+    }
+}
+
+impl MetricsRecorder for SpyMetricsRecorder {
+    fn record_validation_duration_ms(&self, duration_ms: f64) {
+        self.validation_durations_ms
+            .lock()
+            .unwrap()
+            .push(duration_ms);
+    }
+
+    fn record_bypass_activation(&self, bypass_type: &str) {
+        self.bypass_activations
+            .lock()
+            .unwrap()
+            .push(bypass_type.to_string());
+    }
+
+    fn record_config_load_failure(
+        &self,
+        repository_owner: &str,
+        repository: &str,
+        failure_reason: &str,
+    ) {
+        self.config_load_failures.lock().unwrap().push((
+            repository_owner.to_string(),
+            repository.to_string(),
+            failure_reason.to_string(),
+        ));
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Tracing capture test double.
+//
+// This crate has no `tracing-test`-style dev-dependency anywhere in the
+// workspace, and the pre-existing precedent in this file (predating issue
+// #337) was "this test does not assert that warn! fires" — i.e. structured
+// log *content* was never unit-tested directly. Issue #337 requires exactly
+// that (repository_owner/repository/config_path/error field presence), so
+// this is a minimal custom `tracing_subscriber::Layer` that captures every
+// event's level, message, and field values into an in-memory list. See
+// `Cargo.toml`'s new `tracing-subscriber` dev-dependency.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+struct CapturedEvent {
+    level: tracing::Level,
+    message: String,
+    fields: HashMap<String, String>,
+}
+
+#[derive(Default)]
+struct FieldVisitor {
+    fields: HashMap<String, String>,
+    message: String,
+}
+
+impl tracing::field::Visit for FieldVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        // `{:?}` on a `&str`/`String` field value renders a quoted string
+        // (e.g. `"acme"`); strip the surrounding quotes so captured field
+        // values compare equal to the plain strings tests expect.
+        let rendered = format!("{value:?}");
+        let unquoted = rendered
+            .strip_prefix('"')
+            .and_then(|s| s.strip_suffix('"'))
+            .unwrap_or(&rendered)
+            .to_string();
+        if field.name() == "message" {
+            self.message = unquoted;
+        } else {
+            self.fields.insert(field.name().to_string(), unquoted);
+        }
+    }
+}
+
+struct CapturingLayer {
+    events: std::sync::Arc<Mutex<Vec<CapturedEvent>>>,
+}
+
+impl<S> tracing_subscriber::Layer<S> for CapturingLayer
+where
+    S: tracing::Subscriber,
+{
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        let mut visitor = FieldVisitor::default();
+        event.record(&mut visitor);
+        self.events.lock().unwrap().push(CapturedEvent {
+            level: *event.metadata().level(),
+            message: visitor.message,
+            fields: visitor.fields,
+        });
+    }
+}
+
+/// Runs the synchronous closure `f` with a capturing tracing subscriber
+/// installed as the thread-local default, returning `f`'s result alongside
+/// every event emitted during its execution.
+fn capture_tracing_sync<F, T>(f: F) -> (T, Vec<CapturedEvent>)
+where
+    F: FnOnce() -> T,
+{
+    use tracing_subscriber::layer::SubscriberExt as _;
+
+    let events = std::sync::Arc::new(Mutex::new(Vec::new()));
+    let layer = CapturingLayer {
+        events: events.clone(),
+    };
+    let subscriber = tracing_subscriber::registry().with(layer);
+    let guard = tracing::subscriber::set_default(subscriber);
+    let result = f();
+    drop(guard);
+    let captured = events.lock().unwrap().clone();
+    (result, captured)
+}
+
+/// Runs the future `f` with a capturing tracing subscriber installed as the
+/// thread-local default for the lifetime of the `set_default` guard, which
+/// is held across every `.await` point since `#[tokio::test]` defaults to a
+/// single-threaded current-thread runtime (the future never hops OS
+/// threads). Returns `f`'s output alongside every event emitted.
+async fn capture_tracing_events<F, T>(f: F) -> (T, Vec<CapturedEvent>)
+where
+    F: std::future::Future<Output = T>,
+{
+    use tracing_subscriber::layer::SubscriberExt as _;
+
+    let events = std::sync::Arc::new(Mutex::new(Vec::new()));
+    let layer = CapturingLayer {
+        events: events.clone(),
+    };
+    let subscriber = tracing_subscriber::registry().with(layer);
+    let guard = tracing::subscriber::set_default(subscriber);
+    let result = f.await;
+    drop(guard);
+    let captured = events.lock().unwrap().clone();
+    (result, captured)
+}
+
+/// Asserts that at least one captured `WARN`- or `ERROR`-level event carries
+/// every field in `required_fields`, with a non-empty value. Does not
+/// require all fields to come from the *same* event (multiple warnings can
+/// legitimately fire for one call), matching assertion 3's "every log call
+/// site... emits all four fields" without over-constraining which single
+/// event carries them.
+fn assert_warn_or_error_event_has_fields(events: &[CapturedEvent], required_fields: &[&str]) {
+    let severe: Vec<&CapturedEvent> = events
+        .iter()
+        .filter(|e| e.level == tracing::Level::WARN || e.level == tracing::Level::ERROR)
+        .collect();
+    assert!(
+        !severe.is_empty(),
+        "expected at least one WARN or ERROR log event; captured events: {events:?}"
+    );
+    for field in required_fields {
+        assert!(
+            severe
+                .iter()
+                .any(|e| e.fields.get(*field).is_some_and(|v| !v.is_empty())),
+            "expected a WARN/ERROR event with a non-empty '{field}' field; captured severe events: {severe:?}"
+        );
+    }
+}
+
+const REQUIRED_LOG_FIELDS: [&str; 4] = ["repository_owner", "repository", "config_path", "error"];
+
+#[test]
+fn test_validate_schema_version_error_log_has_all_required_fields() {
+    let (_, events) = capture_tracing_sync(|| {
+        let _ = validate_schema_version(
+            "acme",
+            "widgets",
+            ".github/merge-warden.toml",
+            2,
+            &NoopMetricsRecorder,
+        );
+    });
+
+    assert_warn_or_error_event_has_fields(&events, &REQUIRED_LOG_FIELDS);
+}
+
+#[test]
+fn test_validate_schema_version_records_config_load_failure_exactly_once_with_unsupported_schema_version_reason(
+) {
+    let spy = SpyMetricsRecorder::default();
+    let result = validate_schema_version("acme", "widgets", "path", 2, &spy);
+
+    assert!(result.is_err());
+    let calls = spy.config_load_failure_calls();
+    assert_eq!(
+        calls.len(),
+        1,
+        "expected exactly one record_config_load_failure call; got: {calls:?}"
+    );
+    assert_eq!(
+        calls[0],
+        (
+            "acme".to_string(),
+            "widgets".to_string(),
+            "unsupported_schema_version".to_string()
+        )
+    );
+}
+
+#[test]
+fn test_validate_schema_version_does_not_record_failure_when_version_is_supported() {
+    let spy = SpyMetricsRecorder::default();
+    let result = validate_schema_version("acme", "widgets", "path", 1, &spy);
+
+    assert!(result.is_ok());
+    assert!(
+        spy.config_load_failure_calls().is_empty(),
+        "a supported schemaVersion must never increment the config-load-failure counter"
+    );
+}
+
+// ── load_merge_warden_config — structured log fields + metrics ─────────────
+
+#[tokio::test]
+async fn test_load_merge_warden_config_fetch_error_log_has_all_required_fields() {
+    let app_defaults = ApplicationDefaults::default();
+    let (_, events) = capture_tracing_events(load_merge_warden_config(
+        "acme",
+        "widgets",
+        ".github/merge-warden.toml",
+        &FailingFetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    ))
+    .await;
+
+    assert_warn_or_error_event_has_fields(&events, &REQUIRED_LOG_FIELDS);
+}
+
+#[tokio::test]
+async fn test_load_merge_warden_config_toml_parse_error_is_logged_with_all_required_fields() {
+    // Regression guard for a genuine gap: as of issue #337, the TOML-parse
+    // branch of `load_merge_warden_config` has NO log statement at all (the
+    // `?` operator silently propagates `ConfigLoadError::Toml`). This test
+    // must fail until a log statement is added.
+    let fetcher = MockFetcher::new(Some("not = valid = toml [[[".to_string()));
+    let app_defaults = ApplicationDefaults::default();
+    let (_, events) = capture_tracing_events(load_merge_warden_config(
+        "acme",
+        "widgets",
+        ".github/merge-warden.toml",
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    ))
+    .await;
+
+    assert_warn_or_error_event_has_fields(&events, &REQUIRED_LOG_FIELDS);
+}
+
+#[tokio::test]
+async fn test_load_merge_warden_config_records_config_load_failure_exactly_once_on_toml_parse_error(
+) {
+    let fetcher = MockFetcher::new(Some("not = valid = toml [[[".to_string()));
+    let app_defaults = ApplicationDefaults::default();
+    let spy = SpyMetricsRecorder::default();
+
+    let _ = load_merge_warden_config(
+        "acme",
+        "widgets",
+        ".github/merge-warden.toml",
+        &fetcher,
+        &app_defaults,
+        &spy,
+    )
+    .await;
+
+    let calls = spy.config_load_failure_calls();
+    assert_eq!(calls.len(), 1, "got: {calls:?}");
+    assert_eq!(calls[0].0, "acme");
+    assert_eq!(calls[0].1, "widgets");
+    assert_eq!(calls[0].2, "toml_parse_error");
+}
+
+#[tokio::test]
+async fn test_load_merge_warden_config_records_config_load_failure_exactly_once_on_fetch_error() {
+    let app_defaults = ApplicationDefaults::default();
+    let spy = SpyMetricsRecorder::default();
+
+    let _ = load_merge_warden_config(
+        "acme",
+        "widgets",
+        ".github/merge-warden.toml",
+        &FailingFetcher,
+        &app_defaults,
+        &spy,
+    )
+    .await;
+
+    let calls = spy.config_load_failure_calls();
+    assert_eq!(calls.len(), 1, "got: {calls:?}");
+    assert_eq!(calls[0].2, "fetch_error");
+}
+
+#[tokio::test]
+async fn test_load_merge_warden_config_does_not_record_failure_when_file_absent() {
+    // A merely-absent config file is the normal "repo has no override" case,
+    // not a broken-config event, and must not increment the counter.
+    let fetcher = MockFetcher::new(None);
+    let app_defaults = ApplicationDefaults::default();
+    let spy = SpyMetricsRecorder::default();
+
+    let result = load_merge_warden_config(
+        "acme",
+        "widgets",
+        ".github/merge-warden.toml",
+        &fetcher,
+        &app_defaults,
+        &spy,
+    )
+    .await;
+
+    assert!(result.is_ok());
+    assert!(spy.config_load_failure_calls().is_empty());
+}
+
+// ── parse_repo_config — structured log fields + metrics ────────────────────
+
+#[tokio::test]
+async fn test_parse_repo_config_fetch_error_log_has_all_required_fields() {
+    let (_, events) = capture_tracing_events(parse_repo_config(
+        "acme",
+        "widgets",
+        ".github/merge-warden.toml",
+        &FailingFetcher,
+        &NoopMetricsRecorder,
+    ))
+    .await;
+
+    assert_warn_or_error_event_has_fields(&events, &REQUIRED_LOG_FIELDS);
+}
+
+#[tokio::test]
+async fn test_parse_repo_config_toml_parse_error_is_logged_with_all_required_fields() {
+    // Same genuine gap as `load_merge_warden_config`'s TOML-parse branch:
+    // no log statement at all exists here as of issue #337.
+    let fetcher = MockFetcher::new(Some("not = valid = toml [[[".to_string()));
+    let (_, events) = capture_tracing_events(parse_repo_config(
+        "acme",
+        "widgets",
+        ".github/merge-warden.toml",
+        &fetcher,
+        &NoopMetricsRecorder,
+    ))
+    .await;
+
+    assert_warn_or_error_event_has_fields(&events, &REQUIRED_LOG_FIELDS);
+}
+
+#[tokio::test]
+async fn test_parse_repo_config_records_config_load_failure_exactly_once_on_toml_parse_error() {
+    let fetcher = MockFetcher::new(Some("not = valid = toml [[[".to_string()));
+    let spy = SpyMetricsRecorder::default();
+
+    let _ = parse_repo_config(
+        "acme",
+        "widgets",
+        ".github/merge-warden.toml",
+        &fetcher,
+        &spy,
+    )
+    .await;
+
+    let calls = spy.config_load_failure_calls();
+    assert_eq!(calls.len(), 1, "got: {calls:?}");
+    assert_eq!(calls[0].2, "toml_parse_error");
+}
+
+#[tokio::test]
+async fn test_parse_repo_config_records_config_load_failure_exactly_once_on_fetch_error() {
+    let spy = SpyMetricsRecorder::default();
+
+    let _ = parse_repo_config(
+        "acme",
+        "widgets",
+        ".github/merge-warden.toml",
+        &FailingFetcher,
+        &spy,
+    )
+    .await;
+
+    let calls = spy.config_load_failure_calls();
+    assert_eq!(calls.len(), 1, "got: {calls:?}");
+    assert_eq!(calls[0].2, "fetch_error");
+}
+
+#[tokio::test]
+async fn test_parse_repo_config_does_not_record_failure_when_file_absent() {
+    let fetcher = MockFetcher::new(None);
+    let spy = SpyMetricsRecorder::default();
+
+    let result = parse_repo_config(
+        "acme",
+        "widgets",
+        ".github/merge-warden.toml",
+        &fetcher,
+        &spy,
+    )
+    .await;
+
+    assert!(result.is_ok());
+    assert!(spy.config_load_failure_calls().is_empty());
+}
+
+// ── load_org_policy — structured log fields + metrics ───────────────────────
+//
+// The four `warn!` sites in `load_org_policy` currently use `org_owner`/
+// `org_repo`/`org_path` field names rather than the required
+// `repository_owner`/`repository`/`config_path` — these tests pin the
+// required names directly, not the old ones.
+
+#[tokio::test]
+async fn test_load_org_policy_not_found_log_has_all_required_fields() {
+    let fetcher = MockFetcher::new(None);
+    let source = make_org_source(false);
+    let (_, events) =
+        capture_tracing_events(load_org_policy(&source, &fetcher, &NoopMetricsRecorder)).await;
+
+    assert_warn_or_error_event_has_fields(&events, &REQUIRED_LOG_FIELDS);
+}
+
+#[tokio::test]
+async fn test_load_org_policy_fetch_error_log_has_all_required_fields() {
+    let source = make_org_source(false);
+    let (_, events) = capture_tracing_events(load_org_policy(
+        &source,
+        &FailingFetcher,
+        &NoopMetricsRecorder,
+    ))
+    .await;
+
+    assert_warn_or_error_event_has_fields(&events, &REQUIRED_LOG_FIELDS);
+}
+
+#[tokio::test]
+async fn test_load_org_policy_parse_error_log_has_all_required_fields() {
+    let fetcher = MockFetcher::new(Some("not valid toml %%%".to_string()));
+    let source = make_org_source(false);
+    let (_, events) =
+        capture_tracing_events(load_org_policy(&source, &fetcher, &NoopMetricsRecorder)).await;
+
+    assert_warn_or_error_event_has_fields(&events, &REQUIRED_LOG_FIELDS);
+}
+
+#[tokio::test]
+async fn test_load_org_policy_unsupported_schema_log_has_all_required_fields() {
+    let toml_text = "schemaVersion = 99\n[enforced]\n[defaults]\n";
+    let fetcher = MockFetcher::new(Some(toml_text.to_string()));
+    let source = make_org_source(false);
+    let (_, events) =
+        capture_tracing_events(load_org_policy(&source, &fetcher, &NoopMetricsRecorder)).await;
+
+    assert_warn_or_error_event_has_fields(&events, &REQUIRED_LOG_FIELDS);
+}
+
+#[tokio::test]
+async fn test_load_org_policy_records_config_load_failure_exactly_once_on_fetch_error() {
+    let source = make_org_source(false);
+    let spy = SpyMetricsRecorder::default();
+
+    let _ = load_org_policy(&source, &FailingFetcher, &spy).await;
+
+    let calls = spy.config_load_failure_calls();
+    assert_eq!(calls.len(), 1, "got: {calls:?}");
+    assert_eq!(calls[0].2, "fetch_error");
+}
+
+#[tokio::test]
+async fn test_load_org_policy_records_config_load_failure_exactly_once_on_toml_parse_error() {
+    let fetcher = MockFetcher::new(Some("not valid toml %%%".to_string()));
+    let source = make_org_source(false);
+    let spy = SpyMetricsRecorder::default();
+
+    let _ = load_org_policy(&source, &fetcher, &spy).await;
+
+    let calls = spy.config_load_failure_calls();
+    assert_eq!(calls.len(), 1, "got: {calls:?}");
+    assert_eq!(calls[0].2, "toml_parse_error");
+}
+
+#[tokio::test]
+async fn test_load_org_policy_records_config_load_failure_exactly_once_on_unsupported_schema_version(
+) {
+    let toml_text = "schemaVersion = 99\n[enforced]\n[defaults]\n";
+    let fetcher = MockFetcher::new(Some(toml_text.to_string()));
+    let source = make_org_source(false);
+    let spy = SpyMetricsRecorder::default();
+
+    let _ = load_org_policy(&source, &fetcher, &spy).await;
+
+    let calls = spy.config_load_failure_calls();
+    assert_eq!(calls.len(), 1, "got: {calls:?}");
+    assert_eq!(calls[0].2, "unsupported_schema_version");
+}
+
+#[tokio::test]
+async fn test_load_org_policy_does_not_record_failure_when_file_absent() {
+    let fetcher = MockFetcher::new(None);
+    let source = make_org_source(false);
+    let spy = SpyMetricsRecorder::default();
+
+    let result = load_org_policy(&source, &fetcher, &spy).await;
+
+    assert!(result.unwrap().is_none());
+    assert!(spy.config_load_failure_calls().is_empty());
+}
+
+// ── resolve_pull_request_config — structured log fields + no double-counting ─
+
+#[tokio::test]
+async fn test_resolve_pull_request_config_repo_config_failed_log_has_config_path_field() {
+    let app_defaults = ApplicationDefaults::default();
+    let (_, events) = capture_tracing_events(resolve_pull_request_config(
+        "acme",
+        "widgets",
+        ".github/merge-warden.toml",
+        &FailingFetcher,
+        &app_defaults,
+        None,
+        &NoopMetricsRecorder,
+    ))
+    .await;
+
+    let repo_tier_events: Vec<&CapturedEvent> = events
+        .iter()
+        .filter(|e| e.message.contains("resolve_pull_request_config"))
+        .collect();
+    assert!(
+        !repo_tier_events.is_empty(),
+        "expected the repo-config-load-failed warning from resolve_pull_request_config itself; \
+         captured: {events:?}"
+    );
+    for field in REQUIRED_LOG_FIELDS {
+        assert!(
+            repo_tier_events
+                .iter()
+                .any(|e| e.fields.get(field).is_some_and(|v| !v.is_empty())),
+            "expected field '{field}' on resolve_pull_request_config's repo-config-failed log \
+             event; captured: {repo_tier_events:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_resolve_pull_request_config_records_one_failure_per_broken_tier_not_double_counted() {
+    // Both the repo tier and the org tier fail (same fetcher is used for
+    // both, returning malformed TOML either way) — exactly one
+    // `record_config_load_failure` call is expected per tier (two total),
+    // never zero and never more than two.
+    let mut app_defaults = ApplicationDefaults::default();
+    app_defaults.org_policy_source = Some(make_org_source(false));
+    let fetcher = MockFetcher::new(Some("not = valid = toml [[[".to_string()));
+    let spy = SpyMetricsRecorder::default();
+
+    let _ = resolve_pull_request_config(
+        "acme",
+        "widgets",
+        ".github/merge-warden.toml",
+        &fetcher,
+        &app_defaults,
+        None,
+        &spy,
+    )
+    .await;
+
+    let calls = spy.config_load_failure_calls();
+    assert_eq!(
+        calls.len(),
+        2,
+        "expected exactly one failure recorded for the repo tier and one for the org tier \
+         (no double-counting, no missed tier); got: {calls:?}"
+    );
+    assert!(
+        calls.iter().all(|c| c.2 == "toml_parse_error"),
+        "both tiers fail on TOML parsing in this fixture; got: {calls:?}"
+    );
+}
+
+// ── Property-based tests (Tier 3) ───────────────────────────────────────────
+
+proptest! {
+    /// For any non-1 `schemaVersion`, `validate_config_content` must reject
+    /// the configuration and its error message must state the actual
+    /// offending version number — never a hardcoded placeholder.
+    #[test]
+    fn prop_validate_config_content_any_non_one_schema_version_is_invalid_and_names_the_version(
+        version in (2u32..100_000u32)
+    ) {
+        let content = format!("schemaVersion = {version}");
+        let outcome = validate_config_content(&content);
+
+        prop_assert!(!outcome.valid);
+        prop_assert_eq!(outcome.errors.len(), 1);
+        prop_assert!(outcome.errors[0].contains(&version.to_string()));
+    }
+
+    /// For any string that genuinely fails to parse as
+    /// `RepositoryProvidedConfig` TOML, `validate_config_content`'s error
+    /// message must never equal the raw `toml::de::Error` string verbatim —
+    /// the universal form of assertion 1/7's "no raw leak" rule, checked
+    /// across a wide range of generated malformed inputs rather than one or
+    /// two hand-picked fixtures.
+    #[test]
+    fn prop_validate_config_content_never_leaks_raw_toml_error_verbatim(
+        s in "[a-zA-Z0-9_. =\\[\\]\"-]{0,60}"
+    ) {
+        if let Err(raw_err) = toml::from_str::<RepositoryProvidedConfig>(&s) {
+            let outcome = validate_config_content(&s);
+            prop_assert!(!outcome.valid);
+            prop_assert_eq!(outcome.errors.len(), 1);
+            prop_assert_ne!(outcome.errors[0].clone(), raw_err.to_string());
+        }
+    }
+
+    /// `validate_schema_version` must record exactly one config-load-failure
+    /// observation, labelled `"unsupported_schema_version"`, for every
+    /// non-1 version — across a wide range of generated version numbers,
+    /// not just the hand-picked 0/2/99 fixtures used elsewhere in this file.
+    #[test]
+    fn prop_validate_schema_version_records_exactly_one_failure_for_any_unsupported_version(
+        version in (0u32..100_000u32).prop_filter("exclude the supported version", |v| *v != 1)
+    ) {
+        let spy = SpyMetricsRecorder::default();
+        let result = validate_schema_version("acme", "widgets", "path", version, &spy);
+
+        prop_assert!(result.is_err());
+        let calls = spy.config_load_failure_calls();
+        prop_assert_eq!(calls.len(), 1);
+        prop_assert_eq!(calls[0].2.clone(), "unsupported_schema_version".to_string());
+    }
+
+    /// Conversely, schemaVersion == 1 must never be treated as a failure,
+    /// regardless of which repository/owner names are involved.
+    #[test]
+    fn prop_validate_schema_version_never_fails_for_supported_version(
+        owner in "[a-z][a-z0-9_-]{0,20}",
+        repo in "[a-z][a-z0-9_-]{0,20}"
+    ) {
+        let spy = SpyMetricsRecorder::default();
+        let result = validate_schema_version(&owner, &repo, "path", 1, &spy);
+
+        prop_assert!(result.is_ok());
+        prop_assert!(spy.config_load_failure_calls().is_empty());
+    }
 }
 
 // ── PolicySet structural merge tests ─────────────────────────────────────────
@@ -4170,9 +5093,16 @@ fail_on_oversized = true
     app_defaults.pr_size_check.enabled = false;
     app_defaults.pr_size_check.fail_on_oversized = false;
 
-    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        "path",
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     assert!(
         config.policies.pull_requests.size_policies.enabled,
@@ -4219,9 +5149,16 @@ revert   = []
     // Use the compile-time defaults so we have known expected values.
     app_defaults.change_type_labels = ChangeTypeLabelConfig::default();
 
-    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        "path",
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     let labels = config
         .change_type_labels
@@ -4303,9 +5240,16 @@ approved_label = "custom-approved"
     app_defaults.pr_state_labels.draft_label = Some("app-draft".to_string());
     app_defaults.pr_state_labels.review_label = Some("app-review".to_string());
 
-    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        "path",
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     assert!(config.policies.pull_requests.pr_state_policies.enabled);
     assert_eq!(
@@ -4354,9 +5298,16 @@ wip_label = "🚧 In Progress"
     let mut app_defaults = ApplicationDefaults::default();
     app_defaults.wip_check.wip_label = Some("work-in-progress".to_string());
 
-    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        "path",
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         config.policies.pull_requests.wip_policies.wip_label,
@@ -4382,9 +5333,16 @@ wip_title_patterns = ["CUSTOM_WIP"]
     let mut app_defaults = ApplicationDefaults::default();
     app_defaults.wip_check.wip_title_patterns = vec!["APP_WIP".to_string()];
 
-    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        "path",
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         config
@@ -4412,9 +5370,16 @@ async fn test_load_merge_warden_config_app_wip_title_patterns_override_when_repo
     // Custom patterns — different from WipCheckConfig::default().wip_title_patterns.
     app_defaults.wip_check.wip_title_patterns = vec!["MY_WIP".to_string()];
 
-    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        "path",
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         config
@@ -4449,9 +5414,16 @@ name_format = ""
         .fallback_label_settings
         .name_format = "app: {change_type}".to_string();
 
-    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        "path",
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     let labels = config
         .change_type_labels
@@ -4483,9 +5455,16 @@ enabled = true
         .color_scheme
         .insert("feat".to_string(), "#custom".to_string());
 
-    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        "path",
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     let labels = config
         .change_type_labels
@@ -4522,9 +5501,16 @@ common_prefixes = []
         .detection_strategy
         .common_prefixes = vec!["app-prefix:".to_string()];
 
-    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        "path",
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     let labels = config
         .change_type_labels
@@ -4553,9 +5539,16 @@ wip_description_patterns = ["🚧 repo-pattern"]
     let mut app_defaults = ApplicationDefaults::default();
     app_defaults.wip_check.wip_description_patterns = vec!["app-desc-pattern".to_string()];
 
-    let config = load_merge_warden_config("a", "b", "path", &fetcher, &app_defaults)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "a",
+        "b",
+        "path",
+        &fetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(
         config
@@ -4609,7 +5602,9 @@ fn make_org_source(fail: bool) -> OrgPolicySource {
 async fn test_load_org_policy_file_not_found_returns_none() {
     let fetcher = MockFetcher::new(None);
     let source = make_org_source(false);
-    let result = load_org_policy(&source, &fetcher).await.unwrap();
+    let result = load_org_policy(&source, &fetcher, &NoopMetricsRecorder)
+        .await
+        .unwrap();
     assert!(result.is_none(), "Missing file should return None");
 }
 
@@ -4618,7 +5613,9 @@ async fn test_load_org_policy_file_not_found_with_fail_returns_none() {
     // fail_if_unreachable only applies to errors, not missing files.
     let fetcher = MockFetcher::new(None);
     let source = make_org_source(true);
-    let result = load_org_policy(&source, &fetcher).await.unwrap();
+    let result = load_org_policy(&source, &fetcher, &NoopMetricsRecorder)
+        .await
+        .unwrap();
     assert!(
         result.is_none(),
         "Missing file with fail_if_unreachable=true should still return None"
@@ -4628,7 +5625,9 @@ async fn test_load_org_policy_file_not_found_with_fail_returns_none() {
 #[tokio::test]
 async fn test_load_org_policy_fetch_error_lenient_returns_none() {
     let source = make_org_source(false);
-    let result = load_org_policy(&source, &FailingFetcher).await.unwrap();
+    let result = load_org_policy(&source, &FailingFetcher, &NoopMetricsRecorder)
+        .await
+        .unwrap();
     assert!(
         result.is_none(),
         "Fetch error with fail_if_unreachable=false should return None"
@@ -4638,7 +5637,7 @@ async fn test_load_org_policy_fetch_error_lenient_returns_none() {
 #[tokio::test]
 async fn test_load_org_policy_fetch_error_strict_returns_error() {
     let source = make_org_source(true);
-    let result = load_org_policy(&source, &FailingFetcher).await;
+    let result = load_org_policy(&source, &FailingFetcher, &NoopMetricsRecorder).await;
     assert!(
         result.is_err(),
         "Fetch error with fail_if_unreachable=true should return Err"
@@ -4654,7 +5653,9 @@ async fn test_load_org_policy_fetch_error_strict_returns_error() {
 async fn test_load_org_policy_parse_error_lenient_returns_none() {
     let fetcher = MockFetcher::new(Some("not valid toml %%%".to_string()));
     let source = make_org_source(false);
-    let result = load_org_policy(&source, &fetcher).await.unwrap();
+    let result = load_org_policy(&source, &fetcher, &NoopMetricsRecorder)
+        .await
+        .unwrap();
     assert!(
         result.is_none(),
         "Parse error with fail_if_unreachable=false should return None"
@@ -4665,7 +5666,7 @@ async fn test_load_org_policy_parse_error_lenient_returns_none() {
 async fn test_load_org_policy_parse_error_strict_returns_error() {
     let fetcher = MockFetcher::new(Some("not valid toml %%%".to_string()));
     let source = make_org_source(true);
-    let result = load_org_policy(&source, &fetcher).await;
+    let result = load_org_policy(&source, &fetcher, &NoopMetricsRecorder).await;
     assert!(
         result.is_err(),
         "Parse error with fail_if_unreachable=true should return Err"
@@ -4682,7 +5683,9 @@ schemaVersion = 99
 "#;
     let fetcher = MockFetcher::new(Some(toml.to_string()));
     let source = make_org_source(false);
-    let result = load_org_policy(&source, &fetcher).await.unwrap();
+    let result = load_org_policy(&source, &fetcher, &NoopMetricsRecorder)
+        .await
+        .unwrap();
     assert!(
         result.is_none(),
         "Unsupported schema version with fail_if_unreachable=false should return None"
@@ -4699,7 +5702,7 @@ schemaVersion = 99
 "#;
     let fetcher = MockFetcher::new(Some(toml.to_string()));
     let source = make_org_source(true);
-    let result = load_org_policy(&source, &fetcher).await;
+    let result = load_org_policy(&source, &fetcher, &NoopMetricsRecorder).await;
     assert!(
         result.is_err(),
         "Unsupported schema version with fail_if_unreachable=true should return Err"
@@ -4716,7 +5719,9 @@ schemaVersion = 1
 "#;
     let fetcher = MockFetcher::new(Some(toml.to_string()));
     let source = make_org_source(false);
-    let result = load_org_policy(&source, &fetcher).await.unwrap();
+    let result = load_org_policy(&source, &fetcher, &NoopMetricsRecorder)
+        .await
+        .unwrap();
     assert!(result.is_some(), "Valid minimal org policy should parse OK");
 }
 
@@ -4733,7 +5738,7 @@ pattern = "^feat:"
 "#;
     let fetcher = MockFetcher::new(Some(toml.to_string()));
     let source = make_org_source(false);
-    let policy = load_org_policy(&source, &fetcher)
+    let policy = load_org_policy(&source, &fetcher, &NoopMetricsRecorder)
         .await
         .unwrap()
         .expect("should return Some");
@@ -4757,7 +5762,7 @@ pattern = "^org-default:"
 "#;
     let fetcher = MockFetcher::new(Some(toml.to_string()));
     let source = make_org_source(false);
-    let policy = load_org_policy(&source, &fetcher)
+    let policy = load_org_policy(&source, &fetcher, &NoopMetricsRecorder)
         .await
         .unwrap()
         .expect("should return Some");
@@ -4838,7 +5843,7 @@ pattern = "^SHOULD-NOT-APPLY:"
 "#;
     let fetcher = MockFetcher::new(Some(toml.to_string()));
 
-    let result = parse_repo_config("owner", "repo", "path", &fetcher).await;
+    let result = parse_repo_config("owner", "repo", "path", &fetcher, &NoopMetricsRecorder).await;
 
     match result {
         Err(ConfigLoadError::UnsupportedSchemaVersion(path, version)) => {
@@ -4882,12 +5887,20 @@ pattern = "^SHOULD-NOT-APPLY:"
     let fetcher = MockFetcher::new(Some(repo_toml.to_string()));
     let app = ApplicationDefaults::default();
 
-    let result = resolve_pull_request_config("owner", "repo", "path", &fetcher, &app, None)
-        .await
-        .expect(
-            "resolve_pull_request_config must degrade gracefully (Ok) even when \
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "path",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .expect(
+        "resolve_pull_request_config must degrade gracefully (Ok) even when \
              the repo config has an unsupported schema version",
-        );
+    );
 
     assert!(
         !result.enforce_title_convention,
@@ -4905,9 +5918,17 @@ pattern = "^SHOULD-NOT-APPLY:"
 async fn test_resolve_pull_request_config_no_org_source_no_repo_file() {
     let fetcher = MockFetcher::new(None);
     let app = ApplicationDefaults::default();
-    let result = resolve_pull_request_config("owner", "repo", "path", &fetcher, &app, None)
-        .await
-        .unwrap();
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "path",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
     // With no configuration at all, title validation is off by default.
     assert!(
         !result.enforce_title_convention,
@@ -4927,9 +5948,17 @@ enabled = false
     let fetcher = MockFetcher::new(Some(repo_toml.to_string()));
     let mut app = ApplicationDefaults::default();
     app.enable_title_validation = true;
-    let result = resolve_pull_request_config("owner", "repo", "path", &fetcher, &app, None)
-        .await
-        .unwrap();
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "path",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
     assert!(
         result.enforce_title_convention,
         "App enforcement flag must override repo setting"
@@ -4947,9 +5976,17 @@ pattern = "^TICKET-[0-9]+"
 "#;
     let fetcher = MockFetcher::new(Some(repo_toml.to_string()));
     let app = ApplicationDefaults::default();
-    let result = resolve_pull_request_config("owner", "repo", "path", &fetcher, &app, None)
-        .await
-        .unwrap();
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "path",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
     assert!(result.enforce_title_convention);
     assert_eq!(result.title_pattern, "^TICKET-[0-9]+");
 }
@@ -5020,10 +6057,17 @@ pattern = "^ORG:"
         fail_if_unreachable: false,
     });
 
-    let result =
-        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
-            .await
-            .unwrap();
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo-policy.toml",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
     assert!(
         result.enforce_title_convention,
         "Org enforced setting must override repo disabled setting"
@@ -5098,10 +6142,17 @@ pattern = "^REPO:"
         fail_if_unreachable: false,
     });
 
-    let result =
-        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
-            .await
-            .unwrap();
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo-policy.toml",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
     assert!(result.enforce_title_convention);
     assert_eq!(
         result.title_pattern, "^REPO:",
@@ -5172,10 +6223,17 @@ pattern = "^ORG-DEFAULT:"
         fail_if_unreachable: false,
     });
 
-    let result =
-        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
-            .await
-            .unwrap();
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo-policy.toml",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
     assert_eq!(
         result.title_pattern, "^ORG-DEFAULT:",
         "Org defaults must win over custom app pattern when repo does not configure the field"
@@ -5193,9 +6251,17 @@ async fn test_resolve_pull_request_config_org_unavailable_lenient_degrades() {
         fail_if_unreachable: false,
     });
     // Both repo and org return None — should succeed using app defaults.
-    let result = resolve_pull_request_config("owner", "repo", "path", &FailingFetcher, &app, None)
-        .await
-        .unwrap();
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "path",
+        &FailingFetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
     assert!(
         !result.enforce_title_convention,
         "Degraded config should fall back to app defaults (title off)"
@@ -5211,8 +6277,16 @@ async fn test_resolve_pull_request_config_org_unavailable_strict_returns_error()
         path: "org-policy.toml".to_string(),
         fail_if_unreachable: true,
     });
-    let result =
-        resolve_pull_request_config("owner", "repo", "path", &FailingFetcher, &app, None).await;
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "path",
+        &FailingFetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await;
     assert!(
         result.is_err(),
         "Strict org unavailable must propagate as Err"
@@ -5265,9 +6339,16 @@ enabled = false
     let mut app = ApplicationDefaults::default();
     app.enable_title_validation = true;
 
-    let config = load_merge_warden_config("owner", "repo", "path", &fetcher, &app)
-        .await
-        .unwrap();
+    let config = load_merge_warden_config(
+        "owner",
+        "repo",
+        "path",
+        &fetcher,
+        &app,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     assert!(
         !config.policies.pull_requests.title_policies.required,
@@ -5565,10 +6646,17 @@ pattern = "^REPO:"
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(make_org_policy_source());
 
-    let result =
-        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
-            .await
-            .unwrap();
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo-policy.toml",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     assert!(
         result
@@ -5618,10 +6706,17 @@ users = ["repo-specific-bot"]
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(make_org_policy_source());
 
-    let result =
-        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
-            .await
-            .unwrap();
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo-policy.toml",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     assert!(
         result
@@ -5671,10 +6766,17 @@ users = ["repo-bot"]
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(make_org_policy_source());
 
-    let result =
-        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
-            .await
-            .unwrap();
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo-policy.toml",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     assert!(
         result
@@ -5726,10 +6828,17 @@ users = []
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(make_org_policy_source());
 
-    let result =
-        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
-            .await
-            .unwrap();
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo-policy.toml",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     assert!(
         result
@@ -5778,10 +6887,17 @@ users = []
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(make_org_policy_source());
 
-    let result =
-        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
-            .await
-            .unwrap();
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo-policy.toml",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     assert!(
         result.bypass_rules.title_convention().users().is_empty(),
@@ -5813,7 +6929,7 @@ pattern = "JIRA-[0-9]+"
 "#;
     let fetcher = MockFetcher::new(Some(toml.to_string()));
     let source = make_org_source(false);
-    let policy = load_org_policy(&source, &fetcher)
+    let policy = load_org_policy(&source, &fetcher, &NoopMetricsRecorder)
         .await
         .unwrap()
         .expect("should return Some");
@@ -5845,7 +6961,7 @@ async fn test_load_org_policy_schema_version_only_returns_default_policy() {
     let toml = "schemaVersion = 1\n";
     let fetcher = MockFetcher::new(Some(toml.to_string()));
     let source = make_org_source(false);
-    let policy = load_org_policy(&source, &fetcher)
+    let policy = load_org_policy(&source, &fetcher, &NoopMetricsRecorder)
         .await
         .unwrap()
         .expect("should return Some");
@@ -6022,10 +7138,17 @@ pattern = "GH-[0-9]+"
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(make_org_policy_source());
 
-    let result =
-        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
-            .await
-            .unwrap();
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo-policy.toml",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     assert!(result.enforce_work_item_references);
     assert_eq!(
@@ -6064,10 +7187,17 @@ required = false
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(make_org_policy_source());
 
-    let result =
-        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
-            .await
-            .unwrap();
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo-policy.toml",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     assert!(
         result.enforce_work_item_references,
@@ -6107,10 +7237,17 @@ required = true
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(make_org_policy_source());
 
-    let result =
-        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
-            .await
-            .unwrap();
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo-policy.toml",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     assert!(
         result.enforce_work_item_references,
@@ -6303,10 +7440,17 @@ required = false
     app.org_policy_source = Some(make_org_policy_source());
     app.enable_title_validation = true; // Tier 4 enforcement
 
-    let result =
-        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
-            .await
-            .unwrap();
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo-policy.toml",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     assert!(
         result.enforce_title_convention,
@@ -6714,6 +7858,7 @@ pattern = "^PAY:"
         &fetcher,
         &app,
         Some(&provider),
+        &NoopMetricsRecorder,
     )
     .await
     .unwrap();
@@ -6770,6 +7915,7 @@ pattern = "^PAY:"
         &fetcher,
         &app,
         Some(&provider),
+        &NoopMetricsRecorder,
     )
     .await
     .unwrap();
@@ -6836,6 +7982,7 @@ pattern = "^REPO:"
         &fetcher,
         &app,
         Some(&provider),
+        &NoopMetricsRecorder,
     )
     .await
     .unwrap();
@@ -6902,6 +8049,7 @@ pattern = "^REPO:"
         &fetcher,
         &app,
         Some(&provider),
+        &NoopMetricsRecorder,
     )
     .await
     .unwrap();
@@ -6947,10 +8095,17 @@ pattern = "^PAY:"
     });
 
     // Pass None — no metadata_provider.
-    let result =
-        resolve_pull_request_config("owner", "repo", "repo-policy.toml", &fetcher, &app, None)
-            .await
-            .unwrap();
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo-policy.toml",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
 
     assert!(
         !result.enforce_title_convention,
@@ -6998,6 +8153,7 @@ pattern = "^PAY:"
         &fetcher,
         &app,
         Some(&FailingMetadataProvider),
+        &NoopMetricsRecorder,
     )
     .await
     .unwrap();
@@ -7065,6 +8221,7 @@ pattern = "^SECOND:"
         &fetcher,
         &app,
         Some(&provider),
+        &NoopMetricsRecorder,
     )
     .await
     .unwrap();
@@ -7097,6 +8254,7 @@ async fn test_conditional_policy_toml_with_no_org_policy_source_ignores_conditio
         &fetcher,
         &app,
         Some(&provider),
+        &NoopMetricsRecorder,
     )
     .await
     .unwrap();

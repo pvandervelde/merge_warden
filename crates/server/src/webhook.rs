@@ -276,6 +276,8 @@ impl MergeWardenWebhookHandler {
 
         let merge_warden_config_path = ".github/merge-warden.toml";
 
+        let config_metrics_recorder =
+            crate::metrics::CoreMetricsRecorder::new(self.metrics.clone());
         let validation_config = match resolve_pull_request_config(
             repo_owner,
             repo_name,
@@ -283,6 +285,7 @@ impl MergeWardenWebhookHandler {
             &provider,
             &self.policies,
             Some(&provider),
+            &config_metrics_recorder,
         )
         .await
         {
@@ -435,6 +438,8 @@ impl MergeWardenWebhookHandler {
         // All PRs in the loop share the same repository, so the config is
         // identical for each.  Load it once before entering the loop to avoid
         // redundant API calls (including the org-policy fetch).
+        let config_metrics_recorder =
+            crate::metrics::CoreMetricsRecorder::new(self.metrics.clone());
         let validation_config = match resolve_pull_request_config(
             repo_owner,
             repo_name,
@@ -442,6 +447,7 @@ impl MergeWardenWebhookHandler {
             &provider,
             &self.policies,
             Some(&provider),
+            &config_metrics_recorder,
         )
         .await
         {

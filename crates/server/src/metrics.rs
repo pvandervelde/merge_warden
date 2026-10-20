@@ -262,6 +262,27 @@ impl Metrics {
         self.pr_bypass_activations_total
             .add(1, &[KeyValue::new("bypass_type", bypass_type.to_string())]);
     }
+
+    /// Increments the `config.load.failures_total` counter for one
+    /// configuration-load failure, labelled `repository_owner`, `repository`,
+    /// and `failure_reason`.
+    ///
+    /// `failure_reason` is expected to be one of `"toml_parse_error"`,
+    /// `"unsupported_schema_version"`, or `"fetch_error"` — see
+    /// `merge_warden_core::MetricsRecorder::record_config_load_failure`.
+    ///
+    /// # Panics
+    /// Never panics.
+    pub fn record_config_load_failure(
+        &self,
+        _repository_owner: &str,
+        _repository: &str,
+        _failure_reason: &str,
+    ) {
+        // Not yet implemented: no `config.load.failures_total` instrument exists
+        // on `Metrics` yet. See issue #337 — GREEN must add the counter to the
+        // struct/`Metrics::new` and record against it here.
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -301,6 +322,16 @@ impl merge_warden_core::MetricsRecorder for CoreMetricsRecorder {
 
     fn record_bypass_activation(&self, bypass_type: &str) {
         self.metrics.record_bypass_activation(bypass_type);
+    }
+
+    fn record_config_load_failure(
+        &self,
+        repository_owner: &str,
+        repository: &str,
+        failure_reason: &str,
+    ) {
+        self.metrics
+            .record_config_load_failure(repository_owner, repository, failure_reason);
     }
 }
 

@@ -18,7 +18,7 @@ use merge_warden_core::config::{
     resolve_pull_request_config, CurrentPullRequestValidationConfiguration,
 };
 use merge_warden_core::errors::ConfigLoadError;
-use merge_warden_core::MergeWarden;
+use merge_warden_core::{MergeWarden, NoopMetricsRecorder};
 use merge_warden_developer_platforms::app_auth::AppAuthProvider;
 use merge_warden_developer_platforms::github::GitHubProvider;
 use std::collections::HashMap;
@@ -181,6 +181,7 @@ impl WebhookHandler for MergeWardenWebhookHandler {
             &provider,
             &self.config.policies,
             Some(&provider),
+            &NoopMetricsRecorder,
         )
         .await
         {
