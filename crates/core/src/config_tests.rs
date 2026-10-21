@@ -2978,6 +2978,100 @@ async fn test_resolve_pull_request_config_records_one_failure_per_broken_tier_no
     );
 }
 
+// ── Structured-field VALUE pinning (QA audit, issue #337) ───────────────────
+//
+// `assert_warn_or_error_event_has_fields` only checks that each required field
+// is *present and non-empty*. That is too weak to catch a log site that wires
+// the WRONG variable into a structured field (e.g. `config_path = repo_name`,
+// or `repository = repo_owner`): the value is still non-empty, so the
+// presence-only assertions stay green. Mutation testing does not surface this
+// either, since cargo-mutants does not swap variable bindings or string
+// literals. These tests pin the exact field VALUES, using three mutually
+// distinct owner/repo/path strings so that any cross-wiring between the three
+// identity fields is detected.
+
+/// Asserts that at least one captured WARN/ERROR event carries `field` with
+/// exactly `expected` as its value — stronger than
+/// `assert_warn_or_error_event_has_fields`, which only checks non-emptiness.
+fn assert_severe_event_has_field_value(events: &[CapturedEvent], field: &str, expected: &str) {
+    let found = events
+        .iter()
+        .filter(|e| e.level == tracing::Level::WARN || e.level == tracing::Level::ERROR)
+        .any(|e| e.fields.get(field).map(String::as_str) == Some(expected));
+    assert!(
+        found,
+        "expected a WARN/ERROR event with field '{field}' == '{expected}'; captured events: {events:?}"
+    );
+}
+
+#[test]
+fn test_validate_schema_version_error_log_fields_carry_correct_values() {
+    let (_, events) = capture_tracing_sync(|| {
+        let _ = validate_schema_version(
+            "owner-alpha",
+            "repo-beta",
+            "dir/gamma.toml",
+            7,
+            &NoopMetricsRecorder,
+        );
+    });
+
+    assert_severe_event_has_field_value(&events, "repository_owner", "owner-alpha");
+    assert_severe_event_has_field_value(&events, "repository", "repo-beta");
+    assert_severe_event_has_field_value(&events, "config_path", "dir/gamma.toml");
+}
+
+#[tokio::test]
+async fn test_load_merge_warden_config_fetch_error_log_fields_carry_correct_values() {
+    let app_defaults = ApplicationDefaults::default();
+    let (_, events) = capture_tracing_events(load_merge_warden_config(
+        "owner-alpha",
+        "repo-beta",
+        "dir/gamma.toml",
+        &FailingFetcher,
+        &app_defaults,
+        &NoopMetricsRecorder,
+    ))
+    .await;
+
+    assert_severe_event_has_field_value(&events, "repository_owner", "owner-alpha");
+    assert_severe_event_has_field_value(&events, "repository", "repo-beta");
+    assert_severe_event_has_field_value(&events, "config_path", "dir/gamma.toml");
+}
+
+#[tokio::test]
+async fn test_parse_repo_config_toml_error_log_fields_carry_correct_values() {
+    let fetcher = MockFetcher::new(Some("not = valid = toml [[[".to_string()));
+    let (_, events) = capture_tracing_events(parse_repo_config(
+        "owner-alpha",
+        "repo-beta",
+        "dir/gamma.toml",
+        &fetcher,
+        &NoopMetricsRecorder,
+    ))
+    .await;
+
+    assert_severe_event_has_field_value(&events, "repository_owner", "owner-alpha");
+    assert_severe_event_has_field_value(&events, "repository", "repo-beta");
+    assert_severe_event_has_field_value(&events, "config_path", "dir/gamma.toml");
+}
+
+#[tokio::test]
+async fn test_load_org_policy_fetch_error_log_fields_carry_correct_values() {
+    let source = make_org_source(false);
+    let (_, events) = capture_tracing_events(load_org_policy(
+        &source,
+        &FailingFetcher,
+        &NoopMetricsRecorder,
+    ))
+    .await;
+
+    // make_org_source uses three mutually distinct identity strings.
+    assert_severe_event_has_field_value(&events, "repository_owner", "my-org");
+    assert_severe_event_has_field_value(&events, "repository", "org-policies");
+    assert_severe_event_has_field_value(&events, "config_path", ".github/merge-warden-org.toml");
+}
+
 // ── Property-based tests (Tier 3) ───────────────────────────────────────────
 
 proptest! {
