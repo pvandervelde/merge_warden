@@ -112,7 +112,7 @@ unhealthy state; check `status`, not the presence of `message`, to detect an act
   using `basic` mode (the default) for liveness probes and reserving `full` mode for
   readiness/traffic-routing decisions, or accept the restart behaviour if that trade-off is
   acceptable for your deployment.
-- Three of the eleven OTLP metrics — `ingress.queue.enqueue_duration_ms`, `ingress.queue.depth`,
+- Three of the twelve OTLP metrics — `ingress.queue.enqueue_duration_ms`, `ingress.queue.depth`,
   and `ingress.queue.age_oldest_message_secs` — are defined and exported as instruments, but
   nothing in this binary currently calls the code that records values for them: in queue mode,
   Merge Warden is a pure queue *consumer* (see

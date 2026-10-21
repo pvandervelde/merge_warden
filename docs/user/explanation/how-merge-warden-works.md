@@ -127,13 +127,21 @@ When a pull request modifies `.github/merge-warden.toml`, Merge Warden automatic
 fetches the version of that file at the PR's head commit and validates it.
 
 - If the file is **invalid** (bad TOML or an unsupported `schemaVersion`), Merge Warden
-  posts a warning comment on the PR describing the errors. This comment is updated on every
-  subsequent push to the PR branch.
+  posts a warning comment on the PR. The message is self-contained: it states what failed
+  (invalid TOML syntax, or an unsupported `schemaVersion`), the impact (application defaults
+  are used until the file is fixed), and the next step (fix the file on the default branch),
+  with the underlying parse detail included as supporting context rather than as the
+  headline message. This comment is updated on every subsequent push to the PR branch.
 - If the file is **valid**, any existing warning comment is automatically deleted.
 
 This validation is purely informational — it does not affect the Merge Warden check result
 and cannot block merging. Its purpose is to give contributors early feedback before a
 broken config lands on the default branch.
+
+Operators can monitor configuration-load failures across all repositories, independent of
+whether any pull request currently touches the config file, via the
+`config_load_failures_total` metric — see
+[HTTP endpoints reference](../reference/http-endpoints.md#get-metrics--prometheus-metrics).
 
 ---
 
