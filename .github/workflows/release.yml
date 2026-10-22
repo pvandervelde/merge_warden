@@ -97,7 +97,7 @@ jobs:
           target: ${{ matrix.target }}
         if: startsWith(matrix.os, 'ubuntu') && !contains(matrix.target, '-musl')
 
-      - uses: taiki-e/install-action@9bcaee1dcae34154180f412e2fa69355a7cda9f6 # v2
+      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2
         with:
           tool: cross
         if: contains(matrix.target, '-musl')
@@ -233,7 +233,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends pkg-config libssl-dev
 
-      - uses: taiki-e/install-action@9bcaee1dcae34154180f412e2fa69355a7cda9f6 # v2
+      - uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2
         with:
           tool: cross
         if: matrix.target == 'aarch64-unknown-linux-gnu'
