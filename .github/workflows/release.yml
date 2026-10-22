@@ -133,7 +133,7 @@ jobs:
           echo "SBOM_PATH=${BASE}.sbom.spdx.json" >> $GITHUB_ENV
 
       - name: Generate SBOM for CLI binary
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           file: ${{ env.BINARY_PATH }}
           output-file: ${{ env.SBOM_PATH }}
@@ -251,7 +251,7 @@ jobs:
         run: cross build --release --target ${{ matrix.target }} -p merge_warden_server
 
       - name: Generate SBOM for server binary
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
         with:
           path: .
           output-file: sbom-${{ matrix.target }}.spdx.json
