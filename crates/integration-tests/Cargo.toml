@@ -21,7 +21,19 @@ tokio-test = "0.4"
 # GitHub API and HTTP client
 # Used only by the integration-test infrastructure (src/github/).
 # This is a testing-only dependency; no production crate uses octocrab.
-octocrab = "0.54"
+# Default features minus "jwt-aws-lc-rs": that pulls in jsonwebtoken's
+# aws_lc_rs backend, which conflicts with github-bot-sdk's rust_crypto
+# backend under workspace feature unification (ambiguous CryptoProvider
+# panic at runtime). This crate only uses octocrab's plain REST client.
+octocrab = { version = "0.54", default-features = false, features = [
+    "follow-redirect",
+    "retry",
+    "rustls",
+    "timeout",
+    "tracing",
+    "default-client",
+    "rustls-ring",
+] }
 reqwest = { workspace = true, features = ["json"] }
 axum = { workspace = true }
 

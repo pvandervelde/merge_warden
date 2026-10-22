@@ -826,7 +826,7 @@ maxLines = 1000
         // test repositories may not have all label names pre-created, and label
         // assignment is not critical to PR creation itself.
         if !spec.labels.is_empty() {
-            let pr_num = pr.number.unwrap_or_default();
+            let pr_num = pr.number;
             if let Err(e) = self
                 .github_client
                 .issues(&repository.organization, &repository.name)
@@ -842,8 +842,8 @@ maxLines = 1000
         }
 
         Ok(crate::utils::TestPullRequest {
-            number: pr.number.unwrap_or_default(),
-            id: pr.id.unwrap().0,
+            number: pr.number,
+            id: pr.id.into_inner(),
             title: pr.title.unwrap_or_default(),
             body: pr.body.unwrap_or_default(),
             head: spec.source_branch.clone(),
@@ -866,7 +866,7 @@ maxLines = 1000
             .await
             .map_err(|e| TestError::github_api_error("get_pull_request", &format!("{e:?}")))?;
 
-        let head_sha = pr.head.unwrap().sha;
+        let head_sha = pr.head.sha;
 
         // Get check runs - use head SHA as Commitish
         let check_runs = self

@@ -438,7 +438,7 @@ impl TestBotInstance {
             headers: HeaderMap,
             body: String,
         ) -> axum::http::StatusCode {
-            use hmac::{Hmac, Mac};
+            use hmac::{Hmac, KeyInit, Mac};
             use sha2::Sha256;
             type HmacSha256 = Hmac<Sha256>;
 
@@ -682,7 +682,7 @@ impl TestBotInstance {
         event_type: &str,
         payload: &serde_json::Value,
     ) -> TestResult<WebhookResponse> {
-        use hmac::{Hmac, Mac};
+        use hmac::{Hmac, KeyInit, Mac};
         use sha2::Sha256;
         type HmacSha256 = Hmac<Sha256>;
 
@@ -802,7 +802,7 @@ impl TestBotInstance {
             .await
             .map_err(|e| TestError::github_api_error("get_pull_request", &format!("{e:?}")))?;
 
-        let head_sha = pr.head.unwrap().sha;
+        let head_sha = pr.head.sha;
 
         let check_runs = self
             .github_client
