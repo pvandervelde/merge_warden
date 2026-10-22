@@ -158,7 +158,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Install cargo-audit
         uses: taiki-e/install-action@9bcaee1dcae34154180f412e2fa69355a7cda9f6 # v2
         with:
@@ -259,7 +259,7 @@ jobs:
           profile: minimal
           override: true
           components: rustfmt
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - name: Check formatting
         run: cargo fmt --all -- --check
 
@@ -275,7 +275,7 @@ jobs:
           toolchain: stable
           components: clippy
           override: true
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
       - run: cargo clippy --all-features -- -D warnings
 
   cargo-deny:
@@ -308,7 +308,7 @@ jobs:
         with:
           tool: cargo-llvm-cov@0.6.10
 
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Generate code coverage
         run: |
@@ -333,7 +333,7 @@ jobs:
       - name: Install Rust
         run: rustup update stable
 
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Run doc-tests
         run: cargo test --doc --all-features --workspace --exclude integration_tests
@@ -352,7 +352,7 @@ jobs:
         with:
           targets: x86_64-unknown-linux-gnu
 
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Install system dependencies
         run: |
@@ -422,7 +422,7 @@ jobs:
           tool: cross
         if: contains(matrix.target, '-musl')
 
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Set static CRT for Windows
         run: echo "RUSTFLAGS=${RUSTFLAGS} -C target-feature=+crt-static" >>
@@ -458,7 +458,7 @@ jobs:
       - name: Install Rust
         run: rustup update stable
 
-      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
       - name: Run structural tests (no credentials required)
         run: cargo test --package merge-warden-integration-tests --test crate_structure_tests -- --nocapture
