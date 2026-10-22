@@ -192,8 +192,10 @@ pub trait MetricsRecorder: Send + Sync + std::fmt::Debug {
     /// `failure_reason` MUST be one of `"toml_parse_error"`,
     /// `"unsupported_schema_version"`, or `"fetch_error"` — see
     /// `crates/core/src/config.rs`'s repo- and org-policy-config loading
-    /// functions for the call sites that observe each reason. Backs the
-    /// `config.load.failures_total` counter (see `docs/spec/operations/monitoring.md`).
+    /// functions, as well as this crate's `process_pull_request`'s PR-diff
+    /// config-change check, for the call sites that observe each reason.
+    /// Backs the `config.load.failures_total` counter (see
+    /// `docs/spec/operations/monitoring.md`).
     fn record_config_load_failure(
         &self,
         repository_owner: &str,
