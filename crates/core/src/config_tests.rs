@@ -2490,14 +2490,82 @@ where
     }
 }
 
+/// Ensures that at least two long-lived `tracing::Dispatch` instances are
+/// permanently registered in `tracing-core`'s process-wide dispatcher
+/// registry, and performs one `rebuild_interest_cache()` call afterwards.
+///
+/// # Why this exists (issue #337, Verifier Finding 2 — root cause)
+///
+/// `tracing-core`'s per-callsite `Interest` cache is populated the *first
+/// time ever* a given callsite (e.g. one specific `warn!` call) fires in the
+/// process. `tracing_core::callsite`'s internal `Callsites::rebuild_interest`
+/// has two code paths depending on how many `Dispatch` instances are alive
+/// process-wide at that moment:
+///
+/// * With zero or one `Dispatch` ever constructed (and still alive), it
+///   takes a fast path that asks only the *calling thread's* current
+///   dispatch (`tracing::dispatcher::get_default`) — i.e. whichever thread
+///   happens to touch the callsite first. If that thread has no
+///   thread-local override active (the common case for ordinary,
+///   non-capturing tests), the result is cached as `Interest::never()`
+///   **permanently** for every thread, regardless of whether some other
+///   thread's `tracing::subscriber::set_default` override would have wanted
+///   it.
+/// * With two or more `Dispatch` instances alive *simultaneously*, it
+///   instead folds the interest of every alive, registered dispatch, from
+///   wherever `rebuild_interest` is invoked, independent of which thread
+///   does the touching. As long as at least one of those dispatches is
+///   permissive, the result can never be cached as `never()`.
+///
+/// Under `cargo test`'s default parallel execution, this module's dozens of
+/// `#[test]`/`#[tokio::test]` functions that call `validate_schema_version`,
+/// `load_merge_warden_config`, etc. race to be the very first (process-wide)
+/// to touch a given `warn!`/`error!` call site; whichever one wins can
+/// permanently poison it to `never()` before a capturing test's own
+/// `set_default` override is ever consulted. This was observed as
+/// `test_load_org_policy_parse_error_log_has_all_required_fields` failing
+/// under parallel execution ("captured events: []").
+///
+/// Registering (and permanently keeping alive, via a `static`) two
+/// always-interested dispatches as soon as any capturing helper first runs
+/// forces the second code path above for the remainder of the process's
+/// life, closing the race for every callsite touched afterwards, and the
+/// trailing `rebuild_interest_cache()` call retroactively fixes any
+/// callsite that was already poisoned to `never()` before this ran.
+fn ensure_tracing_interest_cache_cannot_be_poisoned_to_never() {
+    use tracing_subscriber::layer::SubscriberExt as _;
+
+    static PERMISSIVE_DISPATCHERS: std::sync::OnceLock<[tracing::Dispatch; 2]> =
+        std::sync::OnceLock::new();
+
+    PERMISSIVE_DISPATCHERS.get_or_init(|| {
+        let make_permissive_dispatch = || {
+            let discard = std::sync::Arc::new(Mutex::new(Vec::new()));
+            let layer = CapturingLayer { events: discard };
+            tracing::Dispatch::new(tracing_subscriber::registry().with(layer))
+        };
+        // `Dispatch::new` registers each instance with the global registry
+        // as a side effect of construction; constructing the second one
+        // (while the first, held in this same array, is still alive) is what
+        // flips `has_just_one` to `false` for the rest of the process.
+        [make_permissive_dispatch(), make_permissive_dispatch()]
+    });
+
+    tracing::callsite::rebuild_interest_cache();
+}
+
 /// Runs the synchronous closure `f` with a capturing tracing subscriber
 /// installed as the thread-local default, returning `f`'s result alongside
-/// every event emitted during its execution.
+/// every event emitted during its execution. See
+/// [`ensure_tracing_interest_cache_cannot_be_poisoned_to_never`] for why this
+/// is necessary (issue #337, Verifier Finding 2).
 fn capture_tracing_sync<F, T>(f: F) -> (T, Vec<CapturedEvent>)
 where
     F: FnOnce() -> T,
 {
     use tracing_subscriber::layer::SubscriberExt as _;
+
+    ensure_tracing_interest_cache_cannot_be_poisoned_to_never();
 
     let events = std::sync::Arc::new(Mutex::new(Vec::new()));
     let layer = CapturingLayer {
@@ -2515,12 +2583,16 @@ where
 /// thread-local default for the lifetime of the `set_default` guard, which
 /// is held across every `.await` point since `#[tokio::test]` defaults to a
 /// single-threaded current-thread runtime (the future never hops OS
-/// threads). Returns `f`'s output alongside every event emitted.
+/// threads). Returns `f`'s output alongside every event emitted. See
+/// [`ensure_tracing_interest_cache_cannot_be_poisoned_to_never`] for why this
+/// is necessary (issue #337, Verifier Finding 2).
 async fn capture_tracing_events<F, T>(f: F) -> (T, Vec<CapturedEvent>)
 where
     F: std::future::Future<Output = T>,
 {
     use tracing_subscriber::layer::SubscriberExt as _;
+
+    ensure_tracing_interest_cache_cannot_be_poisoned_to_never();
 
     let events = std::sync::Arc::new(Mutex::new(Vec::new()));
     let layer = CapturingLayer {
