@@ -45,7 +45,7 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 # Cryptography and encoding
-base64 = "0.22"
+base64 = "0.23"
 hex = { workspace = true }
 hmac = { workspace = true }
 sha2 = { workspace = true }
