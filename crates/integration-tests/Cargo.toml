@@ -33,7 +33,7 @@ toml = { workspace = true }
 
 # Test utilities and mocking
 mockall = "0.14"
-serial_test = "3.2"
+serial_test = "4.0"
 tempfile = "3.8"
 uuid = { version = "1.10", features = ["v4"] }
 wiremock = "0.6"
