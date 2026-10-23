@@ -18,7 +18,7 @@ use merge_warden_core::config::{
     resolve_pull_request_config, CurrentPullRequestValidationConfiguration,
 };
 use merge_warden_core::errors::ConfigLoadError;
-use merge_warden_core::MergeWarden;
+use merge_warden_core::{MergeWarden, NoopMetricsRecorder};
 use merge_warden_developer_platforms::app_auth::AppAuthProvider;
 use merge_warden_developer_platforms::github::GitHubProvider;
 use std::collections::HashMap;
@@ -181,6 +181,7 @@ impl WebhookHandler for MergeWardenWebhookHandler {
             &provider,
             &self.config.policies,
             Some(&provider),
+            &NoopMetricsRecorder,
         )
         .await
         {
@@ -201,8 +202,11 @@ impl WebhookHandler for MergeWardenWebhookHandler {
             }
             Err(e) => {
                 warn!(
-                    "Failed to resolve PR config from {}: {}. Falling back to compiled-in defaults.",
-                    merge_warden_config_path, e
+                    repository_owner = repo_owner,
+                    repository = repo_name,
+                    config_path = merge_warden_config_path,
+                    error = %e,
+                    "Failed to resolve PR config; falling back to compiled-in defaults"
                 );
                 CurrentPullRequestValidationConfiguration::from_app_defaults(&self.config.policies)
             }

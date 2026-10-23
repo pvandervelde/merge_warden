@@ -159,11 +159,28 @@ pr_validation_duration_ms_count 12
 # HELP pr_bypass_activations_total Bypass rule activations
 # TYPE pr_bypass_activations_total counter
 pr_bypass_activations_total{bypass_type="admin_override"} 1
+# HELP config_load_failures_total Configuration load failures, labelled by repository_owner, repository, and failure_reason
+# TYPE config_load_failures_total counter
+config_load_failures_total{failure_reason="toml_parse_error",repository="widget-api",repository_owner="acme-corp"} 3
 ```
 
 Metric names use underscores rather than the dotted form used for OTLP export (e.g.
 `ingress_webhook_requests_total` here vs. `ingress.webhook.requests_total` over OTLP) —
 this follows standard Prometheus naming convention, not a difference in what is measured.
+The OTLP name for the last metric above is `config.load.failures_total`; like the other
+counters that already end in `_total` (`ingress_webhook_requests_total`,
+`pr_bypass_activations_total`), the Prometheus exporter does not append a second `_total`
+suffix.
+
+`config_load_failures_total` is incremented whenever a repository's
+`.github/merge-warden.toml`, or the organisation policy file, fails to load because the
+fetch failed (`failure_reason="fetch_error"`), the file could not be parsed as TOML
+(`"toml_parse_error"`), or its `schemaVersion` is unsupported (`"unsupported_schema_version"`).
+It is **not** incremented when a config file is simply absent — that is the normal,
+supported case of falling back to defaults, not a failure. Use this counter to alert on
+configuration problems across a fleet of repositories; see
+[Per-repository configuration schema](per-repo-config.md) for what happens to policy
+evaluation when a repository's config fails to load.
 
 ---
 

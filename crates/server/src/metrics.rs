@@ -104,6 +104,7 @@ pub struct Metrics {
     processing_success_rate: Gauge<f64>,
     pr_validation_duration_ms: Histogram<f64>,
     pr_bypass_activations_total: Counter<u64>,
+    config_load_failures_total: Counter<u64>,
 }
 
 impl Metrics {
@@ -170,6 +171,12 @@ impl Metrics {
             pr_bypass_activations_total: meter
                 .u64_counter("pr.bypass.activations_total")
                 .with_description("Bypass rule activations, labelled by bypass_type")
+                .build(),
+            config_load_failures_total: meter
+                .u64_counter("config.load.failures_total")
+                .with_description(
+                    "Configuration load failures, labelled by repository_owner, repository, and failure_reason",
+                )
                 .build(),
         }
     }
@@ -262,6 +269,32 @@ impl Metrics {
         self.pr_bypass_activations_total
             .add(1, &[KeyValue::new("bypass_type", bypass_type.to_string())]);
     }
+
+    /// Increments the `config.load.failures_total` counter for one
+    /// configuration-load failure, labelled `repository_owner`, `repository`,
+    /// and `failure_reason`.
+    ///
+    /// `failure_reason` is expected to be one of `"toml_parse_error"`,
+    /// `"unsupported_schema_version"`, or `"fetch_error"` — see
+    /// `merge_warden_core::MetricsRecorder::record_config_load_failure`.
+    ///
+    /// # Panics
+    /// Never panics.
+    pub fn record_config_load_failure(
+        &self,
+        repository_owner: &str,
+        repository: &str,
+        failure_reason: &str,
+    ) {
+        self.config_load_failures_total.add(
+            1,
+            &[
+                KeyValue::new("repository_owner", repository_owner.to_string()),
+                KeyValue::new("repository", repository.to_string()),
+                KeyValue::new("failure_reason", failure_reason.to_string()),
+            ],
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -301,6 +334,16 @@ impl merge_warden_core::MetricsRecorder for CoreMetricsRecorder {
 
     fn record_bypass_activation(&self, bypass_type: &str) {
         self.metrics.record_bypass_activation(bypass_type);
+    }
+
+    fn record_config_load_failure(
+        &self,
+        repository_owner: &str,
+        repository: &str,
+        failure_reason: &str,
+    ) {
+        self.metrics
+            .record_config_load_failure(repository_owner, repository, failure_reason);
     }
 }
 

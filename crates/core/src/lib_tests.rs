@@ -4,12 +4,12 @@ use crate::{
         BypassRule, BypassRules, ChangeTypeLabelConfig, ConventionalCommitMappings,
         CurrentPullRequestValidationConfiguration, FallbackLabelSettings, IssuePropagationConfig,
         KeywordLabelsConfig, LabelDetectionStrategy, WipCheckConfig, CONFIG_COMMENT_MARKER,
-        CONVENTIONAL_COMMIT_REGEX, MISSING_WORK_ITEM_LABEL, SIZE_COMMENT_MARKER,
+        CONFIG_FILE_PATH, CONVENTIONAL_COMMIT_REGEX, MISSING_WORK_ITEM_LABEL, SIZE_COMMENT_MARKER,
         TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL, WIP_COMMENT_MARKER, WORK_ITEM_COMMENT_MARKER,
         WORK_ITEM_REGEX,
     },
     validation_result::{BypassRuleType, ValidationResult},
-    MergeWarden, MetricsRecorder,
+    MergeWarden, MetricsRecorder, NoopMetricsRecorder,
 };
 use async_trait::async_trait;
 use std::{
@@ -4538,6 +4538,53 @@ async fn test_config_check_does_not_affect_check_conclusion() {
     );
 }
 
+// ---------------------------------------------------------------------------
+// Issue #337, assertion 7: no raw `toml::de::Error` string must ever stand
+// alone as the entire content of a PR-comment error line. This exercises
+// the full `communicate_config_validity_status` path (via
+// `process_pull_request`), not just `validate_config_content` in isolation,
+// so it also catches a regression where the comment-building code in
+// `lib.rs` re-introduces the raw string (e.g. by reformatting
+// `outcome.errors` incorrectly) even if `validate_config_content` itself is
+// fixed correctly.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_config_check_error_comment_never_contains_raw_toml_error_as_a_whole_line() {
+    let bad_toml = "not = valid = toml [[[";
+    let raw_toml_error = toml::from_str::<crate::config::RepositoryProvidedConfig>(bad_toml)
+        .expect_err("fixture must be invalid TOML")
+        .to_string();
+
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"))
+        .with_config_file(Some(bad_toml.to_string()));
+
+    let warden = MergeWarden::new(provider);
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    let config_comment = comments
+        .iter()
+        .find(|c| c.body.contains(CONFIG_COMMENT_MARKER))
+        .expect("a config validity error comment must have been posted");
+
+    let raw_error_line = format!("- {raw_toml_error}");
+    assert!(
+        !config_comment.body.contains(&raw_error_line),
+        "the raw toml::de::Error string must never appear as a whole error line in the PR \
+         comment [security]; comment body: {}",
+        config_comment.body
+    );
+    assert!(
+        config_comment.body.contains(CONFIG_FILE_PATH),
+        "the PR comment must name the config file path; comment body: {}",
+        config_comment.body
+    );
+}
+
 #[tokio::test]
 async fn test_config_check_deletes_stale_comment_when_config_becomes_valid() {
     // When there is an existing CONFIG_COMMENT_MARKER comment from a previous
@@ -4673,7 +4720,9 @@ async fn test_config_check_no_repost_when_error_comment_unchanged() {
     use indoc::formatdoc;
 
     let bad_toml = "schemaVersion = 99";
-    let error_lines = "- schemaVersion must be 1, found 99";
+    let error_lines = "- Failed to load `.github/merge-warden.toml`: schemaVersion must be 1, \
+         found 99. Application defaults will be used until this is fixed. Update schemaVersion \
+         to 1 in the config file on the default branch.";
     let expected_body = formatdoc! {"
         {marker}
         ⚠️ **Invalid merge-warden configuration**
@@ -4936,6 +4985,45 @@ async fn process_pull_request_check_conclusion_unaffected_by_stability() {
 }
 
 // ---------------------------------------------------------------------------
+// NoopMetricsRecorder — issue #337 assertion 5: `record_config_load_failure`
+// must be a true no-op (no panic, no observable side effect).
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn noop_metrics_recorder_record_config_load_failure_does_not_panic() {
+    let recorder = NoopMetricsRecorder;
+    recorder.record_config_load_failure("owner", "repo", "toml_parse_error");
+}
+
+#[tokio::test]
+async fn noop_metrics_recorder_record_config_load_failure_accepts_every_documented_failure_reason()
+{
+    let recorder = NoopMetricsRecorder;
+    for reason in [
+        "toml_parse_error",
+        "unsupported_schema_version",
+        "fetch_error",
+    ] {
+        recorder.record_config_load_failure("owner", "repo", reason);
+    }
+}
+
+#[tokio::test]
+async fn noop_metrics_recorder_record_config_load_failure_has_no_observable_side_effect() {
+    // `NoopMetricsRecorder` is a zero-sized unit struct (`struct NoopMetricsRecorder;`)
+    // with no internal state, so a panic is the only possible observable side
+    // effect to rule out; reaching the end of this loop already proves there
+    // is none, and `Default`/`Clone`/`Copy` round-tripping confirms no hidden
+    // state was smuggled in behind the trait object.
+    let recorder = NoopMetricsRecorder;
+    let cloned = recorder;
+    for _ in 0..1000 {
+        cloned.record_config_load_failure("owner", "repo", "fetch_error");
+    }
+    let _ = NoopMetricsRecorder::default();
+}
+
+// ---------------------------------------------------------------------------
 // MetricsRecorder bridge — verifies `record_validation_duration_ms` and
 // `record_bypass_activation` fire on the right exit paths, exactly the right
 // number of times. See `.llm/task.md` / the QA audit's focus area 3.
@@ -4948,6 +5036,18 @@ async fn process_pull_request_check_conclusion_unaffected_by_stability() {
 struct RecordingMetricsRecorder {
     durations_ms: Mutex<Vec<f64>>,
     bypass_types: Mutex<Vec<String>>,
+    /// `(repository_owner, repository, failure_reason)` tuples, one per
+    /// `record_config_load_failure` call received. Exercised by
+    /// `process_pull_request`'s PR-diff config-check path (issue #337,
+    /// Finding 1) when a PR modifies `.github/merge-warden.toml` with
+    /// invalid content at its head SHA.
+    config_load_failures: Mutex<Vec<(String, String, String)>>,
+}
+
+impl RecordingMetricsRecorder {
+    fn config_load_failure_calls(&self) -> Vec<(String, String, String)> {
+        self.config_load_failures.lock().unwrap().clone()
+    }
 }
 
 impl MetricsRecorder for RecordingMetricsRecorder {
@@ -4960,6 +5060,19 @@ impl MetricsRecorder for RecordingMetricsRecorder {
             .lock()
             .unwrap()
             .push(bypass_type.to_string());
+    }
+
+    fn record_config_load_failure(
+        &self,
+        repository_owner: &str,
+        repository: &str,
+        failure_reason: &str,
+    ) {
+        self.config_load_failures.lock().unwrap().push((
+            repository_owner.to_string(),
+            repository.to_string(),
+            failure_reason.to_string(),
+        ));
     }
 }
 
@@ -5168,5 +5281,288 @@ async fn metrics_recorder_records_single_bypass_activation_when_only_one_rule_by
         bypass_calls.as_slice(),
         &["title_convention".to_string()],
         "expected exactly one recorded activation for the single bypassed rule: {bypass_calls:?}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Issue #337, Verifier Finding 1 (Critical): the PR-diff config-check path
+// (`process_pull_request` -> `Ok(Some(content))` -> `validate_config_content`)
+// was the one broken-config code path that neither recorded a
+// `config.load.failures_total` observation nor logged a WARN/ERROR event with
+// `repository_owner`/`repository`/`config_path`/`error` fields when the PR's
+// `.github/merge-warden.toml` content was invalid. This is the issue's own
+// motivating example (a contributor pushes a broken config file in a PR), so
+// it must be covered by the same observability guarantees as every other
+// broken-config log site in this crate.
+//
+// A minimal tracing-capture harness is duplicated here (not reused from
+// `config_tests.rs`) because `config::tests` is a private module (`mod
+// tests;`, not `pub(crate) mod tests;`) and so is not visible from this
+// sibling `tests` module declared in `lib.rs`.
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone)]
+struct CapturedEvent {
+    level: tracing::Level,
+    fields: HashMap<String, String>,
+}
+
+#[derive(Default)]
+struct FieldVisitor {
+    fields: HashMap<String, String>,
+}
+
+impl tracing::field::Visit for FieldVisitor {
+    fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+        let rendered = format!("{value:?}");
+        let unquoted = rendered
+            .strip_prefix('"')
+            .and_then(|s| s.strip_suffix('"'))
+            .unwrap_or(&rendered)
+            .to_string();
+        self.fields.insert(field.name().to_string(), unquoted);
+    }
+}
+
+struct CapturingLayer {
+    events: Arc<Mutex<Vec<CapturedEvent>>>,
+}
+
+impl<S> tracing_subscriber::Layer<S> for CapturingLayer
+where
+    S: tracing::Subscriber,
+{
+    fn on_event(
+        &self,
+        event: &tracing::Event<'_>,
+        _ctx: tracing_subscriber::layer::Context<'_, S>,
+    ) {
+        let mut visitor = FieldVisitor::default();
+        event.record(&mut visitor);
+        self.events.lock().unwrap().push(CapturedEvent {
+            level: *event.metadata().level(),
+            fields: visitor.fields,
+        });
+    }
+}
+
+/// Ensures that at least two long-lived `tracing::Dispatch` instances are
+/// permanently registered in `tracing-core`'s process-wide dispatcher
+/// registry, and performs one `rebuild_interest_cache()` call afterwards.
+///
+/// # Why this exists (issue #337, Verifier Finding 2 — root cause)
+///
+/// `tracing-core`'s per-callsite `Interest` cache is populated the *first
+/// time ever* a given callsite (e.g. one specific `warn!` call) fires in the
+/// process. Crucially, `tracing_core::callsite::Callsites::rebuild_interest`
+/// has two code paths depending on how many `Dispatch` instances are
+/// currently alive process-wide (see `tracing-core`'s `dispatchers` module):
+///
+/// * If zero or one `Dispatch` has ever been constructed (and is still
+///   alive), it takes a "fast path" that asks only the *calling thread's*
+///   current dispatch (`tracing::dispatcher::get_default`) — i.e. whichever
+///   thread happens to touch the callsite first. If that thread has no
+///   thread-local override active (the common case for ordinary,
+///   non-capturing tests), the result is cached as `Interest::never()`,
+///   **permanently**, for every thread, regardless of whether some other
+///   thread's `tracing::subscriber::set_default` override would have wanted
+///   it.
+/// * If two or more `Dispatch` instances are alive *simultaneously*, it
+///   instead folds the interest of every alive, registered dispatch
+///   (`Interest::and`), independent of which thread does the touching. As
+///   long as at least one of those dispatches is permissive, the result can
+///   never be cached as `never()`.
+///
+/// Under `cargo test`'s default parallel execution, dozens of unrelated,
+/// non-capturing `test_config_check_*` tests exercise the exact same new
+/// `warn!` call site this module's capturing tests assert on. Whichever one
+/// happens to be the very first (process-wide) to touch that call site can
+/// permanently poison it to `never()` before a capturing test's own
+/// `tracing::subscriber::set_default` override is ever consulted — this was
+/// observed empirically as this module's tests failing 2-4 times out of 5
+/// default-parallelism runs.
+///
+/// Registering (and permanently keeping alive, via a `static`) two
+/// always-interested dispatches as soon as any capturing helper first runs
+/// forces the second code path above for the remainder of the process's
+/// life, closing the race for every callsite touched afterwards, and the
+/// trailing `rebuild_interest_cache()` call retroactively fixes any
+/// callsite that was already poisoned to `never()` before this ran.
+fn ensure_tracing_interest_cache_cannot_be_poisoned_to_never() {
+    use tracing_subscriber::layer::SubscriberExt as _;
+
+    static PERMISSIVE_DISPATCHERS: std::sync::OnceLock<[tracing::Dispatch; 2]> =
+        std::sync::OnceLock::new();
+
+    PERMISSIVE_DISPATCHERS.get_or_init(|| {
+        let make_permissive_dispatch = || {
+            let discard = Arc::new(Mutex::new(Vec::new()));
+            let layer = CapturingLayer { events: discard };
+            tracing::Dispatch::new(tracing_subscriber::registry().with(layer))
+        };
+        // `Dispatch::new` registers each instance with the global registry
+        // as a side effect of construction; constructing the second one
+        // (while the first, held in this same array, is still alive) is what
+        // flips `has_just_one` to `false` for the rest of the process.
+        [make_permissive_dispatch(), make_permissive_dispatch()]
+    });
+
+    tracing::callsite::rebuild_interest_cache();
+}
+
+/// Runs the future `f` with a capturing tracing subscriber installed as the
+/// thread-local default, returning `f`'s output alongside every event
+/// emitted during its execution. See
+/// [`ensure_tracing_interest_cache_cannot_be_poisoned_to_never`] for why this
+/// is necessary (issue #337, Verifier Finding 2).
+async fn capture_tracing_events<F, T>(f: F) -> (T, Vec<CapturedEvent>)
+where
+    F: std::future::Future<Output = T>,
+{
+    use tracing_subscriber::layer::SubscriberExt as _;
+
+    ensure_tracing_interest_cache_cannot_be_poisoned_to_never();
+
+    let events = Arc::new(Mutex::new(Vec::new()));
+    let layer = CapturingLayer {
+        events: events.clone(),
+    };
+    let subscriber = tracing_subscriber::registry().with(layer);
+    let guard = tracing::subscriber::set_default(subscriber);
+    let result = f.await;
+    drop(guard);
+    let captured = events.lock().unwrap().clone();
+    (result, captured)
+}
+
+/// Asserts that at least one captured `WARN`- or `ERROR`-level event carries
+/// every field in `required_fields` with a non-empty value (not necessarily
+/// all from the same event).
+fn assert_warn_or_error_event_has_fields(events: &[CapturedEvent], required_fields: &[&str]) {
+    let severe: Vec<&CapturedEvent> = events
+        .iter()
+        .filter(|e| e.level == tracing::Level::WARN || e.level == tracing::Level::ERROR)
+        .collect();
+    assert!(
+        !severe.is_empty(),
+        "expected at least one WARN or ERROR log event; captured events: {events:?}"
+    );
+    for field in required_fields {
+        assert!(
+            severe
+                .iter()
+                .any(|e| e.fields.get(*field).is_some_and(|v| !v.is_empty())),
+            "expected a WARN/ERROR event with a non-empty '{field}' field; captured severe \
+             events: {severe:?}"
+        );
+    }
+}
+
+const CONFIG_CHECK_REQUIRED_LOG_FIELDS: [&str; 4] =
+    ["repository_owner", "repository", "config_path", "error"];
+
+#[tokio::test]
+async fn test_config_check_records_config_load_failure_with_toml_parse_error_reason() {
+    let bad_toml = "not = valid = toml [[[";
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"))
+        .with_config_file(Some(bad_toml.to_string()));
+    let recorder = Arc::new(RecordingMetricsRecorder::default());
+
+    let warden = MergeWarden::new(provider).with_metrics_recorder(recorder.clone());
+
+    let (_, events) = capture_tracing_events(warden.process_pull_request("owner", "repo", 1)).await;
+
+    let calls = recorder.config_load_failure_calls();
+    assert_eq!(
+        calls.len(),
+        1,
+        "expected exactly one record_config_load_failure call for an invalid PR-diff \
+         config file; got: {calls:?}"
+    );
+    assert_eq!(
+        calls[0],
+        (
+            "owner".to_string(),
+            "repo".to_string(),
+            "toml_parse_error".to_string()
+        )
+    );
+    assert_warn_or_error_event_has_fields(&events, &CONFIG_CHECK_REQUIRED_LOG_FIELDS);
+}
+
+#[tokio::test]
+async fn test_config_check_records_config_load_failure_with_unsupported_schema_version_reason() {
+    let bad_schema_toml = "schemaVersion = 99";
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"))
+        .with_config_file(Some(bad_schema_toml.to_string()));
+    let recorder = Arc::new(RecordingMetricsRecorder::default());
+
+    let warden = MergeWarden::new(provider).with_metrics_recorder(recorder.clone());
+
+    let (_, events) = capture_tracing_events(warden.process_pull_request("owner", "repo", 1)).await;
+
+    let calls = recorder.config_load_failure_calls();
+    assert_eq!(
+        calls.len(),
+        1,
+        "expected exactly one record_config_load_failure call for an unsupported \
+         schemaVersion in a PR-diff config file; got: {calls:?}"
+    );
+    assert_eq!(
+        calls[0],
+        (
+            "owner".to_string(),
+            "repo".to_string(),
+            "unsupported_schema_version".to_string()
+        )
+    );
+    assert_warn_or_error_event_has_fields(&events, &CONFIG_CHECK_REQUIRED_LOG_FIELDS);
+}
+
+#[tokio::test]
+async fn test_config_check_records_config_load_failure_with_fetch_error_reason() {
+    let provider =
+        ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123")).with_config_fetch_error();
+    let recorder = Arc::new(RecordingMetricsRecorder::default());
+
+    let warden = MergeWarden::new(provider).with_metrics_recorder(recorder.clone());
+
+    let (_, events) = capture_tracing_events(warden.process_pull_request("owner", "repo", 1)).await;
+
+    let calls = recorder.config_load_failure_calls();
+    assert_eq!(
+        calls.len(),
+        1,
+        "expected exactly one record_config_load_failure call when fetch_config_at_ref \
+         fails on the PR-diff path; got: {calls:?}"
+    );
+    assert_eq!(
+        calls[0],
+        (
+            "owner".to_string(),
+            "repo".to_string(),
+            "fetch_error".to_string()
+        )
+    );
+    assert_warn_or_error_event_has_fields(&events, &CONFIG_CHECK_REQUIRED_LOG_FIELDS);
+}
+
+#[tokio::test]
+async fn test_config_check_does_not_record_config_load_failure_when_config_is_valid() {
+    let valid_toml = "schemaVersion = 1";
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"))
+        .with_config_file(Some(valid_toml.to_string()));
+    let recorder = Arc::new(RecordingMetricsRecorder::default());
+
+    let warden = MergeWarden::new(provider).with_metrics_recorder(recorder.clone());
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    assert!(
+        recorder.config_load_failure_calls().is_empty(),
+        "record_config_load_failure must not fire for a valid PR-diff config file"
     );
 }

@@ -80,7 +80,9 @@ use config::SIZE_COMMENT_MARKER;
 use config::TITLE_COMMENT_MARKER;
 use config::WIP_COMMENT_MARKER;
 use config::WORK_ITEM_COMMENT_MARKER;
-use config::{validate_config_content, ConfigValidationOutcome, CONFIG_FILE_PATH};
+use config::{
+    validate_config_content, ConfigValidationOutcome, RepositoryProvidedConfig, CONFIG_FILE_PATH,
+};
 
 /// Error types and utilities for Merge Warden operations.
 ///
@@ -184,6 +186,22 @@ pub trait MetricsRecorder: Send + Sync + std::fmt::Debug {
     /// Records a single bypass-rule activation for the given `bypass_type`
     /// (e.g. `"title_convention"`, `"work_item_reference"`).
     fn record_bypass_activation(&self, bypass_type: &str);
+
+    /// Records a single configuration-load failure for `repository_owner`/`repository`.
+    ///
+    /// `failure_reason` MUST be one of `"toml_parse_error"`,
+    /// `"unsupported_schema_version"`, or `"fetch_error"` — see
+    /// `crates/core/src/config.rs`'s repo- and org-policy-config loading
+    /// functions, as well as this crate's `process_pull_request`'s PR-diff
+    /// config-change check, for the call sites that observe each reason.
+    /// Backs the `config.load.failures_total` counter (see
+    /// `docs/spec/operations/monitoring.md`).
+    fn record_config_load_failure(
+        &self,
+        repository_owner: &str,
+        repository: &str,
+        failure_reason: &str,
+    );
 }
 
 /// No-op [`MetricsRecorder`] used when no real recorder is injected.
@@ -193,6 +211,13 @@ pub struct NoopMetricsRecorder;
 impl MetricsRecorder for NoopMetricsRecorder {
     fn record_validation_duration_ms(&self, _duration_ms: f64) {}
     fn record_bypass_activation(&self, _bypass_type: &str) {}
+    fn record_config_load_failure(
+        &self,
+        _repository_owner: &str,
+        _repository: &str,
+        _failure_reason: &str,
+    ) {
+    }
 }
 
 /// Main struct for validating and managing pull requests.
@@ -1902,6 +1927,22 @@ Please update the PR body to include a valid work item reference."#;
             "Updating pull request config validity comment",
         );
 
+        if !outcome.valid {
+            // Issue #337: this is the PR-diff config-check path's broken-config
+            // observability event. It must carry the same four fields
+            // (`repository_owner`, `repository`, `config_path`, `error`) as every
+            // other broken-config log site in this crate, at WARN level or above
+            // so it is not silently dropped by INFO-filtered log pipelines.
+            warn!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                pull_request = pr.number,
+                config_path = CONFIG_FILE_PATH,
+                error = outcome.errors.join("; "),
+                "Pull request introduces an invalid merge-warden configuration file",
+            );
+        }
+
         // Retrieve all existing config-check comments.
         let existing_comments: Vec<(u64, String)> = {
             let comments = self
@@ -2361,6 +2402,27 @@ Please update the PR body to include a valid work item reference."#;
                 {
                     Ok(Some(content)) => {
                         let outcome = validate_config_content(&content);
+                        if !outcome.valid {
+                            // `validate_config_content` is intentionally kept pure and
+                            // context-free (`fn(&str) -> ConfigValidationOutcome`) and does
+                            // not expose a typed failure reason, so resolve the same reason
+                            // it determined internally by re-running its own cheap checks
+                            // here. This duplicates a parse of a small file on an
+                            // already-rare failure path, matching this task's established
+                            // pattern of determining `failure_reason` explicitly at each
+                            // call site (see `config.rs`'s `log_and_record_toml_parse_failure`
+                            // and `validate_schema_version`).
+                            let failure_reason =
+                                match toml::from_str::<RepositoryProvidedConfig>(&content) {
+                                    Err(_) => "toml_parse_error",
+                                    Ok(_) => "unsupported_schema_version",
+                                };
+                            self.metrics_recorder.record_config_load_failure(
+                                repo_owner,
+                                repo_name,
+                                failure_reason,
+                            );
+                        }
                         self.communicate_config_validity_status(
                             repo_owner, repo_name, &pr, &outcome,
                         )
@@ -2393,8 +2455,14 @@ Please update the PR body to include a valid work item reference."#;
                             repository_owner = repo_owner,
                             repository = repo_name,
                             pull_request = pr_number,
+                            config_path = CONFIG_FILE_PATH,
                             error = %e,
                             "Failed to fetch config file for validation; skipping comment"
+                        );
+                        self.metrics_recorder.record_config_load_failure(
+                            repo_owner,
+                            repo_name,
+                            "fetch_error",
                         );
                     }
                 }

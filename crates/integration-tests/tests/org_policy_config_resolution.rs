@@ -172,9 +172,17 @@ pattern = "^feat:"
     let fetcher = ConstantFetcher::returns(repo_toml);
     let app = ApplicationDefaults::default();
 
-    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app, None)
-        .await
-        .expect("should succeed");
+    let cfg = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo.toml",
+        &fetcher,
+        &app,
+        None,
+        &merge_warden_core::NoopMetricsRecorder,
+    )
+    .await
+    .expect("should succeed");
 
     assert!(cfg.enforce_title_convention);
     assert_eq!(cfg.title_pattern, "^feat:");
@@ -209,9 +217,17 @@ required = false
     app.org_policy_source = Some(org_source(false));
     app.enable_title_validation = true; // app enforcement flag → always wins
 
-    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app, None)
-        .await
-        .expect("should succeed");
+    let cfg = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo.toml",
+        &fetcher,
+        &app,
+        None,
+        &merge_warden_core::NoopMetricsRecorder,
+    )
+    .await
+    .expect("should succeed");
 
     assert!(
         cfg.enforce_title_convention,
@@ -248,9 +264,17 @@ required = false
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(org_source(false));
 
-    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app, None)
-        .await
-        .expect("should succeed");
+    let cfg = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo.toml",
+        &fetcher,
+        &app,
+        None,
+        &merge_warden_core::NoopMetricsRecorder,
+    )
+    .await
+    .expect("should succeed");
 
     assert!(
         cfg.enforce_title_convention,
@@ -288,9 +312,17 @@ pattern = "^REPO:"
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(org_source(false));
 
-    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app, None)
-        .await
-        .expect("should succeed");
+    let cfg = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo.toml",
+        &fetcher,
+        &app,
+        None,
+        &merge_warden_core::NoopMetricsRecorder,
+    )
+    .await
+    .expect("should succeed");
 
     assert!(cfg.enforce_title_convention);
     assert_eq!(
@@ -328,9 +360,17 @@ required = false
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(org_source(false));
 
-    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app, None)
-        .await
-        .expect("should succeed");
+    let cfg = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo.toml",
+        &fetcher,
+        &app,
+        None,
+        &merge_warden_core::NoopMetricsRecorder,
+    )
+    .await
+    .expect("should succeed");
 
     assert!(
         cfg.enforce_work_item_references,
@@ -356,6 +396,7 @@ async fn org_fetch_failure_lenient_degrades_gracefully() {
         &AlwaysFailingFetcher,
         &app,
         None,
+        &merge_warden_core::NoopMetricsRecorder,
     )
     .await;
 
@@ -381,6 +422,7 @@ async fn org_fetch_failure_strict_returns_error() {
         &AlwaysFailingFetcher,
         &app,
         None,
+        &merge_warden_core::NoopMetricsRecorder,
     )
     .await;
 
@@ -405,8 +447,16 @@ async fn org_unsupported_schema_strict_returns_error() {
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(org_source(true));
 
-    let result =
-        resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app, None).await;
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo.toml",
+        &fetcher,
+        &app,
+        None,
+        &merge_warden_core::NoopMetricsRecorder,
+    )
+    .await;
 
     assert!(
         result.is_err(),
@@ -422,8 +472,16 @@ async fn org_malformed_toml_strict_returns_error() {
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(org_source(true));
 
-    let result =
-        resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app, None).await;
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo.toml",
+        &fetcher,
+        &app,
+        None,
+        &merge_warden_core::NoopMetricsRecorder,
+    )
+    .await;
 
     assert!(
         result.is_err(),
@@ -439,9 +497,17 @@ async fn no_config_at_all_uses_app_defaults() {
     app.enable_title_validation = true;
     app.default_title_pattern = "^APP-DEFAULT:".to_string();
 
-    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app, None)
-        .await
-        .expect("should succeed");
+    let cfg = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo.toml",
+        &fetcher,
+        &app,
+        None,
+        &merge_warden_core::NoopMetricsRecorder,
+    )
+    .await
+    .expect("should succeed");
 
     assert!(
         cfg.enforce_title_convention,
@@ -497,9 +563,17 @@ pattern = "GH-[0-9]+"
     app.org_policy_source = Some(org_source(false));
     app.default_title_pattern = "^APP:".to_string();
 
-    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app, None)
-        .await
-        .expect("should succeed");
+    let cfg = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo.toml",
+        &fetcher,
+        &app,
+        None,
+        &merge_warden_core::NoopMetricsRecorder,
+    )
+    .await
+    .expect("should succeed");
 
     // Repo title beats org default (no org enforced title).
     assert!(cfg.enforce_title_convention);
@@ -530,8 +604,16 @@ async fn sample_org_policy_toml_parses_successfully() {
     let mut app = ApplicationDefaults::default();
     app.org_policy_source = Some(source);
 
-    let result =
-        resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app, None).await;
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo.toml",
+        &fetcher,
+        &app,
+        None,
+        &merge_warden_core::NoopMetricsRecorder,
+    )
+    .await;
 
     assert!(
         result.is_ok(),
@@ -635,6 +717,7 @@ pattern = "^repo:"
         &fetcher,
         &app,
         Some(&provider),
+        &merge_warden_core::NoopMetricsRecorder,
     )
     .await
     .expect("should succeed");
@@ -695,6 +778,7 @@ pattern = "^repo:"
         &fetcher,
         &app,
         Some(&provider),
+        &merge_warden_core::NoopMetricsRecorder,
     )
     .await
     .expect("should succeed");
@@ -753,6 +837,7 @@ pattern = "^repo-override:"
         &fetcher,
         &app,
         Some(&provider),
+        &merge_warden_core::NoopMetricsRecorder,
     )
     .await
     .expect("should succeed");
@@ -794,9 +879,17 @@ required = false
     app.org_policy_source = Some(org_source(false));
 
     // No metadata_provider — conditional block must be skipped.
-    let cfg = resolve_pull_request_config("owner", "repo", "repo.toml", &fetcher, &app, None)
-        .await
-        .expect("should succeed");
+    let cfg = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "repo.toml",
+        &fetcher,
+        &app,
+        None,
+        &merge_warden_core::NoopMetricsRecorder,
+    )
+    .await
+    .expect("should succeed");
 
     assert!(
         !cfg.enforce_title_convention,
@@ -842,6 +935,7 @@ required = false
         &fetcher,
         &app,
         Some(&FailingContextProvider),
+        &merge_warden_core::NoopMetricsRecorder,
     )
     .await
     .expect("metadata provider failure must degrade gracefully");
@@ -895,6 +989,7 @@ schemaVersion = 1
         &fetcher,
         &app,
         Some(&provider),
+        &merge_warden_core::NoopMetricsRecorder,
     )
     .await
     .expect("should succeed");
@@ -947,6 +1042,7 @@ pattern = "^second:"
         &fetcher,
         &app,
         Some(&provider),
+        &merge_warden_core::NoopMetricsRecorder,
     )
     .await
     .expect("should succeed");

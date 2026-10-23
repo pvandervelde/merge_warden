@@ -11,7 +11,12 @@ no server restart is needed when you update it.
 
 If the file is absent, malformed, or specifies an unsupported `schemaVersion`, the server
 falls back to application-level defaults. With compiled-in defaults, all validation is
-disabled.
+disabled. A missing file is expected and is not treated as a failure. A malformed file or
+an unsupported `schemaVersion`, however, is logged with the repository and file path and
+recorded in the `config_load_failures_total` metric so operators can alert on it — see
+[HTTP endpoints reference](http-endpoints.md#get-metrics--prometheus-metrics). If a pull
+request modifies this file, Merge Warden also posts a PR comment describing the problem —
+see [How Merge Warden works](../explanation/how-merge-warden-works.md#automatic-configuration-file-validation).
 
 The top-level `schemaVersion` field is required.
 

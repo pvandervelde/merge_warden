@@ -276,6 +276,8 @@ impl MergeWardenWebhookHandler {
 
         let merge_warden_config_path = ".github/merge-warden.toml";
 
+        let config_metrics_recorder =
+            crate::metrics::CoreMetricsRecorder::new(self.metrics.clone());
         let validation_config = match resolve_pull_request_config(
             repo_owner,
             repo_name,
@@ -283,6 +285,7 @@ impl MergeWardenWebhookHandler {
             &provider,
             &self.policies,
             Some(&provider),
+            &config_metrics_recorder,
         )
         .await
         {
@@ -306,8 +309,11 @@ impl MergeWardenWebhookHandler {
             }
             Err(e) => {
                 warn!(
-                    "Failed to resolve PR config from {}: {}. Using compiled-in defaults.",
-                    merge_warden_config_path, e
+                    repository_owner = repo_owner.as_str(),
+                    repository = repo_name.as_str(),
+                    config_path = merge_warden_config_path,
+                    error = %e,
+                    "Failed to resolve PR config; using compiled-in defaults"
                 );
                 CurrentPullRequestValidationConfiguration::from_app_defaults(&self.policies)
             }
@@ -435,6 +441,8 @@ impl MergeWardenWebhookHandler {
         // All PRs in the loop share the same repository, so the config is
         // identical for each.  Load it once before entering the loop to avoid
         // redundant API calls (including the org-policy fetch).
+        let config_metrics_recorder =
+            crate::metrics::CoreMetricsRecorder::new(self.metrics.clone());
         let validation_config = match resolve_pull_request_config(
             repo_owner,
             repo_name,
@@ -442,6 +450,7 @@ impl MergeWardenWebhookHandler {
             &provider,
             &self.policies,
             Some(&provider),
+            &config_metrics_recorder,
         )
         .await
         {
@@ -459,6 +468,7 @@ impl MergeWardenWebhookHandler {
                 warn!(
                     repository_owner = repo_owner.as_str(),
                     repository = repo_name.as_str(),
+                    config_path = merge_warden_config_path,
                     error = %e,
                     "Failed to resolve config during status event; using defaults"
                 );
