@@ -10,7 +10,7 @@ version.workspace = true
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-base64 = "0.22.1"
+base64 = "0.23.0"
 chrono = "0.4.40"
 github-bot-sdk = { workspace = true }
 reqwest = { version = "0.13.0", features = ["json"] }

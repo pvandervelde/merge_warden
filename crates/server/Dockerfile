@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
+# syntax=docker/dockerfile:1@sha256:4edf897a3ffa55b89f906fc8cc78afdb3f1834cc9c7083565e611a8a7d5fe99e
 # Runtime image using pre-compiled binaries.
 #
 # Rust binaries for each supported architecture are compiled natively in CI
@@ -11,7 +11,7 @@
 # Debian 13 (Trixie) is required because the CI builder uses Debian 13 tooling
 # which ships glibc 2.38. The older distroless/cc-debian12 only provides
 # glibc 2.36 and causes a "GLIBC_2.38 not found" crash at startup.
-FROM gcr.io/distroless/cc-debian13@sha256:a017e74bd2a12d98342dbecd33d121d2b160415ed777573dc1808969e989d94d
+FROM gcr.io/distroless/cc-debian13@sha256:b2e43dc72acf58a146ed6feaf350806ae3bf4243eb5c68062d06bc13228ca2bd
 ARG TARGETARCH
 COPY binaries/${TARGETARCH}/merge_warden_server /merge_warden_server
 EXPOSE 3000
