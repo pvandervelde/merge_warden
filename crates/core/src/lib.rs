@@ -2459,6 +2459,11 @@ Please update the PR body to include a valid work item reference."#;
                             error = %e,
                             "Failed to fetch config file for validation; skipping comment"
                         );
+                        self.metrics_recorder.record_config_load_failure(
+                            repo_owner,
+                            repo_name,
+                            "fetch_error",
+                        );
                     }
                 }
             }

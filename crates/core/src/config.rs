@@ -8,7 +8,7 @@ use merge_warden_developer_platforms::{
 };
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use tracing::{debug, error, info, warn};
+use tracing::{debug, info, warn};
 
 use crate::errors::ConfigLoadError;
 use crate::size::SizeThresholds;
@@ -2560,7 +2560,7 @@ fn validate_schema_version(
 ) -> Result<(), ConfigLoadError> {
     if schema_version != 1 {
         let error_detail = format!("unsupported schemaVersion {schema_version}, expected 1");
-        error!(
+        warn!(
             repository_owner = repo_owner,
             repository = repo_name,
             config_path = path,

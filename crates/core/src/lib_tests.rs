@@ -5520,6 +5520,34 @@ async fn test_config_check_records_config_load_failure_with_unsupported_schema_v
 }
 
 #[tokio::test]
+async fn test_config_check_records_config_load_failure_with_fetch_error_reason() {
+    let provider =
+        ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123")).with_config_fetch_error();
+    let recorder = Arc::new(RecordingMetricsRecorder::default());
+
+    let warden = MergeWarden::new(provider).with_metrics_recorder(recorder.clone());
+
+    let (_, events) = capture_tracing_events(warden.process_pull_request("owner", "repo", 1)).await;
+
+    let calls = recorder.config_load_failure_calls();
+    assert_eq!(
+        calls.len(),
+        1,
+        "expected exactly one record_config_load_failure call when fetch_config_at_ref \
+         fails on the PR-diff path; got: {calls:?}"
+    );
+    assert_eq!(
+        calls[0],
+        (
+            "owner".to_string(),
+            "repo".to_string(),
+            "fetch_error".to_string()
+        )
+    );
+    assert_warn_or_error_event_has_fields(&events, &CONFIG_CHECK_REQUIRED_LOG_FIELDS);
+}
+
+#[tokio::test]
 async fn test_config_check_does_not_record_config_load_failure_when_config_is_valid() {
     let valid_toml = "schemaVersion = 1";
     let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"))

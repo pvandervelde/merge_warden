@@ -17,7 +17,7 @@ platform-specific one:
 
 - `tracing` + `tracing-opentelemetry` for structured logs and spans, exported over OTLP/HTTP
   when `OTEL_EXPORTER_OTLP_ENDPOINT` is set (see `crates/server/src/telemetry.rs`).
-- An OTLP metrics pipeline (`crates/server/src/metrics.rs`) exporting the eleven metrics below,
+- An OTLP metrics pipeline (`crates/server/src/metrics.rs`) exporting the twelve metrics below,
   over the same `OTEL_EXPORTER_OTLP_ENDPOINT`.
 - An optional pull-based Prometheus scrape endpoint (`GET /metrics`, opt-in via
   `MERGE_WARDEN_METRICS_ENDPOINT=prometheus`) for operators without an OTLP collector.
