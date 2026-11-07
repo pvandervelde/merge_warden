@@ -1930,7 +1930,10 @@ Please update the PR body to include a valid work item reference."#;
             "Updating pull request config validity comment",
         );
 
-        if !outcome.valid {
+        let comment_body = if outcome.valid {
+            // Configuration is valid — the comment must be removed.
+            None
+        } else {
             // Issue #337: this is the PR-diff config-check path's broken-config
             // observability event. It must carry the same four fields
             // (`repository_owner`, `repository`, `config_path`, `error`) as every
@@ -1944,49 +1947,7 @@ Please update the PR body to include a valid work item reference."#;
                 error = outcome.errors.join("; "),
                 "Pull request introduces an invalid merge-warden configuration file",
             );
-        }
 
-        // Retrieve all existing config-check comments.
-        let existing_comments: Vec<(u64, String)> = {
-            let comments = self
-                .provider
-                .list_comments(repo_owner, repo_name, pr.number)
-                .await
-                .unwrap_or_default();
-            comments
-                .iter()
-                .filter(|c| c.body.contains(CONFIG_COMMENT_MARKER))
-                .map(|c| (c.id, c.body.clone()))
-                .collect()
-        };
-
-        if outcome.valid {
-            // Configuration is valid — remove all stale warning comments.
-            for (comment_id, _) in &existing_comments {
-                if let Err(e) = self
-                    .provider
-                    .delete_comment(repo_owner, repo_name, *comment_id)
-                    .await
-                {
-                    warn!(
-                        repository_owner = repo_owner,
-                        repository = repo_name,
-                        pull_request = pr.number,
-                        comment_id = comment_id,
-                        error = %e,
-                        "Failed to remove stale config validity comment"
-                    );
-                } else {
-                    info!(
-                        repository_owner = repo_owner,
-                        repository = repo_name,
-                        pull_request = pr.number,
-                        "Removed stale config validity comment"
-                    );
-                }
-            }
-        } else {
-            // Configuration is invalid — build the comment body.
             let error_lines: String = outcome
                 .errors
                 .iter()
@@ -1994,7 +1955,7 @@ Please update the PR body to include a valid work item reference."#;
                 .collect::<Vec<_>>()
                 .join("\n");
 
-            let comment_body = formatdoc! {"
+            Some(formatdoc! {"
                 {marker}
                 ⚠️ **Invalid merge-warden configuration**
 
@@ -2008,64 +1969,158 @@ Please update the PR body to include a valid work item reference."#;
                 Please fix the configuration before merging.",
                 marker = CONFIG_COMMENT_MARKER,
                 error_lines = error_lines,
-            };
+            })
+        };
 
-            let already_up_to_date =
-                existing_comments.len() == 1 && existing_comments[0].1 == comment_body;
+        self.reconcile_marker_comment(
+            repo_owner,
+            repo_name,
+            pr,
+            CONFIG_COMMENT_MARKER,
+            comment_body.as_deref(),
+        )
+        .await;
+    }
 
-            if already_up_to_date {
-                debug!(
-                    repository_owner = repo_owner,
-                    repository = repo_name,
-                    pull_request = pr.number,
-                    "Config validity comment is already up-to-date; skipping"
-                );
-                return;
-            }
+    /// Reconciles the single marker-tagged comment on a pull request to a
+    /// desired state.
+    ///
+    /// Lists every existing comment whose body contains `marker`, then:
+    ///
+    /// * When `desired_body` is `None`, all matching comments are deleted
+    ///   (cleanup for when the condition that warranted the comment is gone).
+    /// * When `desired_body` is `Some(body)`, the PR is made to carry exactly
+    ///   one comment equal to `body`: if a single matching comment already
+    ///   equals `body` the call is a no-op (idempotent re-runs do not churn the
+    ///   PR); otherwise all stale copies are deleted and a fresh comment is
+    ///   posted. If any stale delete fails the re-post is skipped so duplicate
+    ///   comments are never created.
+    ///
+    /// This is the shared comment-lifecycle engine behind the config-check
+    /// notices. Callers are responsible for emitting any domain-specific
+    /// observability event (e.g. the broken-config WARN carrying `config_path`
+    /// and `error`) before invoking this helper; it emits only the mechanical
+    /// lifecycle logs, each tagged with `marker` for disambiguation.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner` - The owner of the repository.
+    /// * `repo_name` - The name of the repository.
+    /// * `pr` - The pull request on which the comment is managed.
+    /// * `marker` - The hidden HTML marker that identifies the managed comment.
+    /// * `desired_body` - The exact body the comment should have, or `None` to
+    ///   remove it.
+    async fn reconcile_marker_comment(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr: &PullRequest,
+        marker: &str,
+        desired_body: Option<&str>,
+    ) {
+        // Retrieve all existing comments bearing this marker.
+        let existing_comments: Vec<(u64, String)> = {
+            let comments = self
+                .provider
+                .list_comments(repo_owner, repo_name, pr.number)
+                .await
+                .unwrap_or_default();
+            comments
+                .iter()
+                .filter(|c| c.body.contains(marker))
+                .map(|c| (c.id, c.body.clone()))
+                .collect()
+        };
 
-            // Delete stale copies then post a fresh comment.
-            let mut all_deleted = true;
+        let Some(comment_body) = desired_body else {
+            // No desired comment — remove all stale copies.
             for (comment_id, _) in &existing_comments {
-                if self
+                if let Err(e) = self
                     .provider
                     .delete_comment(repo_owner, repo_name, *comment_id)
                     .await
-                    .is_err()
                 {
                     warn!(
                         repository_owner = repo_owner,
                         repository = repo_name,
                         pull_request = pr.number,
                         comment_id = comment_id,
-                        "Failed to delete stale config validity comment; skipping re-post"
+                        marker = marker,
+                        error = %e,
+                        "Failed to remove stale marker comment"
                     );
-                    all_deleted = false;
+                } else {
+                    info!(
+                        repository_owner = repo_owner,
+                        repository = repo_name,
+                        pull_request = pr.number,
+                        marker = marker,
+                        "Removed stale marker comment"
+                    );
                 }
             }
+            return;
+        };
 
-            if all_deleted {
-                match self
-                    .provider
-                    .add_comment(repo_owner, repo_name, pr.number, &comment_body)
-                    .await
-                {
-                    Ok(_) => {
-                        info!(
-                            repository_owner = repo_owner,
-                            repository = repo_name,
-                            pull_request = pr.number,
-                            "Posted config validity error comment"
-                        );
-                    }
-                    Err(e) => {
-                        warn!(
-                            repository_owner = repo_owner,
-                            repository = repo_name,
-                            pull_request = pr.number,
-                            error = %e,
-                            "Failed to post config validity error comment"
-                        );
-                    }
+        let already_up_to_date =
+            existing_comments.len() == 1 && existing_comments[0].1 == comment_body;
+
+        if already_up_to_date {
+            debug!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                pull_request = pr.number,
+                marker = marker,
+                "Marker comment is already up-to-date; skipping"
+            );
+            return;
+        }
+
+        // Delete stale copies then post a fresh comment.
+        let mut all_deleted = true;
+        for (comment_id, _) in &existing_comments {
+            if self
+                .provider
+                .delete_comment(repo_owner, repo_name, *comment_id)
+                .await
+                .is_err()
+            {
+                warn!(
+                    repository_owner = repo_owner,
+                    repository = repo_name,
+                    pull_request = pr.number,
+                    comment_id = comment_id,
+                    marker = marker,
+                    "Failed to delete stale marker comment; skipping re-post"
+                );
+                all_deleted = false;
+            }
+        }
+
+        if all_deleted {
+            match self
+                .provider
+                .add_comment(repo_owner, repo_name, pr.number, comment_body)
+                .await
+            {
+                Ok(_) => {
+                    info!(
+                        repository_owner = repo_owner,
+                        repository = repo_name,
+                        pull_request = pr.number,
+                        marker = marker,
+                        "Posted marker comment"
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        repository_owner = repo_owner,
+                        repository = repo_name,
+                        pull_request = pr.number,
+                        marker = marker,
+                        error = %e,
+                        "Failed to post marker comment"
+                    );
                 }
             }
         }
@@ -2096,133 +2151,48 @@ Please update the PR body to include a valid work item reference."#;
         pr: &PullRequest,
         notice: Option<&BrokenRepoConfigNotice>,
     ) {
-        // Retrieve all existing broken-config comments.
-        let existing_comments: Vec<(u64, String)> = {
-            let comments = self
-                .provider
-                .list_comments(repo_owner, repo_name, pr.number)
-                .await
-                .unwrap_or_default();
-            comments
-                .iter()
-                .filter(|c| c.body.contains(BROKEN_CONFIG_COMMENT_MARKER))
-                .map(|c| (c.id, c.body.clone()))
-                .collect()
-        };
-
-        let Some(notice) = notice else {
-            // No notice — remove any stale broken-config comment left from a run
-            // where the default-branch config was still broken.
-            for (comment_id, _) in &existing_comments {
-                if let Err(e) = self
-                    .provider
-                    .delete_comment(repo_owner, repo_name, *comment_id)
-                    .await
-                {
-                    warn!(
-                        repository_owner = repo_owner,
-                        repository = repo_name,
-                        pull_request = pr.number,
-                        comment_id = comment_id,
-                        error = %e,
-                        "Failed to remove stale broken-config comment"
-                    );
-                } else {
-                    info!(
-                        repository_owner = repo_owner,
-                        repository = repo_name,
-                        pull_request = pr.number,
-                        "Removed stale broken-config comment"
-                    );
-                }
-            }
-            return;
-        };
-
-        // A broken default-branch config is present and the operator wants it
-        // surfaced. Emit the standard broken-config observability event carrying
-        // the same four fields as every other broken-config log site.
-        warn!(
-            repository_owner = repo_owner,
-            repository = repo_name,
-            pull_request = pr.number,
-            config_path = CONFIG_FILE_PATH,
-            error = notice.error_detail,
-            "Default-branch merge-warden configuration is broken; surfacing notice on pull request",
-        );
-
-        let comment_body = formatdoc! {"
-            {marker}
-            \u{26a0}\u{fe0f} **merge-warden configuration error**
-
-            The `.github/merge-warden.toml` on the default branch of this repository could not be loaded. \
-            Application defaults are being used to evaluate this PR.
-
-            **Reason:** {error_detail}
-
-            Please fix the configuration file on the default branch so that your intended policy takes effect.",
-            marker = BROKEN_CONFIG_COMMENT_MARKER,
-            error_detail = notice.error_detail,
-        };
-
-        let already_up_to_date =
-            existing_comments.len() == 1 && existing_comments[0].1 == comment_body;
-
-        if already_up_to_date {
-            debug!(
-                repository_owner = repo_owner,
-                repository = repo_name,
-                pull_request = pr.number,
-                "Broken-config comment is already up-to-date; skipping"
-            );
-            return;
-        }
-
-        // Delete stale copies then post a fresh comment.
-        let mut all_deleted = true;
-        for (comment_id, _) in &existing_comments {
-            if self
-                .provider
-                .delete_comment(repo_owner, repo_name, *comment_id)
-                .await
-                .is_err()
-            {
+        let comment_body = match notice {
+            // No notice — any stale broken-config comment left from a run where
+            // the default-branch config was still broken must be removed.
+            None => None,
+            Some(notice) => {
+                // A broken default-branch config is present and the operator wants
+                // it surfaced. Emit the standard broken-config observability event
+                // carrying the same four fields as every other broken-config log
+                // site.
                 warn!(
                     repository_owner = repo_owner,
                     repository = repo_name,
                     pull_request = pr.number,
-                    comment_id = comment_id,
-                    "Failed to delete stale broken-config comment; skipping re-post"
+                    config_path = CONFIG_FILE_PATH,
+                    error = notice.error_detail,
+                    "Default-branch merge-warden configuration is broken; surfacing notice on pull request",
                 );
-                all_deleted = false;
-            }
-        }
 
-        if all_deleted {
-            match self
-                .provider
-                .add_comment(repo_owner, repo_name, pr.number, &comment_body)
-                .await
-            {
-                Ok(_) => {
-                    info!(
-                        repository_owner = repo_owner,
-                        repository = repo_name,
-                        pull_request = pr.number,
-                        "Posted broken-config notice comment"
-                    );
-                }
-                Err(e) => {
-                    warn!(
-                        repository_owner = repo_owner,
-                        repository = repo_name,
-                        pull_request = pr.number,
-                        error = %e,
-                        "Failed to post broken-config notice comment"
-                    );
-                }
+                Some(formatdoc! {"
+                    {marker}
+                    \u{26a0}\u{fe0f} **merge-warden configuration error**
+
+                    The `.github/merge-warden.toml` on the default branch of this repository could not be loaded. \
+                    Application defaults are being used to evaluate this PR.
+
+                    **Reason:** {error_detail}
+
+                    Please fix the configuration file on the default branch so that your intended policy takes effect.",
+                    marker = BROKEN_CONFIG_COMMENT_MARKER,
+                    error_detail = notice.error_detail,
+                })
             }
-        }
+        };
+
+        self.reconcile_marker_comment(
+            repo_owner,
+            repo_name,
+            pr,
+            BROKEN_CONFIG_COMMENT_MARKER,
+            comment_body.as_deref(),
+        )
+        .await;
     }
 
     /// Processes a pull request, validating it against the configured rules.
