@@ -848,6 +848,7 @@ fn test_application_defaults_bypass_rules_serialization() {
         bot_mention: "@merge-warden".to_string(),
         org_policy_source: None,
         repository_scope: None,
+        broken_repo_config_behaviour: BrokenRepoConfigBehaviour::default(),
     };
 
     let serialized =
