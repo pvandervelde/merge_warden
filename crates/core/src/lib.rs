@@ -75,6 +75,9 @@ use std::sync::Arc;
 pub mod checks;
 pub mod config;
 use config::CurrentPullRequestValidationConfiguration;
+use config::BrokenRepoConfigBehaviour;
+use config::BrokenRepoConfigNotice;
+use config::BROKEN_CONFIG_COMMENT_MARKER;
 use config::CONFIG_COMMENT_MARKER;
 use config::SIZE_COMMENT_MARKER;
 use config::TITLE_COMMENT_MARKER;
@@ -2068,6 +2071,160 @@ Please update the PR body to include a valid work item reference."#;
         }
     }
 
+    /// Posts, updates, or removes the broken-default-branch-config notice comment.
+    ///
+    /// This mirrors [`Self::communicate_config_validity_status`] but is keyed on
+    /// [`BROKEN_CONFIG_COMMENT_MARKER`] and manages the notice for a broken
+    /// `.github/merge-warden.toml` already present on the repository's **default
+    /// branch** (as opposed to one introduced within the PR diff).
+    ///
+    /// When `notice` is `Some` a single comment is posted (or kept as-is when an
+    /// identical one already exists). When `notice` is `None` any existing
+    /// broken-config comment is deleted — cleanup for when the operator config
+    /// problem has been fixed.
+    ///
+    /// # Arguments
+    ///
+    /// * `repo_owner` - The owner of the repository.
+    /// * `repo_name` - The name of the repository.
+    /// * `pr` - The pull request on which the comment is managed.
+    /// * `notice` - The broken-config directive, if any.
+    async fn communicate_broken_repo_config_status(
+        &self,
+        repo_owner: &str,
+        repo_name: &str,
+        pr: &PullRequest,
+        notice: Option<&BrokenRepoConfigNotice>,
+    ) {
+        // Retrieve all existing broken-config comments.
+        let existing_comments: Vec<(u64, String)> = {
+            let comments = self
+                .provider
+                .list_comments(repo_owner, repo_name, pr.number)
+                .await
+                .unwrap_or_default();
+            comments
+                .iter()
+                .filter(|c| c.body.contains(BROKEN_CONFIG_COMMENT_MARKER))
+                .map(|c| (c.id, c.body.clone()))
+                .collect()
+        };
+
+        let Some(notice) = notice else {
+            // No notice — remove any stale broken-config comment left from a run
+            // where the default-branch config was still broken.
+            for (comment_id, _) in &existing_comments {
+                if let Err(e) = self
+                    .provider
+                    .delete_comment(repo_owner, repo_name, *comment_id)
+                    .await
+                {
+                    warn!(
+                        repository_owner = repo_owner,
+                        repository = repo_name,
+                        pull_request = pr.number,
+                        comment_id = comment_id,
+                        error = %e,
+                        "Failed to remove stale broken-config comment"
+                    );
+                } else {
+                    info!(
+                        repository_owner = repo_owner,
+                        repository = repo_name,
+                        pull_request = pr.number,
+                        "Removed stale broken-config comment"
+                    );
+                }
+            }
+            return;
+        };
+
+        // A broken default-branch config is present and the operator wants it
+        // surfaced. Emit the standard broken-config observability event carrying
+        // the same four fields as every other broken-config log site.
+        warn!(
+            repository_owner = repo_owner,
+            repository = repo_name,
+            pull_request = pr.number,
+            config_path = CONFIG_FILE_PATH,
+            error = notice.error_detail,
+            "Default-branch merge-warden configuration is broken; surfacing notice on pull request",
+        );
+
+        let comment_body = formatdoc! {"
+            {marker}
+            \u{26a0}\u{fe0f} **merge-warden configuration error**
+
+            The `.github/merge-warden.toml` on the default branch of this repository could not be loaded. \
+            Application defaults are being used to evaluate this PR.
+
+            **Reason:** {error_detail}
+
+            Please fix the configuration file on the default branch so that your intended policy takes effect.",
+            marker = BROKEN_CONFIG_COMMENT_MARKER,
+            error_detail = notice.error_detail,
+        };
+
+        let already_up_to_date =
+            existing_comments.len() == 1 && existing_comments[0].1 == comment_body;
+
+        if already_up_to_date {
+            debug!(
+                repository_owner = repo_owner,
+                repository = repo_name,
+                pull_request = pr.number,
+                "Broken-config comment is already up-to-date; skipping"
+            );
+            return;
+        }
+
+        // Delete stale copies then post a fresh comment.
+        let mut all_deleted = true;
+        for (comment_id, _) in &existing_comments {
+            if self
+                .provider
+                .delete_comment(repo_owner, repo_name, *comment_id)
+                .await
+                .is_err()
+            {
+                warn!(
+                    repository_owner = repo_owner,
+                    repository = repo_name,
+                    pull_request = pr.number,
+                    comment_id = comment_id,
+                    "Failed to delete stale broken-config comment; skipping re-post"
+                );
+                all_deleted = false;
+            }
+        }
+
+        if all_deleted {
+            match self
+                .provider
+                .add_comment(repo_owner, repo_name, pr.number, &comment_body)
+                .await
+            {
+                Ok(_) => {
+                    info!(
+                        repository_owner = repo_owner,
+                        repository = repo_name,
+                        pull_request = pr.number,
+                        "Posted broken-config notice comment"
+                    );
+                }
+                Err(e) => {
+                    warn!(
+                        repository_owner = repo_owner,
+                        repository = repo_name,
+                        pull_request = pr.number,
+                        error = %e,
+                        "Failed to post broken-config notice comment"
+                    );
+                }
+            }
+        }
+    }
+
     /// Processes a pull request, validating it against the configured rules.
     ///
     /// This method:
@@ -2469,6 +2626,18 @@ Please update the PR body to include a valid work item reference."#;
             }
         }
 
+        // Surface (or clean up) the broken-default-branch-config notice on every
+        // run, based on the directive resolved into the active config. This is
+        // independent of the PR-diff config-check above and manages its own,
+        // distinct comment marker.
+        self.communicate_broken_repo_config_status(
+            repo_owner,
+            repo_name,
+            &pr,
+            self.config.broken_repo_config.as_ref(),
+        )
+        .await;
+
         // Collect bypass information for audit trail
         let mut bypasses_used = Vec::new();
         if let Some(bypass_info) = title_result.bypass_info() {
@@ -2579,7 +2748,7 @@ Please update the PR body to include a valid work item reference."#;
 
         let all_valid =
             is_title_valid && is_work_item_referenced && (is_size_valid || !should_fail_on_size);
-        let check_conclusion = if all_valid {
+        let mut check_conclusion = if all_valid {
             "success"
         } else if pr.draft {
             // Draft PRs are never hard-blocked: use "neutral" so required checks don't
@@ -2588,6 +2757,16 @@ Please update the PR body to include a valid work item reference."#;
         } else {
             "failure"
         };
+
+        // Operator hard gate: a broken default-branch config under the `Block`
+        // behaviour forces a "failure" conclusion, overriding the validation
+        // result (including the draft "neutral" case). `Notify` and
+        // `SilentFallback`/`None` never alter the conclusion.
+        if let Some(notice) = self.config.broken_repo_config.as_ref() {
+            if notice.behaviour == BrokenRepoConfigBehaviour::Block {
+                check_conclusion = "failure";
+            }
+        }
 
         // Enhanced check summary that includes all validation results and bypass information
         let check_summary = if is_title_valid && is_work_item_referenced && is_size_valid {
