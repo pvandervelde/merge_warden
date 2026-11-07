@@ -1,10 +1,12 @@
 use crate::{
     checks::TitleValidationResult,
     config::{
-        BypassRule, BypassRules, ChangeTypeLabelConfig, ConventionalCommitMappings,
+        BrokenRepoConfigBehaviour, BrokenRepoConfigNotice, BypassRule, BypassRules,
+        ChangeTypeLabelConfig, ConventionalCommitMappings,
         CurrentPullRequestValidationConfiguration, FallbackLabelSettings, IssuePropagationConfig,
-        KeywordLabelsConfig, LabelDetectionStrategy, WipCheckConfig, CONFIG_COMMENT_MARKER,
-        CONFIG_FILE_PATH, CONVENTIONAL_COMMIT_REGEX, MISSING_WORK_ITEM_LABEL, SIZE_COMMENT_MARKER,
+        KeywordLabelsConfig, LabelDetectionStrategy, WipCheckConfig,
+        BROKEN_CONFIG_COMMENT_MARKER, CONFIG_COMMENT_MARKER, CONFIG_FILE_PATH,
+        CONVENTIONAL_COMMIT_REGEX, MISSING_WORK_ITEM_LABEL, SIZE_COMMENT_MARKER,
         TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL, WIP_COMMENT_MARKER, WORK_ITEM_COMMENT_MARKER,
         WORK_ITEM_REGEX,
     },
@@ -5564,5 +5566,330 @@ async fn test_config_check_does_not_record_config_load_failure_when_config_is_va
     assert!(
         recorder.config_load_failure_calls().is_empty(),
         "record_config_load_failure must not fire for a valid PR-diff config file"
+    );
+}
+
+// ===========================================================================
+// Issue #336 — broken-repo-config policy, end-to-end through
+// `process_pull_request`. RED test suite (TDD): references the not-yet-wired
+// `CurrentPullRequestValidationConfiguration::broken_repo_config` field, the
+// `BrokenRepoConfigNotice`/`BrokenRepoConfigBehaviour` types, and the
+// `BROKEN_CONFIG_COMMENT_MARKER` constant. Expected to FAIL TO COMPILE until
+// the implementation lands.
+// ===========================================================================
+
+impl ConfigCheckMockProvider {
+    /// Returns the sequence of check conclusions recorded via
+    /// `update_pr_check_status`.
+    fn get_check_conclusions(&self) -> Vec<String> {
+        self.check_updates.lock().unwrap().clone()
+    }
+}
+
+/// Builds the exact PR-comment body the broken-config feature must produce,
+/// per the Issue #336 interface contract. Pinning the whole body here makes the
+/// format test adversarial and gives the idempotency test an exact pre-seed.
+fn expected_broken_config_comment_body(error_detail: &str) -> String {
+    format!(
+        "{marker}\n\
+⚠️ **merge-warden configuration error**\n\
+\n\
+The `.github/merge-warden.toml` on the default branch of this repository could not be loaded. \
+Application defaults are being used to evaluate this PR.\n\
+\n\
+**Reason:** {error_detail}\n\
+\n\
+Please fix the configuration file on the default branch so that your intended policy takes effect.",
+        marker = BROKEN_CONFIG_COMMENT_MARKER,
+        error_detail = error_detail,
+    )
+}
+
+/// Builds a default validation config carrying the supplied broken-config notice.
+fn config_with_broken_notice(
+    notice: Option<BrokenRepoConfigNotice>,
+) -> CurrentPullRequestValidationConfiguration {
+    CurrentPullRequestValidationConfiguration {
+        broken_repo_config: notice,
+        ..CurrentPullRequestValidationConfiguration::default()
+    }
+}
+
+#[tokio::test]
+async fn test_broken_config_none_posts_no_broken_marker_comment() {
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"));
+    let warden = MergeWarden::with_config(provider, config_with_broken_notice(None));
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    assert!(
+        !comments
+            .iter()
+            .any(|c| c.body.contains(BROKEN_CONFIG_COMMENT_MARKER)),
+        "no broken-config comment must be posted when broken_repo_config is None"
+    );
+}
+
+#[tokio::test]
+async fn test_broken_config_none_leaves_check_conclusion_unaffected() {
+    // A valid, non-draft PR with no broken-config notice must still conclude
+    // "success" — exactly as before the feature existed.
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"));
+    let warden = MergeWarden::with_config(provider, config_with_broken_notice(None));
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        warden.provider.get_check_conclusions().last().map(String::as_str),
+        Some("success"),
+        "broken_repo_config == None must not alter the check conclusion"
+    );
+}
+
+#[tokio::test]
+async fn test_broken_config_notify_posts_exactly_one_broken_marker_comment() {
+    let notice = BrokenRepoConfigNotice {
+        behaviour: BrokenRepoConfigBehaviour::Notify,
+        error_detail: "malformed TOML at line 3".to_string(),
+    };
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"));
+    let warden = MergeWarden::with_config(provider, config_with_broken_notice(Some(notice)));
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let count = warden
+        .provider
+        .get_comments()
+        .iter()
+        .filter(|c| c.body.contains(BROKEN_CONFIG_COMMENT_MARKER))
+        .count();
+    assert_eq!(
+        count, 1,
+        "Notify must post exactly one broken-config comment"
+    );
+}
+
+#[tokio::test]
+async fn test_broken_config_notify_comment_body_matches_required_format() {
+    let error_detail = "unsupported schemaVersion 2, expected 1";
+    let notice = BrokenRepoConfigNotice {
+        behaviour: BrokenRepoConfigBehaviour::Notify,
+        error_detail: error_detail.to_string(),
+    };
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"));
+    let warden = MergeWarden::with_config(provider, config_with_broken_notice(Some(notice)));
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    let body = comments
+        .iter()
+        .find(|c| c.body.contains(BROKEN_CONFIG_COMMENT_MARKER))
+        .map(|c| c.body.clone())
+        .expect("a broken-config comment must be posted");
+    assert_eq!(
+        body,
+        expected_broken_config_comment_body(error_detail),
+        "the broken-config comment body must match the Issue #336 format exactly"
+    );
+}
+
+#[tokio::test]
+async fn test_broken_config_notify_comment_includes_error_detail_reason() {
+    let error_detail = "a very specific parse failure sentinel 0xDEADBEEF";
+    let notice = BrokenRepoConfigNotice {
+        behaviour: BrokenRepoConfigBehaviour::Notify,
+        error_detail: error_detail.to_string(),
+    };
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"));
+    let warden = MergeWarden::with_config(provider, config_with_broken_notice(Some(notice)));
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    let body = comments
+        .iter()
+        .find(|c| c.body.contains(BROKEN_CONFIG_COMMENT_MARKER))
+        .map(|c| c.body.clone())
+        .expect("a broken-config comment must be posted");
+    assert!(
+        body.contains(&format!("**Reason:** {error_detail}")),
+        "the comment must surface the error detail on the Reason line; body: {body}"
+    );
+}
+
+#[tokio::test]
+async fn test_broken_config_notify_does_not_force_failure_conclusion() {
+    // Notify must NOT block: an otherwise-valid non-draft PR still concludes
+    // "success".
+    let notice = BrokenRepoConfigNotice {
+        behaviour: BrokenRepoConfigBehaviour::Notify,
+        error_detail: "bad config".to_string(),
+    };
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"));
+    let warden = MergeWarden::with_config(provider, config_with_broken_notice(Some(notice)));
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        warden.provider.get_check_conclusions().last().map(String::as_str),
+        Some("success"),
+        "Notify must not force the check conclusion to failure"
+    );
+}
+
+#[tokio::test]
+async fn test_broken_config_block_posts_broken_marker_comment() {
+    let notice = BrokenRepoConfigNotice {
+        behaviour: BrokenRepoConfigBehaviour::Block,
+        error_detail: "bad config".to_string(),
+    };
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"));
+    let warden = MergeWarden::with_config(provider, config_with_broken_notice(Some(notice)));
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    assert!(
+        comments
+            .iter()
+            .any(|c| c.body.contains(BROKEN_CONFIG_COMMENT_MARKER)),
+        "Block must also post the broken-config comment"
+    );
+}
+
+#[tokio::test]
+async fn test_broken_config_block_forces_failure_conclusion_even_when_all_valid() {
+    // The PR passes title, work-item, and size checks; Block must still force
+    // the final conclusion to "failure".
+    let notice = BrokenRepoConfigNotice {
+        behaviour: BrokenRepoConfigBehaviour::Block,
+        error_detail: "bad config".to_string(),
+    };
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"));
+    let warden = MergeWarden::with_config(provider, config_with_broken_notice(Some(notice)));
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        warden.provider.get_check_conclusions().last().map(String::as_str),
+        Some("failure"),
+        "Block must force the check conclusion to failure even when all validations pass"
+    );
+}
+
+#[tokio::test]
+async fn test_broken_config_notify_is_idempotent_when_matching_comment_exists() {
+    // A pre-existing identical broken-config comment must not be duplicated.
+    let error_detail = "malformed TOML";
+    let existing = expected_broken_config_comment_body(error_detail);
+    let notice = BrokenRepoConfigNotice {
+        behaviour: BrokenRepoConfigBehaviour::Notify,
+        error_detail: error_detail.to_string(),
+    };
+    let provider =
+        ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123")).with_existing_comment(&existing);
+    let warden = MergeWarden::with_config(provider, config_with_broken_notice(Some(notice)));
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let count = warden
+        .provider
+        .get_comments()
+        .iter()
+        .filter(|c| c.body.contains(BROKEN_CONFIG_COMMENT_MARKER))
+        .count();
+    assert_eq!(
+        count, 1,
+        "an identical broken-config comment must not be duplicated"
+    );
+}
+
+#[tokio::test]
+async fn test_broken_config_none_deletes_stale_broken_marker_comment() {
+    // When the notice clears on a later run, a stale broken-config comment from
+    // a previous run must be removed.
+    let stale = expected_broken_config_comment_body("old error");
+    let provider =
+        ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123")).with_existing_comment(&stale);
+    let warden = MergeWarden::with_config(provider, config_with_broken_notice(None));
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    assert!(
+        !comments
+            .iter()
+            .any(|c| c.body.contains(BROKEN_CONFIG_COMMENT_MARKER)),
+        "a stale broken-config comment must be deleted when broken_repo_config is None"
+    );
+}
+
+#[tokio::test]
+async fn test_broken_config_marker_is_distinct_from_pr_diff_config_marker() {
+    assert_ne!(
+        BROKEN_CONFIG_COMMENT_MARKER, CONFIG_COMMENT_MARKER,
+        "the broken-default-branch marker must be distinct from the PR-diff config marker"
+    );
+}
+
+#[tokio::test]
+async fn test_broken_config_path_does_not_touch_pr_diff_config_comment() {
+    // The broken-default-branch path (Notify) must not disturb a pre-existing
+    // PR-diff `CONFIG_COMMENT_MARKER` comment; it manages only its own marker.
+    let pr_diff_comment = format!("{}\nsome pre-existing PR-diff note", CONFIG_COMMENT_MARKER);
+    let notice = BrokenRepoConfigNotice {
+        behaviour: BrokenRepoConfigBehaviour::Notify,
+        error_detail: "bad config".to_string(),
+    };
+    // No config file in the PR diff, so communicate_config_validity_status does
+    // not run; only the broken-default-branch path acts.
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"))
+        .with_existing_comment(&pr_diff_comment);
+    let warden = MergeWarden::with_config(provider, config_with_broken_notice(Some(notice)));
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    assert!(
+        comments
+            .iter()
+            .any(|c| c.body.contains(CONFIG_COMMENT_MARKER)
+                && !c.body.contains(BROKEN_CONFIG_COMMENT_MARKER)),
+        "the broken-config path must not delete the unrelated PR-diff config comment"
     );
 }

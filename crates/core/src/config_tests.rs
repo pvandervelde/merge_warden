@@ -9374,3 +9374,637 @@ proptest! {
         let _ = validate_repository_scope_patterns(&scope); // must not panic
     }
 }
+
+// ===========================================================================
+// Issue #336 — application-level policy for broken repo config on the default
+// branch. RED test suite (TDD): these tests reference the not-yet-implemented
+// `BrokenRepoConfigBehaviour`, `BrokenRepoConfigNotice`,
+// `ApplicationDefaults::broken_repo_config_behaviour`,
+// `CurrentPullRequestValidationConfiguration::broken_repo_config`, and
+// `BROKEN_CONFIG_COMMENT_MARKER`. They are expected to FAIL TO COMPILE until
+// the implementation lands.
+//
+// Error classification under test:
+//   BROKEN  (→ notice when not silent): malformed TOML, wrong schemaVersion.
+//   NOT broken (always silent):         fetch error (NotFound), absent file.
+// ===========================================================================
+
+/// A deliberately malformed TOML body used to force a `ConfigLoadError::Toml`
+/// (a BROKEN-config error) in the repo tier.
+const BROKEN_CONFIG_MALFORMED_TOML: &str = "not = valid = toml [[[";
+
+/// A syntactically valid TOML body whose `schemaVersion` is unsupported,
+/// forcing a `ConfigLoadError::UnsupportedSchemaVersion` (also a BROKEN-config
+/// error). Because the TOML parses, any (ignored) extra keys are retained —
+/// this lets the "not settable at repo level" tests embed
+/// `broken_repo_config_behaviour` in a repo file and prove it has no effect.
+const BROKEN_CONFIG_WRONG_SCHEMA_TOML: &str = "schemaVersion = 2\n";
+
+// ── Tier 1: serde contract for BrokenRepoConfigBehaviour ───────────────────
+
+#[test]
+fn test_broken_repo_config_behaviour_deserializes_silent_fallback() {
+    let app: ApplicationDefaults =
+        toml::from_str(r#"broken_repo_config_behaviour = "silent_fallback""#).unwrap();
+    assert_eq!(
+        app.broken_repo_config_behaviour,
+        BrokenRepoConfigBehaviour::SilentFallback
+    );
+}
+
+#[test]
+fn test_broken_repo_config_behaviour_deserializes_notify() {
+    let app: ApplicationDefaults =
+        toml::from_str(r#"broken_repo_config_behaviour = "notify""#).unwrap();
+    assert_eq!(
+        app.broken_repo_config_behaviour,
+        BrokenRepoConfigBehaviour::Notify
+    );
+}
+
+#[test]
+fn test_broken_repo_config_behaviour_deserializes_block() {
+    let app: ApplicationDefaults =
+        toml::from_str(r#"broken_repo_config_behaviour = "block""#).unwrap();
+    assert_eq!(
+        app.broken_repo_config_behaviour,
+        BrokenRepoConfigBehaviour::Block
+    );
+}
+
+#[test]
+fn test_broken_repo_config_behaviour_defaults_to_silent_fallback_when_omitted() {
+    // The field carries `#[serde(default)]`; omitting it must yield SilentFallback.
+    let app: ApplicationDefaults = toml::from_str("").unwrap();
+    assert_eq!(
+        app.broken_repo_config_behaviour,
+        BrokenRepoConfigBehaviour::SilentFallback
+    );
+}
+
+#[test]
+fn test_broken_repo_config_behaviour_unknown_value_errors() {
+    // An unrecognised string must be a hard deserialization error, not a silent
+    // fall-through to the default.
+    let result: Result<ApplicationDefaults, _> =
+        toml::from_str(r#"broken_repo_config_behaviour = "warn_and_pray""#);
+    assert!(
+        result.is_err(),
+        "an unknown broken_repo_config_behaviour value must fail to deserialize"
+    );
+}
+
+#[test]
+fn test_application_defaults_default_broken_repo_config_behaviour_is_silent_fallback() {
+    assert_eq!(
+        ApplicationDefaults::default().broken_repo_config_behaviour,
+        BrokenRepoConfigBehaviour::SilentFallback
+    );
+}
+
+#[test]
+fn test_broken_repo_config_behaviour_enum_default_is_silent_fallback() {
+    assert_eq!(
+        BrokenRepoConfigBehaviour::default(),
+        BrokenRepoConfigBehaviour::SilentFallback
+    );
+}
+
+#[test]
+fn test_broken_repo_config_behaviour_round_trips_via_server_policies_section() {
+    // Mirrors the server's `[policies]` TOML shape, where the section body is
+    // deserialized directly into `ApplicationDefaults`.
+    #[derive(serde::Deserialize, Default)]
+    struct ServerTomlConfig {
+        #[serde(default)]
+        policies: ApplicationDefaults,
+    }
+
+    let parsed: ServerTomlConfig = toml::from_str(
+        r#"
+[policies]
+broken_repo_config_behaviour = "block"
+"#,
+    )
+    .unwrap();
+    assert_eq!(
+        parsed.policies.broken_repo_config_behaviour,
+        BrokenRepoConfigBehaviour::Block
+    );
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SerdeWrapper {
+    behaviour: BrokenRepoConfigBehaviour,
+}
+
+#[test]
+fn test_broken_repo_config_behaviour_serialize_deserialize_round_trip_notify() {
+    let value = BrokenRepoConfigBehaviour::Notify;
+    let serialized = toml::to_string(&SerdeWrapper { behaviour: value }).unwrap();
+    let back: SerdeWrapper = toml::from_str(&serialized).unwrap();
+    assert_eq!(back.behaviour, value);
+}
+
+// ── Tier 2: not settable at repo / org level ───────────────────────────────
+
+#[tokio::test]
+async fn test_resolve_repo_config_cannot_downgrade_broken_config_behaviour() {
+    // The repo file tries to force "silent_fallback" while the operator app
+    // default is Notify. The repo setting MUST be ignored — a naive impl that
+    // reads the behaviour from the repo config would wrongly return None.
+    let repo_toml = format!(
+        "{}\n[policies]\nbroken_repo_config_behaviour = \"silent_fallback\"\n",
+        BROKEN_CONFIG_WRONG_SCHEMA_TOML.trim()
+    );
+    let fetcher = MockFetcher::new(Some(repo_toml));
+    let mut app = ApplicationDefaults::default();
+    app.broken_repo_config_behaviour = BrokenRepoConfigBehaviour::Notify;
+
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "path",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        result.broken_repo_config.map(|n| n.behaviour),
+        Some(BrokenRepoConfigBehaviour::Notify),
+        "a repo file must not be able to downgrade the operator-configured behaviour"
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_repo_config_cannot_enable_broken_config_behaviour() {
+    // The repo file tries to force "block" while the operator app default is
+    // SilentFallback. The repo setting MUST be ignored → no notice at all.
+    let repo_toml = format!(
+        "{}\n[policies]\nbroken_repo_config_behaviour = \"block\"\n",
+        BROKEN_CONFIG_WRONG_SCHEMA_TOML.trim()
+    );
+    let fetcher = MockFetcher::new(Some(repo_toml));
+    let app = ApplicationDefaults::default(); // SilentFallback
+
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "path",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        result.broken_repo_config, None,
+        "a repo file must not be able to enable broken-config notices"
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_org_policy_cannot_set_broken_config_behaviour() {
+    // The org policy file tries to force "block"; the app default is
+    // SilentFallback and the repo config is broken. The org setting MUST be
+    // ignored → no notice.
+    struct TwoFileFetcher {
+        repo_content: String,
+        org_content: String,
+        org_path: String,
+    }
+
+    #[async_trait]
+    impl ConfigFetcher for TwoFileFetcher {
+        async fn fetch_config(
+            &self,
+            _owner: &str,
+            _repo: &str,
+            path: &str,
+        ) -> Result<Option<String>, Error> {
+            if path == self.org_path {
+                Ok(Some(self.org_content.clone()))
+            } else {
+                Ok(Some(self.repo_content.clone()))
+            }
+        }
+
+        async fn fetch_config_at_ref(
+            &self,
+            _owner: &str,
+            _repo: &str,
+            _path: &str,
+            _git_ref: &str,
+        ) -> Result<Option<String>, Error> {
+            Ok(None)
+        }
+    }
+
+    let fetcher = TwoFileFetcher {
+        repo_content: BROKEN_CONFIG_MALFORMED_TOML.to_string(),
+        org_content: "schemaVersion = 1\nbroken_repo_config_behaviour = \"block\"\n[defaults]\n"
+            .to_string(),
+        org_path: ".github/merge-warden-org.toml".to_string(),
+    };
+
+    let mut app = ApplicationDefaults::default(); // SilentFallback
+    app.org_policy_source = Some(make_org_source(false));
+
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "path",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        result.broken_repo_config, None,
+        "an org policy file must not be able to set broken-config behaviour"
+    );
+}
+
+// ── Tier 2: resolve_pull_request_config notice population ──────────────────
+
+#[tokio::test]
+async fn test_resolve_broken_config_malformed_toml_silent_fallback_yields_none() {
+    let fetcher = MockFetcher::new(Some(BROKEN_CONFIG_MALFORMED_TOML.to_string()));
+    let app = ApplicationDefaults::default(); // SilentFallback
+
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "path",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        result.broken_repo_config, None,
+        "SilentFallback must reproduce today's behaviour: no notice"
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_broken_config_malformed_toml_silent_fallback_still_records_metric() {
+    // SilentFallback must NOT suppress the pre-existing config-load-failure
+    // metric; only the comment/conclusion behaviour changes across modes.
+    let fetcher = MockFetcher::new(Some(BROKEN_CONFIG_MALFORMED_TOML.to_string()));
+    let app = ApplicationDefaults::default(); // SilentFallback
+    let spy = SpyMetricsRecorder::default();
+
+    let _ = resolve_pull_request_config("acme", "widgets", "path", &fetcher, &app, None, &spy)
+        .await
+        .unwrap();
+
+    let calls = spy.config_load_failure_calls();
+    assert!(
+        calls.iter().any(|c| c.2 == "toml_parse_error"),
+        "the config-load-failure metric must still be recorded under SilentFallback; got: {calls:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_broken_config_malformed_toml_notify_yields_notice() {
+    let fetcher = MockFetcher::new(Some(BROKEN_CONFIG_MALFORMED_TOML.to_string()));
+    let mut app = ApplicationDefaults::default();
+    app.broken_repo_config_behaviour = BrokenRepoConfigBehaviour::Notify;
+
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "path",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        result.broken_repo_config.as_ref().map(|n| n.behaviour),
+        Some(BrokenRepoConfigBehaviour::Notify)
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_broken_config_malformed_toml_notify_notice_has_non_empty_error_detail() {
+    let fetcher = MockFetcher::new(Some(BROKEN_CONFIG_MALFORMED_TOML.to_string()));
+    let mut app = ApplicationDefaults::default();
+    app.broken_repo_config_behaviour = BrokenRepoConfigBehaviour::Notify;
+
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "path",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
+
+    let notice = result
+        .broken_repo_config
+        .expect("a notice must be produced for malformed TOML under Notify");
+    assert!(
+        !notice.error_detail.trim().is_empty(),
+        "the notice must carry a non-empty human-readable error detail"
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_broken_config_malformed_toml_block_yields_block_notice() {
+    let fetcher = MockFetcher::new(Some(BROKEN_CONFIG_MALFORMED_TOML.to_string()));
+    let mut app = ApplicationDefaults::default();
+    app.broken_repo_config_behaviour = BrokenRepoConfigBehaviour::Block;
+
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "path",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        result.broken_repo_config.map(|n| n.behaviour),
+        Some(BrokenRepoConfigBehaviour::Block)
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_broken_config_wrong_schema_version_notify_yields_notice() {
+    let fetcher = MockFetcher::new(Some(BROKEN_CONFIG_WRONG_SCHEMA_TOML.to_string()));
+    let mut app = ApplicationDefaults::default();
+    app.broken_repo_config_behaviour = BrokenRepoConfigBehaviour::Notify;
+
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "path",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        result.broken_repo_config.map(|n| n.behaviour),
+        Some(BrokenRepoConfigBehaviour::Notify),
+        "an unsupported schemaVersion is a BROKEN-config error and must produce a notice"
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_broken_config_wrong_schema_version_block_yields_block_notice() {
+    let fetcher = MockFetcher::new(Some(BROKEN_CONFIG_WRONG_SCHEMA_TOML.to_string()));
+    let mut app = ApplicationDefaults::default();
+    app.broken_repo_config_behaviour = BrokenRepoConfigBehaviour::Block;
+
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "path",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        result.broken_repo_config.map(|n| n.behaviour),
+        Some(BrokenRepoConfigBehaviour::Block)
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_broken_config_fetch_error_notify_yields_none() {
+    // A fetch failure (ConfigLoadError::NotFound) is a transient infra problem,
+    // NOT a broken config — it must never produce a notice, even under Notify.
+    let mut app = ApplicationDefaults::default();
+    app.broken_repo_config_behaviour = BrokenRepoConfigBehaviour::Notify;
+
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "path",
+        &FailingFetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        result.broken_repo_config, None,
+        "a fetch error must not produce a broken-config notice"
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_broken_config_fetch_error_block_yields_none() {
+    let mut app = ApplicationDefaults::default();
+    app.broken_repo_config_behaviour = BrokenRepoConfigBehaviour::Block;
+
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "path",
+        &FailingFetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        result.broken_repo_config, None,
+        "a fetch error must not produce a broken-config notice even under Block"
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_broken_config_absent_file_notify_yields_none() {
+    // An absent file (fetcher returns Ok(None)) is an expected state, never broken.
+    let fetcher = MockFetcher::new(None);
+    let mut app = ApplicationDefaults::default();
+    app.broken_repo_config_behaviour = BrokenRepoConfigBehaviour::Notify;
+
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "path",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        result.broken_repo_config, None,
+        "an absent config file must not produce a broken-config notice"
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_broken_config_absent_file_block_yields_none() {
+    let fetcher = MockFetcher::new(None);
+    let mut app = ApplicationDefaults::default();
+    app.broken_repo_config_behaviour = BrokenRepoConfigBehaviour::Block;
+
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "path",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        result.broken_repo_config, None,
+        "an absent config file must not produce a broken-config notice even under Block"
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_valid_config_notify_yields_none() {
+    let fetcher = MockFetcher::new(Some("schemaVersion = 1\n".to_string()));
+    let mut app = ApplicationDefaults::default();
+    app.broken_repo_config_behaviour = BrokenRepoConfigBehaviour::Notify;
+
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "path",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        result.broken_repo_config, None,
+        "a valid repo config must never produce a broken-config notice"
+    );
+}
+
+#[tokio::test]
+async fn test_resolve_valid_config_block_yields_none() {
+    let fetcher = MockFetcher::new(Some("schemaVersion = 1\n".to_string()));
+    let mut app = ApplicationDefaults::default();
+    app.broken_repo_config_behaviour = BrokenRepoConfigBehaviour::Block;
+
+    let result = resolve_pull_request_config(
+        "owner",
+        "repo",
+        "path",
+        &fetcher,
+        &app,
+        None,
+        &NoopMetricsRecorder,
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(
+        result.broken_repo_config, None,
+        "a valid repo config must never produce a broken-config notice even under Block"
+    );
+}
+
+// ── Tier 3: property-based invariants ──────────────────────────────────────
+
+/// Strategy over the two non-silent behaviours.
+fn non_silent_behaviour_strategy() -> impl Strategy<Value = BrokenRepoConfigBehaviour> {
+    prop_oneof![
+        Just(BrokenRepoConfigBehaviour::Notify),
+        Just(BrokenRepoConfigBehaviour::Block),
+    ]
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(32))]
+
+    /// For any non-silent behaviour, a BROKEN repo config (malformed TOML) must
+    /// always produce a notice carrying exactly that behaviour.
+    #[test]
+    fn prop_broken_malformed_config_non_silent_always_yields_matching_notice(
+        behaviour in non_silent_behaviour_strategy()
+    ) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let fetcher = MockFetcher::new(Some(BROKEN_CONFIG_MALFORMED_TOML.to_string()));
+        let mut app = ApplicationDefaults::default();
+        app.broken_repo_config_behaviour = behaviour;
+        let result = rt.block_on(resolve_pull_request_config(
+            "owner",
+            "repo",
+            "path",
+            &fetcher,
+            &app,
+            None,
+            &NoopMetricsRecorder,
+        ))
+        .unwrap();
+        prop_assert_eq!(result.broken_repo_config.map(|n| n.behaviour), Some(behaviour));
+    }
+
+    /// Under SilentFallback, NO broken reason (malformed or wrong schema) may
+    /// ever produce a notice.
+    #[test]
+    fn prop_silent_fallback_never_yields_notice(
+        body in prop_oneof![
+            Just(BROKEN_CONFIG_MALFORMED_TOML.to_string()),
+            Just(BROKEN_CONFIG_WRONG_SCHEMA_TOML.to_string()),
+        ]
+    ) {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let fetcher = MockFetcher::new(Some(body));
+        let app = ApplicationDefaults::default(); // SilentFallback
+        let result = rt.block_on(resolve_pull_request_config(
+            "owner",
+            "repo",
+            "path",
+            &fetcher,
+            &app,
+            None,
+            &NoopMetricsRecorder,
+        ))
+        .unwrap();
+        prop_assert_eq!(result.broken_repo_config, None);
+    }
+}
