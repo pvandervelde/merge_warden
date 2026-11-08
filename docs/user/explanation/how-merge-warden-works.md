@@ -145,6 +145,37 @@ whether any pull request currently touches the config file, via the
 
 ---
 
+## Broken default-branch configuration policy
+
+The validation above only runs when a PR's diff touches `.github/merge-warden.toml`. It
+says nothing about the config that is already committed to the default branch and is
+actually governing every PR — including ones that don't touch the config file at all.
+
+If that default-branch config becomes malformed or specifies an unsupported
+`schemaVersion`, Merge Warden falls back to application defaults for that repository, on
+every PR, until it is fixed. By default this fallback is silent. Operators can change that
+with the application-level `broken_repo_config_behaviour` setting:
+
+- **`silent_fallback`** (default) — unchanged: no PR comment, check conclusion unaffected.
+- **`notify`** — posts a PR comment explaining that the default-branch config could not be
+  loaded and that application defaults are in effect. Does not block.
+- **`block`** — posts the same comment **and** forces the check conclusion to `failure`,
+  hard-blocking the PR until the default-branch config is fixed.
+
+This notice uses a comment marker distinct from the PR-diff config check above, so the two
+are managed independently — fixing one does not affect the other's comment. A transient
+fetch failure or a simply-absent config file is never treated as "broken" and never
+triggers this notice, regardless of the setting.
+
+This setting is application-level only: it cannot be set or overridden by a repository's
+own `.github/merge-warden.toml` or an org policy file. See
+[`broken_repo_config_behaviour`](../reference/app-config.md#broken_repo_config_behaviour)
+for the full reference and
+[Choosing a broken default-branch config policy](../how-to/set-app-level-defaults.md#choosing-a-broken-default-branch-config-policy)
+for guidance on picking a value.
+
+---
+
 ## What Merge Warden does not do
 
 - It does not merge or close pull requests.

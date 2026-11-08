@@ -79,6 +79,12 @@ without forcing every repository to maintain its own config file.
 See [Application configuration schema](../reference/app-config.md) and
 [Set application-level defaults](../how-to/set-app-level-defaults.md).
 
+Some application-level fields — `bot_mention`, `repository_scope`, and
+`broken_repo_config_behaviour` — have no per-repo equivalent and are not part of this merge
+chain at all; they are app-level-only operator controls. See
+[`broken_repo_config_behaviour`](../reference/app-config.md#broken_repo_config_behaviour)
+for how a broken per-repository config on the default branch is handled.
+
 ### Layer 3 — Org-level policy (optional)
 
 When `[policies.org_policy_source]` is configured in the application-level config, the server

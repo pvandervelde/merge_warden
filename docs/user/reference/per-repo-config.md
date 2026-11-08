@@ -18,6 +18,13 @@ recorded in the `config_load_failures_total` metric so operators can alert on it
 request modifies this file, Merge Warden also posts a PR comment describing the problem —
 see [How Merge Warden works](../explanation/how-merge-warden-works.md#automatic-configuration-file-validation).
 
+A malformed or unsupported-`schemaVersion` file already present on the default branch (as
+opposed to one introduced within a PR) is additionally governed by the operator's
+`broken_repo_config_behaviour` application setting, which can surface a PR comment and
+optionally block merging. This setting cannot be configured here, in this file — it is
+application-level only. See
+[`broken_repo_config_behaviour`](app-config.md#broken_repo_config_behaviour).
+
 The top-level `schemaVersion` field is required.
 
 ```toml
