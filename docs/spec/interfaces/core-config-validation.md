@@ -527,6 +527,153 @@ pub enum ConfigurationError {
 
 ---
 
+## Broken Default-Branch Configuration Policy Additions
+
+The following types, constants, and functions are added to `crates/core/src/config.rs`
+(plus one new private helper and call-site wiring in `crates/core/src/lib.rs`) as part of
+[FR-010 (Broken Default-Branch Configuration Policy)](../requirements/functional-requirements.md#fr-010-broken-default-branch-configuration-policy).
+
+### New Constant: `BROKEN_CONFIG_COMMENT_MARKER`
+
+Location: `crates/core/src/config.rs`
+
+```rust
+/// HTML comment marker identifying the broken-default-branch-config notice comment.
+///
+/// Deliberately distinct from [`CONFIG_COMMENT_MARKER`]: that marker flags a malformed
+/// configuration file introduced *within the PR diff*; this one flags a malformed
+/// `.github/merge-warden.toml` already present on the repository's **default branch**.
+/// Keeping the markers separate lets each comment lifecycle be reconciled independently.
+pub const BROKEN_CONFIG_COMMENT_MARKER: &str = "<!-- MERGE_WARDEN_BROKEN_CONFIG_CHECK -->";
+```
+
+### New Type: `BrokenRepoConfigBehaviour`
+
+Location: `crates/core/src/config.rs`
+
+```rust
+/// Application-level operator policy controlling how Merge Warden reacts when the
+/// `.github/merge-warden.toml` on a repository's default branch is present but cannot be
+/// loaded (malformed TOML or an unsupported `schemaVersion`).
+///
+/// Application-level only — not settable at the organization or repository level.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BrokenRepoConfigBehaviour {
+    /// Silently fall back to application defaults — no PR comment, check conclusion
+    /// unchanged. `config.load.failures_total` is still recorded.
+    #[default]
+    SilentFallback,
+    /// Post a PR comment explaining the broken default-branch config; do not block.
+    Notify,
+    /// Post the same PR comment and force the check conclusion to `"failure"`.
+    Block,
+}
+```
+
+### New Type: `BrokenRepoConfigNotice`
+
+Location: `crates/core/src/config.rs`
+
+```rust
+/// A populated directive describing that a broken default-branch config was detected and
+/// the operator wants it surfaced on the PR. Produced by [`resolve_pull_request_config`];
+/// `Some` only when the repo-tier load failed with a "broken" error (not a fetch failure or
+/// absent file) and `broken_repo_config_behaviour` is `Notify` or `Block`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrokenRepoConfigNotice {
+    /// Always `Notify` or `Block` — never `SilentFallback`.
+    pub behaviour: BrokenRepoConfigBehaviour,
+    /// Human-readable explanation, derived from the `ConfigLoadError`'s `Display` output.
+    pub error_detail: String,
+}
+```
+
+### Second Extension to `ApplicationDefaults`
+
+```rust
+pub struct ApplicationDefaults {
+    // ... existing fields unchanged ...
+
+    /// Application-level operator policy for a broken default-branch config.
+    /// Not part of the org/repo policy merge chain and cannot be set in a repository or
+    /// org policy file.
+    #[serde(default)]
+    pub broken_repo_config_behaviour: BrokenRepoConfigBehaviour,
+}
+```
+
+### Extension to `CurrentPullRequestValidationConfiguration`
+
+```rust
+pub struct CurrentPullRequestValidationConfiguration {
+    // ... existing fields unchanged ...
+
+    /// `Some` only when the repo-tier config was broken and the application behaviour is
+    /// `Notify` or `Block`. Populated by [`resolve_pull_request_config`] after the merge
+    /// chain runs, not by any `PolicySet` conversion.
+    pub broken_repo_config: Option<BrokenRepoConfigNotice>,
+}
+```
+
+### Error Classification in `resolve_pull_request_config`
+
+Only `ConfigLoadError::Toml(_)`, `ConfigLoadError::ParseError(_)`, and
+`ConfigLoadError::UnsupportedSchemaVersion(..)` are classified as "broken" and eligible for a
+`BrokenRepoConfigNotice`. Fetch failures and an absent file fall back to
+`RepositoryProvidedConfig::default()` exactly as before FR-010, and never populate
+`broken_repo_config`.
+
+### New Private Function: `sanitize_config_error_detail`
+
+Location: `crates/core/src/config.rs`
+
+```rust
+/// Neutralises comment-body breakout / marker-injection vectors in an untrusted
+/// config-load error detail before it is embedded in a PR comment's fenced code block.
+///
+/// `error_detail` originates from `ConfigLoadError`'s `Display` — for a malformed-TOML
+/// failure this quotes the repository's own `.github/merge-warden.toml` source lines,
+/// which are attacker-influenceable by anyone who can land a config on the default branch.
+pub(crate) fn sanitize_config_error_detail(detail: &str) -> String;
+```
+
+Substitutions applied: `<!--` → `<! --` and `-->` → `-- >` (split HTML-comment delimiters so
+an injected marker token cannot match the `body.contains(marker)` filter used by both
+comment reconcilers); and a triple-backtick run → `` ` ` ` `` (so the detail cannot break out
+of the fenced block it is rendered inside).
+
+### Check-Conclusion Override in `process_pull_request`
+
+When `broken_repo_config` is `Some(notice)` with `notice.behaviour == Block`, the computed
+check conclusion is forced to `"failure"` after the normal `success`/`neutral`/`failure`
+determination (including the draft-PR `"neutral"` case) — this is the only way FR-010 can
+change the check conclusion. `Notify` and `SilentFallback`/`None` never alter it.
+
+### Testing Requirements (`crates/core/src/config_tests.rs`, `crates/core/src/lib_tests.rs`)
+
+- `BrokenRepoConfigBehaviour` default is `SilentFallback`; TOML round-trip for all three
+  snake_case values
+- `resolve_pull_request_config`: malformed TOML / unsupported `schemaVersion` on the default
+  branch with `behaviour = SilentFallback` → `broken_repo_config: None`
+  (byte-for-byte-identical fallback behaviour)
+- `resolve_pull_request_config`: same, with `behaviour = Notify` or `Block` →
+  `broken_repo_config: Some(BrokenRepoConfigNotice { behaviour, error_detail })`
+- `resolve_pull_request_config`: a fetch failure (`NotFound`/`Io`) or absent file never
+  populates `broken_repo_config`, regardless of `behaviour`
+- `process_pull_request` with `Notify`: notice comment posted; check conclusion unaffected
+- `process_pull_request` with `Block`: notice comment posted; check conclusion forced to
+  `"failure"` even when validation would otherwise produce `"success"` or the draft
+  `"neutral"`
+- Notice comment reconciliation: idempotent re-run is a no-op; comment is removed once the
+  default-branch config is fixed
+- `sanitize_config_error_detail`: `<!--`/`-->` sequences and triple-backtick runs in the
+  input are split in the output
+- `broken_repo_config_behaviour` is rejected (or ignored, per `serde(default)` on unknown
+  fields policy) when present in `RepositoryProvidedConfig` or an org policy file
+
+---
+
 ## Testing Requirements
 
 ### Unit tests (`crates/core/src/config_tests.rs`)
