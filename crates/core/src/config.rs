@@ -77,6 +77,29 @@ pub const CONFIG_FILE_PATH: &str = ".github/merge-warden.toml";
 /// manage (post/update/delete) only its own comment without disturbing the other.
 pub const BROKEN_CONFIG_COMMENT_MARKER: &str = "<!-- MERGE_WARDEN_BROKEN_CONFIG_CHECK -->";
 
+/// Neutralises comment-body breakout / marker-injection vectors in an untrusted
+/// config-load error detail before it is embedded in a PR comment.
+///
+/// `error_detail` originates from [`ConfigLoadError`]'s `Display` — for a
+/// malformed-TOML failure this quotes the repository's own
+/// `.github/merge-warden.toml` source lines, which are attacker-influenceable by
+/// anyone who can land a config on the default branch. Three substitutions make
+/// the string safe to embed inside a fenced Markdown block:
+/// - `<!--` becomes `<! --` and `-->` becomes `-- >`: split the HTML-comment
+///   delimiters so an injected marker token cannot match the raw
+///   `body.contains(marker)` filters used by the comment reconcilers (both
+///   [`CONFIG_COMMENT_MARKER`] and [`BROKEN_CONFIG_COMMENT_MARKER`] end in `-->`).
+/// - a triple-backtick run becomes `` ` ` ` ``: split the run so the detail cannot
+///   break out of the fenced code block it is rendered inside.
+///
+/// [`ConfigLoadError`]: crate::errors::ConfigLoadError
+pub(crate) fn sanitize_config_error_detail(detail: &str) -> String {
+    detail
+        .replace("<!--", "<! --")
+        .replace("-->", "-- >")
+        .replace("```", "` ` `")
+}
+
 /// Application-level operator policy controlling how merge-warden reacts when the
 /// `.github/merge-warden.toml` on a repository's **default branch** is present but
 /// cannot be loaded (malformed TOML or an unsupported `schemaVersion`).

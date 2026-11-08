@@ -2169,19 +2169,29 @@ Please update the PR body to include a valid work item reference."#;
                     "Default-branch merge-warden configuration is broken; surfacing notice on pull request",
                 );
 
-                Some(formatdoc! {"
-                    {marker}
-                    \u{26a0}\u{fe0f} **merge-warden configuration error**
-
-                    The `.github/merge-warden.toml` on the default branch of this repository could not be loaded. \
-                    Application defaults are being used to evaluate this PR.
-
-                    **Reason:** {error_detail}
-
-                    Please fix the configuration file on the default branch so that your intended policy takes effect.",
+                // The error detail is untrusted — for a malformed-TOML failure it
+                // quotes the repository's own config source lines. Sanitise it to
+                // neutralise HTML-comment marker injection and fenced-block
+                // breakout before embedding it inside a fenced `text` block.
+                let sanitized_error_detail =
+                    config::sanitize_config_error_detail(&notice.error_detail);
+                Some(format!(
+                    "{marker}\n\
+                     \u{26a0}\u{fe0f} **merge-warden configuration error**\n\
+                     \n\
+                     The `.github/merge-warden.toml` on the default branch of this repository could not be loaded. \
+                     Application defaults are being used to evaluate this PR.\n\
+                     \n\
+                     **Reason:**\n\
+                     \n\
+                     ```text\n\
+                     {sanitized_error_detail}\n\
+                     ```\n\
+                     \n\
+                     Please fix the configuration file on the default branch so that your intended policy takes effect.",
                     marker = BROKEN_CONFIG_COMMENT_MARKER,
-                    error_detail = notice.error_detail,
-                })
+                    sanitized_error_detail = sanitized_error_detail,
+                ))
             }
         };
 
