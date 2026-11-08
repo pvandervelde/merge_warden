@@ -10009,3 +10009,80 @@ proptest! {
         prop_assert_eq!(result.broken_repo_config, None);
     }
 }
+
+// ===========================================================================
+// Issue #336 security follow-up — `sanitize_config_error_detail`.
+//
+// This helper neutralises comment-body breakout / marker-injection vectors in
+// an untrusted config-load error detail before it is embedded in a PR comment.
+// These RED unit tests reference the not-yet-implemented
+// `sanitize_config_error_detail` (expected compile failure until it lands).
+// ===========================================================================
+
+#[test]
+fn test_sanitize_config_error_detail_splits_html_comment_open_token() {
+    let out = sanitize_config_error_detail("prefix <!-- suffix");
+    assert_eq!(out, "prefix <! -- suffix");
+}
+
+#[test]
+fn test_sanitize_config_error_detail_splits_html_comment_close_token() {
+    let out = sanitize_config_error_detail("prefix --> suffix");
+    assert_eq!(out, "prefix -- > suffix");
+}
+
+#[test]
+fn test_sanitize_config_error_detail_neutralises_full_config_check_marker() {
+    // The whole PR-diff marker embedded in the detail must no longer contain the
+    // literal `CONFIG_COMMENT_MARKER`, so the other reconciler's
+    // `body.contains(CONFIG_COMMENT_MARKER)` filter cannot capture the comment.
+    let out = sanitize_config_error_detail(CONFIG_COMMENT_MARKER);
+    assert!(
+        !out.contains(CONFIG_COMMENT_MARKER),
+        "sanitised output must not contain the PR-diff config marker; got: {out}"
+    );
+}
+
+#[test]
+fn test_sanitize_config_error_detail_neutralises_full_broken_config_marker() {
+    // The broken-config marker also ends in `-->`, so it too must be defeated —
+    // this prevents a crafted detail from spoofing a second marker line.
+    let out = sanitize_config_error_detail(BROKEN_CONFIG_COMMENT_MARKER);
+    assert!(
+        !out.contains(BROKEN_CONFIG_COMMENT_MARKER),
+        "sanitised output must not contain the broken-config marker; got: {out}"
+    );
+}
+
+#[test]
+fn test_sanitize_config_error_detail_splits_triple_backtick_run() {
+    let out = sanitize_config_error_detail("before ``` after");
+    assert!(
+        !out.contains("```"),
+        "sanitised output must not contain a triple-backtick run; got: {out}"
+    );
+}
+
+#[test]
+fn test_sanitize_config_error_detail_leaves_benign_input_unchanged() {
+    // A detail with none of the targeted tokens must be returned byte-for-byte.
+    let benign = "schemaVersion must be 1, found 2 (update the config file)";
+    assert_eq!(sanitize_config_error_detail(benign), benign);
+}
+
+#[test]
+fn test_sanitize_config_error_detail_preserves_realistic_toml_error_without_special_tokens() {
+    // A realistic multi-line toml parse error that contains none of the targeted
+    // tokens must pass through unharmed — the sanitiser only rewrites the three
+    // breakout sequences and must not mangle ordinary diagnostic text.
+    let toml_error = "TOML parse error at line 3, column 1\n  |\n3 | not = valid = toml\n  | ^\nexpected newline, found an identifier";
+    assert_eq!(sanitize_config_error_detail(toml_error), toml_error);
+}
+
+#[test]
+fn test_sanitize_config_error_detail_rewrites_every_targeted_token_in_one_pass() {
+    // All three breakout sequences present together must each be split, proving
+    // the replacements are independent and none is skipped.
+    let out = sanitize_config_error_detail("<!-- ``` -->");
+    assert_eq!(out, "<! -- ` ` ` -- >");
+}

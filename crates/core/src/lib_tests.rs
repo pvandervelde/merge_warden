@@ -5,6 +5,7 @@ use crate::{
         ChangeTypeLabelConfig, ConventionalCommitMappings,
         CurrentPullRequestValidationConfiguration, FallbackLabelSettings, IssuePropagationConfig,
         KeywordLabelsConfig, LabelDetectionStrategy, WipCheckConfig,
+        sanitize_config_error_detail,
         BROKEN_CONFIG_COMMENT_MARKER, CONFIG_COMMENT_MARKER, CONFIG_FILE_PATH,
         CONVENTIONAL_COMMIT_REGEX, MISSING_WORK_ITEM_LABEL, SIZE_COMMENT_MARKER,
         TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL, WIP_COMMENT_MARKER, WORK_ITEM_COMMENT_MARKER,
@@ -5701,9 +5702,17 @@ impl ConfigCheckMockProvider {
 }
 
 /// Builds the exact PR-comment body the broken-config feature must produce,
-/// per the Issue #336 interface contract. Pinning the whole body here makes the
-/// format test adversarial and gives the idempotency test an exact pre-seed.
+/// per the Issue #336 interface contract as hardened for the comment-injection
+/// follow-up. Pinning the whole body here makes the format test adversarial and
+/// gives the idempotency test an exact pre-seed.
+///
+/// The untrusted `error_detail` is embedded inside a fenced `text` code block
+/// and is first passed through [`sanitize_config_error_detail`], so every test
+/// that compares against this helper simultaneously pins the sanitised,
+/// breakout-proof output. Callers pass the RAW detail; this helper applies the
+/// same sanitisation the production code must apply.
 fn expected_broken_config_comment_body(error_detail: &str) -> String {
+    let sanitized = sanitize_config_error_detail(error_detail);
     format!(
         "{marker}\n\
 ⚠️ **merge-warden configuration error**\n\
@@ -5711,11 +5720,15 @@ fn expected_broken_config_comment_body(error_detail: &str) -> String {
 The `.github/merge-warden.toml` on the default branch of this repository could not be loaded. \
 Application defaults are being used to evaluate this PR.\n\
 \n\
-**Reason:** {error_detail}\n\
+**Reason:**\n\
+\n\
+```text\n\
+{sanitized}\n\
+```\n\
 \n\
 Please fix the configuration file on the default branch so that your intended policy takes effect.",
         marker = BROKEN_CONFIG_COMMENT_MARKER,
-        error_detail = error_detail,
+        sanitized = sanitized,
     )
 }
 
@@ -5842,9 +5855,12 @@ async fn test_broken_config_notify_comment_includes_error_detail_reason() {
         .find(|c| c.body.contains(BROKEN_CONFIG_COMMENT_MARKER))
         .map(|c| c.body.clone())
         .expect("a broken-config comment must be posted");
+    // The hardened format puts `**Reason:**` on its own line and renders the
+    // detail inside a fenced block on the following lines; the detail (which
+    // carries no injection tokens here) must still be surfaced verbatim.
     assert!(
-        body.contains(&format!("**Reason:** {error_detail}")),
-        "the comment must surface the error detail on the Reason line; body: {body}"
+        body.contains(error_detail),
+        "the comment must surface the error detail inside the Reason block; body: {body}"
     );
 }
 
@@ -6145,5 +6161,82 @@ async fn test_broken_config_notify_different_body_is_deleted_and_reposted() {
     assert_ne!(
         broken[0].id, 99,
         "a changed body must be deleted and re-posted (fresh id), not left as the stale id=99 comment"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Issue #336 security follow-up — comment-body-injection hardening.
+//
+// `error_detail` is derived from `ConfigLoadError::to_string()`, which for a
+// malformed repo-owned `.github/merge-warden.toml` quotes the offending lines
+// of that file verbatim. It is therefore attacker-controlled and must be
+// neutralised before being embedded in the authoritative bot comment. These
+// RED tests lock in the hardened behaviour and reference the not-yet-existing
+// `sanitize_config_error_detail` helper (expected compile failure).
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_broken_config_notify_marker_injection_cannot_contaminate_pr_diff_marker() {
+    // A crafted malformed config whose quoted text embeds the OTHER reconciler's
+    // marker token must NOT smuggle `CONFIG_COMMENT_MARKER` into the posted
+    // broken-config comment. If it could, the PR-diff reconciler's
+    // `body.contains(CONFIG_COMMENT_MARKER)` filter would capture (and
+    // delete/replace) this comment, defeating the deliberate marker isolation.
+    let error_detail =
+        format!("malformed TOML near: title = \"{CONFIG_COMMENT_MARKER} pwn\"");
+    let notice = BrokenRepoConfigNotice {
+        behaviour: BrokenRepoConfigBehaviour::Notify,
+        error_detail,
+    };
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"));
+    let warden = MergeWarden::with_config(provider, config_with_broken_notice(Some(notice)));
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    let body = comments
+        .iter()
+        .find(|c| c.body.contains(BROKEN_CONFIG_COMMENT_MARKER))
+        .map(|c| c.body.clone())
+        .expect("a broken-config comment must be posted");
+    assert!(
+        !body.contains(CONFIG_COMMENT_MARKER),
+        "a crafted error_detail must not smuggle the PR-diff CONFIG_COMMENT_MARKER \
+         into the broken-config comment; body: {body}"
+    );
+}
+
+#[tokio::test]
+async fn test_broken_config_notify_triple_backtick_detail_cannot_break_fence() {
+    // A crafted detail containing a triple-backtick run would otherwise close the
+    // fenced block early and let the remaining text render as arbitrary Markdown.
+    // The sanitiser must split every ``` run; comparing against the expected-body
+    // helper (which applies the same sanitiser) pins the intact fenced output.
+    let error_detail = "malformed TOML: ```markdown [click](http://evil) ``` trailing";
+    let notice = BrokenRepoConfigNotice {
+        behaviour: BrokenRepoConfigBehaviour::Notify,
+        error_detail: error_detail.to_string(),
+    };
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"));
+    let warden = MergeWarden::with_config(provider, config_with_broken_notice(Some(notice)));
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    let body = comments
+        .iter()
+        .find(|c| c.body.contains(BROKEN_CONFIG_COMMENT_MARKER))
+        .map(|c| c.body.clone())
+        .expect("a broken-config comment must be posted");
+    assert_eq!(
+        body,
+        expected_broken_config_comment_body(error_detail),
+        "a triple-backtick error_detail must be sanitised and rendered inside an intact fenced block"
     );
 }
