@@ -4184,6 +4184,120 @@ async fn test_size_comment_is_removed_when_pr_becomes_non_oversized() {
     );
 }
 
+/// Kill test for the `(is_size_valid || !should_fail_on_size)` contribution to
+/// the final check conclusion (lib.rs process_pull_request). Surfaced during the
+/// Issue #336 mutation audit: the `delete !` mutant on `!should_fail_on_size`
+/// turns the size term into `is_size_valid || should_fail_on_size`, which is
+/// always `true` and lets an oversized hard-fail PR wrongly conclude "success".
+///
+/// An oversized, non-draft PR with `fail_on_oversized = true`, valid title and
+/// work-item reference, and NO size bypass must conclude "failure".
+#[tokio::test]
+async fn test_oversized_hard_fail_pr_concludes_failure() {
+    let pr = PullRequest {
+        number: 1,
+        title: "feat: add new feature".to_string(),
+        draft: false,
+        body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+        head_sha: String::new(),
+    };
+
+    // 600 changes → oversized with default thresholds (XL threshold = 500).
+    let provider = SizeMockGitProvider::new(pr, vec![make_pr_file("src/main.rs", 600)]);
+
+    let config = CurrentPullRequestValidationConfiguration {
+        pr_size_check: crate::config::PrSizeCheckConfig {
+            enabled: true,
+            add_comment: true,
+            fail_on_oversized: true,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let warden = MergeWarden::with_config(provider, config);
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let conclusion = warden
+        .provider
+        .get_check_status_updates()
+        .last()
+        .map(|u| u.conclusion.clone())
+        .expect("a check status update must be recorded");
+    assert_eq!(
+        conclusion, "failure",
+        "an oversized non-draft PR with fail_on_oversized=true and no bypass must conclude failure"
+    );
+}
+
+/// Kill test for the `is_size_valid ||` half of the size conclusion term
+/// (lib.rs process_pull_request). Surfaced during the Issue #336 mutation audit:
+/// the `|| -> &&` mutant turns `(is_size_valid || !should_fail_on_size)` into
+/// `(is_size_valid && !should_fail_on_size)`. The `||` exists precisely so that a
+/// user who BYPASSES the size check is not blocked even though
+/// `should_fail_on_size` (computed without bypass awareness) is still `true`.
+///
+/// An oversized PR with `fail_on_oversized = true` but an active size bypass for
+/// the author must conclude "success"; the `&&` mutant would wrongly fail it.
+#[tokio::test]
+async fn test_oversized_hard_fail_pr_with_size_bypass_concludes_success() {
+    let pr = PullRequest {
+        number: 1,
+        title: "feat: add new feature".to_string(),
+        draft: false,
+        body: Some("Fixes #123".to_string()),
+        author: Some(User {
+            id: 1,
+            login: "dev".to_string(),
+        }),
+        milestone_number: None,
+        head_sha: String::new(),
+    };
+
+    let provider = SizeMockGitProvider::new(pr, vec![make_pr_file("src/main.rs", 600)]);
+
+    let config = CurrentPullRequestValidationConfiguration {
+        pr_size_check: crate::config::PrSizeCheckConfig {
+            enabled: true,
+            add_comment: true,
+            fail_on_oversized: true,
+            ..Default::default()
+        },
+        // Author "dev" is allowed to bypass the size check.
+        bypass_rules: BypassRules::new_with_size(
+            BypassRule::new(false, vec![]),
+            BypassRule::new(false, vec![]),
+            BypassRule::new(true, vec!["dev".to_string()]),
+        ),
+        ..Default::default()
+    };
+    let warden = MergeWarden::with_config(provider, config);
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let conclusion = warden
+        .provider
+        .get_check_status_updates()
+        .last()
+        .map(|u| u.conclusion.clone())
+        .expect("a check status update must be recorded");
+    assert_eq!(
+        conclusion, "success",
+        "an oversized PR must not be blocked when the author bypasses the size check"
+    );
+}
+
 // ── Config change validation tests ────────────────────────────────────────────
 
 /// A minimal mock provider for config-change validation tests.
@@ -5891,5 +6005,145 @@ async fn test_broken_config_path_does_not_touch_pr_diff_config_comment() {
             .any(|c| c.body.contains(CONFIG_COMMENT_MARKER)
                 && !c.body.contains(BROKEN_CONFIG_COMMENT_MARKER)),
         "the broken-config path must not delete the unrelated PR-diff config comment"
+    );
+}
+
+/// A draft PR with an invalid title and no work-item reference. Absent any
+/// broken-config override it concludes "neutral" (draft PRs are never hard
+/// blocked by validation failures).
+fn make_invalid_draft_pr() -> PullRequest {
+    PullRequest {
+        number: 1,
+        title: "not a conventional title".to_string(),
+        draft: true,
+        body: None,
+        author: Some(User {
+            id: 456,
+            login: "developer123".to_string(),
+        }),
+        milestone_number: None,
+        head_sha: "abc123".to_string(),
+    }
+}
+
+#[tokio::test]
+async fn test_broken_config_block_overrides_draft_neutral_to_failure() {
+    // A draft PR with validation failures would normally conclude "neutral".
+    // The `Block` behaviour must override even that draft "neutral" to "failure"
+    // (the operator hard gate ignores draft status).
+    let notice = BrokenRepoConfigNotice {
+        behaviour: BrokenRepoConfigBehaviour::Block,
+        error_detail: "bad config".to_string(),
+    };
+    let provider = ConfigCheckMockProvider::new(make_invalid_draft_pr());
+    let warden = MergeWarden::with_config(provider, config_with_broken_notice(Some(notice)));
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        warden.provider.get_check_conclusions().last().map(String::as_str),
+        Some("failure"),
+        "Block must override the draft \"neutral\" conclusion to \"failure\""
+    );
+}
+
+#[tokio::test]
+async fn test_broken_config_notify_leaves_draft_neutral_unchanged() {
+    // The same draft PR under `Notify` must keep its "neutral" conclusion:
+    // Notify surfaces a comment but never alters the check conclusion.
+    let notice = BrokenRepoConfigNotice {
+        behaviour: BrokenRepoConfigBehaviour::Notify,
+        error_detail: "bad config".to_string(),
+    };
+    let provider = ConfigCheckMockProvider::new(make_invalid_draft_pr());
+    let warden = MergeWarden::with_config(provider, config_with_broken_notice(Some(notice)));
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    assert_eq!(
+        warden.provider.get_check_conclusions().last().map(String::as_str),
+        Some("neutral"),
+        "Notify must not change the draft \"neutral\" conclusion"
+    );
+}
+
+#[tokio::test]
+async fn test_broken_config_notify_renders_valid_comment_with_empty_error_detail() {
+    // An empty error_detail must still render a well-formed comment (no panic,
+    // marker present, Reason line present) — the reason value is simply empty.
+    let notice = BrokenRepoConfigNotice {
+        behaviour: BrokenRepoConfigBehaviour::Notify,
+        error_detail: String::new(),
+    };
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"));
+    let warden = MergeWarden::with_config(provider, config_with_broken_notice(Some(notice)));
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    let body = comments
+        .iter()
+        .find(|c| c.body.contains(BROKEN_CONFIG_COMMENT_MARKER))
+        .map(|c| c.body.clone())
+        .expect("a broken-config comment must be posted even with an empty error_detail");
+    assert_eq!(
+        body,
+        expected_broken_config_comment_body(""),
+        "an empty error_detail must still render the exact Issue #336 comment format"
+    );
+    assert!(
+        body.contains("**Reason:**"),
+        "the Reason line must still be present with an empty error_detail; body: {body}"
+    );
+}
+
+/// Kill/hardening test for the `reconcile_marker_comment` idempotency check:
+/// when an existing broken-config comment has a DIFFERENT body, it must be
+/// deleted and re-posted (not left stale, not duplicated). The seeded comment
+/// has id=99; a re-post assigns a fresh id, so id-change proves delete+repost.
+#[tokio::test]
+async fn test_broken_config_notify_different_body_is_deleted_and_reposted() {
+    let stale = expected_broken_config_comment_body("an OLD error detail");
+    let notice = BrokenRepoConfigNotice {
+        behaviour: BrokenRepoConfigBehaviour::Notify,
+        error_detail: "a NEW error detail".to_string(),
+    };
+    let provider =
+        ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123")).with_existing_comment(&stale);
+    let warden = MergeWarden::with_config(provider, config_with_broken_notice(Some(notice)));
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let broken: Vec<Comment> = warden
+        .provider
+        .get_comments()
+        .into_iter()
+        .filter(|c| c.body.contains(BROKEN_CONFIG_COMMENT_MARKER))
+        .collect();
+    assert_eq!(
+        broken.len(),
+        1,
+        "exactly one broken-config comment must remain after a body change"
+    );
+    assert_eq!(
+        broken[0].body,
+        expected_broken_config_comment_body("a NEW error detail"),
+        "the remaining comment must carry the NEW error detail"
+    );
+    assert_ne!(
+        broken[0].id, 99,
+        "a changed body must be deleted and re-posted (fresh id), not left as the stale id=99 comment"
     );
 }
