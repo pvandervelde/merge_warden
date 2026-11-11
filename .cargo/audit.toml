@@ -28,4 +28,10 @@ ignore = [
     "RUSTSEC-2026-0174",
     # event-listener !Send StackSlot unsoundness — transitive via queue-runtime's azure_core 1.1.0/lapin.
     "RUSTSEC-2026-0221",
+    # crypto-bigint constant-time side-channel — transitive via
+    # github-bot-sdk -> jsonwebtoken 10.4.0 -> p256/ecdsa -> elliptic-curve 0.13.8 -> crypto-bigint 0.5.5.
+    # The fix (crypto-bigint >= 0.7.6) requires elliptic-curve 0.14+, but github-bot-sdk 0.2.1 (latest)
+    # pins jsonwebtoken ^10.3, which depends on elliptic-curve 0.13. No upgrade path without an upstream
+    # github-bot-sdk release.
+    "RUSTSEC-2026-0387",
 ]

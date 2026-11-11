@@ -244,6 +244,59 @@ access.
 **Priority:** High
 **Dependencies:** FR-002 (Configuration Management), FR-001 (Pull Request Validation)
 
+### FR-010: Broken Default-Branch Configuration Policy
+
+**Requirement:** The system shall allow operators to choose, at the application level only,
+how Merge Warden reacts when the `.github/merge-warden.toml` already present on a
+repository's default branch is present but cannot be loaded.
+
+**Description:**
+
+- Classify a repo-tier config load failure as "broken" only when it is a malformed-TOML
+  parse error or an unsupported `schemaVersion`; a fetch failure (network/`404`) or a
+  simply-absent file is never "broken" and never produces a notice
+- Expose an application-level setting, `broken_repo_config_behaviour` (in the
+  `ApplicationDefaults`/`[policies]` section loaded from `MERGE_WARDEN_CONFIG_FILE`), with
+  three values: `silent_fallback` (default), `notify`, `block`
+- `silent_fallback`: preserve today's behaviour exactly — fall back to application defaults,
+  post no PR comment, leave the check conclusion unchanged; `config.load.failures_total` is
+  still recorded
+- `notify`: additionally post a PR comment (identified by a marker distinct from
+  `CONFIG_COMMENT_MARKER`) explaining that the default-branch config could not be loaded and
+  that application defaults are in effect; never alters the check conclusion
+- `block`: post the same PR comment **and** force the check conclusion to `failure`,
+  overriding the validation result (including the draft-PR "neutral" case), hard-blocking
+  the PR until the operator fixes the default-branch config
+- Reconcile the notice comment on every run: post/update it while the notice applies, and
+  delete it once the default-branch config is fixed
+- Treat the untrusted error detail (which may quote the repository's own broken TOML source)
+  as attacker-influenceable: sanitise it before embedding it in the PR comment's fenced code
+  block so it cannot inject a marker token or break out of the fence
+- Make this setting application-level only: it cannot be set or overridden by a repository's
+  own `.github/merge-warden.toml` or by an org policy file, so a broken repository config can
+  never weaken (or silently strengthen) the operator's chosen reaction to its own brokenness
+
+**Acceptance Criteria:**
+
+- ✅ A malformed-TOML or unsupported-`schemaVersion` default-branch config is classified as
+  "broken"; a fetch failure or absent file is not, regardless of `broken_repo_config_behaviour`
+- ✅ `silent_fallback` (default): no PR comment is posted, the check conclusion is unaffected,
+  and `config.load.failures_total` is still recorded — byte-for-byte identical to pre-FR-010
+  behaviour
+- ✅ `notify`: a PR comment is posted explaining the broken default-branch config and that
+  application defaults are in effect; the check conclusion is unaffected
+- ✅ `block`: the same PR comment is posted and the check conclusion is forced to `failure`,
+  overriding `success`, `neutral` (draft PRs), and the unmodified `failure` result alike
+- ✅ The notice comment uses a marker distinct from `CONFIG_COMMENT_MARKER` and is reconciled
+  idempotently (posted once, updated on change, removed once the config is fixed)
+- ✅ The error detail rendered in the comment is sanitised so it cannot inject a marker token
+  or escape its fenced code block
+- ✅ `broken_repo_config_behaviour` is not a recognised field in the per-repository
+  `.github/merge-warden.toml` or in an org policy file's `[defaults]`/`[enforced]` sections
+
+**Priority:** Medium
+**Dependencies:** FR-002 (Configuration Management), FR-007 (Configuration Change Validation)
+
 ## Detailed Functional Specifications
 
 ### Pull Request Title Validation

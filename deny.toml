@@ -109,6 +109,12 @@ ignore = [
     # -> async-lock/event-listener-strategy -> event-listener 5.4.1. No fixed version has been
     # adopted by these upstream crates yet.
     { id = "RUSTSEC-2026-0221", reason = "transitive via queue-runtime -> azure_core/lapin -> async-lock -> event-listener 5.4.1; no upgrade path available upstream" },
+    # crypto-bigint constant-time side-channel — transitive via
+    # github-bot-sdk -> jsonwebtoken 10.4.0 -> p256/ecdsa -> elliptic-curve 0.13.8 -> crypto-bigint 0.5.5.
+    # The fix (crypto-bigint >= 0.7.6) requires elliptic-curve 0.14+, but github-bot-sdk 0.2.1 (latest)
+    # pins jsonwebtoken ^10.3, which depends on elliptic-curve 0.13. No upgrade path without an upstream
+    # github-bot-sdk release.
+    { id = "RUSTSEC-2026-0387", reason = "transitive via github-bot-sdk -> jsonwebtoken -> p256/ecdsa -> elliptic-curve 0.13.8 -> crypto-bigint 0.5.5; fix requires elliptic-curve 0.14+ but github-bot-sdk 0.2.1 pins jsonwebtoken ^10.3; no upgrade path available upstream" },
 ]
 
 # If this is true, then cargo deny will use the git executable to fetch advisory database.

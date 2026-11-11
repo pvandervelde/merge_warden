@@ -67,6 +67,88 @@ pub const CONFIG_COMMENT_MARKER: &str = "<!-- MERGE_WARDEN_CONFIG_CHECK -->";
 /// and never affects the check conclusion.
 pub const CONFIG_FILE_PATH: &str = ".github/merge-warden.toml";
 
+/// HTML comment marker identifying the broken-default-branch-config notice comment.
+///
+/// This marker is deliberately distinct from [`CONFIG_COMMENT_MARKER`]: the latter
+/// flags a malformed configuration file introduced *within the PR diff*, whereas
+/// this one flags a malformed `.github/merge-warden.toml` already present on the
+/// repository's **default branch** (surfaced via
+/// [`BrokenRepoConfigBehaviour`]). Keeping the markers separate lets each path
+/// manage (post/update/delete) only its own comment without disturbing the other.
+pub const BROKEN_CONFIG_COMMENT_MARKER: &str = "<!-- MERGE_WARDEN_BROKEN_CONFIG_CHECK -->";
+
+/// Neutralises comment-body breakout / marker-injection vectors in an untrusted
+/// config-load error detail before it is embedded in a PR comment.
+///
+/// `error_detail` originates from [`ConfigLoadError`]'s `Display` — for a
+/// malformed-TOML failure this quotes the repository's own
+/// `.github/merge-warden.toml` source lines, which are attacker-influenceable by
+/// anyone who can land a config on the default branch. Three substitutions make
+/// the string safe to embed inside a fenced Markdown block:
+/// - `<!--` becomes `<! --` and `-->` becomes `-- >`: split the HTML-comment
+///   delimiters so an injected marker token cannot match the raw
+///   `body.contains(marker)` filters used by the comment reconcilers (both
+///   [`CONFIG_COMMENT_MARKER`] and [`BROKEN_CONFIG_COMMENT_MARKER`] end in `-->`).
+/// - a triple-backtick run becomes `` ` ` ` ``: split the run so the detail cannot
+///   break out of the fenced code block it is rendered inside.
+///
+/// [`ConfigLoadError`]: crate::errors::ConfigLoadError
+pub(crate) fn sanitize_config_error_detail(detail: &str) -> String {
+    detail
+        .replace("<!--", "<! --")
+        .replace("-->", "-- >")
+        .replace("```", "` ` `")
+}
+
+/// Application-level operator policy controlling how merge-warden reacts when the
+/// `.github/merge-warden.toml` on a repository's **default branch** is present but
+/// cannot be loaded (malformed TOML or an unsupported `schemaVersion`).
+///
+/// This is an **application-level** setting only: it is configured by the operator
+/// running the merge-warden installation and is intentionally **not** settable at
+/// the organization or repository level. A broken repository config must not be
+/// able to weaken (or silently strengthen) the operator's chosen reaction to its
+/// own brokenness.
+///
+/// In every mode the pre-existing `config.load.failures_total` metric is still
+/// recorded; only the PR-facing comment and the check conclusion change.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BrokenRepoConfigBehaviour {
+    /// Current (default) behaviour: silently fall back to application defaults —
+    /// no PR comment is posted and the check conclusion is not changed. The
+    /// config-load-failure metric is still recorded.
+    #[default]
+    SilentFallback,
+
+    /// Post a PR comment explaining that the default-branch config is broken, but
+    /// do **not** block: the check conclusion is left unchanged.
+    Notify,
+
+    /// Post a PR comment **and** force the GitHub check conclusion to `"failure"`,
+    /// hard-blocking the PR until the operator fixes the default-branch config.
+    Block,
+}
+
+/// A populated directive describing that a broken default-branch config was
+/// detected and the operator wants it surfaced on the PR.
+///
+/// Produced by [`resolve_pull_request_config`] and carried on
+/// [`CurrentPullRequestValidationConfiguration::broken_repo_config`]. It is only
+/// ever `Some` when the repo-tier config was broken **and** the application-level
+/// [`BrokenRepoConfigBehaviour`] is `Notify` or `Block` (never `SilentFallback`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BrokenRepoConfigNotice {
+    /// The operator-configured reaction; always [`BrokenRepoConfigBehaviour::Notify`]
+    /// or [`BrokenRepoConfigBehaviour::Block`] (never `SilentFallback`).
+    pub behaviour: BrokenRepoConfigBehaviour,
+
+    /// Human-readable explanation of why the config could not be loaded, surfaced
+    /// on the PR comment's `Reason:` line. Derived from the underlying
+    /// [`ConfigLoadError`]'s `Display` output.
+    pub error_detail: String,
+}
+
 /// The outcome of validating the content of a repository-provided configuration file.
 ///
 /// This type is returned by [`validate_config_content`] and carries both a boolean
@@ -434,6 +516,15 @@ pub struct ApplicationDefaults {
     /// an event is processed at all, not how it is validated.
     #[serde(default)]
     pub repository_scope: Option<RepositoryScope>,
+
+    /// Application-level operator policy for a broken `.github/merge-warden.toml`
+    /// on the repository's **default branch**.
+    ///
+    /// This is deliberately an application-level setting only: it is **not**
+    /// part of the org/repo policy merge chain and cannot be set in a
+    /// repository or org policy file. See [`BrokenRepoConfigBehaviour`].
+    #[serde(default)]
+    pub broken_repo_config_behaviour: BrokenRepoConfigBehaviour,
 }
 
 impl ApplicationDefaults {
@@ -491,6 +582,7 @@ impl Default for ApplicationDefaults {
             bot_mention: ApplicationDefaults::default_bot_mention(),
             org_policy_source: None,
             repository_scope: None,
+            broken_repo_config_behaviour: BrokenRepoConfigBehaviour::default(),
         }
     }
 }
@@ -1257,6 +1349,14 @@ pub struct CurrentPullRequestValidationConfiguration {
 
     /// Bot mention prefix used to parse label suppression commands from PR comments.
     pub bot_mention: String,
+
+    /// Directive to surface a broken default-branch config on the PR, when the
+    /// operator's application-level [`BrokenRepoConfigBehaviour`] requests it.
+    ///
+    /// Populated by [`resolve_pull_request_config`] (not by the policy merge
+    /// chain): `Some` only when the repo-tier config was broken and the
+    /// application behaviour is `Notify` or `Block`; `None` otherwise.
+    pub broken_repo_config: Option<BrokenRepoConfigNotice>,
 }
 
 impl CurrentPullRequestValidationConfiguration {
@@ -1286,6 +1386,8 @@ impl CurrentPullRequestValidationConfiguration {
             bypass_rules: app.bypass_rules.clone(),
             issue_propagation: IssuePropagationConfig::default(),
             bot_mention: app.bot_mention.clone(),
+            // Populated later by resolve_pull_request_config, not by this fallback.
+            broken_repo_config: None,
         }
     }
 
@@ -1324,6 +1426,7 @@ impl CurrentPullRequestValidationConfiguration {
             bypass_rules: bypass_rules.unwrap_or_default(),
             issue_propagation: IssuePropagationConfig::default(),
             bot_mention: "@merge-warden".to_string(),
+            broken_repo_config: None,
         }
     }
 }
@@ -1345,6 +1448,7 @@ impl Default for CurrentPullRequestValidationConfiguration {
             bypass_rules: BypassRules::default(),
             issue_propagation: IssuePropagationConfig::default(),
             bot_mention: "@merge-warden".to_string(),
+            broken_repo_config: None,
         }
     }
 }
@@ -1589,6 +1693,8 @@ impl RepositoryProvidedConfig {
             },
             issue_propagation: pr_policies.issue_propagation.clone(),
             bot_mention: self.bot_mention.clone(),
+            // Populated later by resolve_pull_request_config, not by the merge chain.
+            broken_repo_config: None,
         }
     }
 }
@@ -2270,6 +2376,8 @@ impl PolicySet {
             bypass_rules: self.bypass_rules.clone(),
             issue_propagation: self.issue_propagation.clone(),
             bot_mention: app_defaults.bot_mention.clone(),
+            // Populated later by resolve_pull_request_config, not by the merge chain.
+            broken_repo_config: None,
         }
     }
 
@@ -3016,6 +3124,13 @@ pub async fn resolve_pull_request_config(
         }
     );
 
+    // When the repo-tier load fails we fall back to an empty repo config (as
+    // before). Additionally, when the failure is a *broken* config (malformed
+    // TOML or an unsupported schemaVersion) and the operator has opted into
+    // surfacing it, capture a notice to attach to the resolved config below.
+    // The metric is already recorded inside parse_repo_config's helpers, so the
+    // SilentFallback path stays byte-for-byte identical to today's behaviour.
+    let mut broken_repo_config: Option<BrokenRepoConfigNotice> = None;
     let repo_config = match repo_config_res {
         Ok(c) => c,
         Err(e) => {
@@ -3026,6 +3141,30 @@ pub async fn resolve_pull_request_config(
                 error = %e,
                 "Failed to load repo config in resolve_pull_request_config; using empty defaults for repo tier"
             );
+
+            // Classify the error: only malformed TOML / parse errors / unsupported
+            // schema versions are "broken" configs the operator can be notified
+            // about. Fetch failures (NotFound/Io) are transient infra problems, not
+            // broken configs, and never produce a notice.
+            let is_broken = matches!(
+                e,
+                ConfigLoadError::Toml(_)
+                    | ConfigLoadError::ParseError(_)
+                    | ConfigLoadError::UnsupportedSchemaVersion(..)
+            );
+            // Stash the human-readable detail before `e` is dropped.
+            let error_detail = e.to_string();
+
+            if is_broken
+                && app_defaults.broken_repo_config_behaviour
+                    != BrokenRepoConfigBehaviour::SilentFallback
+            {
+                broken_repo_config = Some(BrokenRepoConfigNotice {
+                    behaviour: app_defaults.broken_repo_config_behaviour,
+                    error_detail,
+                });
+            }
+
             // Fall back to an empty repo config; the four-tier chain supplies app and org values.
             RepositoryProvidedConfig::default()
         }
@@ -3162,7 +3301,9 @@ pub async fn resolve_pull_request_config(
     }
     effective_ps = effective_ps.merge(&org_enforced_ps).merge(&app_enforced_ps);
 
-    Ok(effective_ps.to_validation_config(app_defaults))
+    let mut config = effective_ps.to_validation_config(app_defaults);
+    config.broken_repo_config = broken_repo_config;
+    Ok(config)
 }
 
 /// Configuration for change type label detection and management

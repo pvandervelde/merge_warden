@@ -507,8 +507,82 @@ The config validation result **does not** influence the commit status check conc
 (`success`, `neutral`, or `failure`). A PR with an invalid `.github/merge-warden.toml`
 can still be merged. The comment exists to surface the problem early, not to gate the PR.
 
-This matches the existing runtime behaviour: if the file is absent or unreadable on the
-default branch, Merge Warden falls back to application defaults without blocking anything.
+This matches the default runtime behaviour: if the file is absent, or cannot be fetched, on
+the default branch, Merge Warden falls back to application defaults without blocking
+anything. A *malformed* default-branch config can be configured to block — see
+[Broken Default-Branch Configuration Policy](#broken-default-branch-configuration-policy)
+below; this PR-diff check's non-blocking guarantee is unaffected either way, because it
+validates a different artifact (the PR head SHA's copy of the file, not the default
+branch's).
+
+## Broken Default-Branch Configuration Policy
+
+The PR-diff validation above only runs when a PR touches `.github/merge-warden.toml`. It
+says nothing about the config that is already on the default branch and actually governs
+every PR — if *that* file is broken, `resolve_pull_request_config` falls back to an empty
+repo tier (application and, if configured, org-level defaults still apply) on every single
+PR, silently, with no way for a contributor to find out from the PR diff.
+`broken_repo_config_behaviour` closes that gap: an application-level, operator-only setting
+that controls whether this condition is surfaced on the PR and whether it blocks.
+
+### Error Classification
+
+Only two `ConfigLoadError` variants count as "broken":
+
+| Variant | Broken? | Rationale |
+| :--- | :--- | :--- |
+| `Toml(_)` / `ParseError(_)` | Yes | Malformed TOML — the file exists but cannot be parsed |
+| `UnsupportedSchemaVersion(..)` | Yes | The file parses but declares a `schemaVersion` this build does not support |
+| `NotFound` / `Io(_)` (fetch failure) | No | Transient infrastructure problem, not a config authoring error |
+| *(file simply absent)* | No | The documented, supported way to opt out of a repo-tier config entirely |
+
+A fetch failure or an absent file never produces a notice, regardless of
+`broken_repo_config_behaviour` — `config.load.failures_total` is still recorded for all
+failure kinds (see [Operations monitoring](../operations/monitoring.md)), but only "broken"
+configs are eligible for the PR-facing behaviours below.
+
+### `broken_repo_config_behaviour`
+
+```rust
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum BrokenRepoConfigBehaviour {
+    #[default]
+    SilentFallback,
+    Notify,
+    Block,
+}
+```
+
+| Value | PR comment | Check conclusion |
+| :--- | :--- | :--- |
+| `silent_fallback` (default) | None | Unaffected — identical to pre-existing behaviour |
+| `notify` | Posted, explaining the default-branch config could not be loaded | Unaffected |
+| `block` | Posted (same comment as `notify`) | Forced to `failure`, overriding `success`, `neutral` (draft PRs), and the unmodified `failure` result alike |
+
+The notice comment uses a dedicated marker, `BROKEN_CONFIG_COMMENT_MARKER`
+(`<!-- MERGE_WARDEN_BROKEN_CONFIG_CHECK -->`), kept deliberately distinct from
+`CONFIG_COMMENT_MARKER` so the two lifecycles (PR-diff check vs. default-branch notice)
+never interfere with each other's reconciliation. It is reconciled on every run: posted when
+a notice applies, left untouched when an identical comment already exists, and deleted once
+the default-branch config is fixed.
+
+The underlying `ConfigLoadError`'s `Display` text is untrusted — for a malformed-TOML
+failure it quotes the repository's own config source lines, which an attacker who can land a
+config on the default branch controls. Before being embedded in the comment's fenced code
+block, it is passed through a sanitiser that splits any `<!--`/`-->` sequence (so it cannot
+forge a marker token that the `body.contains(marker)` reconciler would match) and any triple
+back-tick run (so it cannot escape the fence).
+
+### Application-Level Only
+
+`broken_repo_config_behaviour` lives in `ApplicationDefaults` and is read only from
+`MERGE_WARDEN_CONFIG_FILE`. It is deliberately **not** part of the `PolicySet` merge chain
+described above and has no equivalent field in the per-repository
+`.github/merge-warden.toml` schema or in an org policy file's `[defaults]`/`[enforced]`
+sections. This is intentional: if a broken repository config could set or override its own
+reaction to being broken, the operator's chosen safety net (`notify`/`block`) could be
+silently defeated by the very file that is malformed.
 
 ## Repository Scope Filtering
 
@@ -572,3 +646,4 @@ for the `RepositoryScope` struct, the `is_repository_in_scope` matching function
 - [Operations Configuration Management](../operations/configuration-management.md) - Operational configuration procedures
 - [Security Data Protection](../security/data-protection.md) - Secure handling of configuration data
 - [Functional Requirements FR-007](../requirements/functional-requirements.md#fr-007-configuration-change-validation) - Acceptance criteria for this feature
+- [Functional Requirements FR-010](../requirements/functional-requirements.md#fr-010-broken-default-branch-configuration-policy) - Acceptance criteria for the broken default-branch configuration policy

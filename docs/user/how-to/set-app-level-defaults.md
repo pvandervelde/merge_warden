@@ -78,6 +78,41 @@ For the complete field list, see [Application configuration schema](../reference
 
 ---
 
+## Choosing a broken default-branch config policy
+
+If a repository's `.github/merge-warden.toml` on its **default branch** becomes malformed
+or specifies an unsupported `schemaVersion`, Merge Warden falls back to application
+defaults for that repository on every PR. By default this fallback is silent — set
+`broken_repo_config_behaviour` under `[policies]` if you want it surfaced or enforced:
+
+```toml
+[policies]
+broken_repo_config_behaviour = "silent_fallback"  # or "notify" or "block"
+```
+
+- **`silent_fallback`** (default) — no PR comment, check conclusion unchanged. Choose this
+  if you'd rather rely solely on the `config_load_failures_total` metric (see
+  [HTTP endpoints reference](../reference/http-endpoints.md#get-metrics--prometheus-metrics))
+  and don't want PR authors to see operator-internal config problems.
+- **`notify`** — posts a PR comment explaining the default-branch config is broken and that
+  defaults are in effect, without blocking. Choose this for most deployments: it gives
+  contributors (who may not realise the repository's own config, not theirs, is at fault)
+  visibility without stopping their work.
+- **`block`** — posts the same comment and forces the check conclusion to `failure`. Choose
+  this only if a broken default-branch config represents a policy gap you are not willing to
+  run with even temporarily — for example, a repository where title/work-item validation is
+  mandatory and must never silently fall back to disabled defaults.
+
+This setting is **application-level only** — it cannot be set or overridden by a
+repository's own `.github/merge-warden.toml` or by an org policy file. A transient fetch
+failure or a config file that is simply absent is never treated as "broken" and never
+triggers a notice, under any value of this setting.
+
+See [`broken_repo_config_behaviour`](../reference/app-config.md#broken_repo_config_behaviour)
+for the full field reference.
+
+---
+
 ## Precedence
 
 When both files set the same policy, the per-repository file takes precedence:
