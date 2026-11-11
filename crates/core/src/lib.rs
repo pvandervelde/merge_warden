@@ -74,9 +74,9 @@ use std::sync::Arc;
 
 pub mod checks;
 pub mod config;
-use config::CurrentPullRequestValidationConfiguration;
 use config::BrokenRepoConfigBehaviour;
 use config::BrokenRepoConfigNotice;
+use config::CurrentPullRequestValidationConfiguration;
 use config::BROKEN_CONFIG_COMMENT_MARKER;
 use config::CONFIG_COMMENT_MARKER;
 use config::SIZE_COMMENT_MARKER;
@@ -2610,6 +2610,15 @@ Please update the PR body to include a valid work item reference."#;
         // run, based on the directive resolved into the active config. This is
         // independent of the PR-diff config-check above and manages its own,
         // distinct comment marker.
+        //
+        // This runs unconditionally — including when the notice is `None` under
+        // `silent_fallback` — on purpose: the `None` branch deletes any stale
+        // notice left over from a previous run (e.g. after the operator switches
+        // from `notify`/`block` back to `silent_fallback`, or the default-branch
+        // config is fixed). Gating it on "is a notice present" would strand those
+        // comments. The cost is one read-only `list_comments` call, consistent
+        // with every other comment-reconciliation step in this method; the policy
+        // behaviour (no comment posted, no conclusion change) is unchanged.
         self.communicate_broken_repo_config_status(
             repo_owner,
             repo_name,
@@ -2742,14 +2751,28 @@ Please update the PR body to include a valid work item reference."#;
         // behaviour forces a "failure" conclusion, overriding the validation
         // result (including the draft "neutral" case). `Notify` and
         // `SilentFallback`/`None` never alter the conclusion.
-        if let Some(notice) = self.config.broken_repo_config.as_ref() {
-            if notice.behaviour == BrokenRepoConfigBehaviour::Block {
-                check_conclusion = "failure";
-            }
+        let config_block_active = matches!(
+            self.config.broken_repo_config.as_ref(),
+            Some(notice) if notice.behaviour == BrokenRepoConfigBehaviour::Block
+        );
+        if config_block_active {
+            check_conclusion = "failure";
         }
 
-        // Enhanced check summary that includes all validation results and bypass information
-        let check_summary = if is_title_valid && is_work_item_referenced && is_size_valid {
+        // Enhanced check summary that includes all validation results and bypass information.
+        //
+        // When the broken-config `Block` gate forced the failure, the summary must
+        // name that cause — otherwise an otherwise-valid PR would show a "failure"
+        // conclusion alongside an "All PR requirements satisfied." summary, which is
+        // contradictory and hides the real, operator-actionable reason. The broken
+        // config is the dominant blocker, so it replaces the summary; the per-check
+        // detail still appears in the `text` field below.
+        let check_summary = if config_block_active {
+            "Blocked: the merge-warden configuration on the default branch could not be \
+             loaded, so application defaults were used. Fix the default-branch configuration \
+             so your intended policy applies."
+                .to_string()
+        } else if is_title_valid && is_work_item_referenced && is_size_valid {
             let base = if bypasses_used.is_empty() {
                 "All PR requirements satisfied.".to_string()
             } else {
@@ -2822,6 +2845,19 @@ Please update the PR body to include a valid work item reference."#;
             }
             if !smart_label_message.is_empty() {
                 messages.push(smart_label_message);
+            }
+            // Surface the broken default-branch config in the check text whenever a
+            // notice is active (both `Notify` and `Block`), so the check run itself
+            // explains why defaults are in use — not only the separate PR comment.
+            if let Some(notice) = self.config.broken_repo_config.as_ref() {
+                let verb = if notice.behaviour == BrokenRepoConfigBehaviour::Block {
+                    "blocking this PR"
+                } else {
+                    "application defaults are being used"
+                };
+                messages.push(format!(
+                    "\u{26a0}\u{fe0f} The merge-warden configuration on the default branch could not be loaded ({verb}). See the configuration-error comment on this PR for details."
+                ));
             }
             messages.join("\n\n---\n\n")
         };

@@ -1,15 +1,13 @@
 use crate::{
     checks::TitleValidationResult,
     config::{
-        BrokenRepoConfigBehaviour, BrokenRepoConfigNotice, BypassRule, BypassRules,
-        ChangeTypeLabelConfig, ConventionalCommitMappings,
+        sanitize_config_error_detail, BrokenRepoConfigBehaviour, BrokenRepoConfigNotice,
+        BypassRule, BypassRules, ChangeTypeLabelConfig, ConventionalCommitMappings,
         CurrentPullRequestValidationConfiguration, FallbackLabelSettings, IssuePropagationConfig,
-        KeywordLabelsConfig, LabelDetectionStrategy, WipCheckConfig,
-        sanitize_config_error_detail,
-        BROKEN_CONFIG_COMMENT_MARKER, CONFIG_COMMENT_MARKER, CONFIG_FILE_PATH,
-        CONVENTIONAL_COMMIT_REGEX, MISSING_WORK_ITEM_LABEL, SIZE_COMMENT_MARKER,
-        TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL, WIP_COMMENT_MARKER, WORK_ITEM_COMMENT_MARKER,
-        WORK_ITEM_REGEX,
+        KeywordLabelsConfig, LabelDetectionStrategy, WipCheckConfig, BROKEN_CONFIG_COMMENT_MARKER,
+        CONFIG_COMMENT_MARKER, CONFIG_FILE_PATH, CONVENTIONAL_COMMIT_REGEX,
+        MISSING_WORK_ITEM_LABEL, SIZE_COMMENT_MARKER, TITLE_COMMENT_MARKER, TITLE_INVALID_LABEL,
+        WIP_COMMENT_MARKER, WORK_ITEM_COMMENT_MARKER, WORK_ITEM_REGEX,
     },
     validation_result::{BypassRuleType, ValidationResult},
     MergeWarden, MetricsRecorder, NoopMetricsRecorder,
@@ -4312,6 +4310,8 @@ struct ConfigCheckMockProvider {
     config_at_ref: Option<Result<Option<String>, merge_warden_developer_platforms::errors::Error>>,
     comments: Arc<Mutex<Vec<Comment>>>,
     check_updates: Arc<Mutex<Vec<String>>>,
+    /// Summaries recorded via `update_pr_check_status`, parallel to `check_updates`.
+    check_summaries: Arc<Mutex<Vec<String>>>,
 }
 
 impl ConfigCheckMockProvider {
@@ -4322,6 +4322,7 @@ impl ConfigCheckMockProvider {
             config_at_ref: None,
             comments: Arc::new(Mutex::new(vec![])),
             check_updates: Arc::new(Mutex::new(vec![])),
+            check_summaries: Arc::new(Mutex::new(vec![])),
         }
     }
 
@@ -4464,13 +4465,17 @@ impl merge_warden_developer_platforms::PullRequestProvider for ConfigCheckMockPr
         _number: u64,
         conclusion: &str,
         _title: &str,
-        _summary: &str,
+        summary: &str,
         _text: &str,
     ) -> Result<(), merge_warden_developer_platforms::errors::Error> {
         self.check_updates
             .lock()
             .unwrap()
             .push(conclusion.to_string());
+        self.check_summaries
+            .lock()
+            .unwrap()
+            .push(summary.to_string());
         Ok(())
     }
 
@@ -5699,6 +5704,12 @@ impl ConfigCheckMockProvider {
     fn get_check_conclusions(&self) -> Vec<String> {
         self.check_updates.lock().unwrap().clone()
     }
+
+    /// Returns the sequence of check summaries recorded via
+    /// `update_pr_check_status`, parallel to `get_check_conclusions`.
+    fn get_check_summaries(&self) -> Vec<String> {
+        self.check_summaries.lock().unwrap().clone()
+    }
 }
 
 /// Builds the exact PR-comment body the broken-config feature must produce,
@@ -5774,7 +5785,11 @@ async fn test_broken_config_none_leaves_check_conclusion_unaffected() {
         .unwrap();
 
     assert_eq!(
-        warden.provider.get_check_conclusions().last().map(String::as_str),
+        warden
+            .provider
+            .get_check_conclusions()
+            .last()
+            .map(String::as_str),
         Some("success"),
         "broken_repo_config == None must not alter the check conclusion"
     );
@@ -5881,7 +5896,11 @@ async fn test_broken_config_notify_does_not_force_failure_conclusion() {
         .unwrap();
 
     assert_eq!(
-        warden.provider.get_check_conclusions().last().map(String::as_str),
+        warden
+            .provider
+            .get_check_conclusions()
+            .last()
+            .map(String::as_str),
         Some("success"),
         "Notify must not force the check conclusion to failure"
     );
@@ -5927,9 +5946,46 @@ async fn test_broken_config_block_forces_failure_conclusion_even_when_all_valid(
         .unwrap();
 
     assert_eq!(
-        warden.provider.get_check_conclusions().last().map(String::as_str),
+        warden
+            .provider
+            .get_check_conclusions()
+            .last()
+            .map(String::as_str),
         Some("failure"),
         "Block must force the check conclusion to failure even when all validations pass"
+    );
+}
+
+#[tokio::test]
+async fn test_broken_config_block_summary_names_the_config_cause_when_all_valid() {
+    // Regression: a Block on an otherwise-valid PR must not show a "failure"
+    // conclusion alongside an "All PR requirements satisfied." summary. The
+    // summary must name the broken default-branch config as the blocking cause.
+    let notice = BrokenRepoConfigNotice {
+        behaviour: BrokenRepoConfigBehaviour::Block,
+        error_detail: "bad config".to_string(),
+    };
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"));
+    let warden = MergeWarden::with_config(provider, config_with_broken_notice(Some(notice)));
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let summary = warden
+        .provider
+        .get_check_summaries()
+        .last()
+        .cloned()
+        .expect("a check summary must have been recorded");
+    assert!(
+        summary.contains("default branch") && summary.to_lowercase().contains("blocked"),
+        "Block summary must name the broken default-branch config as the cause, got: {summary}"
+    );
+    assert!(
+        !summary.contains("All PR requirements satisfied"),
+        "Block summary must not claim all requirements are satisfied, got: {summary}"
     );
 }
 
@@ -5942,8 +5998,8 @@ async fn test_broken_config_notify_is_idempotent_when_matching_comment_exists() 
         behaviour: BrokenRepoConfigBehaviour::Notify,
         error_detail: error_detail.to_string(),
     };
-    let provider =
-        ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123")).with_existing_comment(&existing);
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"))
+        .with_existing_comment(&existing);
     let warden = MergeWarden::with_config(provider, config_with_broken_notice(Some(notice)));
 
     warden
@@ -5968,8 +6024,8 @@ async fn test_broken_config_none_deletes_stale_broken_marker_comment() {
     // When the notice clears on a later run, a stale broken-config comment from
     // a previous run must be removed.
     let stale = expected_broken_config_comment_body("old error");
-    let provider =
-        ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123")).with_existing_comment(&stale);
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"))
+        .with_existing_comment(&stale);
     let warden = MergeWarden::with_config(provider, config_with_broken_notice(None));
 
     warden
@@ -6060,7 +6116,11 @@ async fn test_broken_config_block_overrides_draft_neutral_to_failure() {
         .unwrap();
 
     assert_eq!(
-        warden.provider.get_check_conclusions().last().map(String::as_str),
+        warden
+            .provider
+            .get_check_conclusions()
+            .last()
+            .map(String::as_str),
         Some("failure"),
         "Block must override the draft \"neutral\" conclusion to \"failure\""
     );
@@ -6083,7 +6143,11 @@ async fn test_broken_config_notify_leaves_draft_neutral_unchanged() {
         .unwrap();
 
     assert_eq!(
-        warden.provider.get_check_conclusions().last().map(String::as_str),
+        warden
+            .provider
+            .get_check_conclusions()
+            .last()
+            .map(String::as_str),
         Some("neutral"),
         "Notify must not change the draft \"neutral\" conclusion"
     );
@@ -6133,8 +6197,8 @@ async fn test_broken_config_notify_different_body_is_deleted_and_reposted() {
         behaviour: BrokenRepoConfigBehaviour::Notify,
         error_detail: "a NEW error detail".to_string(),
     };
-    let provider =
-        ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123")).with_existing_comment(&stale);
+    let provider = ConfigCheckMockProvider::new(make_valid_pr_with_sha("abc123"))
+        .with_existing_comment(&stale);
     let warden = MergeWarden::with_config(provider, config_with_broken_notice(Some(notice)));
 
     warden
@@ -6182,8 +6246,7 @@ async fn test_broken_config_notify_marker_injection_cannot_contaminate_pr_diff_m
     // broken-config comment. If it could, the PR-diff reconciler's
     // `body.contains(CONFIG_COMMENT_MARKER)` filter would capture (and
     // delete/replace) this comment, defeating the deliberate marker isolation.
-    let error_detail =
-        format!("malformed TOML near: title = \"{CONFIG_COMMENT_MARKER} pwn\"");
+    let error_detail = format!("malformed TOML near: title = \"{CONFIG_COMMENT_MARKER} pwn\"");
     let notice = BrokenRepoConfigNotice {
         behaviour: BrokenRepoConfigBehaviour::Notify,
         error_detail,
