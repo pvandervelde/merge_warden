@@ -7,3 +7,7 @@
 [[IgnoredVulns]]
 id = "RUSTSEC-2026-0275"
 reason = "Legacy azure_core writes the authorization header value to logs; transitive via queue-runtime -> azure_messaging_servicebus 0.21.0 -> azure_core 0.21.0. azure_messaging_servicebus has no release depending on azure_core >=0.22, so there is no upgrade path available in this workspace."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0387"
+reason = "crypto-bigint constant-time side-channel; transitive via github-bot-sdk -> jsonwebtoken 10.4.0 -> p256/ecdsa -> elliptic-curve 0.13.8 -> crypto-bigint 0.5.5. The fix (crypto-bigint >= 0.7.6) requires elliptic-curve 0.14+, but github-bot-sdk 0.2.1 (latest) pins jsonwebtoken ^10.3 which depends on elliptic-curve 0.13, so there is no upgrade path available in this workspace."
