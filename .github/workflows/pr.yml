@@ -54,7 +54,10 @@ jobs:
         id: osv-scan
         run: |
           set +e
-          osv-scanner --format=json --lockfile=Cargo.lock > /tmp/osv-rust.json 2>/tmp/osv-rust-stderr.log
+          # Pass the config explicitly: osv-scanner's auto-discovery of
+          # osv-scanner.toml is unreliable for a root --lockfile scan, which let
+          # ignored advisories (see osv-scanner.toml) slip through and fail the gate.
+          osv-scanner --format=json --config=osv-scanner.toml --lockfile=Cargo.lock > /tmp/osv-rust.json 2>/tmp/osv-rust-stderr.log
           SCAN_EXIT=$?
           set -e
           echo "results-path=/tmp/osv-rust.json" >> "$GITHUB_OUTPUT"
