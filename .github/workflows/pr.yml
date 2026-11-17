@@ -82,6 +82,22 @@ jobs:
           with open(path) as f:
               data = json.load(f)
 
+          # Honor the ignore list in osv-scanner.toml. osv-scanner applies
+          # IgnoredVulns to its own exit code, but across versions it does not
+          # reliably strip them from the JSON output — and this gate re-derives
+          # pass/fail from the JSON. Advisories documented there as having no
+          # upstream fix path must therefore be skipped here too, or they fail the
+          # build regardless of the ignore list.
+          ignored_ids = set()
+          try:
+              import tomllib
+              with open("osv-scanner.toml", "rb") as cf:
+                  for entry in tomllib.load(cf).get("IgnoredVulns", []):
+                      if entry.get("id"):
+                          ignored_ids.add(entry["id"])
+          except Exception as exc:
+              print(f"::warning::could not load osv-scanner.toml ignore list: {exc}")
+
           FIXABLE_SEVERITIES = set()
           rows = []
           has_fixable = False
@@ -91,7 +107,11 @@ jobs:
                   name = pkg["package"]["name"]
                   version = pkg["package"]["version"]
                   for group in pkg.get("groups", []):
-                      ids = ", ".join(group.get("ids", []))
+                      group_ids = group.get("ids", [])
+                      # Skip advisories explicitly ignored in osv-scanner.toml.
+                      if any(i in ignored_ids for i in group_ids):
+                          continue
+                      ids = ", ".join(group_ids)
                       max_severity = group.get("max_severity") or ""
 
                       # Collect informational tags and whether a fix exists
