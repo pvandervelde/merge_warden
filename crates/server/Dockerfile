@@ -11,7 +11,7 @@
 # Debian 13 (Trixie) is required because the CI builder uses Debian 13 tooling
 # which ships glibc 2.38. The older distroless/cc-debian12 only provides
 # glibc 2.36 and causes a "GLIBC_2.38 not found" crash at startup.
-FROM gcr.io/distroless/cc-debian13@sha256:b2e43dc72acf58a146ed6feaf350806ae3bf4243eb5c68062d06bc13228ca2bd
+FROM gcr.io/distroless/cc-debian13@sha256:809d04afa1be033c441f76bb0051878c342fb76d0ea236bc6dc94b655fa0fbd6
 ARG TARGETARCH
 COPY binaries/${TARGETARCH}/merge_warden_server /merge_warden_server
 EXPOSE 3000
