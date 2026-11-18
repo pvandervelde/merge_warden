@@ -323,8 +323,16 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install Rust
-        run: rustup update stable
+      - name: Install Rust (pinned)
+        # cargo-llvm-cov's object-file collection is broken under rustc 1.100.0
+        # (released 2026-11-09): `cargo llvm-cov` fails with "failed to collect
+        # object files". Pin the coverage job to the last known-good stable
+        # (1.99.1) until a cargo-llvm-cov release supports 1.100.0, then restore
+        # `rustup update stable`. Only this job needs the pin — it is the only one
+        # that runs cargo-llvm-cov.
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --component llvm-tools-preview
+          rustup default 1.99.1
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2
