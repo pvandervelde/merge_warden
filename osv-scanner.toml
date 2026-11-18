@@ -1,9 +1,40 @@
 # osv-scanner configuration
 # https://google.github.io/osv-scanner/configuration/
 #
-# Ignored advisories mirror the same no-upstream-fix rationale documented in
-# deny.toml and .cargo/audit.toml.
+# This list MUST mirror the same no-upstream-fix ignore set documented in
+# deny.toml and .cargo/audit.toml. Keep all three in sync: the OSV gate
+# (.github/workflows/pr.yml) re-derives pass/fail from the scan JSON and also
+# reads this file, so an advisory ignored for cargo-audit/deny but missing here
+# fails the OSV job as soon as OSV assigns it a CVSS severity.
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2023-0071"
+reason = "rsa Marvin Attack timing side-channel; transitive via github-bot-sdk -> jsonwebtoken -> rsa. No fixed version of rsa is available upstream."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0384"
+reason = "instant is unmaintained; transitive via queue-runtime -> azure_core -> http-types -> futures-lite -> fastrand. No safe upgrade available upstream."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2024-0436"
+reason = "paste is unmaintained; transitive via queue-runtime -> azure_core. No safe upgrade available upstream."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0097"
+reason = "rand unsoundness with a custom logger (rand 0.7/0.8/0.9); transitive via queue-runtime (azure_core, async-nats) and github-bot-sdk (rsa, jsonwebtoken). The unsoundness only triggers when a custom logger calls rand::rng() during reseeding, which does not apply to this application. No upgrade path without upstream changes."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0174"
+reason = "http-types Authorization/WwwAuthenticate ASCII invariant notice; same legacy azure_core chain as RUSTSEC-2026-0275 (queue-runtime -> azure_messaging_servicebus -> azure_core 0.21.0 -> http-types 2.12.0). No upgrade path available upstream."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0221"
+reason = "event-listener !Send StackSlot unsoundness; transitive via queue-runtime's azure_core 1.1.0/lapin -> async-lock -> event-listener 5.4.1. No fixed version adopted by these upstream crates yet."
 
 [[IgnoredVulns]]
 id = "RUSTSEC-2026-0275"
 reason = "Legacy azure_core writes the authorization header value to logs; transitive via queue-runtime -> azure_messaging_servicebus 0.21.0 -> azure_core 0.21.0. azure_messaging_servicebus has no release depending on azure_core >=0.22, so there is no upgrade path available in this workspace."
+
+[[IgnoredVulns]]
+id = "RUSTSEC-2026-0387"
+reason = "crypto-bigint constant-time side-channel; transitive via github-bot-sdk -> jsonwebtoken 10.4.0 -> p256/ecdsa -> elliptic-curve 0.13.8 -> crypto-bigint 0.5.5. The fix (crypto-bigint >= 0.7.6) requires elliptic-curve 0.14+, but github-bot-sdk 0.2.1 (latest) pins jsonwebtoken ^10.3 which depends on elliptic-curve 0.13, so there is no upgrade path available in this workspace."

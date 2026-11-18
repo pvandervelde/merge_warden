@@ -54,7 +54,10 @@ jobs:
         id: osv-scan
         run: |
           set +e
-          osv-scanner --format=json --lockfile=Cargo.lock > /tmp/osv-rust.json 2>/tmp/osv-rust-stderr.log
+          # Pass the config explicitly: osv-scanner's auto-discovery of
+          # osv-scanner.toml is unreliable for a root --lockfile scan, which let
+          # ignored advisories (see osv-scanner.toml) slip through and fail the gate.
+          osv-scanner --format=json --config=osv-scanner.toml --lockfile=Cargo.lock > /tmp/osv-rust.json 2>/tmp/osv-rust-stderr.log
           SCAN_EXIT=$?
           set -e
           echo "results-path=/tmp/osv-rust.json" >> "$GITHUB_OUTPUT"
@@ -79,6 +82,22 @@ jobs:
           with open(path) as f:
               data = json.load(f)
 
+          # Honor the ignore list in osv-scanner.toml. osv-scanner applies
+          # IgnoredVulns to its own exit code, but across versions it does not
+          # reliably strip them from the JSON output — and this gate re-derives
+          # pass/fail from the JSON. Advisories documented there as having no
+          # upstream fix path must therefore be skipped here too, or they fail the
+          # build regardless of the ignore list.
+          ignored_ids = set()
+          try:
+              import tomllib
+              with open("osv-scanner.toml", "rb") as cf:
+                  for entry in tomllib.load(cf).get("IgnoredVulns", []):
+                      if entry.get("id"):
+                          ignored_ids.add(entry["id"])
+          except Exception as exc:
+              print(f"::warning::could not load osv-scanner.toml ignore list: {exc}")
+
           FIXABLE_SEVERITIES = set()
           rows = []
           has_fixable = False
@@ -88,7 +107,11 @@ jobs:
                   name = pkg["package"]["name"]
                   version = pkg["package"]["version"]
                   for group in pkg.get("groups", []):
-                      ids = ", ".join(group.get("ids", []))
+                      group_ids = group.get("ids", [])
+                      # Skip advisories explicitly ignored in osv-scanner.toml.
+                      if any(i in ignored_ids for i in group_ids):
+                          continue
+                      ids = ", ".join(group_ids)
                       max_severity = group.get("max_severity") or ""
 
                       # Collect informational tags and whether a fix exists
@@ -300,13 +323,21 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
-      - name: Install Rust
-        run: rustup update stable
+      - name: Install Rust (pinned)
+        # cargo-llvm-cov's object-file collection is broken under rustc 1.100.0
+        # (released 2026-11-09): `cargo llvm-cov` fails with "failed to collect
+        # object files". Pin the coverage job to the last known-good stable
+        # (1.99.1) until a cargo-llvm-cov release supports 1.100.0, then restore
+        # `rustup update stable`. Only this job needs the pin — it is the only one
+        # that runs cargo-llvm-cov.
+        run: |
+          rustup toolchain install 1.99.1 --profile minimal --component llvm-tools-preview
+          rustup default 1.99.1
 
       - name: Install cargo-llvm-cov
         uses: taiki-e/install-action@a4d3f3f761dcd95cce1b72cb61cb6d1963438177 # v2
         with:
-          tool: cargo-llvm-cov@0.6.10
+          tool: cargo-llvm-cov@0.6.24
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
 
