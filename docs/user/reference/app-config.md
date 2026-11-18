@@ -34,6 +34,7 @@ Top-level policy defaults.
 | `default_work_item_pattern` | string | *(GitHub issue patterns)* | `[workItem] pattern` |
 | `default_missing_work_item_label` | string | *(none)* | `[workItem] label_if_missing` |
 | `bot_mention` | string | `"@merge-warden"` | *(none — app-level only)* |
+| `broken_repo_config_behaviour` | string | `"silent_fallback"` | *(none — app-level only)* |
 
 ### `bot_mention`
 
@@ -53,6 +54,39 @@ bot_mention = "@acme-merge-warden[bot]"
 ```
 
 This field has no per-repo equivalent. It is controlled solely by the operator.
+
+### `broken_repo_config_behaviour`
+
+Controls how Merge Warden reacts when the `.github/merge-warden.toml` already present on a
+repository's **default branch** is present but cannot be loaded — malformed TOML or an
+unsupported `schemaVersion`. This is distinct from the PR-diff config check described in
+[How Merge Warden works](../explanation/how-merge-warden-works.md#automatic-configuration-file-validation),
+which validates a config change proposed *within* a PR; this setting governs the config
+that is already live and actually governing every PR.
+
+A transient fetch failure or a config file that is simply absent is **never** treated as
+broken and never produces a notice, regardless of this setting — Merge Warden silently
+falls back to application defaults in both cases, same as always.
+
+| Value | PR comment | Check conclusion |
+| :--- | :--- | :--- |
+| `silent_fallback` (default) | None | Unaffected |
+| `notify` | Posted — explains the config could not be loaded and that defaults are in use | Unaffected |
+| `block` | Posted (same comment as `notify`) | Forced to `failure`, hard-blocking the PR until the config is fixed |
+
+```toml
+[policies]
+broken_repo_config_behaviour = "silent_fallback"  # or "notify" or "block"
+```
+
+**This field is application-level only.** It cannot be set, or overridden, in a repository's
+own `.github/merge-warden.toml` or in an org policy file — a broken repository config must
+not be able to weaken (or silently strengthen) the operator's chosen reaction to its own
+brokenness. In every mode, the existing `config.load.failures_total` metric is still
+recorded; only the PR-facing comment and check conclusion change.
+
+See [How to set application-level policy defaults — broken default-branch config policy](../how-to/set-app-level-defaults.md#choosing-a-broken-default-branch-config-policy)
+for guidance on choosing between the three values.
 
 ---
 
@@ -229,6 +263,10 @@ default_missing_work_item_label  = "pr-issue: missing-work-item"
 # Bot mention prefix for label-suppression commands posted in PR comments.
 # Change this if your GitHub App is installed under a different name.
 # bot_mention = "@merge-warden"
+
+# Reaction to a broken (malformed/unsupported schemaVersion) default-branch config.
+# Application-level only — cannot be set per-repo or per-org.
+# broken_repo_config_behaviour = "silent_fallback"  # or "notify" or "block"
 
 [policies.pr_size_check]
 enabled           = false
