@@ -851,9 +851,42 @@ impl GitHubProvider {
 }
 ```
 
+## Issue Tracker Abstraction
+
+The abstractions above (`PullRequestProvider`, `RepositoryProvider`,
+`AuthenticationProvider`) all answer the question "where does the pull request
+live?" — today exclusively GitHub, with GitLab and Azure DevOps sketched above as
+future PR-hosting platforms.
+
+A related but independent question is "where does the work item a PR *references*
+live?" A team can host its code on GitHub while tracking work in Jira, Azure
+DevOps, GitLab, or Linear — the PR-hosting platform and the issue tracker are
+orthogonal choices. For that reason, optional work-item reference verification
+(`verify_exists`, see
+[Work Item Reference Verification](../design/configuration-system.md#work-item-reference-verification))
+is backed by a **separate** port trait, `IssueTrackerProvider`, defined in its own
+crate (`crates/issue_trackers`) rather than as another method on
+`PullRequestProvider` or another variant of `PlatformType` above.
+
+Two consequences follow from keeping these boundaries distinct:
+
+- Adding a new issue tracker (e.g. a sixth work-item system) never requires
+  touching `PullRequestProvider` or any PR-hosting adapter, and vice versa.
+- `PlatformType::AzureDevOps` (a future PR-hosting platform) and
+  `TrackerConfig::AzureDevOps` (an issue-tracker connection, available today) are
+  deliberately two different types in two different modules — a repository can
+  use Azure DevOps as its work-item tracker today even though Merge Warden hosts
+  no PRs there.
+
+See [issue-tracker.md](../interfaces/issue-tracker.md) for the full trait,
+tracker-agnostic data model, and per-tracker configuration/mapping contract, and
+[ADR-007](../../adr/ADR-007-issue-tracker-abstraction.md) for the rationale behind
+the separate crate boundary.
+
 ## Related Documentation
 
 - **[System Overview](./system-overview.md)**: High-level system architecture
 - **[Core Components](./core-components.md)**: Core business logic and domain models
-- **[Security - Authentication](../security/authentication.md)**: Authentication and token management
+- **[Issue Tracker Abstraction (interface spec)](../interfaces/issue-tracker.md)**: `IssueTrackerProvider` trait and tracker configuration
+- **[Security - Threat Model](../security/threat-model.md#tracker-connection-configuration-and-outbound-request-risk)**: Outbound request risk for operator-configured tracker base URLs
 - **[Testing - Integration Testing](../testing/integration-testing.md)**: Platform integration testing strategies

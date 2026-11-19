@@ -1,7 +1,7 @@
 # Configuration System
 
-**Version:** 1.1
-**Last Updated:** 2026-05-21
+**Version:** 1.2
+**Last Updated:** 2026-11-19
 
 ## Overview
 
@@ -128,6 +128,17 @@ allowed_types = ["feat", "fix", "docs", "chore", "refactor", "test"]
 required = true
 pattern = "#\\d+"
 allowed_prefixes = ["closes", "fixes", "relates to", "references"]
+
+# Opt-in: resolve the matched reference against the configured issue tracker and
+# require it to exist and be open. Defaults to false (syntactic check only) — see
+# "Work Item Reference Verification" below.
+verify_exists = false
+
+# Optional. Omit entirely to verify against GitHub using this repository (the
+# zero-configuration default). See "Pluggable Issue Tracker Configuration" below
+# for the other four supported trackers.
+# [policies.pullRequests.workItem.tracker]
+# kind = "github"
 
 [policies.pullRequests.prSize]
 enabled = true
@@ -640,6 +651,169 @@ See [core-config-validation.md](../interfaces/core-config-validation.md#reposito
 for the `RepositoryScope` struct, the `is_repository_in_scope` matching function, and the
 `validate_repository_scope_patterns` startup validator.
 
+## Pattern Validation and Compile-Time Safety
+
+`title_pattern` and `work_item_reference_pattern` are maintainer-supplied regular
+expressions evaluated against attacker-influenceable input (the title and body of
+any pull request). Merge Warden's underlying regex engine matches in linear time
+(a Thompson NFA, never backtracking), so the classic catastrophic-backtracking
+ReDoS shape that affects backtracking engines does not apply to pattern
+*matching*. The residual risk is at pattern *compilation*: a pattern can be
+pathologically expensive, or outright fail, to compile into the engine's internal
+program, and today there is no application-level control over that boundary and
+no distinct, documented behaviour when it is crossed.
+
+### Validation Rule
+
+Every pattern string — whether set in application defaults, an org policy file,
+or a repository's own `.github/merge-warden.toml` — must satisfy a fixed length
+cap and compile within a fixed compiled-program size budget before it is accepted
+as part of a valid configuration:
+
+- **Length cap**: patterns longer than a fixed maximum are rejected without an
+  attempt to compile them.
+- **Bounded compile budget**: patterns within the length cap are compiled with an
+  explicit size limit well below the regex engine's own default, so a
+  syntactically valid but pathologically expensive pattern is rejected quickly
+  and deterministically.
+- Both limits are **fixed application constants**. They are not configurable per
+  repository or org — the entity whose pattern is being bounded must not be able
+  to raise its own bound. See
+  [ADR-006](../../adr/ADR-006-regex-pattern-validation.md).
+
+### When Validation Runs
+
+Validation happens once, at the point each configuration tier is parsed — never
+lazily on first use during webhook processing:
+
+| Configuration tier | Validation point |
+|---|---|
+| Application defaults | Server/CLI startup (`load_config()`), alongside existing startup validation such as `validate_repository_scope_patterns` |
+| Org policy | Each time `load_org_policy` fetches and parses the org policy file |
+| Repository config (effective/default-branch) | Each time `load_merge_warden_config` / `resolve_pull_request_config` resolves the configuration for an incoming webhook event |
+| Repository config (PR-diff, informational) | `validate_config_content`, as an additional rule alongside the existing TOML/`schemaVersion` validation (see [Configuration Change Validation](#configuration-change-validation) above) |
+
+A successfully validated pattern is compiled exactly once per configuration
+resolution; a process-wide cache keyed by the pattern string additionally avoids
+recompiling byte-identical patterns across webhook events and across
+repositories that share a pattern (most repositories use at least one built-in
+default). See
+[core-config-validation.md](../interfaces/core-config-validation.md#regex-pattern-validation-and-compilation)
+for the concrete types (`validate_pattern`, `CompiledPatternCache`,
+`PatternValidationError`, `MAX_PATTERN_LENGTH`, `PATTERN_COMPILE_SIZE_LIMIT`).
+
+### Deterministic, Maintainer-Visible Failure — Never Silent
+
+When a configured pattern fails validation on the path that actually governs PR
+evaluation, this is treated as a distinct, deterministic failure of the specific
+check that depends on it (title or work item), never as a silent disablement and
+never as a silent fallback to a different tier's pattern:
+
+- The dependent check (and only that check — the other check is unaffected) is
+  reported as **failed**, with a message that explicitly names the configuration
+  problem (e.g. "the configured pattern is invalid and could not be evaluated"),
+  distinct from "the title/body did not match the pattern."
+- This message is surfaced through the same maintainer-visible channel already
+  used for that check's ordinary feedback — check-run output and/or a PR comment
+  — because the repository maintainer, not the operator, is the person who can
+  fix the pattern. No new comment marker or communication path is introduced.
+- There is no configuration option to silence this failure or fall back to a
+  different tier's pattern. This is intentionally stricter than
+  `broken_repo_config_behaviour` (which *is* configurable): a malformed TOML file
+  has a safe degraded state (use application defaults), but "the pattern this
+  check depends on cannot be evaluated" has no safe default other than failing
+  that check.
+- On the PR-diff informational path (`validate_config_content`), an invalid
+  pattern is added to `ConfigValidationOutcome.errors` exactly like any other
+  schema problem, and remains subject to that check's existing non-blocking
+  guarantee.
+
+## Work Item Reference Verification
+
+By default, the work-item check is **syntactic only**: it passes as soon as the
+PR title/body contains text matching `work_item_reference_pattern`, with no
+confirmation that the referenced work item exists, let alone that it reflects
+real, current work. `#99999` passes exactly as readily as a reference to a real,
+open issue. This is a formatting/hygiene control, not a traceability control, and
+is the default because it requires no additional permissions or external calls
+beyond what the check already does.
+
+### `verify_exists`
+
+Setting `verify_exists = true` on `[policies.pullRequests.workItem]` opts into
+live verification: the reference extracted by the pattern match is resolved
+against the configured issue tracker, and the check additionally requires that
+the work item **both exists and is open**. A reference to a work item that exists
+but has since been closed fails the check identically to a reference that does
+not resolve at all — see
+[ADR-007](../../adr/ADR-007-issue-tracker-abstraction.md) for why "valid" is
+defined as a single exists-and-open condition rather than two independently
+toggleable conditions.
+
+- Default: `false`. When unset, behaviour is unchanged from the syntactic-only
+  check described above.
+- Requires read access to the configured tracker. For the default (GitHub)
+  tracker this is the `Issues: Read` repository permission the GitHub App already
+  holds for milestone/project propagation (see
+  [Issue Metadata Propagation](./issue-metadata-propagation.md)) — enabling
+  `verify_exists` with the default tracker requires no new permission grant.
+- Cross-repository/cross-project references (e.g. GitHub `owner/repo#42`) are
+  **resolved** against the referenced project when the configured credential can
+  reach it; when it cannot (or the item does not exist), the reference is treated
+  as unresolved, which fails the check under `verify_exists` exactly like any
+  other unresolved reference. Verification is never silently skipped for a
+  cross-repository reference.
+- Verification failures (tracker unreachable, authentication rejected) are
+  reported with a message distinguishable from "reference does not exist" and
+  from "reference exists but is closed," so maintainers can tell a tracker outage
+  apart from an actually-invalid reference.
+
+See [Work Item Reference Verification types](../interfaces/issue-tracker.md) for
+the full behavioural contract.
+
+## Pluggable Issue Tracker Configuration
+
+The work item a PR references does not have to live in the same system that
+hosts the PR. A repository selects its tracker via an optional
+`[policies.pullRequests.workItem.tracker]` table:
+
+```toml
+[policies.pullRequests.workItem]
+required = true
+pattern = "#\\d+"
+verify_exists = true
+
+# Omit this table entirely to verify against GitHub using this repository —
+# the zero-configuration default, reusing the existing installation credential.
+[policies.pullRequests.workItem.tracker]
+kind = "github"
+```
+
+Five trackers are supported: GitHub, Azure DevOps (both the `dev.azure.com` cloud
+service and on-premises Azure DevOps Server), Jira (Cloud and Server/Data
+Center), GitLab (gitlab.com and self-managed), and Linear. Each non-default
+tracker requires connection details appropriate to that tracker — at minimum a
+base URL (for self-hostable trackers) and a project/org identifier — plus a
+reference to a credential, never a raw secret, in configuration:
+
+```toml
+[policies.pullRequests.workItem.tracker]
+kind = "jira"
+base_url = "https://my-team.atlassian.net"
+project_key = "PROJ"
+auth_token_env = "JIRA_API_TOKEN"   # name of an environment variable; never the token itself
+```
+
+The abstraction is deliberately extensible: adding a sixth tracker means adding
+one new `TrackerConfig` variant and one new adapter module, with no change to the
+check logic in `core`. See
+[issue-tracker.md](../interfaces/issue-tracker.md) for the trait, the
+tracker-agnostic data model, the full connection-field reference per tracker, and
+the open/closed state-mapping table each adapter is responsible for. See
+[Tracker Connection Configuration and Outbound Request Risk](../security/threat-model.md#tracker-connection-configuration-and-outbound-request-risk)
+for the security considerations that come with operator-configurable base URLs,
+particularly for on-premises trackers.
+
 ## Related Specifications
 
 - [Validation Engine](./validation-engine.md) - How configuration drives validation behavior
@@ -647,3 +821,8 @@ for the `RepositoryScope` struct, the `is_repository_in_scope` matching function
 - [Security Data Protection](../security/data-protection.md) - Secure handling of configuration data
 - [Functional Requirements FR-007](../requirements/functional-requirements.md#fr-007-configuration-change-validation) - Acceptance criteria for this feature
 - [Functional Requirements FR-010](../requirements/functional-requirements.md#fr-010-broken-default-branch-configuration-policy) - Acceptance criteria for the broken default-branch configuration policy
+- [Functional Requirements FR-011](../requirements/functional-requirements.md#fr-011-regex-pattern-validation-and-deterministic-failure-handling) - Acceptance criteria for pattern validation and compile-failure handling
+- [Functional Requirements FR-012](../requirements/functional-requirements.md#fr-012-work-item-reference-verification) - Acceptance criteria for work item reference verification
+- [Functional Requirements FR-013](../requirements/functional-requirements.md#fr-013-pluggable-issue-tracker-support) - Acceptance criteria for multi-tracker support
+- [Issue Tracker Abstraction](../interfaces/issue-tracker.md) - Trait, types, and per-tracker configuration
+- [ADR-006](../../adr/ADR-006-regex-pattern-validation.md) / [ADR-007](../../adr/ADR-007-issue-tracker-abstraction.md) - Design rationale

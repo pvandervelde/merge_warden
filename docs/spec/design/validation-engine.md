@@ -1,7 +1,7 @@
 # Validation Engine
 
-**Version:** 1.1
-**Last Updated:** April 10, 2026
+**Version:** 1.2
+**Last Updated:** 2026-11-19
 
 > **Note:** The detailed `ValidationRule` trait, `ValidationContext`, `RuleRegistry`, and
 > `TitleValidationRule` sections below describe the **target / aspirational architecture**.
@@ -261,16 +261,33 @@ impl TitleValidationRule {
         &self,
         title: &str,
         policy: Option<&TitlePolicy>,
-    ) -> bool {
+    ) -> Result<bool, PatternValidationError> {
         let pattern = policy
             .and_then(|p| p.pattern.as_ref())
             .unwrap_or(&DEFAULT_CONVENTIONAL_COMMIT_PATTERN);
 
-        let regex = Regex::new(pattern).unwrap();
-        regex.is_match(title)
+        // Patterns are validated and compiled once at config-load time and reused
+        // from a process-wide cache keyed by pattern string — never recompiled
+        // per PR event with an unwrapping `Regex::new(pattern).unwrap()`. See
+        // "Pattern Validation and Compile-Time Safety" in
+        // docs/spec/design/configuration-system.md and ADR-006. A pattern that
+        // failed validation at config-load time surfaces here as `Err`, which
+        // the caller must turn into a distinct check failure (see below) rather
+        // than ever panicking or silently treating the title as valid/invalid.
+        let regex = CompiledPatternCache::get_or_compile(pattern)?;
+        Ok(regex.is_match(title))
     }
 }
 ```
+
+> **Distinguishing "pattern invalid" from "title does not match."** When
+> `validate_conventional_commits` returns `Err(PatternValidationError)`, the rule
+> must report a failure whose message names the configuration problem (e.g. "the
+> configured `title_pattern` is invalid and could not be evaluated") — never the
+> ordinary "title does not follow conventional commit format" message, and never
+> a silent pass. See
+> [core-config-validation.md](../interfaces/core-config-validation.md#check-time-behaviour-on-patternvalidationerror)
+> for the full contract.
 
 #### PR Title Diagnostic Types
 
@@ -515,6 +532,96 @@ impl ValidationRule for WorkItemReferenceRule {
     }
 }
 ```
+
+#### `extract_work_item_references` and Pattern Validity
+
+`extract_work_item_references` matches `description` against
+`work_item_reference_pattern` exactly as before — this is the syntactic layer and
+is unaffected by `verify_exists`. Internally it resolves the configured pattern via
+`CompiledPatternCache::get_or_compile` (the same shared, validated-once-at-load
+compile path used by the title rule); when that returns
+`Err(PatternValidationError)`, the rule fails immediately with a configuration-error
+message distinct from "no work item reference found," per the contract in
+[core-config-validation.md](../interfaces/core-config-validation.md#check-time-behaviour-on-patternvalidationerror).
+It never falls through to "no references found."
+
+#### `validate_work_items_exist` — Optional Live Verification
+
+Once a syntactic match is found, `validate_work_items_exist` decides whether any
+further check is needed:
+
+```rust
+impl WorkItemReferenceRule {
+    async fn validate_work_items_exist(
+        &self,
+        context: &ValidationContext,
+        work_items: &[WorkItemReference],
+    ) -> Result<RuleResult, ValidationError> {
+        let policy = context.configuration.policies
+            .as_ref()
+            .and_then(|p| p.pull_requests.work_item.as_ref());
+
+        // Default false: syntactic-only behaviour, unchanged from today. The
+        // tracker is never contacted in this branch.
+        if !policy.map(|p| p.verify_exists).unwrap_or(false) {
+            return Ok(RuleResult {
+                rule_name: self.name().to_string(),
+                status: RuleStatus::Passed,
+                severity: Severity::Info,
+                message: Some("Work item reference found".to_string()),
+                suggestions: vec![],
+                bypass_info: None,
+            });
+        }
+
+        // Opt-in path: resolve the first matched reference against the
+        // configured tracker (default: GitHub, this repository — see
+        // docs/spec/interfaces/issue-tracker.md). "Valid" means the tracker
+        // reports the work item both exists and is open; a closed work item
+        // fails identically to one that does not resolve at all.
+        let tracker = context.tracker_provider_for(policy);
+        match tracker.resolve(&work_items[0].as_tracker_reference()).await {
+            Ok(WorkItemResolution::Found { state: WorkItemState::Open }) => Ok(RuleResult {
+                rule_name: self.name().to_string(),
+                status: RuleStatus::Passed,
+                severity: Severity::Info,
+                message: Some("Work item reference verified: exists and is open".to_string()),
+                suggestions: vec![],
+                bypass_info: None,
+            }),
+            Ok(WorkItemResolution::Found { state: WorkItemState::Closed }) => Ok(RuleResult {
+                rule_name: self.name().to_string(),
+                status: RuleStatus::Failed,
+                severity: Severity::Error,
+                message: Some("Referenced work item exists but is closed".to_string()),
+                suggestions: vec!["Reference an open work item, or disable verify_exists".to_string()],
+                bypass_info: None,
+            }),
+            Ok(WorkItemResolution::NotFound) => Ok(RuleResult {
+                rule_name: self.name().to_string(),
+                status: RuleStatus::Failed,
+                severity: Severity::Error,
+                message: Some("Referenced work item does not exist or is not accessible".to_string()),
+                suggestions: vec![],
+                bypass_info: None,
+            }),
+            Err(e) => Ok(RuleResult {
+                rule_name: self.name().to_string(),
+                status: RuleStatus::Failed,
+                severity: Severity::Error,
+                message: Some(format!("Could not verify work item reference: {}", e)),
+                suggestions: vec!["This may be a transient tracker outage; re-run the check".to_string()],
+                bypass_info: None,
+            }),
+        }
+    }
+}
+```
+
+Each of the three failure messages above — closed, not-found, and
+verification-error — is deliberately distinct, so a maintainer reading the check
+output can tell "this reference is stale" apart from "the tracker could not be
+reached" apart from "this reference never existed."
 
 ### PR Size Rule
 
@@ -884,3 +991,5 @@ impl ValidationOrchestrator {
 - [Configuration System](./configuration-system.md) - How configuration drives validation behavior
 - [Bypass Mechanisms](./bypass-mechanisms.md) - Bypass integration and audit trails
 - [Core Components](../architecture/core-components.md) - Core validation abstractions
+- [Issue Tracker Abstraction](../interfaces/issue-tracker.md) - `IssueTrackerProvider` trait and tracker-agnostic verification model
+- [Core Config Validation](../interfaces/core-config-validation.md#regex-pattern-validation-and-compilation) - Pattern validation, compilation, and caching contract

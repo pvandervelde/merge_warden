@@ -14,7 +14,9 @@ Merge Warden is a comprehensive pull request validation and governance system de
 
 **Key Objectives**:
 
-- **Quality Assurance**: Enforce conventional commit standards and require work item references
+- **Quality Assurance**: Enforce conventional commit standards and require work item references,
+  with optional live verification that a referenced work item actually exists and is open on the
+  configured issue tracker
 - **Process Automation**: Automate labeling, size assessment, and milestone synchronization
 - **Governance**: Provide audit trails and bypass mechanisms for exceptional cases
 - **Developer Experience**: Offer clear, actionable feedback and multiple deployment options
@@ -23,7 +25,9 @@ Merge Warden is a comprehensive pull request validation and governance system de
 ### System Capabilities
 
 - **Multi-Platform Deployment**: Azure Functions, CLI, and future cloud platforms
-- **Configurable Validation Rules**: Title format, work item references, PR size limits
+- **Configurable Validation Rules**: Title format, work item references (syntactic by default,
+  with opt-in live verification against a pluggable issue tracker — GitHub, Azure DevOps, Jira,
+  GitLab, or Linear), PR size limits
 - **Intelligent Labeling**: Automatic size labeling and change type classification
 - **Audit and Compliance**: Comprehensive logging and bypass tracking
 - **Integration Testing**: End-to-end validation with real GitHub repositories

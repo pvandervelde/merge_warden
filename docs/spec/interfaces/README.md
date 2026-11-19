@@ -41,6 +41,15 @@ the **queue-based webhook processing** (task 3.0). Covers `EventIngress`,
 `EventAcknowledger`, `ProcessableEvent`, `WebhookQueueMessage`, `IngressError`, and
 `run_event_processor`.
 
+### [issue-tracker.md](./issue-tracker.md)
+
+Contracts for the pluggable issue-tracker abstraction backing optional work-item
+reference verification. Covers `IssueTrackerProvider`, `WorkItemReference`,
+`WorkItemState`, `WorkItemResolution`, `TrackerConfig`/`TrackerKind`, per-tracker
+state-mapping rules, and the `verify_exists`/`tracker` additions to
+`WorkItemPolicyConfig`. See
+[ADR-007](../../adr/ADR-007-issue-tracker-abstraction.md) for the rationale.
+
 ## Dependency Map
 
 ```
@@ -67,6 +76,15 @@ server-config.md
 server-ingress.md
   └── defines EventIngress, IngressError
         └── IngressError used in server-config.md (ServerError::IngressError)
+
+issue-tracker.md
+  └── defines IssueTrackerProvider, WorkItemReference, WorkItemState,
+      WorkItemResolution, TrackerConfig, TrackerKind, IssueTrackerError
+        └── WorkItemPolicyConfig.verify_exists / .tracker (core-config-validation.md)
+              └── extends WorkItemPolicyConfig::merge (policy-engine.md)
+        └── pattern validation (core-config-validation.md) shares the same
+            config-load-time, fail-closed philosophy (ADR-006) but is a
+            separate mechanism
 ```
 
 ## Source Code Stubs
@@ -80,3 +98,4 @@ The corresponding Rust stubs live in `crates/`:
 | core-config-validation.md | `crates/core/src/config.rs`, `crates/core/src/lib.rs` |
 | server-config.md | `crates/server/src/config.rs`, `crates/server/src/errors.rs`, `crates/server/src/telemetry.rs` |
 | server-ingress.md | `crates/server/src/ingress.rs` |
+| issue-tracker.md | `crates/issue_trackers/src/lib.rs` (trait + types), `crates/issue_trackers/src/{github,azure_devops,jira,gitlab,linear}.rs` (adapters) |

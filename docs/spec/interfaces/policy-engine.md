@@ -133,9 +133,21 @@ impl WorkItemPolicyConfig {
     /// - `pattern`: `over.pattern` if non-empty and not equal to `WORK_ITEM_REGEX`;
     ///   otherwise `base.pattern`
     /// - `label_if_missing`: `over.label_if_missing.or_else(|| base.label_if_missing.clone())`
+    /// - `verify_exists`: `base.verify_exists || over.verify_exists` — activation-bool
+    ///   semantics, same as `required`; once enabled by either tier it stays enabled.
+    ///   See [issue-tracker.md](../interfaces/issue-tracker.md) and
+    ///   [ADR-007](../../adr/ADR-007-issue-tracker-abstraction.md).
+    /// - `tracker`: `over.tracker` if it is not `TrackerConfig::default()`; otherwise
+    ///   `base.tracker`
     pub(crate) fn merge(base: &Self, over: &Self) -> Self;
 }
 ```
+
+> **Pattern validity is orthogonal to merge.** `PolicySet::merge` never validates or
+> compiles `pattern`; it only chooses which tier's raw string wins. Validation happens
+> separately via `validate_pattern` (see
+> [core-config-validation.md](../interfaces/core-config-validation.md#regex-pattern-validation-and-compilation))
+> at config-load time, after the merge chain has produced the final pattern string.
 
 ### 2.3 `PrSizeCheckConfig::merge`
 
