@@ -579,8 +579,19 @@ impl WorkItemReferenceRule {
         // docs/spec/interfaces/issue-tracker.md). "Valid" means the tracker
         // reports the work item both exists and is open; a closed work item
         // fails identically to one that does not resolve at all.
+        //
+        // Resolution goes through `WorkItemResolutionCache::get_or_resolve`
+        // (60s TTL, keyed by tracker identity + reference — see
+        // issue-tracker.md §8) and is itself bounded by
+        // `MAX_WORK_ITEM_REFERENCES_PER_EVENT` (issue-tracker.md §10) further
+        // up the call stack in `extract_work_item_references`, so references
+        // beyond the cap never reach this method at all — the caller treats
+        // them as `NotFound` before `validate_work_items_exist` is invoked.
         let tracker = context.tracker_provider_for(policy);
-        match tracker.resolve(&work_items[0].as_tracker_reference()).await {
+        match context.resolution_cache
+            .get_or_resolve(context.tracker_identity(policy), tracker.as_ref(), &work_items[0].as_tracker_reference())
+            .await
+        {
             Ok(WorkItemResolution::Found { state: WorkItemState::Open }) => Ok(RuleResult {
                 rule_name: self.name().to_string(),
                 status: RuleStatus::Passed,
@@ -605,12 +616,27 @@ impl WorkItemReferenceRule {
                 suggestions: vec![],
                 bypass_info: None,
             }),
+            Err(IssueTrackerError::RequestFailed(_)) => Ok(RuleResult {
+                rule_name: self.name().to_string(),
+                status: RuleStatus::Failed,
+                severity: Severity::Error,
+                message: Some(
+                    "Could not verify work item reference: issue tracker is currently \
+                     unreachable; this check will be re-evaluated if the pull request is \
+                     updated or the check is re-run".to_string(),
+                ),
+                suggestions: vec![
+                    "This may be a transient tracker outage; re-run the check".to_string(),
+                    "If this happens routinely, consider disabling verify_exists".to_string(),
+                ],
+                bypass_info: None,
+            }),
             Err(e) => Ok(RuleResult {
                 rule_name: self.name().to_string(),
                 status: RuleStatus::Failed,
                 severity: Severity::Error,
                 message: Some(format!("Could not verify work item reference: {}", e)),
-                suggestions: vec!["This may be a transient tracker outage; re-run the check".to_string()],
+                suggestions: vec![],
                 bypass_info: None,
             }),
         }
@@ -621,7 +647,15 @@ impl WorkItemReferenceRule {
 Each of the three failure messages above — closed, not-found, and
 verification-error — is deliberately distinct, so a maintainer reading the check
 output can tell "this reference is stale" apart from "the tracker could not be
-reached" apart from "this reference never existed."
+reached" apart from "this reference never existed." The tracker-unreachable
+message is a deliberate fail-closed trade-off, not a neutral pass: enabling
+`verify_exists` means a tracker outage can block merges for as long as the
+outage lasts, with no silent fallback to "pattern matched, so pass." A
+maintainer who hits this routinely can disable `verify_exists`, since it is
+opt-in. See
+[ADR-007 decision point 8](../../adr/ADR-007-issue-tracker-abstraction.md) and
+the integration test matrix in
+[issue-tracker.md §9.2](../interfaces/issue-tracker.md#92-core-integration-tests-cratescoresrclib_testsrs).
 
 ### PR Size Rule
 

@@ -688,8 +688,9 @@ See [ADR-006](../../adr/ADR-006-regex-pattern-validation.md) for the rationale.
 ### New Constants
 
 ```rust
-/// Maximum accepted length, in characters, for `title_pattern` and
-/// `work_item_reference_pattern` at any configuration tier.
+/// Maximum accepted length, in **bytes** (`str::len()`, not Unicode scalar
+/// values or chars), for `title_pattern` and `work_item_reference_pattern` at
+/// any configuration tier.
 ///
 /// A fixed application constant — not configurable per repository or org, for
 /// the same reason `broken_repo_config_behaviour` is application-level only
@@ -755,9 +756,12 @@ pub fn validate_pattern(pattern: &str) -> Result<regex::Regex, PatternValidation
 /// built-in default for at least one of `title_pattern` /
 /// `work_item_reference_pattern`).
 ///
-/// Bounded (fixed-capacity LRU) so that operators running many repositories
-/// with many distinct custom patterns cannot cause unbounded cache growth.
-/// Capacity is an internal implementation constant, not configuration.
+/// Bounded to a fixed capacity of **256 entries** (LRU-evicted) so that
+/// operators running many repositories with many distinct custom patterns
+/// cannot cause unbounded cache growth. Capacity is an internal implementation
+/// constant, not configuration. Cached entries are `Arc<Regex>`, so a cache hit
+/// is an O(1) reference-count bump, never a recompile or a deep copy of the
+/// compiled program.
 pub struct CompiledPatternCache { /* internal LRU, not part of the public API shape */ }
 
 impl CompiledPatternCache {
@@ -867,11 +871,14 @@ depends on:
 ## Work Item Verification Additions
 
 The following types and fields are added to `crates/core/src/config.rs` as part of
-[FR-012 (Work Item Reference Verification)](../requirements/functional-requirements.md#fr-012-work-item-reference-verification).
+[FR-012 (Work Item Reference Verification)](../requirements/functional-requirements.md#fr-012-work-item-reference-verification)
+and
+[FR-013 (Pluggable Issue Tracker Support)](../requirements/functional-requirements.md#fr-013-pluggable-issue-tracker-support).
 Concrete tracker-side types (`IssueTrackerProvider`, `WorkItemReference`,
-`WorkItemState`, `TrackerConfig`, `TrackerKind`) are specified in
-[issue-tracker.md](./issue-tracker.md); this section covers only the
-`WorkItemPolicyConfig` additions and their merge/validation treatment.
+`WorkItemState`, `TrackerConfig`, `TrackerProfile`, `TrackerKind`) are specified
+in [issue-tracker.md](./issue-tracker.md); this section covers the
+`WorkItemPolicyConfig`/`ApplicationDefaults` additions and their
+merge/validation treatment.
 
 ### Extension to `WorkItemPolicyConfig`
 
@@ -892,9 +899,32 @@ pub struct WorkItemPolicyConfig {
     pub verify_exists: bool,
 
     /// Which tracker to verify against. Defaults to the GitHub tracker, using
-    /// this repository, when omitted.
+    /// this repository, when omitted. Never carries a connection coordinate
+    /// (`base_url`, `auth_token_env`) directly — non-`GitHub`/`GitHubRepository`
+    /// variants name an operator-defined `profile` instead (see
+    /// [`ApplicationDefaults::tracker_profiles`](#extension-to-applicationdefaults-tracker-profiles)
+    /// below and [issue-tracker.md §3](./issue-tracker.md#3-tracker-configuration)).
     #[serde(default)]
     pub tracker: issue_trackers::TrackerConfig,
+}
+```
+
+### Extension to `ApplicationDefaults` (tracker profiles)
+
+```rust
+pub struct ApplicationDefaults {
+    // ... existing fields unchanged ...
+
+    /// Operator-defined tracker connections, keyed by profile name. The only
+    /// place `base_url` and `auth_token_env` may be set — never in a
+    /// repository's or org's own config file. Not part of the `PolicySet`
+    /// merge chain, the same placement pattern as `broken_repo_config_behaviour`
+    /// and `repository_scope`. Default: empty map (no non-GitHub trackers
+    /// usable until the operator defines at least one profile).
+    ///
+    /// TOML key: `[policies.tracker_profiles.<name>]`.
+    #[serde(default)]
+    pub tracker_profiles: std::collections::HashMap<String, issue_trackers::TrackerProfile>,
 }
 ```
 
@@ -905,6 +935,61 @@ pub struct WorkItemPolicyConfig {
 | :--- | :--- |
 | `verify_exists` | `base.verify_exists \|\| over.verify_exists` |
 | `tracker` | `over.tracker` if not `TrackerConfig::default()`; otherwise `base.tracker` |
+
+`tracker_profiles` does not participate in `PolicySet::merge` at all — it is read
+directly from `ApplicationDefaults`, exactly like `broken_repo_config_behaviour`.
+
+### New Validation: Tracker/Profile Resolution and Pattern Alignment
+
+Two validation rules run once, at config-resolution time, after
+`PolicySet::merge` has produced the effective `WorkItemPolicyConfig` — neither is
+a `PolicySet::merge` rule itself:
+
+1. **Profile lookup and kind compatibility.** When `tracker` is any variant
+   other than `GitHub`/`GitHubRepository`, its `profile` field is looked up in
+   `ApplicationDefaults.tracker_profiles`. An unknown profile name, or a profile
+   whose `TrackerProfile::kind()` does not match the `TrackerConfig` variant's
+   own kind (e.g. `tracker.kind = "jira"` naming a profile defined with
+   `kind = "azure_devops"`), is a config validation error:
+   `IssueTrackerError::InvalidConfiguration`, fail-closed and
+   maintainer-visible — never resolved by guessing or silently substituting a
+   different profile.
+2. **Tracker/pattern alignment.** When `tracker` resolves to any kind other than
+   the default `GitHub`, and the effective `pattern` is still exactly the
+   built-in default pattern constant (`WORK_ITEM_REGEX`), configuration
+   validation **rejects** the configuration with an error naming the mismatch —
+   e.g. *"tracker is set to jira but work_item_reference_pattern was left at its
+   GitHub-shaped default; set an explicit pattern matching this tracker's
+   reference syntax."* This is a config-validation-time check, not a runtime
+   one; it never attempts to infer or auto-correct a pattern for the selected
+   tracker kind — the maintainer must set one explicitly. See
+   [issue-tracker.md §3.7](./issue-tracker.md#37-trackerpattern-alignment-validation).
+
+### New Constant: `MAX_WORK_ITEM_REFERENCES_PER_EVENT`
+
+```rust
+/// Maximum number of distinct `WorkItemReference` values resolved against the
+/// configured issue tracker per PR webhook event.
+///
+/// A fixed application constant, alongside `MAX_PATTERN_LENGTH` — not
+/// configurable per repository or org. References beyond this cap are not
+/// verified: they are treated as `Ok(WorkItemResolution::NotFound)`, never as
+/// an error, so a PR body crafted with many reference-shaped strings cannot
+/// trigger unbounded outbound tracker API calls for a single event, and
+/// behaviour stays deterministic regardless of how many reference-shaped
+/// strings a PR body contains. See
+/// [issue-tracker.md §10](./issue-tracker.md#10-per-event-reference-count-cap).
+pub const MAX_WORK_ITEM_REFERENCES_PER_EVENT: usize = 20;
+```
+
+### Resolution Caching
+
+`IssueTrackerProvider::resolve` results are cached in-memory, per process, for a
+fixed 60-second TTL, keyed by `(tracker identity, WorkItemReference)`. See
+[issue-tracker.md §8](./issue-tracker.md#8-resolution-caching) for the
+`WorkItemResolutionCache` type. This is a runtime optimisation, not a config
+type, and is called from the same check-time path as
+`CompiledPatternCache::get_or_compile`.
 
 ### Testing Requirements
 
@@ -918,11 +1003,33 @@ pub struct WorkItemPolicyConfig {
   tier re-asserting default)
 - Merge: `over.tracker` set to a non-default kind wins over `base.tracker`
 - Merge: `over.tracker` omitted (default) → `base.tracker` is preserved
+- `ApplicationDefaults.tracker_profiles` TOML round-trip: a
+  `[policies.tracker_profiles.<name>]` table for each of the four profile kinds
+  parses correctly; an unknown `kind` value is rejected
+- `tracker_profiles` is rejected (or ignored, per the unknown-fields policy) when
+  present in `RepositoryProvidedConfig` or an org policy file — a repository or
+  org cannot define its own profiles
+- A `TrackerConfig` non-GitHub variant naming a `profile` not present in
+  `tracker_profiles` → config validation fails with
+  `IssueTrackerError::InvalidConfiguration`
+- A `TrackerConfig` non-GitHub variant naming a `profile` of a different kind →
+  config validation fails with `IssueTrackerError::InvalidConfiguration`
+- A `TrackerConfig` non-GitHub variant with `pattern` left at `WORK_ITEM_REGEX`
+  (the built-in default) → config validation fails, naming the tracker/pattern
+  mismatch
+- A `TrackerConfig` non-GitHub variant with an explicit, non-default `pattern` →
+  config validation passes (assuming the profile also resolves)
+- A `TrackerProfile` with a non-`https://` `base_url` → rejected with
+  `IssueTrackerError::InvalidConfiguration`
+- A project-scoping identifier (`organization`, `project`, `project_key`,
+  `project_path`, `team_key`) containing `@`, `:`, `://`, or whitespace →
+  rejected with `IssueTrackerError::InvalidConfiguration`
 
 #### Integration tests (`crates/core/src/lib_tests.rs`)
 
-See [issue-tracker.md §6.2](./issue-tracker.md#62-core-integration-tests-cratescoresrclib_testsrs)
-for the full behavioural matrix.
+See [issue-tracker.md §9.2](./issue-tracker.md#92-core-integration-tests-cratescoresrclib_testsrs)
+for the full behavioural matrix, including the per-event cap and resolution
+cache tests.
 
 ---
 

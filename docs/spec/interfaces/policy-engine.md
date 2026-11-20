@@ -148,6 +148,17 @@ impl WorkItemPolicyConfig {
 > separately via `validate_pattern` (see
 > [core-config-validation.md](../interfaces/core-config-validation.md#regex-pattern-validation-and-compilation))
 > at config-load time, after the merge chain has produced the final pattern string.
+>
+> **Tracker profile lookup is also orthogonal to merge.** `PolicySet::merge`
+> never resolves a `TrackerConfig`'s `profile` field against
+> `ApplicationDefaults.tracker_profiles`, and never checks kind compatibility
+> between a `TrackerConfig` variant and its named profile — it only chooses
+> which tier's whole `TrackerConfig` value wins, exactly like any other
+> non-activation field. Profile resolution, kind-compatibility checking, and the
+> tracker/pattern alignment check both happen once, after the merge chain has
+> produced the final `WorkItemPolicyConfig` — see
+> [core-config-validation.md](../interfaces/core-config-validation.md#new-validation-trackerprofile-resolution-and-pattern-alignment)
+> and [ADR-007](../../adr/ADR-007-issue-tracker-abstraction.md).
 
 ### 2.3 `PrSizeCheckConfig::merge`
 

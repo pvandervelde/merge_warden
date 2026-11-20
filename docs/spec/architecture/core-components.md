@@ -210,10 +210,14 @@ impl WorkItemReferenceRule {
 ```
 
 > **Optional live verification.** When a repository sets `verify_exists = true`,
-> each extracted reference is additionally resolved against a configured
-> `IssueTrackerProvider` (GitHub by default; Azure DevOps, Jira, GitLab, or Linear
-> when configured) and must resolve to a work item that both exists and is open.
-> This is an infrastructure-abstraction concern, not a domain-model concern — see
+> an extracted reference is resolved against a configured `IssueTrackerProvider`
+> (GitHub by default; Azure DevOps, Jira, GitLab, or Linear when configured) and
+> must resolve to a work item that both exists and is open, up to a fixed cap on
+> distinct references resolved per PR event. Non-GitHub trackers are selected via
+> a repository-controlled `kind` plus project-scoping identifiers only — the
+> connection itself (`base_url`, credential) is always an operator-defined
+> profile, never repository-controlled. This is an infrastructure-abstraction
+> concern, not a domain-model concern — see
 > [Platform Integrations](./platform-integrations.md#issue-tracker-abstraction)
 > and [issue-tracker.md](../interfaces/issue-tracker.md).
 

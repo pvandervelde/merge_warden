@@ -757,16 +757,32 @@ toggleable conditions.
   holds for milestone/project propagation (see
   [Issue Metadata Propagation](./issue-metadata-propagation.md)) — enabling
   `verify_exists` with the default tracker requires no new permission grant.
-- Cross-repository/cross-project references (e.g. GitHub `owner/repo#42`) are
-  **resolved** against the referenced project when the configured credential can
-  reach it; when it cannot (or the item does not exist), the reference is treated
-  as unresolved, which fails the check under `verify_exists` exactly like any
-  other unresolved reference. Verification is never silently skipped for a
-  cross-repository reference.
+- Cross-repository/cross-project references are **resolved** against the
+  referenced project when the configured credential can reach it and the
+  tracker's reference syntax can express a cross-project target in the first
+  place (today, that is GitHub's `owner/repo#42` and, where a maintainer's
+  pattern captures it, GitLab's equivalent — Jira, Azure DevOps, and Linear have
+  no cross-project reference concept in this design). When the target cannot be
+  reached (or the item does not exist), the reference is treated as unresolved,
+  which fails the check under `verify_exists` exactly like any other unresolved
+  reference. Verification is never silently skipped for a cross-repository
+  reference.
 - Verification failures (tracker unreachable, authentication rejected) are
   reported with a message distinguishable from "reference does not exist" and
-  from "reference exists but is closed," so maintainers can tell a tracker outage
-  apart from an actually-invalid reference.
+  from "reference exists but is closed" — e.g. *"could not verify work item
+  reference: issue tracker is currently unreachable; this check will be
+  re-evaluated if the pull request is updated or the check is re-run"* — so
+  maintainers can tell a tracker outage apart from an actually-invalid
+  reference. This is a deliberate fail-closed trade-off: a tracker outage can
+  block merges while `verify_exists` is enabled, with no neutral/pass-through
+  fallback. A maintainer who hits this routinely can disable `verify_exists`,
+  since it is opt-in.
+- Resolution results are cached in-memory, per process, for a short, fixed TTL
+  so repeated webhook events against the same PR (e.g. several `synchronize`
+  events as fixup commits land) do not repeatedly re-contact the tracker for a
+  reference that has not changed. A fixed cap also bounds how many distinct
+  references a single PR event resolves, so a PR body crafted with many
+  reference-shaped strings cannot trigger unbounded outbound calls.
 
 See [Work Item Reference Verification types](../interfaces/issue-tracker.md) for
 the full behavioural contract.
@@ -791,28 +807,94 @@ kind = "github"
 
 Five trackers are supported: GitHub, Azure DevOps (both the `dev.azure.com` cloud
 service and on-premises Azure DevOps Server), Jira (Cloud and Server/Data
-Center), GitLab (gitlab.com and self-managed), and Linear. Each non-default
-tracker requires connection details appropriate to that tracker — at minimum a
-base URL (for self-hostable trackers) and a project/org identifier — plus a
-reference to a credential, never a raw secret, in configuration:
+Center), GitLab (gitlab.com and self-managed), and Linear.
+
+For every tracker other than GitHub, the repository config supplies only `kind`,
+a `profile` naming an operator-defined connection (see "Operator-Defined Tracker
+Profiles" below), and project-scoping identifiers that select which
+project/org/team *within* that already-fixed connection to query —
+`organization`/`project` for Azure DevOps, `project_key` for Jira, `project_path`
+for GitLab, `team_key` for Linear:
 
 ```toml
 [policies.pullRequests.workItem.tracker]
 kind = "jira"
-base_url = "https://my-team.atlassian.net"
+profile = "jira_support"   # names a profile defined in the operator's application config
 project_key = "PROJ"
-auth_token_env = "JIRA_API_TOKEN"   # name of an environment variable; never the token itself
 ```
+
+A repository or org config file cannot supply a connection's `base_url` or
+`auth_token_env` directly — see "Operator-Defined Tracker Profiles" below for why
+and where those fields live instead.
 
 The abstraction is deliberately extensible: adding a sixth tracker means adding
 one new `TrackerConfig` variant and one new adapter module, with no change to the
 check logic in `core`. See
 [issue-tracker.md](../interfaces/issue-tracker.md) for the trait, the
-tracker-agnostic data model, the full connection-field reference per tracker, and
-the open/closed state-mapping table each adapter is responsible for. See
+tracker-agnostic data model, the full field reference per tracker, the
+project-scoping identifier charset requirements, and the open/closed
+state-mapping table each adapter is responsible for. See
 [Tracker Connection Configuration and Outbound Request Risk](../security/threat-model.md#tracker-connection-configuration-and-outbound-request-risk)
-for the security considerations that come with operator-configurable base URLs,
-particularly for on-premises trackers.
+for the security considerations this split between operator profile and
+repository config exists to address.
+
+### Tracker/Pattern Alignment
+
+Selecting a non-GitHub tracker while leaving `work_item_reference_pattern` at its
+built-in, GitHub-shaped default (`#\d+`-style) means that tracker's reference
+syntax (a Jira key, an Azure DevOps ID, a Linear identifier) can never match the
+pattern, so `verify_exists` would always fail silently against a pattern that
+was never going to match. Configuration validation rejects this combination at
+config-load time with a clear error naming the mismatch, rather than inferring
+or auto-selecting a pattern for the chosen tracker — the maintainer must set an
+explicit pattern matching the tracker's own reference syntax. See
+[core-config-validation.md](../interfaces/core-config-validation.md) for the
+concrete validation rule.
+
+### Operator-Defined Tracker Profiles
+
+Tracker connection coordinates — `base_url` and the name of the environment
+variable holding the credential (`auth_token_env`) — are **never** set in a
+repository's or org's own configuration file. They are defined exclusively in
+the operator's application configuration, under `[policies.tracker_profiles.<name>]`
+(`ApplicationDefaults.tracker_profiles`), the same trust tier
+`broken_repo_config_behaviour` (see
+["Broken Default-Branch Configuration Policy"](#broken-default-branch-configuration-policy))
+and `repository_scope` already live in:
+
+```toml
+# Server application config — [policies] maps to ApplicationDefaults
+[policies.tracker_profiles.jira_support]
+kind = "jira"
+base_url = "https://my-team.atlassian.net"
+auth_token_env = "JIRA_API_TOKEN"
+
+[policies.tracker_profiles.ado_internal]
+kind = "azure_devops"
+base_url = "https://my-ado-server.internal.example.com"   # on-prem Server
+auth_token_env = "ADO_PAT"
+```
+
+A repository's `[policies.pullRequests.workItem.tracker]` table names one of
+these profiles by its key (`profile = "jira_support"`) and supplies only the
+project-scoping identifiers described above. At config-resolution time the named
+profile is looked up and its `kind` must match the repository's selected `kind`
+exactly — a mismatch, or a `profile` name that does not exist in
+`tracker_profiles`, is a config validation error, fail-closed and
+maintainer-visible, exactly like an unknown or oversized pattern (ADR-006) or a
+broken default-branch config (ADR-005).
+
+This split exists because a repository's own config file is not a trusted
+boundary for an outbound connection target and a credential pointer together: a
+repository-controlled `base_url` pointed at an attacker-controlled host, paired
+with a repository-controlled `auth_token_env` naming an unrelated secret (e.g.
+the application's own GitHub private key or webhook secret), would let a
+malicious or careless config change exfiltrate that secret to that host. Keeping
+both fields operator-only, and letting the repository control only which
+already-fixed connection's project/org/team to query, closes that vector
+entirely — see
+[ADR-007](../../adr/ADR-007-issue-tracker-abstraction.md) and
+[Tracker Connection Configuration and Outbound Request Risk](../security/threat-model.md#tracker-connection-configuration-and-outbound-request-risk).
 
 ## Related Specifications
 

@@ -368,12 +368,21 @@ configured issue tracker, failing the work-item check when it does not.
   referenced project when the configured credential can reach it; treat an inaccessible or
   non-existent cross-project reference as unresolved, failing the check under `verify_exists`
   exactly like any other unresolved reference — never silently skip verification for a cross-project
-  reference
+  reference. Cross-project references only exist for tracker kinds whose reference syntax can
+  express one (GitHub today, and GitLab where a custom pattern captures it); Jira, Azure DevOps,
+  and Linear references have no cross-project concept in this design
 - Produce distinguishable failure messages for "reference does not exist," "reference exists but
   is closed," and "verification could not be completed" (tracker unreachable or authentication
-  rejected), so maintainers can tell a tracker outage apart from an actually-invalid reference
+  rejected), so maintainers can tell a tracker outage apart from an actually-invalid reference. The
+  tracker-unreachable case is a deliberate fail-closed outcome, not a neutral pass — a tracker
+  outage can block merges while `verify_exists` is enabled; a maintainer who hits this routinely can
+  disable it, since it is opt-in
 - Require no new GitHub App permission for the default (GitHub) tracker — reuse the existing
   `Issues: Read` repository permission already granted for milestone/project propagation
+- Cache resolution results in-memory, per process, for a short fixed TTL so repeated webhook events
+  against the same PR do not repeatedly re-contact the tracker for an unchanged reference, and bound
+  the number of distinct references resolved per PR event with a fixed cap so a PR body crafted with
+  many reference-shaped strings cannot trigger unbounded outbound calls
 
 **Acceptance Criteria:**
 
@@ -386,9 +395,14 @@ configured issue tracker, failing the work-item check when it does not.
 - ✅ `verify_exists = true`, tracker request fails (transient error, auth failure) → work-item check
   fails with a message distinguishable from "does not exist" and from "is closed"
 - ✅ A cross-repository/cross-project reference is resolved against the referenced project when
-  reachable, and treated as unresolved (failing the check) when not
+  reachable, and treated as unresolved (failing the check) when not; this only applies to tracker
+  kinds whose reference syntax can express a cross-project target (GitHub today)
 - ✅ Enabling `verify_exists` with the default GitHub tracker requires no GitHub App permission
   beyond what is already granted
+- ✅ Repeated webhook events against the same PR within the cache TTL resolve a given reference
+  against the tracker at most once
+- ✅ A PR body with more reference-shaped strings than the per-event cap resolves only up to the
+  cap; references beyond it are treated as unresolved, not as errors
 
 **Priority:** High
 **Dependencies:** FR-001 (Pull Request Validation), FR-002 (Configuration Management),
@@ -410,28 +424,48 @@ logic.
 - Allow a repository to select its tracker via an optional configuration table; omitting it
   defaults to the GitHub tracker using the PR's own repository, requiring zero additional
   configuration
-- For each supported tracker, accept the connection details that tracker requires: at minimum a
-  base URL for self-hostable trackers (Azure DevOps Server, self-managed GitLab/Jira) and a
-  project/organisation identifier; reference credentials by the name of an environment variable,
-  never a raw secret value, in configuration
+- Keep tracker connection coordinates — base URL and the name of the environment variable holding
+  the credential — exclusively in operator-defined configuration (a named "tracker profile"),
+  never in a repository's or org's own config file; a repository selects a tracker `kind`, names
+  which operator-defined profile to use, and supplies only project-scoping identifiers
+  (organisation/project, project key, project path, or team key, depending on tracker) that select
+  which project/org/team within that already-fixed connection to query. No raw secret value and no
+  connection coordinate is ever accepted from repository or org configuration
+- Validate every project-scoping identifier against a restrictive, tracker-appropriate charset
+  before using it in an outbound request, since it remains repository-controlled and is
+  concatenated into a request path/URL by the adapter
+- Require each non-GitHub adapter to enforce outbound-request hardening: HTTPS-only connections, no
+  automatic redirect following (or re-validation of the resolved target after a redirect), blocking
+  of loopback/private/link-local/metadata address ranges evaluated after DNS resolution, a
+  per-request timeout, and a response-size cap
 - Require each tracker implementation to map its own native issue/work-item status model onto a
   single tracker-agnostic open/closed concept, using status categories (or the equivalent stable,
   tracker-guaranteed field) rather than literal, customisable status names where a tracker allows
   per-project custom workflow states
-- Validate tracker configuration (connection fields required for the selected tracker kind,
-  well-formed base URL) at configuration-load time, not lazily on first verification attempt
+- Validate tracker configuration (profile existence and kind compatibility, connection fields
+  required for the selected tracker kind, well-formed base URL, project-scoping identifier
+  charset) at configuration-load time, not lazily on first verification attempt
+- Reject, at configuration-load time, a non-default tracker selection paired with a
+  `work_item_reference_pattern` left at its built-in, GitHub-shaped default — that tracker's
+  reference syntax can never match the default pattern, so verification would always fail
 
 **Acceptance Criteria:**
 
-- ✅ Work-item verification succeeds against each of the five supported trackers given correctly
-  configured connection details
+- ✅ Work-item verification succeeds against each of the five supported trackers given a correctly
+  configured operator tracker profile and repository-level project-scoping identifiers
 - ✅ Omitting tracker configuration defaults to GitHub, the PR's own repository, with no additional
   setup
 - ✅ Selecting a non-default tracker requires no change to the work-item check logic in `core`
-- ✅ No raw secret value appears in `.github/merge-warden.toml`, an org policy file, or application
-  defaults — every credential is referenced by environment variable name
-- ✅ A missing required connection field for the selected tracker kind, or a malformed base URL, is
-  rejected at configuration-load time with a clear error
+- ✅ No raw secret value, and no `base_url`, appears in `.github/merge-warden.toml` or an org policy
+  file — every connection coordinate lives only in operator-defined application configuration, and
+  every credential is referenced there by environment variable name
+- ✅ A repository config naming an unknown tracker profile, or a profile of a different kind than the
+  selected tracker `kind`, is rejected at configuration-load time with a clear error
+- ✅ A project-scoping identifier containing a scheme delimiter, `@`, `:`, or whitespace is rejected
+  at configuration-load time
+- ✅ A tracker profile with a non-`https://` base URL is rejected at configuration-load time
+- ✅ A non-default tracker selection paired with the built-in default `work_item_reference_pattern`
+  is rejected at configuration-load time, naming the mismatch
 - ✅ Each tracker's status mapping correctly classifies every documented native state as either
   open or closed (see the per-tracker mapping table in
   [issue-tracker.md](../interfaces/issue-tracker.md))
@@ -549,7 +583,10 @@ verify_exists = false   # opt-in live verification (exists + open); see FR-012
 
 # Optional. Omit to verify against GitHub using this repository. See FR-013 and
 # docs/spec/interfaces/issue-tracker.md for the other supported trackers
-# (Azure DevOps, Jira, GitLab, Linear).
+# (Azure DevOps, Jira, GitLab, Linear). A non-GitHub tracker names an
+# operator-defined profile ("profile") and supplies only project-scoping
+# identifiers — never a base URL or credential, which live only in the
+# operator's own application configuration.
 # [policies.pullRequests.workItem.tracker]
 # kind = "github"
 
@@ -606,8 +643,9 @@ Webhook event subscriptions:
 > **Non-GitHub trackers (FR-013):** when `verify_exists` is enabled with a tracker other than
 > GitHub (Azure DevOps, Jira, GitLab, Linear), no GitHub App permission is involved at all —
 > Merge Warden instead authenticates to that tracker's own API using the credential referenced by
-> the repository's `tracker` configuration (see
-> [issue-tracker.md](../interfaces/issue-tracker.md)).
+> the operator-defined tracker profile the repository's `tracker` configuration names (see
+> [issue-tracker.md](../interfaces/issue-tracker.md)); the repository's own configuration never
+> carries the credential or connection host directly.
 
 Organisation permissions:
 

@@ -51,7 +51,12 @@ silently never runs, which is worse than having no pattern validation at all.
    resolution. A process-wide cache keyed by the pattern string additionally avoids
    recompiling byte-identical patterns across webhook events and across
    repositories that happen to share a pattern (most do, since most repos use the
-   built-in default).
+   built-in default). The cache holds at most **256 entries** (fixed capacity,
+   evicted LRU) — comfortably above the number of distinct patterns any realistic
+   deployment uses, since most repositories share the small set of built-in
+   defaults. Cached entries are `Arc<Regex>`: cloning a pattern out of the cache for
+   use by a check is an O(1) reference-count bump, never a recompile or a deep copy
+   of the compiled program.
 4. When a pattern fails validation on the config path that actually governs PR
    evaluation (the merged, effective config — as opposed to the PR-diff informational
    check, which already has its own non-blocking comment mechanism from FR-007), the
@@ -61,6 +66,18 @@ silently never runs, which is worse than having no pattern validation at all.
    the same maintainer-visible channel (check-run output / PR comment) already used
    for that check's ordinary pass/fail feedback. It is never silently disabled and
    never silently falls back to a different configuration tier's pattern.
+5. **A pattern-validation failure is not escalated to
+   `BrokenRepoConfigBehaviour` (ADR-005).** `BrokenRepoConfigBehaviour` governs
+   whether the repository config tier is used *at all* — it reacts to structural
+   failures (malformed TOML, an unsupported `schemaVersion`) that prevent the
+   whole tier from loading. A bad pattern is a narrower, local failure: it is
+   handled entirely within the specific dependent check (title or work item) that
+   consults that pattern. Every other setting in the same repository config tier
+   — labels, bypass rules, size thresholds, the *other* pattern, and every other
+   policy — remains in effect normally. The two mechanisms never interact: a
+   malformed pattern never trips the whole-tier `BrokenRepoConfigBehaviour`
+   fallback, and `BrokenRepoConfigBehaviour` never suppresses or substitutes for
+   a pattern-validation failure.
 
 ## Consequences
 
@@ -76,14 +93,27 @@ silently never runs, which is worse than having no pattern validation at all.
   the two must always be distinguishable in both the message text and the
   underlying result type.
 - **Trade-offs accepted:**
-  - The fixed limits (`MAX_PATTERN_LENGTH = 256` characters,
-    `PATTERN_COMPILE_SIZE_LIMIT = 1 MiB`) are chosen to comfortably accommodate every
-    realistic title/work-item pattern while remaining far below the point where
-    compilation cost becomes noticeable. They are implementation constants, not
-    policy, and can be revisited if a legitimate pattern is ever rejected.
-  - The process-wide compiled-pattern cache is bounded (LRU, capped entry count) so
-    that an operator running many repositories with many distinct custom patterns
-    cannot cause unbounded cache growth.
+  - The fixed limits (`MAX_PATTERN_LENGTH = 256` **bytes** — measured via
+    `str::len()`, not Unicode scalar values or chars, so a pattern using
+    multi-byte characters is bounded by its UTF-8 byte length, not its character
+    count — and `PATTERN_COMPILE_SIZE_LIMIT = 1 MiB`) are chosen to comfortably
+    accommodate every realistic title/work-item pattern while remaining far below
+    the point where compilation cost becomes noticeable. They are implementation
+    constants, not policy, and can be revisited if a legitimate pattern is ever
+    rejected.
+  - `PATTERN_COMPILE_SIZE_LIMIT` maps to `RegexBuilder::size_limit` — the budget
+    for the size of the compiled program produced at build time. The `regex`
+    crate's separate, smaller `dfa_size_limit` (which bounds the *lazy* DFA's
+    runtime cache during matching, not compile-time cost) is deliberately left at
+    the crate's own default rather than also fixed by this ADR: it bounds a
+    different resource (a small, evictable, bounded runtime cache) than the
+    compile-time cost this ADR's budget is about, and the crate's default for it
+    is already conservative.
+  - The process-wide compiled-pattern cache is bounded to **256 entries**
+    (fixed-capacity LRU) so that an operator running many repositories with many
+    distinct custom patterns cannot cause unbounded cache growth. Cached entries
+    are `Arc<Regex>`, so retrieving one is an O(1) refcount bump rather than a
+    recompile or a deep copy.
 
 ## Alternatives considered
 
@@ -117,15 +147,25 @@ silently never runs, which is worse than having no pattern validation at all.
 ## Examples
 
 ```text
-# Repository .github/merge-warden.toml with an oversized pattern
+# Repository .github/merge-warden.toml with a pattern that demonstrates the
+# *compile-size-budget* rejection path specifically — NOT the length-cap path.
+#
+# `(#\d+){1,10000}` is only 15 bytes long, nowhere near MAX_PATTERN_LENGTH
+# (256 bytes); it passes the length check. It fails only because expanding a
+# bounded repetition of {1,10000} produces a compiled program that exceeds
+# PATTERN_COMPILE_SIZE_LIMIT. Verified experimentally against `regex` 1.13
+# (the same major version this repo pins, "1.11", in Cargo.toml):
+# `RegexBuilder::new(r"(#\d+){1,10000}").size_limit(1 << 20).build()` returns
+# `Err("Compiled regex exceeds size limit of 1048576 bytes.")`, while the same
+# pattern compiles successfully with no size limit applied.
 [policies.pullRequests.workItem]
-pattern = "(#\\d+){1,10000}"   # exceeds MAX_PATTERN_LENGTH or compile budget
+pattern = "(#\\d+){1,10000}"   # passes MAX_PATTERN_LENGTH; fails PATTERN_COMPILE_SIZE_LIMIT only
 
 # Resulting title/work-item check-run output (not a silent fallback):
 # ⚠️ Work item check cannot run: the configured `work_item_reference_pattern`
-#    in .github/merge-warden.toml is invalid (pattern too long / failed to
-#    compile). A repository maintainer must fix this pattern before this
-#    check can evaluate pull requests.
+#    in .github/merge-warden.toml is invalid (failed to compile within the
+#    configured compile-size budget). A repository maintainer must fix this
+#    pattern before this check can evaluate pull requests.
 ```
 
 ## References

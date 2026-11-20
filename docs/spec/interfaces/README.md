@@ -45,10 +45,14 @@ the **queue-based webhook processing** (task 3.0). Covers `EventIngress`,
 
 Contracts for the pluggable issue-tracker abstraction backing optional work-item
 reference verification. Covers `IssueTrackerProvider`, `WorkItemReference`,
-`WorkItemState`, `WorkItemResolution`, `TrackerConfig`/`TrackerKind`, per-tracker
-state-mapping rules, and the `verify_exists`/`tracker` additions to
-`WorkItemPolicyConfig`. See
-[ADR-007](../../adr/ADR-007-issue-tracker-abstraction.md) for the rationale.
+`WorkItemState`, `WorkItemResolution`, `TrackerKind`, the operator/repository
+trust split between `TrackerProfile` (operator-only connection coordinates) and
+`TrackerConfig` (repository/org-controlled kind selection plus project-scoping
+identifiers), per-tracker state-mapping rules, outbound-request hardening
+requirements, resolution caching, the per-event reference-count cap, and the
+`verify_exists`/`tracker` additions to `WorkItemPolicyConfig`. See
+[ADR-007](../../adr/ADR-007-issue-tracker-abstraction.md) for the rationale,
+including why tracker connection coordinates must not be repository-controlled.
 
 ## Dependency Map
 
@@ -79,9 +83,12 @@ server-ingress.md
 
 issue-tracker.md
   └── defines IssueTrackerProvider, WorkItemReference, WorkItemState,
-      WorkItemResolution, TrackerConfig, TrackerKind, IssueTrackerError
+      WorkItemResolution, TrackerConfig, TrackerProfile, TrackerKind,
+      IssueTrackerError, WorkItemResolutionCache
         └── WorkItemPolicyConfig.verify_exists / .tracker (core-config-validation.md)
               └── extends WorkItemPolicyConfig::merge (policy-engine.md)
+        └── ApplicationDefaults.tracker_profiles (core-config-validation.md) —
+            operator-only, never part of the PolicySet merge chain
         └── pattern validation (core-config-validation.md) shares the same
             config-load-time, fail-closed philosophy (ADR-006) but is a
             separate mechanism

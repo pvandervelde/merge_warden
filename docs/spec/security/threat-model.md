@@ -195,61 +195,99 @@ for the full mechanism.
 
 Optional work-item verification (`verify_exists`) and the pluggable issue-tracker
 abstraction introduce a new category of server-initiated outbound HTTP request:
-Merge Warden calls a tracker's API at a `base_url` taken from repository or org
-configuration. For cloud trackers (`dev.azure.com`, `atlassian.net`, `gitlab.com`,
-Linear's API) this base URL is effectively fixed by convention, but on-premises
-deployments — Azure DevOps Server and self-hosted Jira/GitLab — require an
-operator- or repository-maintainer-supplied base URL, which is attacker-adjacent
-input if a lower-trust actor can influence repository configuration (e.g. through
-a PR that modifies `.github/merge-warden.toml`, subject to whatever review
-process the repository otherwise uses).
+Merge Warden calls a tracker's API at a `base_url`. For cloud trackers
+(`dev.azure.com`, `atlassian.net`, `gitlab.com`, Linear's API) this base URL is
+effectively fixed by convention, but on-premises deployments — Azure DevOps
+Server and self-hosted Jira/GitLab — require an operator-supplied base URL.
 
-An uncontrolled, configuration-supplied base URL is a textbook SSRF vector: a
-maliciously or carelessly configured `base_url` could point the server at an
-internal-network address (a cloud metadata endpoint, an internal admin API, a
-loopback address) rather than a legitimate tracker instance, causing Merge Warden
-to make requests on the attacker's behalf from inside the operator's network.
+If a repository's or org's own configuration could set `base_url` and the name
+of the environment variable supplying the credential (`auth_token_env`)
+together, this would be a **credential-exfiltration** vector, not merely SSRF: a
+maliciously or carelessly configured `base_url` pointed at an attacker-controlled
+host, paired with an `auth_token_env` naming an unrelated secret the process
+happens to hold (e.g. the application's own GitHub private key or webhook
+secret), would cause Merge Warden to send that secret to the attacker's host —
+strictly worse than classic SSRF, which only lets an attacker make the server
+*visit* an arbitrary address. This is the design this threat model entry
+documents the mitigation for; see "Required Mitigations" below for how the
+connection target and the credential pointer are kept out of repository/org
+control entirely.
 
 ### Severity
 
-**Medium.** Requires either operator error or a configuration change that passes
-whatever review gate the repository/org already applies to
-`.github/merge-warden.toml` (the same gate that already governs
-`broken_repo_config_behaviour`-adjacent risks). Impact depends on what the
-outbound request can reach from the server's network position.
+**High.** A repository-controlled (or org-policy-controlled) `base_url` paired
+with a repository-controlled `auth_token_env` would allow any actor whose config
+change merges — not just an operator — to exfiltrate any secret available as an
+environment variable to the process, to a host of their choosing. The mitigation
+below removes this path structurally (the connection coordinates are no longer
+settable outside the operator's own application configuration), but the severity
+rating reflects the risk the design must close, not the residual risk once
+closed.
 
 ### Required Mitigations
 
-1. **Credentials are never stored in configuration.** Every tracker's connection
-   fields reference a credential by the *name* of an environment variable
+1. **Tracker connection coordinates are operator-defined only.** `base_url` and
+   `auth_token_env` exist exclusively on `TrackerProfile`, defined in
+   `ApplicationDefaults.tracker_profiles` — the operator's own application
+   configuration file, never a repository's or org's config file. A repository
+   or org selects a tracker `kind`, names a `profile` by key, and supplies only
+   project-scoping identifiers (`organization`/`project`, `project_key`,
+   `project_path`, `team_key`) that select which project/org/team *within* the
+   already-fixed connection to query. This is the same trust-tier precedent as
+   `broken_repo_config_behaviour` (ADR-005) and the pattern-validation limits
+   (ADR-006): the entity whose outbound request target and credential pointer
+   are being fixed must not be the one who fixes them. See
+   [ADR-007](../../adr/ADR-007-issue-tracker-abstraction.md) and
+   [issue-tracker.md §3](../interfaces/issue-tracker.md#3-tracker-configuration).
+2. **Credentials are never stored in configuration.** Every `TrackerProfile`
+   references a credential by the *name* of an environment variable
    (`auth_token_env`), never the secret value itself — consistent with the
    project's existing secrets-handling posture (environment variables / Key
    Vault, never repository-committed secrets).
-2. **Least-privilege tracker credentials.** Operators should provision read-only
+3. **Project-scoping identifiers are validated against a restrictive charset.**
+   Because `organization`/`project`/`project_key`/`project_path`/`team_key`
+   remain repository-controlled and are concatenated into a request path/URL by
+   the adapter, each is validated against a charset that excludes scheme
+   delimiters, `@`, `:`, and whitespace before use — see
+   [issue-tracker.md §3.5](../interfaces/issue-tracker.md#35-project-scoping-identifier-validation).
+   This prevents a scoping identifier from being crafted to change the effective
+   request target, even though it does not control the connection host.
+4. **Outbound request hardening on every non-GitHub adapter:** HTTPS-only
+   (reject non-`https://` profile URLs); no automatic redirect following, or
+   re-validation of the resolved target after any redirect; blocking of
+   loopback, link-local, private, and cloud-metadata IP ranges **after DNS
+   resolution** (not by inspecting the hostname string alone, since DNS
+   rebinding — a name that resolves to a public address at validation time and a
+   private/metadata address at request time — bypasses a hostname-only check); a
+   per-request timeout; and a response-size cap. See
+   [issue-tracker.md §6](../interfaces/issue-tracker.md#6-outbound-request-hardening-non-github-adapters)
+   for the full, itemised requirement set every `azure_devops`/`jira`/`gitlab`
+   adapter must implement.
+5. **Least-privilege tracker credentials.** Operators should provision read-only
    tokens/PATs for every non-GitHub tracker where the tracker vendor supports
    scoping a token to read-only, work-item-read access — mirroring the existing
    GitHub App permission model (`Issues: Read`, not `Issues: Write`, is all
    `verify_exists` requires for the GitHub tracker).
-3. **Operator-level base URL allow-listing is recommended for on-premises
-   trackers.** Deployments that enable non-default `TrackerConfig` variants with
-   operator-supplied `base_url` values for self-hosted trackers should restrict
-   egress at the network layer (firewall/proxy egress allow-list) to the known
-   set of tracker hosts the organisation actually uses, the same operational
-   posture already expected for other server-initiated calls. This is an
-   operator responsibility, analogous to the org-policy-repository branch
-   protection requirements already documented above, rather than a code-level
-   control — Merge Warden validates `base_url` is well-formed but does not (and
-   cannot, without an explicit allow-list input it does not currently have)
-   determine which hosts are "legitimate" for a given deployment.
-4. **Tracker configuration is validated at config-load time**, not lazily on
-   first use — a malformed `base_url` or missing required field for the selected
-   `TrackerConfig::kind` is rejected the same way an invalid pattern is (see
+6. **Operator-level network egress allow-listing remains recommended** for
+   on-premises trackers, as defence in depth alongside the code-level controls
+   above — restrict egress at the network layer (firewall/proxy egress
+   allow-list) to the known set of tracker hosts the organisation actually uses.
+   Merge Warden **can** determine which hosts are legitimate for a given
+   deployment: the host is fixed by the operator's own `TrackerProfile`, not by
+   repository input, so "legitimate" means "a profile the operator themselves
+   defined." Network-layer allow-listing is still recommended as defence in
+   depth against a mistake in that same operator-authored profile, not because
+   the application is unable to express the boundary.
+7. **Tracker configuration is validated at config-load time**, not lazily on
+   first use — a malformed `base_url`, an unknown or kind-mismatched `profile`
+   reference, an invalid project-scoping identifier, or a missing required field
+   for the selected `kind` is rejected the same way an invalid pattern is (see
    `IssueTrackerError::InvalidConfiguration` in
    [issue-tracker.md](../interfaces/issue-tracker.md)), so a broken tracker
    configuration is visible before it affects any PR.
 
 ### Related
 
-- [issue-tracker.md](../interfaces/issue-tracker.md) — `TrackerConfig` connection fields
+- [issue-tracker.md](../interfaces/issue-tracker.md) — `TrackerProfile` / `TrackerConfig` split, outbound-request hardening, project-scoping identifier validation
 - [ADR-007](../../adr/ADR-007-issue-tracker-abstraction.md)
 - [Functional Requirements FR-013](../requirements/functional-requirements.md#fr-013-pluggable-issue-tracker-support)
