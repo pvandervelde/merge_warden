@@ -34,7 +34,7 @@ prometheus = "0.14.0"
 # Test-only: used to drive `axum::Router` as a `tower::Service` in
 # route-registration tests (e.g. asserting `/metrics` 404s unless enabled).
 tower = { version = "=0.5.3", features = ["util"] }
-http-body-util = "=0.1.3"
+http-body-util = "=0.1.5"
 # Test-only: enables `opentelemetry_sdk::metrics::ManualReader` /
 # `MetricReader` / `Pipeline`, which are gated behind
 # `experimental_metrics_custom_reader` upstream. Declared as a dev-dependency
