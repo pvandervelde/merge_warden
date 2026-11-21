@@ -60,6 +60,19 @@ pub struct ValidationResult {
 
     /// Detailed information about the bypass, if used
     pub bypass_info: Option<BypassInfo>,
+
+    /// Set when the check failed closed because its *own* configuration
+    /// (e.g. a `title_pattern` or `work_item_reference_pattern`) could not
+    /// be validated/compiled — distinct from an ordinary "content did not
+    /// match" failure.
+    ///
+    /// `None` for every outcome produced by [`ValidationResult::valid`],
+    /// [`ValidationResult::invalid`], and [`ValidationResult::bypassed`].
+    /// `Some(message)` only via [`ValidationResult::config_error`].
+    ///
+    /// See `docs/adr/ADR-006-regex-pattern-validation.md`.
+    #[serde(default)]
+    pub config_error: Option<String>,
 }
 
 /// Information about a bypass that was used during validation
@@ -132,6 +145,7 @@ impl ValidationResult {
             is_valid: true,
             bypass_used: false,
             bypass_info: None,
+            config_error: None,
         }
     }
 
@@ -153,6 +167,35 @@ impl ValidationResult {
             is_valid: false,
             bypass_used: false,
             bypass_info: None,
+            config_error: None,
+        }
+    }
+
+    /// Creates a validation result indicating the check failed closed
+    /// because its own configured pattern could not be validated/compiled.
+    ///
+    /// Use this — never [`ValidationResult::invalid`] — when the failure is
+    /// a configuration problem (an oversized or uncompilable pattern) rather
+    /// than an ordinary "content did not match" outcome. `message` should
+    /// name the configuration problem (see
+    /// `docs/adr/ADR-006-regex-pattern-validation.md`).
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use merge_warden_core::validation_result::ValidationResult;
+    ///
+    /// let result = ValidationResult::config_error("pattern failed to compile".to_string());
+    /// assert!(!result.is_valid);
+    /// assert!(!result.bypass_used);
+    /// assert_eq!(result.config_error.as_deref(), Some("pattern failed to compile"));
+    /// ```
+    pub fn config_error(message: String) -> Self {
+        Self {
+            is_valid: false,
+            bypass_used: false,
+            bypass_info: None,
+            config_error: Some(message),
         }
     }
 
@@ -185,6 +228,7 @@ impl ValidationResult {
             is_valid: true,
             bypass_used: true,
             bypass_info: Some(bypass_info),
+            config_error: None,
         }
     }
 
