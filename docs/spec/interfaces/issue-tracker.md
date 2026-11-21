@@ -217,6 +217,16 @@ entry on
 [tracker connection configuration](../security/threat-model.md#tracker-connection-configuration-and-outbound-request-risk)
 for the credential-exfiltration risk this closes.
 
+`TrackerProfile.auth_token_env` is operator-authored, which carries materially
+lower risk than a repository-authored value — but a typo could still point a
+tracker profile at the wrong environment variable. Operators **should** name
+these variables with a dedicated prefix (e.g. `MERGE_WARDEN_TRACKER_*`) so a
+tracker credential can never collide, by name, with an unrelated secret (the
+app's private key, the webhook secret) the process also holds. This is a
+documented operational convention, not a value the server parses or enforces —
+enforcing a prefix programmatically would require the server to know which
+other env vars exist and why, which is out of scope here.
+
 ### 3.1 `TrackerProfile` (operator-defined)
 
 ```rust
@@ -544,9 +554,14 @@ misconfigured, and the adapters that consume it must not reopen a weaker version
 of the same class of risk through a careless HTTP client default. Every
 non-GitHub adapter (`azure_devops`, `jira`, `gitlab`, `linear`) **must**:
 
-1. **HTTPS-only.** Reject, at config-load time
-   (`IssueTrackerError::InvalidConfiguration`), any `TrackerProfile.base_url`
-   that is not an `https://` URL. Linear has no on-premises variant and no
+1. **HTTPS-only.** Reject any `TrackerProfile.base_url` that is not an
+   `https://` URL. This is validated **eagerly, for every entry in
+   `ApplicationDefaults.tracker_profiles`, when the operator's application
+   configuration is loaded at server startup** — not deferred until some
+   repository's config first names that profile. A malformed operator profile
+   must fail server startup, the same way a malformed `ApplicationDefaults`
+   value does today; it must never surface for the first time as a runtime
+   error on an arbitrary PR event. Linear has no on-premises variant and no
    operator-supplied `base_url`, but its fixed cloud endpoint is still accessed
    over HTTPS only.
 2. **No automatic redirect following** — or, if the underlying HTTP client
@@ -567,11 +582,16 @@ non-GitHub adapter (`azure_devops`, `jira`, `gitlab`, `linear`) **must**:
    maximum size; a response exceeding it is treated as
    `IssueTrackerError::RequestFailed`.
 
-The `github` adapter is exempt from points 1–3: it never takes an operator- or
-repository-supplied host at all — it always calls `api.github.com` using the
-existing installation credential (a future GitHub Enterprise Server host would
-itself be an operator/profile-level value subject to the same controls, not a
-repository-supplied one). Points 4–5 apply to every adapter, including `github`.
+The `github` adapter is exempt **only** from points 1 and 3 — HTTPS-only and
+IP-range blocking are meaningless when the target host is the fixed, compiled-in
+`api.github.com` and never an operator- or repository-supplied value (a future
+GitHub Enterprise Server host would itself be an operator/profile-level value
+subject to the same controls, not a repository-supplied one). Point 2 (no
+automatic redirect following) still applies to `github`: without it, a redirect
+response could carry the installation token's `Authorization` header to a
+different host than `api.github.com`, which is exactly the exfiltration shape
+points 1–3 exist to prevent — a fixed initial host does not make that safe.
+Points 2, 4, and 5 apply to every adapter without exception, `github` included.
 
 ---
 
@@ -644,7 +664,14 @@ impl WorkItemResolutionCache {
 `tracker_identity` distinguishes two repositories configured with different
 `TrackerConfig`/profile combinations so a cache hit never crosses tracker
 connections — it is derived from the resolved `TrackerConfig` (profile name plus
-scoping identifiers), not merely the tracker kind.
+scoping identifiers) **and the named profile's own `base_url`**, not merely the
+tracker kind or the profile name alone. Including `base_url` in the key means
+that if an operator edits a profile's `base_url` and reloads application
+configuration, any entries cached under the old connection expire naturally
+(their key no longer matches) instead of serving a result resolved against the
+connection that is no longer configured — without this, a profile edit at
+runtime could otherwise return a stale result from the previous host for up to
+the 60-second TTL.
 
 ---
 
