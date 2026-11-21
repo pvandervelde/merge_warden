@@ -2194,3 +2194,32 @@ fn should_return_config_error_when_work_item_pattern_broken_and_body_is_none() {
         result
     );
 }
+
+#[test]
+fn should_return_ordinary_invalid_not_config_error_when_body_is_none_with_valid_pattern() {
+    // QA audit (ADR-006, item 4): a None body with a VALID
+    // work_item_reference_pattern must still take the pre-existing
+    // ValidationResult::invalid() path, not ValidationResult::config_error().
+    // The existing `should_return_invalid_when_body_is_none_with_bypass_disabled`
+    // test only asserts `!result.is_valid()`, which is true for BOTH
+    // `invalid()` and `config_error(..)` — it does not distinguish them, so a
+    // mutant that swapped the `None => ValidationResult::invalid()` arm for
+    // `None => ValidationResult::config_error(..)` would survive undetected.
+    // This test closes that gap by asserting `config_error` is explicitly
+    // `None` on this path.
+    let user = create_user(123, "developer");
+    let pr = create_pull_request(1, "feat: add feature", None, Some(user));
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_default_config(); // uses the valid WORK_ITEM_REGEX default
+
+    let result = check_work_item_reference(&pr, &bypass_rule, &config);
+
+    assert!(!result.is_valid());
+    assert!(!result.was_bypassed());
+    assert!(
+        result.config_error.is_none(),
+        "a None body with a VALID work_item_reference_pattern must report ordinary \
+         invalid(), not config_error; got: {:?}",
+        result
+    );
+}

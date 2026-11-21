@@ -10589,6 +10589,70 @@ proptest! {
     }
 }
 
+#[test]
+fn test_compiled_pattern_cache_evicts_lru_entry_when_capacity_exceeded() {
+    // QA audit (ADR-006, item 7): this was flagged as untested in the
+    // RED-phase suite. The 256-entry cache must evict LRU-style rather than
+    // growing unboundedly when more than PATTERN_CACHE_CAPACITY distinct
+    // patterns have been seen.
+    let cache = CompiledPatternCache::new();
+
+    // Fill the cache to exactly its capacity with distinct, valid, literal
+    // patterns (each literal pattern matches itself; well within
+    // MAX_PATTERN_LENGTH).
+    let patterns: Vec<String> = (0..PATTERN_CACHE_CAPACITY)
+        .map(|i| format!("^literal-pattern-{i}$"))
+        .collect();
+
+    let first_arc = cache
+        .get_or_compile(&patterns[0])
+        .expect("first pattern must compile");
+
+    for pattern in &patterns[1..] {
+        cache
+            .get_or_compile(pattern)
+            .expect("every filler pattern must compile");
+    }
+
+    // The cache must never exceed its fixed capacity.
+    {
+        let guard = cache.cache.lock().expect("pattern cache mutex poisoned");
+        assert_eq!(guard.len(), PATTERN_CACHE_CAPACITY);
+    }
+
+    // `patterns[0]` is now the least-recently-used entry: it has not been
+    // touched since its initial insertion, while every other pattern was
+    // inserted more recently. Inserting one more, distinct pattern must
+    // evict it rather than growing the cache past capacity.
+    let overflow_pattern = "^literal-pattern-overflow$";
+    cache
+        .get_or_compile(overflow_pattern)
+        .expect("overflow pattern must compile");
+
+    {
+        let guard = cache.cache.lock().expect("pattern cache mutex poisoned");
+        assert_eq!(
+            guard.len(),
+            PATTERN_CACHE_CAPACITY,
+            "cache must remain bounded at its fixed capacity after an eviction"
+        );
+    }
+
+    // Recompiling the evicted pattern must produce a FRESH Arc<Regex>, not
+    // the originally cached one — proving it was actually evicted rather
+    // than the cache silently growing past its capacity.
+    let first_arc_after_eviction = cache
+        .get_or_compile(&patterns[0])
+        .expect("the evicted pattern must still compile correctly on a cache miss");
+
+    assert!(
+        !std::sync::Arc::ptr_eq(&first_arc, &first_arc_after_eviction),
+        "the first-inserted pattern must have been evicted (LRU) once the cache \
+         exceeded its fixed capacity; getting it again should recompile rather \
+         than return the original cached Arc"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // validate_config_content — oversized/uncompilable pattern integration
 // (non-blocking; additive to the existing schema/TOML error checks above)
