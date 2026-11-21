@@ -41,6 +41,19 @@ the **queue-based webhook processing** (task 3.0). Covers `EventIngress`,
 `EventAcknowledger`, `ProcessableEvent`, `WebhookQueueMessage`, `IngressError`, and
 `run_event_processor`.
 
+### [issue-tracker.md](./issue-tracker.md)
+
+Contracts for the pluggable issue-tracker abstraction backing optional work-item
+reference verification. Covers `IssueTrackerProvider`, `WorkItemReference`,
+`WorkItemState`, `WorkItemResolution`, `TrackerKind`, the operator/repository
+trust split between `TrackerProfile` (operator-only connection coordinates) and
+`TrackerConfig` (repository/org-controlled kind selection plus project-scoping
+identifiers), per-tracker state-mapping rules, outbound-request hardening
+requirements, resolution caching, the per-event reference-count cap, and the
+`verify_exists`/`tracker` additions to `WorkItemPolicyConfig`. See
+[ADR-007](../../adr/ADR-007-issue-tracker-abstraction.md) for the rationale,
+including why tracker connection coordinates must not be repository-controlled.
+
 ## Dependency Map
 
 ```
@@ -67,6 +80,18 @@ server-config.md
 server-ingress.md
   └── defines EventIngress, IngressError
         └── IngressError used in server-config.md (ServerError::IngressError)
+
+issue-tracker.md
+  └── defines IssueTrackerProvider, WorkItemReference, WorkItemState,
+      WorkItemResolution, TrackerConfig, TrackerProfile, TrackerKind,
+      IssueTrackerError, WorkItemResolutionCache
+        └── WorkItemPolicyConfig.verify_exists / .tracker (core-config-validation.md)
+              └── extends WorkItemPolicyConfig::merge (policy-engine.md)
+        └── ApplicationDefaults.tracker_profiles (core-config-validation.md) —
+            operator-only, never part of the PolicySet merge chain
+        └── pattern validation (core-config-validation.md) shares the same
+            config-load-time, fail-closed philosophy (ADR-006) but is a
+            separate mechanism
 ```
 
 ## Source Code Stubs
@@ -80,3 +105,4 @@ The corresponding Rust stubs live in `crates/`:
 | core-config-validation.md | `crates/core/src/config.rs`, `crates/core/src/lib.rs` |
 | server-config.md | `crates/server/src/config.rs`, `crates/server/src/errors.rs`, `crates/server/src/telemetry.rs` |
 | server-ingress.md | `crates/server/src/ingress.rs` |
+| issue-tracker.md | `crates/issue_trackers/src/lib.rs` (trait + types), `crates/issue_trackers/src/{github,azure_devops,jira,gitlab,linear}.rs` (adapters) |

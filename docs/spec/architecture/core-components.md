@@ -195,17 +195,31 @@ impl TitleValidationRule {
 pub struct WorkItemReferenceRule;
 
 impl WorkItemReferenceRule {
-    const WORK_ITEM_PATTERNS: &'static [&'static str] = &[
-        r"(?i)(closes?|fixes?|resolves?)\s+#(\d+)",
-        r"(?i)(relates?\s+to|references?)\s+#(\d+)",
-        r"(?i)(closes?|fixes?|resolves?)\s+\w+/\w+#(\d+)",
-    ];
+    // The built-in default pattern; a repository's configured
+    // `work_item_reference_pattern` overrides this entirely rather than adding to
+    // it — there is exactly one active pattern per repository, not a list.
+    const DEFAULT_WORK_ITEM_PATTERN: &'static str = r"(?i)(closes?|fixes?|resolves?|relates?\s+to|references?)\s+#(\d+)";
 
-    fn find_work_item_references(&self, body: &str) -> Vec<WorkItemReference> {
-        // Implementation to extract work item references
+    fn find_work_item_references(&self, body: &str, pattern: &str) -> Vec<WorkItemReference> {
+        // Syntactic extraction only — matches `pattern` against `body`. Whether a
+        // match is then resolved against a real tracker is a separate, opt-in
+        // concern (`verify_exists`) handled by `IssueTrackerProvider`, not by this
+        // method. See docs/spec/interfaces/issue-tracker.md.
     }
 }
 ```
+
+> **Optional live verification.** When a repository sets `verify_exists = true`,
+> an extracted reference is resolved against a configured `IssueTrackerProvider`
+> (GitHub by default; Azure DevOps, Jira, GitLab, or Linear when configured) and
+> must resolve to a work item that both exists and is open, up to a fixed cap on
+> distinct references resolved per PR event. Non-GitHub trackers are selected via
+> a repository-controlled `kind` plus project-scoping identifiers only — the
+> connection itself (`base_url`, credential) is always an operator-defined
+> profile, never repository-controlled. This is an infrastructure-abstraction
+> concern, not a domain-model concern — see
+> [Platform Integrations](./platform-integrations.md#issue-tracker-abstraction)
+> and [issue-tracker.md](../interfaces/issue-tracker.md).
 
 #### Size Assessment Rule
 

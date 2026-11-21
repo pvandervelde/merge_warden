@@ -297,6 +297,184 @@ repository's default branch is present but cannot be loaded.
 **Priority:** Medium
 **Dependencies:** FR-002 (Configuration Management), FR-007 (Configuration Change Validation)
 
+### FR-011: Regex Pattern Validation and Deterministic Failure Handling
+
+**Requirement:** The system shall enforce a length and compile-time complexity cap on every
+configured `title_pattern` and `work_item_reference_pattern`, validating and compiling each
+pattern once at configuration-load time, and shall fail the dependent check deterministically
+and visibly to repository maintainers whenever a configured pattern cannot be validated.
+
+**Description:**
+
+- Reject, at config-load/validation time, any `title_pattern` or `work_item_reference_pattern`
+  that exceeds a fixed maximum length, without attempting to compile it
+- Compile every pattern within an explicit, fixed compiled-program size budget, rejecting
+  patterns that are syntactically valid but pathologically expensive to compile
+- Apply this validation at every tier a pattern can be set: application defaults (at server/CLI
+  startup), org policy (`[enforced]`/`[defaults]`), repository config (both the live/default-branch
+  config path and the PR-diff informational check already defined by FR-007)
+- Compile each validated pattern exactly once per configuration resolution and reuse the compiled
+  form; maintain a process-wide cache keyed by the pattern string so identical patterns are never
+  recompiled across webhook events
+- When a pattern fails validation on the live configuration path, fail the specific check that
+  depends on it (title or work item) with a message that names the configuration problem, distinct
+  from "the title/body did not match the pattern" — never silently disable the check and never
+  silently fall back to a different configuration tier's pattern
+- Surface the failure through the same maintainer-visible channel (check-run output and/or PR
+  comment) already used for that check's ordinary pass/fail feedback
+- Keep both the maximum pattern length and the compile-size budget as fixed application constants,
+  not configurable per repository or org
+
+**Acceptance Criteria:**
+
+- ✅ A pattern exceeding the fixed maximum length is rejected at config-load time without a compile
+  attempt
+- ✅ A syntactically valid pattern that exceeds the compile-size budget is rejected deterministically
+- ✅ Application defaults, org policy, and repository config patterns are all validated at their
+  respective load points, never lazily on first use during webhook processing
+- ✅ An invalid application-default pattern prevents the server/CLI from starting
+- ✅ An invalid org-policy pattern is treated identically to any other org-policy parse error
+  (degrades per `fail_if_unreachable`)
+- ✅ An invalid repository-config pattern on the PR-diff path produces a `ConfigValidationOutcome`
+  error entry, non-blocking, per the existing FR-007 behaviour
+- ✅ An invalid repository-config pattern on the live configuration path fails only the dependent
+  check (title or work item), with a message distinct from "did not match," while leaving the other
+  check unaffected
+- ✅ Identical pattern strings are compiled at most once per process lifetime (observable via a
+  compile-counting test double), not once per webhook event
+- ✅ No configuration option exists to silence a compile-failure or redirect it to a different
+  configuration tier's pattern
+
+**Priority:** High
+**Dependencies:** FR-002 (Configuration Management), FR-001 (Pull Request Validation)
+
+### FR-012: Work Item Reference Verification
+
+**Requirement:** The system shall support an opt-in setting that, when enabled, verifies a
+matched work-item reference resolves to a work item that both exists and is open on the
+configured issue tracker, failing the work-item check when it does not.
+
+**Description:**
+
+- Add `verify_exists` (default `false`) to the work-item policy; when unset, the work-item check
+  remains syntactic only — a reference matching `work_item_reference_pattern` passes regardless of
+  whether it resolves to anything real, exactly as today
+- When `verify_exists = true`, resolve the extracted reference against the configured issue
+  tracker (GitHub by default, using the PR's own repository and existing installation credential)
+  and treat the reference as valid only if the tracker reports the work item both exists and is
+  open — a reference to a work item that exists but is closed fails the check identically to a
+  reference that does not resolve at all
+- Resolve cross-repository/cross-project references (e.g. GitHub `owner/repo#42`) against the
+  referenced project when the configured credential can reach it; treat an inaccessible or
+  non-existent cross-project reference as unresolved, failing the check under `verify_exists`
+  exactly like any other unresolved reference — never silently skip verification for a cross-project
+  reference. Cross-project references only exist for tracker kinds whose reference syntax can
+  express one (GitHub today, and GitLab where a custom pattern captures it); Jira, Azure DevOps,
+  and Linear references have no cross-project concept in this design
+- Produce distinguishable failure messages for "reference does not exist," "reference exists but
+  is closed," and "verification could not be completed" (tracker unreachable or authentication
+  rejected), so maintainers can tell a tracker outage apart from an actually-invalid reference. The
+  tracker-unreachable case is a deliberate fail-closed outcome, not a neutral pass — a tracker
+  outage can block merges while `verify_exists` is enabled; a maintainer who hits this routinely can
+  disable it, since it is opt-in
+- Require no new GitHub App permission for the default (GitHub) tracker — reuse the existing
+  `Issues: Read` repository permission already granted for milestone/project propagation
+- Cache resolution results in-memory, per process, for a short fixed TTL so repeated webhook events
+  against the same PR do not repeatedly re-contact the tracker for an unchanged reference, and bound
+  the number of distinct references resolved per PR event with a fixed cap so a PR body crafted with
+  many reference-shaped strings cannot trigger unbounded outbound calls
+
+**Acceptance Criteria:**
+
+- ✅ `verify_exists` omitted or `false` → work-item check behaviour is unchanged from
+  syntactic-only matching; the issue tracker is never contacted
+- ✅ `verify_exists = true`, reference resolves to an open work item → work-item check passes
+- ✅ `verify_exists = true`, reference resolves to a closed work item → work-item check fails
+- ✅ `verify_exists = true`, reference does not resolve (non-existent or inaccessible) → work-item
+  check fails
+- ✅ `verify_exists = true`, tracker request fails (transient error, auth failure) → work-item check
+  fails with a message distinguishable from "does not exist" and from "is closed"
+- ✅ A cross-repository/cross-project reference is resolved against the referenced project when
+  reachable, and treated as unresolved (failing the check) when not; this only applies to tracker
+  kinds whose reference syntax can express a cross-project target (GitHub today)
+- ✅ Enabling `verify_exists` with the default GitHub tracker requires no GitHub App permission
+  beyond what is already granted
+- ✅ Repeated webhook events against the same PR within the cache TTL resolve a given reference
+  against the tracker at most once
+- ✅ A PR body with more reference-shaped strings than the per-event cap resolves only up to the
+  cap; references beyond it are treated as unresolved, not as errors
+
+**Priority:** High
+**Dependencies:** FR-001 (Pull Request Validation), FR-002 (Configuration Management),
+FR-013 (Pluggable Issue Tracker Support)
+
+### FR-013: Pluggable Issue Tracker Support
+
+**Requirement:** The system shall support verifying work-item references against multiple issue
+trackers — at minimum GitHub, Azure DevOps (both the cloud service and on-premises Server),
+Jira, GitLab, and Linear — selected and configured per repository, through an extensible
+abstraction that allows additional trackers to be added without changing the work-item check
+logic.
+
+**Description:**
+
+- Define a tracker-agnostic port trait, implemented once per supported tracker, that resolves a
+  work-item reference to an existence/open-or-closed result; the work-item check logic depends
+  only on this trait, never on a specific tracker's API or SDK
+- Allow a repository to select its tracker via an optional configuration table; omitting it
+  defaults to the GitHub tracker using the PR's own repository, requiring zero additional
+  configuration
+- Keep tracker connection coordinates — base URL and the name of the environment variable holding
+  the credential — exclusively in operator-defined configuration (a named "tracker profile"),
+  never in a repository's or org's own config file; a repository selects a tracker `kind`, names
+  which operator-defined profile to use, and supplies only project-scoping identifiers
+  (organisation/project, project key, project path, or team key, depending on tracker) that select
+  which project/org/team within that already-fixed connection to query. No raw secret value and no
+  connection coordinate is ever accepted from repository or org configuration
+- Validate every project-scoping identifier against a restrictive, tracker-appropriate charset
+  before using it in an outbound request, since it remains repository-controlled and is
+  concatenated into a request path/URL by the adapter
+- Require each non-GitHub adapter to enforce outbound-request hardening: HTTPS-only connections, no
+  automatic redirect following (or re-validation of the resolved target after a redirect), blocking
+  of loopback/private/link-local/metadata address ranges evaluated after DNS resolution, a
+  per-request timeout, and a response-size cap
+- Require each tracker implementation to map its own native issue/work-item status model onto a
+  single tracker-agnostic open/closed concept, using status categories (or the equivalent stable,
+  tracker-guaranteed field) rather than literal, customisable status names where a tracker allows
+  per-project custom workflow states
+- Validate tracker configuration (profile existence and kind compatibility, connection fields
+  required for the selected tracker kind, well-formed base URL, project-scoping identifier
+  charset) at configuration-load time, not lazily on first verification attempt
+- Reject, at configuration-load time, a non-default tracker selection paired with a
+  `work_item_reference_pattern` left at its built-in, GitHub-shaped default — that tracker's
+  reference syntax can never match the default pattern, so verification would always fail
+
+**Acceptance Criteria:**
+
+- ✅ Work-item verification succeeds against each of the five supported trackers given a correctly
+  configured operator tracker profile and repository-level project-scoping identifiers
+- ✅ Omitting tracker configuration defaults to GitHub, the PR's own repository, with no additional
+  setup
+- ✅ Selecting a non-default tracker requires no change to the work-item check logic in `core`
+- ✅ No raw secret value, and no `base_url`, appears in `.github/merge-warden.toml` or an org policy
+  file — every connection coordinate lives only in operator-defined application configuration, and
+  every credential is referenced there by environment variable name
+- ✅ A repository config naming an unknown tracker profile, or a profile of a different kind than the
+  selected tracker `kind`, is rejected at configuration-load time with a clear error
+- ✅ A project-scoping identifier containing a scheme delimiter, `@`, `:`, or whitespace is rejected
+  at configuration-load time
+- ✅ A tracker profile with a non-`https://` base URL is rejected at configuration-load time
+- ✅ A non-default tracker selection paired with the built-in default `work_item_reference_pattern`
+  is rejected at configuration-load time, naming the mismatch
+- ✅ Each tracker's status mapping correctly classifies every documented native state as either
+  open or closed (see the per-tracker mapping table in
+  [issue-tracker.md](../interfaces/issue-tracker.md))
+- ✅ Adding a sixth tracker requires one new adapter module and one new configuration variant, with
+  no change to `core`'s check logic
+
+**Priority:** Medium
+**Dependencies:** FR-012 (Work Item Reference Verification)
+
 ## Detailed Functional Specifications
 
 ### Pull Request Title Validation
@@ -330,14 +508,19 @@ repository's default branch is present but cannot be loaded.
 - GitHub Issues: `#123`, `fixes #123`, `closes #123`
 - Azure DevOps: `AB#123`, `fixes AB#123`
 - Jira: `PROJ-123`, `fixes PROJ-123`
-- Custom patterns via configuration
+- Custom patterns via configuration — exactly one `work_item_reference_pattern` is active per
+  repository at a time (the examples above are illustrative of what a repository's single
+  configured pattern might match, not a built-in list the system tries in sequence)
 
 **Validation Logic:**
 
-- Pattern matching against PR description
-- Multiple work item reference support
+- Pattern matching against PR description (syntactic — see FR-001)
+- Multiple work item reference support within a single PR description
 - Required vs. optional reference configuration
-- Link validation for supported platforms
+- Optional live verification that a matched reference resolves to an existing, open work item on
+  the configured issue tracker (`verify_exists`; see FR-012 and FR-013). Without `verify_exists`
+  enabled, a matched reference is accepted on pattern match alone — it is never confirmed against
+  any tracker, regardless of which patterns above it resembles.
 
 ### Size-Based Categorization
 
@@ -396,7 +579,16 @@ maxLength = 72
 [policies.pullRequests.workItem]
 required = true
 pattern = "#\\d+"
-platforms = ["github", "azure-devops"]
+verify_exists = false   # opt-in live verification (exists + open); see FR-012
+
+# Optional. Omit to verify against GitHub using this repository. See FR-013 and
+# docs/spec/interfaces/issue-tracker.md for the other supported trackers
+# (Azure DevOps, Jira, GitLab, Linear). A non-GitHub tracker names an
+# operator-defined profile ("profile") and supplies only project-scoping
+# identifiers — never a base URL or credential, which live only in the
+# operator's own application configuration.
+# [policies.pullRequests.workItem.tracker]
+# kind = "github"
 
 [policies.pullRequests.prSize]
 enabled = true
@@ -437,15 +629,23 @@ docs = ["documentation"]
 Repository permissions:
 
 - **Pull requests**: Read/Write (for status checks and comments)
-- **Issues**: Read (for work item validation)
+- **Issues**: Read (for work item validation; also used by FR-012's `verify_exists` when the
+  configured tracker is GitHub — no additional permission is required for that case)
 - **Metadata**: Read (for repository information)
 - **Contents**: Read (for configuration file access)
 - **Commit statuses**: Read (required for `get_commit_statuses`; needed by FR-008)
 
 Webhook event subscriptions:
 
-- **pull_request** (required for PR validation — FR-001 through FR-007)
+- **pull_request** (required for PR validation — FR-001 through FR-007, FR-011, FR-012)
 - **status** (commit statuses; required for Renovate stability label management — FR-008)
+
+> **Non-GitHub trackers (FR-013):** when `verify_exists` is enabled with a tracker other than
+> GitHub (Azure DevOps, Jira, GitLab, Linear), no GitHub App permission is involved at all —
+> Merge Warden instead authenticates to that tracker's own API using the credential referenced by
+> the operator-defined tracker profile the repository's `tracker` configuration names (see
+> [issue-tracker.md](../interfaces/issue-tracker.md)); the repository's own configuration never
+> carries the credential or connection host directly.
 
 Organisation permissions:
 

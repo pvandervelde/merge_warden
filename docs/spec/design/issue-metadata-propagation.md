@@ -14,6 +14,15 @@ Both features are **disabled by default** and fully opt-in via configuration fla
 not use GitHub Issues, do not use GitHub Milestones or Projects v2, or who track work in an
 external system (Jira, Linear, Azure DevOps, etc.) experience zero behaviour change.
 
+> **Not the same abstraction as work-item verification.** `IssueMetadataProvider`
+> (this document) is GitHub-specific by design — it copies GitHub Milestones and
+> Projects v2 membership onto a PR, concepts with no equivalent on other trackers.
+> It is unrelated to the tracker-agnostic `IssueTrackerProvider` used by the
+> optional `verify_exists` work-item check (which supports GitHub, Azure DevOps,
+> Jira, GitLab, and Linear). See
+> [issue-tracker.md](../interfaces/issue-tracker.md) for that abstraction. A
+> repository can enable one, both, or neither independently.
+
 ## Design Principles
 
 ### Opt-in Only

@@ -100,6 +100,10 @@ Location: `crates/core/src/config.rs`
 ///    produce one error entry each.
 /// 2. `schema_version` must equal `1`.  Any other value produces a
 ///    dedicated error entry.
+/// 3. `title_pattern` and `work_item_reference_pattern`, if present, are each
+///    passed through [`validate_pattern`]; a `PatternValidationError` produces
+///    a dedicated error entry naming the offending field (see
+///    "Regex Pattern Validation and Compilation" below).
 pub fn validate_config_content(content: &str) -> ConfigValidationOutcome {
     todo!("See docs/spec/interfaces/core-config-validation.md")
 }
@@ -671,6 +675,361 @@ change the check conclusion. `Notify` and `SilentFallback`/`None` never alter it
   input are split in the output
 - `broken_repo_config_behaviour` is rejected (or ignored, per `serde(default)` on unknown
   fields policy) when present in `RepositoryProvidedConfig` or an org policy file
+
+---
+
+## Regex Pattern Validation and Compilation
+
+The following types, constants, and functions are added to `crates/core/src/config.rs`
+as part of
+[FR-011 (Regex Pattern Validation and Deterministic Failure Handling)](../requirements/functional-requirements.md#fr-011-regex-pattern-validation-and-deterministic-failure-handling).
+See [ADR-006](../../adr/ADR-006-regex-pattern-validation.md) for the rationale.
+
+### New Constants
+
+```rust
+/// Maximum accepted length, in **bytes** (`str::len()`, not Unicode scalar
+/// values or chars), for `title_pattern` and `work_item_reference_pattern` at
+/// any configuration tier.
+///
+/// A fixed application constant — not configurable per repository or org, for
+/// the same reason `broken_repo_config_behaviour` is application-level only
+/// (see ADR-005): the entity whose pattern is being bounded must not control
+/// the bound.
+pub const MAX_PATTERN_LENGTH: usize = 256;
+
+/// Compiled-program size budget (bytes) passed to `RegexBuilder::size_limit`
+/// when validating and compiling a configured pattern. Deliberately far below
+/// the `regex` crate's own default, so a pathologically expensive-to-compile
+/// pattern is rejected quickly and deterministically rather than consuming
+/// unbounded memory/CPU during compilation.
+pub const PATTERN_COMPILE_SIZE_LIMIT: usize = 1_048_576; // 1 MiB
+```
+
+### New Type: `PatternValidationError`
+
+```rust
+/// Why a configured `title_pattern` or `work_item_reference_pattern` was
+/// rejected. Always distinct, in both type and rendered message, from "the
+/// title/body did not match the pattern" — the two must never be conflated.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PatternValidationError {
+    /// Pattern exceeds `MAX_PATTERN_LENGTH`. Rejected without attempting to
+    /// compile it.
+    #[error("pattern length {length} exceeds the maximum of {max} characters")]
+    TooLong { length: usize, max: usize },
+
+    /// Pattern is within the length limit but failed to compile — either a
+    /// genuine syntax error, or a pattern that is syntactically valid but
+    /// exceeds `PATTERN_COMPILE_SIZE_LIMIT` when compiled.
+    #[error("pattern failed to compile: {message}")]
+    CompileFailed { message: String },
+}
+```
+
+### New Function: `validate_pattern`
+
+```rust
+/// The single entry point every pattern string must pass through before it is
+/// accepted as part of a valid configuration, at every tier (application
+/// defaults, org policy, repository config) and in the PR-diff informational
+/// check (`validate_config_content`).
+///
+/// # Errors
+///
+/// Returns `PatternValidationError::TooLong` before attempting to compile a
+/// pattern longer than [`MAX_PATTERN_LENGTH`]. Returns
+/// `PatternValidationError::CompileFailed` for any pattern that is within the
+/// length limit but fails `RegexBuilder::new(pattern).size_limit(PATTERN_COMPILE_SIZE_LIMIT).build()`,
+/// whether due to invalid regex syntax or exceeding the compile-size budget.
+pub fn validate_pattern(pattern: &str) -> Result<regex::Regex, PatternValidationError> {
+    todo!("See docs/spec/design/configuration-system.md#pattern-validation-and-compile-time-safety")
+}
+```
+
+### New Type: `CompiledPatternCache`
+
+```rust
+/// Process-wide cache of validated, compiled patterns, keyed by the pattern
+/// string. Avoids recompiling byte-identical patterns across webhook events
+/// and across repositories that share a pattern (most repositories use the
+/// built-in default for at least one of `title_pattern` /
+/// `work_item_reference_pattern`).
+///
+/// Bounded to a fixed capacity of **256 entries** (LRU-evicted) so that
+/// operators running many repositories with many distinct custom patterns
+/// cannot cause unbounded cache growth. Capacity is an internal implementation
+/// constant, not configuration. Cached entries are `Arc<Regex>`, so a cache hit
+/// is an O(1) reference-count bump, never a recompile or a deep copy of the
+/// compiled program.
+pub struct CompiledPatternCache { /* internal LRU, not part of the public API shape */ }
+
+impl CompiledPatternCache {
+    /// Returns the cached compiled pattern for `pattern`, or validates and
+    /// compiles it via [`validate_pattern`] and caches the result (success or
+    /// failure) before returning.
+    ///
+    /// Caching validation *failures* as well as successes avoids repeatedly
+    /// re-running a doomed compile attempt for a config that has not changed.
+    pub fn get_or_compile(
+        &self,
+        pattern: &str,
+    ) -> Result<Arc<regex::Regex>, PatternValidationError> {
+        todo!("See docs/spec/design/configuration-system.md#pattern-validation-and-compile-time-safety")
+    }
+}
+```
+
+### Call Sites
+
+| Call site | When it runs | Behaviour on `Err` |
+|---|---|---|
+| `load_config()` (server startup) | Once, for `ApplicationDefaults.default_title_pattern` / `.default_work_item_pattern` | Process fails to start — same fail-fast precedent as `validate_repository_scope_patterns` |
+| `load_org_policy` | Once per org-policy fetch, for both `[enforced]` and `[defaults]` sections' patterns | Treated as a parse-equivalent failure of the org policy file (same `Ok(None)`/`Err(OrgPolicyUnavailable)` behaviour as any other org-policy parse error, per `fail_if_unreachable`) |
+| `load_merge_warden_config` / `resolve_pull_request_config` | Once per webhook event, for the resolved repository-tier patterns | The merged `CurrentPullRequestValidationConfiguration` carries the error (see below); the dependent check fails closed at evaluation time rather than at config-resolution time, so that the *other* check (title vs. work item) is unaffected |
+| `validate_config_content` | PR-diff informational check (FR-007) | Added as additional `ConfigValidationOutcome.errors` entries — non-blocking, identical treatment to any other schema error already produced by this function |
+
+### `CurrentPullRequestValidationConfiguration` — no new fields
+
+`title_pattern: String` and `work_item_reference_pattern: String` are **unchanged** —
+they continue to carry the raw pattern string. `check_title` and
+`check_work_item_reference` call `CompiledPatternCache::get_or_compile` themselves
+at evaluation time rather than the config-resolution step eagerly embedding a
+`Result<Regex, _>` into CPVRC. This keeps CPVRC a plain, comparable data structure
+and keeps "pattern is invalid" a check-time concern with a single code path,
+matching how `check_title` and `check_work_item_reference` already produce their
+other failure messages.
+
+### Check-Time Behaviour on `PatternValidationError`
+
+When `CompiledPatternCache::get_or_compile` returns `Err` for the pattern a check
+depends on:
+
+- That check (title or work item) is reported as **failed**, with a message that
+  names the configuration problem (e.g. *"The configured `work_item_reference_pattern`
+  in `.github/merge-warden.toml` is invalid and could not be evaluated:
+  pattern failed to compile. A repository maintainer must correct this pattern
+  before this check can run."*) — never the ordinary "no reference found" /
+  "title does not match" message.
+- This message is surfaced through the same channel already used for that
+  check's pass/fail feedback (check-run output and/or PR comment), so no new
+  comment marker or communication path is introduced.
+- The *other* check is unaffected: an invalid `title_pattern` does not prevent
+  the work-item check (or any other check) from running normally, and vice versa.
+- This failure is deterministic and unconditional — there is no configuration
+  option to silence it or fall back to a different tier's pattern (contrast with
+  `broken_repo_config_behaviour`, which *is* configurable, because a malformed
+  TOML file has a safe degraded state — using application defaults — whereas "the
+  configured pattern cannot be evaluated" has no safe default other than failing
+  the check it would have governed).
+
+### Testing Requirements for Pattern Validation
+
+#### Unit tests (`crates/core/src/config_tests.rs`)
+
+- `validate_pattern` with a pattern at exactly `MAX_PATTERN_LENGTH` → `Ok(_)`
+  (boundary is inclusive)
+- `validate_pattern` with a pattern one character over `MAX_PATTERN_LENGTH` →
+  `Err(TooLong { length, max })`, pattern is **not** attempted to compile
+  (verify via a pattern that is both oversized and syntactically invalid, to
+  confirm the length check short-circuits before the compile attempt)
+- `validate_pattern` with invalid regex syntax (e.g. unbalanced `(`) →
+  `Err(CompileFailed { .. })`
+- `validate_pattern` with a syntactically valid pattern engineered to exceed
+  `PATTERN_COMPILE_SIZE_LIMIT` → `Err(CompileFailed { .. })`
+- `validate_pattern` with the built-in default `title_pattern` / `work_item_reference_pattern`
+  → `Ok(_)` (defaults must always pass validation)
+- `CompiledPatternCache::get_or_compile` called twice with the same valid
+  pattern string → second call returns the same cached `Arc<Regex>` without
+  recompiling (observable via a compile-counting test double)
+- `CompiledPatternCache::get_or_compile` called twice with the same invalid
+  pattern string → the cached failure is returned both times without
+  re-attempting compilation
+
+#### Integration tests (`crates/core/src/lib_tests.rs`)
+
+- Repository config with an oversized `title_pattern` → title check fails with
+  a configuration-error message distinct from "title does not match"; work-item
+  check (with a valid pattern) still runs and evaluates normally
+- Repository config with an uncompilable `work_item_reference_pattern` → work-item
+  check fails with a configuration-error message distinct from "no reference
+  found"; title check is unaffected
+- Application defaults with a deliberately invalid `default_title_pattern` →
+  `load_config()` returns `Err` at startup (process does not start)
+- Org policy `[enforced]` section with an invalid pattern, `fail_if_unreachable = false`
+  → `load_org_policy` returns `Ok(None)` with a `warn!` log entry, matching
+  existing org-policy parse-error handling
+- Org policy `[enforced]` section with an invalid pattern, `fail_if_unreachable = true`
+  → `load_org_policy` returns `Err(OrgPolicyUnavailable)`
+- `validate_config_content` on a PR-diff config with an oversized pattern →
+  `ConfigValidationOutcome.valid == false`, with an error entry naming the
+  oversized field; check conclusion unaffected (same non-blocking guarantee as
+  every other `validate_config_content` error)
+
+---
+
+## Work Item Verification Additions
+
+The following types and fields are added to `crates/core/src/config.rs` as part of
+[FR-012 (Work Item Reference Verification)](../requirements/functional-requirements.md#fr-012-work-item-reference-verification)
+and
+[FR-013 (Pluggable Issue Tracker Support)](../requirements/functional-requirements.md#fr-013-pluggable-issue-tracker-support).
+Concrete tracker-side types (`IssueTrackerProvider`, `WorkItemReference`,
+`WorkItemState`, `TrackerConfig`, `TrackerProfile`, `TrackerKind`) are specified
+in [issue-tracker.md](./issue-tracker.md); this section covers the
+`WorkItemPolicyConfig`/`ApplicationDefaults` additions and their
+merge/validation treatment.
+
+### Extension to `WorkItemPolicyConfig`
+
+```rust
+pub struct WorkItemPolicyConfig {
+    pub required: bool,
+    pub pattern: String,
+    pub label_if_missing: Option<String>,
+
+    /// Opt-in live verification against the configured issue tracker. `false`
+    /// (the default) preserves syntactic-only behaviour exactly — the check
+    /// passes on any reference matching `pattern`, regardless of whether it
+    /// resolves to anything real. `true` means the reference must resolve to
+    /// a work item that both exists and is open (see
+    /// [issue-tracker.md](./issue-tracker.md) and
+    /// [ADR-007](../../adr/ADR-007-issue-tracker-abstraction.md)).
+    #[serde(default)]
+    pub verify_exists: bool,
+
+    /// Which tracker to verify against. Defaults to the GitHub tracker, using
+    /// this repository, when omitted. Never carries a connection coordinate
+    /// (`base_url`, `auth_token_env`) directly — non-`GitHub`/`GitHubRepository`
+    /// variants name an operator-defined `profile` instead (see
+    /// [`ApplicationDefaults::tracker_profiles`](#extension-to-applicationdefaults-tracker-profiles)
+    /// below and [issue-tracker.md §3](./issue-tracker.md#3-tracker-configuration)).
+    #[serde(default)]
+    pub tracker: issue_trackers::TrackerConfig,
+}
+```
+
+### Extension to `ApplicationDefaults` (tracker profiles)
+
+```rust
+pub struct ApplicationDefaults {
+    // ... existing fields unchanged ...
+
+    /// Operator-defined tracker connections, keyed by profile name. The only
+    /// place `base_url` and `auth_token_env` may be set — never in a
+    /// repository's or org's own config file. Not part of the `PolicySet`
+    /// merge chain, the same placement pattern as `broken_repo_config_behaviour`
+    /// and `repository_scope`. Default: empty map (no non-GitHub trackers
+    /// usable until the operator defines at least one profile).
+    ///
+    /// TOML key: `[policies.tracker_profiles.<name>]`.
+    #[serde(default)]
+    pub tracker_profiles: std::collections::HashMap<String, issue_trackers::TrackerProfile>,
+}
+```
+
+### Merge rules (extends `WorkItemPolicyConfig::merge`, see
+[policy-engine.md](./policy-engine.md))
+
+| Field | Rule |
+| :--- | :--- |
+| `verify_exists` | `base.verify_exists \|\| over.verify_exists` |
+| `tracker` | `over.tracker` if not `TrackerConfig::default()`; otherwise `base.tracker` |
+
+`tracker_profiles` does not participate in `PolicySet::merge` at all — it is read
+directly from `ApplicationDefaults`, exactly like `broken_repo_config_behaviour`.
+
+### New Validation: Tracker/Profile Resolution and Pattern Alignment
+
+Two validation rules run once, at config-resolution time, after
+`PolicySet::merge` has produced the effective `WorkItemPolicyConfig` — neither is
+a `PolicySet::merge` rule itself:
+
+1. **Profile lookup and kind compatibility.** When `tracker` is any variant
+   other than `GitHub`/`GitHubRepository`, its `profile` field is looked up in
+   `ApplicationDefaults.tracker_profiles`. An unknown profile name, or a profile
+   whose `TrackerProfile::kind()` does not match the `TrackerConfig` variant's
+   own kind (e.g. `tracker.kind = "jira"` naming a profile defined with
+   `kind = "azure_devops"`), is a config validation error:
+   `IssueTrackerError::InvalidConfiguration`, fail-closed and
+   maintainer-visible — never resolved by guessing or silently substituting a
+   different profile.
+2. **Tracker/pattern alignment.** When `tracker` resolves to any kind other than
+   the default `GitHub`, and the effective `pattern` is still exactly the
+   built-in default pattern constant (`WORK_ITEM_REGEX`), configuration
+   validation **rejects** the configuration with an error naming the mismatch —
+   e.g. *"tracker is set to jira but work_item_reference_pattern was left at its
+   GitHub-shaped default; set an explicit pattern matching this tracker's
+   reference syntax."* This is a config-validation-time check, not a runtime
+   one; it never attempts to infer or auto-correct a pattern for the selected
+   tracker kind — the maintainer must set one explicitly. See
+   [issue-tracker.md §3.7](./issue-tracker.md#37-trackerpattern-alignment-validation).
+
+### New Constant: `MAX_WORK_ITEM_REFERENCES_PER_EVENT`
+
+```rust
+/// Maximum number of distinct `WorkItemReference` values resolved against the
+/// configured issue tracker per PR webhook event.
+///
+/// A fixed application constant, alongside `MAX_PATTERN_LENGTH` — not
+/// configurable per repository or org. References beyond this cap are not
+/// verified: they are treated as `Ok(WorkItemResolution::NotFound)`, never as
+/// an error, so a PR body crafted with many reference-shaped strings cannot
+/// trigger unbounded outbound tracker API calls for a single event, and
+/// behaviour stays deterministic regardless of how many reference-shaped
+/// strings a PR body contains. See
+/// [issue-tracker.md §10](./issue-tracker.md#10-per-event-reference-count-cap).
+pub const MAX_WORK_ITEM_REFERENCES_PER_EVENT: usize = 20;
+```
+
+### Resolution Caching
+
+`IssueTrackerProvider::resolve` results are cached in-memory, per process, for a
+fixed 60-second TTL, keyed by `(tracker identity, WorkItemReference)`. See
+[issue-tracker.md §8](./issue-tracker.md#8-resolution-caching) for the
+`WorkItemResolutionCache` type. This is a runtime optimisation, not a config
+type, and is called from the same check-time path as
+`CompiledPatternCache::get_or_compile`.
+
+### Testing Requirements
+
+#### Config unit tests (`crates/core/src/config_tests.rs`)
+
+- `WorkItemPolicyConfig::default()` → `verify_exists == false`,
+  `tracker == TrackerConfig::GitHub`
+- TOML round-trip: `verify_exists = true` with and without a `[tracker]` subtable
+- Merge: `base.verify_exists = true`, `over.verify_exists = false` →
+  `result.verify_exists == true` (OR semantics, cannot be disabled by a lower
+  tier re-asserting default)
+- Merge: `over.tracker` set to a non-default kind wins over `base.tracker`
+- Merge: `over.tracker` omitted (default) → `base.tracker` is preserved
+- `ApplicationDefaults.tracker_profiles` TOML round-trip: a
+  `[policies.tracker_profiles.<name>]` table for each of the four profile kinds
+  parses correctly; an unknown `kind` value is rejected
+- `tracker_profiles` is rejected (or ignored, per the unknown-fields policy) when
+  present in `RepositoryProvidedConfig` or an org policy file — a repository or
+  org cannot define its own profiles
+- A `TrackerConfig` non-GitHub variant naming a `profile` not present in
+  `tracker_profiles` → config validation fails with
+  `IssueTrackerError::InvalidConfiguration`
+- A `TrackerConfig` non-GitHub variant naming a `profile` of a different kind →
+  config validation fails with `IssueTrackerError::InvalidConfiguration`
+- A `TrackerConfig` non-GitHub variant with `pattern` left at `WORK_ITEM_REGEX`
+  (the built-in default) → config validation fails, naming the tracker/pattern
+  mismatch
+- A `TrackerConfig` non-GitHub variant with an explicit, non-default `pattern` →
+  config validation passes (assuming the profile also resolves)
+- A `TrackerProfile` with a non-`https://` `base_url` → rejected with
+  `IssueTrackerError::InvalidConfiguration`
+- A project-scoping identifier (`organization`, `project`, `project_key`,
+  `project_path`, `team_key`) containing `@`, `:`, `://`, or whitespace →
+  rejected with `IssueTrackerError::InvalidConfiguration`
+
+#### Integration tests (`crates/core/src/lib_tests.rs`)
+
+See [issue-tracker.md §9.2](./issue-tracker.md#92-core-integration-tests-cratescoresrclib_testsrs)
+for the full behavioural matrix, including the per-event cap and resolution
+cache tests.
 
 ---
 
