@@ -10653,6 +10653,36 @@ fn test_compiled_pattern_cache_evicts_lru_entry_when_capacity_exceeded() {
     );
 }
 
+#[test]
+fn test_compiled_pattern_cache_does_not_cache_too_long_pattern() {
+    // Security review HIGH-1 (2026-11-22): a TooLong outcome must never be
+    // inserted into the cache. The cache key is the full pattern string, so
+    // caching a TooLong result would mean the 256-entry capacity only bounds
+    // entry COUNT, not entry SIZE — an attacker/operator could still fill
+    // all 256 slots with distinct, arbitrarily large rejected strings,
+    // defeating the point of the length cap (ADR-006 point 1 / point 3:
+    // "the entity whose input is being bounded must not control the
+    // bound").
+    let cache = CompiledPatternCache::new();
+    let oversized = "x".repeat(MAX_PATTERN_LENGTH + 1);
+
+    let result = cache.get_or_compile(&oversized);
+    assert!(
+        matches!(result, Err(PatternValidationError::TooLong { .. })),
+        "expected Err(TooLong {{ .. }}); got {:?}",
+        result
+    );
+
+    let guard = cache.cache.lock().expect("pattern cache mutex poisoned");
+    assert_eq!(
+        guard.len(),
+        0,
+        "a TooLong outcome must not be inserted into the cache — the length \
+         check is cheap to re-derive and caching it only risks the unbounded \
+         memory the length cap exists to prevent"
+    );
+}
+
 // ---------------------------------------------------------------------------
 // validate_config_content — oversized/uncompilable pattern integration
 // (non-blocking; additive to the existing schema/TOML error checks above)

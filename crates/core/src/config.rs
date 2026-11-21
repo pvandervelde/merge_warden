@@ -358,11 +358,12 @@ pub fn validate_pattern(pattern: &str) -> Result<Regex, PatternValidationError> 
 
 /// Process-wide, fixed-capacity LRU cache of compiled regex patterns.
 ///
-/// Caches BOTH successful compilations (as `Arc<Regex>`, so repeated callers
-/// share one allocation) and validation failures (`PatternValidationError`),
-/// so a pattern that is doomed to fail is not re-validated/re-compiled on
-/// every check-time call — see ADR-006, "Cache stores both Ok and Err
-/// outcomes".
+/// Caches successful compilations (as `Arc<Regex>`, so repeated callers
+/// share one allocation) and `CompileFailed` validation failures
+/// (`PatternValidationError`), so a pattern that is doomed to fail compiling
+/// is not re-validated/re-compiled on every check-time call — see ADR-006,
+/// "Cache stores both Ok and Err outcomes". `TooLong` outcomes are
+/// deliberately excluded from the cache (see [`CompiledPatternCache::get_or_compile`]).
 ///
 /// # Implementation note (crate vs. hand-rolled)
 ///
@@ -406,8 +407,20 @@ impl CompiledPatternCache {
     ///
     /// A cache hit — whether the cached outcome is `Ok` or `Err` — never
     /// re-validates or re-compiles `pattern`. On a cache miss, `pattern` is
-    /// validated via [`validate_pattern`] and the outcome (success or
-    /// failure) is stored before being returned.
+    /// validated via [`validate_pattern`] and the outcome is returned.
+    ///
+    /// [`PatternValidationError::TooLong`] outcomes are deliberately **not**
+    /// stored in the cache: the cache key is the full pattern string, so
+    /// caching a `TooLong` result would mean the cache's 256-entry capacity
+    /// bounds entry *count* only, not entry *size* — an attacker/operator
+    /// could still fill all 256 slots with arbitrarily large rejected
+    /// strings (ADR-006 point 1/3: "the entity whose input is being bounded
+    /// must not control the bound"). Re-deriving a `TooLong` rejection is
+    /// already O(1) (a single `pattern.len()` comparison in
+    /// [`validate_pattern`]), so caching it has no performance benefit and
+    /// only the memory cost it exists to prevent. `Ok` and `CompileFailed`
+    /// outcomes are always for patterns within [`MAX_PATTERN_LENGTH`], so
+    /// caching them does not reintroduce the unbounded-size risk.
     pub fn get_or_compile(&self, pattern: &str) -> Result<Arc<Regex>, PatternValidationError> {
         {
             let mut cache = self.cache.lock().expect("pattern cache mutex poisoned");
@@ -418,8 +431,11 @@ impl CompiledPatternCache {
 
         let result = validate_pattern(pattern).map(Arc::new);
 
-        let mut cache = self.cache.lock().expect("pattern cache mutex poisoned");
-        cache.put(pattern.to_string(), result.clone());
+        if !matches!(result, Err(PatternValidationError::TooLong { .. })) {
+            let mut cache = self.cache.lock().expect("pattern cache mutex poisoned");
+            cache.put(pattern.to_string(), result.clone());
+        }
+
         result
     }
 }
