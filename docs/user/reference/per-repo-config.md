@@ -40,7 +40,7 @@ Controls pull request title validation.
 | Field | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `required` | bool | `false` | When `true`, the PR title must match the pattern. |
-| `pattern` | string | *(conventional commits)* | Regular expression the PR title must match. Omit to use the built-in conventional commits pattern. |
+| `pattern` | string | *(conventional commits)* | Regular expression the PR title must match. Omit to use the built-in conventional commits pattern. Must be 256 bytes or shorter and compile within a fixed internal size budget — see note below. |
 | `label_if_missing` | string | *(none)* | Label applied to the PR when the title is invalid. Removed when the title passes. Omit to disable labeling. |
 
 **Built-in default pattern:**
@@ -48,6 +48,12 @@ Controls pull request title validation.
 ```
 ^(build|chore|ci|docs|feat|fix|perf|refactor|revert|style|test)(\([a-z0-9_-]+\))?!?: .+
 ```
+
+> **Pattern limits:** `pattern` is capped at 256 bytes and must compile within a fixed
+> 1 MiB compiled-program size budget. A pattern that exceeds either limit makes the title
+> check fail closed with a distinct "the configured pattern is invalid" comment — it does
+> not fall back to the built-in pattern and does not disable the check. See
+> [How Merge Warden works — regex pattern validation](../explanation/how-merge-warden-works.md#regex-pattern-validation).
 
 ---
 
@@ -58,12 +64,18 @@ Controls work item reference validation.
 | Field | Type | Default | Description |
 | :--- | :--- | :--- | :--- |
 | `required` | bool | `false` | When `true`, the PR description must contain a matching work item reference. |
-| `pattern` | string | *(GitHub issue patterns)* | Regular expression applied to the PR description. Omit to use the built-in pattern. |
+| `pattern` | string | *(GitHub issue patterns)* | Regular expression applied to the PR description. Omit to use the built-in pattern. Must be 256 bytes or shorter and compile within a fixed internal size budget — see note below. |
 | `label_if_missing` | string | *(none)* | Label applied when no work item reference is found. Removed when a valid reference is added. |
 
 **Built-in default pattern** matches:
 `fixes #123`, `closes GH-456`, `resolves https://github.com/owner/repo/issues/789`,
 `references owner/repo#42`.
+
+> **Pattern limits:** `pattern` is capped at 256 bytes and must compile within a fixed
+> 1 MiB compiled-program size budget. A pattern that exceeds either limit makes the work
+> item check fail closed with a distinct "the configured pattern is invalid" comment — it
+> does not fall back to the built-in pattern and does not disable the check. See
+> [How Merge Warden works — regex pattern validation](../explanation/how-merge-warden-works.md#regex-pattern-validation).
 
 ---
 

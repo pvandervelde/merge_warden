@@ -78,6 +78,39 @@ For the complete field list, see [Application configuration schema](../reference
 
 ---
 
+## Startup validation of default patterns
+
+`default_title_pattern` and `default_work_item_pattern` are validated when the server
+starts, before it accepts any connections — not lazily the first time a pull request is
+evaluated. Validation checks two things, both fixed and not configurable:
+
+- The pattern is **256 bytes or shorter**.
+- The pattern **compiles** within a fixed 1 MiB compiled-program size budget.
+
+**If either default pattern fails validation, the server logs the problem and exits
+immediately instead of starting.** This is a deliberate behaviour change: an operator-level
+default pattern that cannot be evaluated must not be allowed to silently run with title or
+work-item validation disabled for every repository on the instance. The startup log line
+looks like one of:
+
+```text
+Invalid default_title_pattern: pattern length 310 exceeds the maximum of 256 characters
+Invalid default_work_item_pattern: pattern failed to compile: <regex syntax/size-limit detail>
+```
+
+To recover, fix the offending pattern in the file pointed to by `MERGE_WARDEN_CONFIG_FILE`
+(or remove the field entirely to fall back to the compiled-in default) and restart the
+server.
+
+This check only applies to `default_title_pattern`/`default_work_item_pattern` in the
+application config. A per-repository `pattern` in `.github/merge-warden.toml`, or a
+`title_pattern`/`work_item_reference_pattern` in an org policy file, is validated
+separately and does **not** stop the server — see
+[How Merge Warden works — regex pattern validation](../explanation/how-merge-warden-works.md#regex-pattern-validation)
+for how those failures are handled instead.
+
+---
+
 ## Choosing a broken default-branch config policy
 
 If a repository's `.github/merge-warden.toml` on its **default branch** becomes malformed

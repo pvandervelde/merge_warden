@@ -176,6 +176,64 @@ for guidance on picking a value.
 
 ---
 
+## Regex pattern validation
+
+`title_pattern` and `work_item_reference_pattern` (configurable as `pattern` under
+`[policies.pullRequests.prTitle]`/`[policies.pullRequests.workItem]` in a repository's
+`.github/merge-warden.toml`, in an org policy file's `[enforced]`/`[defaults]` sections, or
+as `default_title_pattern`/`default_work_item_pattern` at the application level) are
+validated wherever they enter the system, with two fixed limits that cannot be raised at
+any configuration tier:
+
+- **Length cap** — a pattern longer than **256 bytes** is rejected outright, without
+  attempting to compile it.
+- **Compile-size budget** — a pattern within the length cap is compiled with a fixed
+  **1 MiB** compiled-program size budget. A pattern that is syntactically valid but
+  pathologically expensive to compile (for example, a large bounded repetition such as
+  `(#\d+){1,10000}`) is rejected deterministically rather than risking unbounded
+  compile-time memory or CPU.
+
+**What happens when a pattern fails validation depends on where it was set:**
+
+| Where the pattern was set | What happens on an invalid pattern |
+| :--- | :--- |
+| Application default (`default_title_pattern`/`default_work_item_pattern`) | The server logs the error and **refuses to start**. See [Set application-level defaults — startup pattern validation](../how-to/set-app-level-defaults.md#startup-validation-of-default-patterns). |
+| Org policy (`[enforced]`/`[defaults]`) | Treated exactly like any other org-policy load failure: governed by `fail_if_unreachable` (warn-and-fall-back by default, or abort PR processing if `true`). See [Configure an organisation-level policy](../how-to/configure-org-policy.md#behaviour-when-the-org-policy-file-is-unreachable). |
+| Repository's own `.github/merge-warden.toml` | The rest of that file's settings remain fully in effect. Only the specific check that depends on the broken pattern (title or work item) fails, with a distinct comment — see below. |
+
+**At check time**, if the effective (merged) `title_pattern` or `work_item_reference_pattern`
+governing a pull request is invalid, Merge Warden does **not** report the ordinary "title
+doesn't match the pattern" or "no work item reference found" failure, and does **not**
+silently skip the check or fall back to the built-in default pattern. It posts a distinct
+comment naming the problem:
+
+> The configured `title_pattern` in `.github/merge-warden.toml` is invalid and could not be
+> evaluated: *(reason)*. A repository maintainer must correct this pattern before this
+> check can run.
+
+(The equivalent message for the work-item check names `work_item_reference_pattern`
+instead.) A maintainer resolves this by finding which configuration tier actually set the
+broken pattern — check the repository's own `.github/merge-warden.toml` first, then any
+org policy, then the operator's application defaults — and fixing or removing it there.
+
+A broken pattern **never** escalates to the `broken_repo_config_behaviour` policy described
+above: that policy governs whether the whole repository config tier is used at all (a
+structural failure, like malformed TOML), whereas a bad pattern is a narrower, local
+failure handled entirely within the one check that depends on it. Every other policy in
+the same repository config — labels, bypass rules, size thresholds, the *other* pattern —
+keeps working normally.
+
+Validated, compiled patterns are reused across pull-request events via a process-wide
+cache, so identical patterns (most repositories share the built-in defaults) are not
+recompiled on every webhook event. This caching is purely a performance optimisation and
+has no user-visible effect on behaviour.
+
+See [Per-repository configuration schema](../reference/per-repo-config.md#policiespullrequestsprtitle)
+and [Application configuration schema](../reference/app-config.md#default_title_pattern-and-default_work_item_pattern)
+for the field-level reference.
+
+---
+
 ## What Merge Warden does not do
 
 - It does not merge or close pull requests.
