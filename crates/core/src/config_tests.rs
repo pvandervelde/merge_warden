@@ -10196,6 +10196,38 @@ fn test_validate_pattern_invalid_regex_syntax_is_compile_failed() {
 }
 
 #[test]
+fn test_validate_pattern_compile_failed_message_is_sanitized_against_marker_breakout() {
+    // Security review HIGH-3 (2026-11-22): `regex::Error::to_string()` echoes
+    // the original pattern text back as diagnostic context. An unclosed
+    // group containing this codebase's own CONFIG_COMMENT_MARKER text is
+    // short enough to pass MAX_PATTERN_LENGTH, fails to compile, and would
+    // otherwise carry the raw `<!-- MERGE_WARDEN_CONFIG_CHECK -->` string
+    // into the CompileFailed message — and from there, unsanitized, into a
+    // PR comment, where it could be mistaken for the bot's own marker by
+    // the `body.contains(marker)` comment-reconciliation filters.
+    let pattern = format!("({CONFIG_COMMENT_MARKER}");
+    assert!(pattern.len() < MAX_PATTERN_LENGTH);
+
+    match validate_pattern(&pattern) {
+        Err(PatternValidationError::CompileFailed { message }) => {
+            assert!(
+                !message.contains("<!--") && !message.contains("-->"),
+                "CompileFailed message must not carry an intact HTML comment \
+                 marker delimiter that could be mistaken for a bot marker by \
+                 `body.contains(marker)` comment-reconciliation filters; got: \
+                 {message:?}"
+            );
+            assert!(
+                message.contains("<! --") || !message.contains(CONFIG_COMMENT_MARKER),
+                "sanitization must split, not drop, the marker's comment \
+                 delimiters; got: {message:?}"
+            );
+        }
+        other => panic!("expected Err(CompileFailed {{ .. }}), got: {:?}", other),
+    }
+}
+
+#[test]
 fn test_validate_pattern_exceeding_compile_size_budget_is_compile_failed() {
     // ADR-006's worked example: 15 bytes, well under MAX_PATTERN_LENGTH, and
     // syntactically perfectly valid — it is rejected ONLY because the

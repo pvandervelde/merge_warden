@@ -352,7 +352,18 @@ pub fn validate_pattern(pattern: &str) -> Result<Regex, PatternValidationError> 
         .size_limit(PATTERN_COMPILE_SIZE_LIMIT)
         .build()
         .map_err(|e| PatternValidationError::CompileFailed {
-            message: e.to_string(),
+            // Security review HIGH-3 (2026-11-22): `regex::Error::to_string()`
+            // echoes the original pattern text back as diagnostic context. A
+            // pattern within MAX_PATTERN_LENGTH can still be crafted to be
+            // syntactically invalid while containing this codebase's own
+            // HTML comment markers (e.g. `CONFIG_COMMENT_MARKER`) verbatim,
+            // and this message flows unsanitized into PR comments
+            // (`config_error_comment_body`, `communicate_config_validity_status`).
+            // Sanitizing here — at construction — means every consumer of
+            // `CompileFailed.message` (including `Display`/`{e}` formatting
+            // and the compiled-pattern cache, which stores this value) gets
+            // a safe value automatically, with no call site able to forget.
+            message: sanitize_config_error_detail(&e.to_string()),
         })
 }
 
