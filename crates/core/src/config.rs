@@ -369,21 +369,21 @@ pub fn validate_pattern(pattern: &str) -> Result<Regex, PatternValidationError> 
 
 /// Process-wide, fixed-capacity LRU cache of compiled regex patterns.
 ///
-/// Caches successful compilations (as `Arc<Regex>`, so repeated callers
-/// share one allocation) and `CompileFailed` validation failures
-/// (`PatternValidationError`), so a pattern that is doomed to fail compiling
-/// is not re-validated/re-compiled on every check-time call — see ADR-006,
-/// "Cache stores both Ok and Err outcomes". `TooLong` outcomes are
-/// deliberately excluded from the cache (see [`CompiledPatternCache::get_or_compile`]).
+/// Caches `Ok` and `CompileFailed` outcomes (as `Arc<Regex>`, so repeated
+/// callers share one allocation, and as `PatternValidationError`
+/// respectively), so a pattern that is doomed to fail compiling is not
+/// re-validated/re-compiled on every check-time call — see ADR-006.
+/// `TooLong` outcomes are deliberately excluded from the cache (see
+/// [`CompiledPatternCache::get_or_compile`]).
 ///
 /// # Implementation note (crate vs. hand-rolled)
 ///
-/// Backed by the [`lru`] crate (0.12.x) rather than a hand-rolled eviction
-/// policy: `lru::LruCache` is a small, dependency-free, synchronous,
-/// well-reviewed implementation of exactly the fixed-capacity O(1)
-/// get/insert/evict semantics this cache needs, and pulling it in is cheaper
-/// and less error-prone than re-implementing intrusive linked-list LRU
-/// bookkeeping by hand. The cache is wrapped in a [`std::sync::Mutex`] (not
+/// Backed by the [`lru`] crate rather than a hand-rolled eviction policy:
+/// `lru::LruCache` is a small, synchronous, well-reviewed implementation of
+/// exactly the fixed-capacity O(1) get/insert/evict semantics this cache
+/// needs, and pulling it in is cheaper and less error-prone than
+/// re-implementing intrusive linked-list LRU bookkeeping by hand. The cache
+/// is wrapped in a [`std::sync::Mutex`] (not
 /// `parking_lot`, which is also not yet in this crate's dependency tree):
 /// every operation here is synchronous and fast (a hash lookup plus, at
 /// most, a cheap regex compile), and the lock is never held across an
