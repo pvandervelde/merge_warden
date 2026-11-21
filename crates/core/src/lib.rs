@@ -264,6 +264,22 @@ pub struct MergeWarden<P: PullRequestProvider + std::fmt::Debug> {
     metrics_recorder: Arc<dyn MetricsRecorder>,
 }
 
+/// Renders the dedicated warning comment body used by
+/// `communicate_pr_title_validity_status` and
+/// `communicate_pr_work_item_validity_status` when the configured pattern
+/// for the given field (`title_pattern` or `work_item_reference_pattern`)
+/// itself failed validation (ADR-006): this is a configuration problem, not
+/// a PR-content problem, so it replaces the ordinary diagnosis/missing-
+/// reference body with a maintainer-facing message naming the broken field
+/// and the underlying [`crate::config::PatternValidationError`] text.
+fn config_error_comment_body(field_name: &str, config_error: &str) -> String {
+    format!(
+        "⚠️ The configured `{field_name}` in `{CONFIG_FILE_PATH}` is invalid \
+         and could not be evaluated: {config_error}. A repository maintainer \
+         must correct this pattern before this check can run."
+    )
+}
+
 impl<P: PullRequestProvider + ConfigFetcher + std::fmt::Debug> MergeWarden<P> {
     /// Checks if the PR title follows the Conventional Commits format.
     ///
@@ -777,11 +793,7 @@ Please update the PR title to match the conventional commit message guidelines."
                     // diagnosis-bullets + format-reminder body. `diagnose_pr_title` was
                     // never run in this case (see check_pr_title), so there is no
                     // diagnosis to render here.
-                    format!(
-                        "⚠️ The configured `title_pattern` in `{CONFIG_FILE_PATH}` is invalid \
-                     and could not be evaluated: {config_error}. A repository maintainer \
-                     must correct this pattern before this check can run."
-                    )
+                    config_error_comment_body("title_pattern", config_error)
                 } else {
                     // Build the diagnosis section: one bullet per TitleIssue, optional suggested fix.
                     let mut diagnosis_section =
@@ -1121,11 +1133,7 @@ Please update the PR title to match the conventional commit message guidelines."
                 // broken (too long or uncompilable) — a configuration problem, not
                 // a "no reference found" content problem, so it gets a dedicated
                 // message instead of the ordinary missing-reference body.
-                format!(
-                    "⚠️ The configured `work_item_reference_pattern` in `{CONFIG_FILE_PATH}` \
-                     is invalid and could not be evaluated: {config_error}. A repository \
-                     maintainer must correct this pattern before this check can run."
-                )
+                config_error_comment_body("work_item_reference_pattern", config_error)
             } else {
                 r#"
 The pull request body needs improvement:
