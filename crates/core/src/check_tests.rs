@@ -1934,3 +1934,263 @@ fn should_return_invalid_with_empty_scope_in_diagnosis_when_title_has_empty_scop
         diagnosis.issues
     );
 }
+
+// ============================================================================
+// ADR-006: check_pr_title / check_work_item_reference config-error behaviour
+//
+// See docs/spec/interfaces/core-config-validation.md
+// #check-time-behaviour-on-patternvalidationerror
+//
+// These tests assert the NEW, distinct failure path: when the configured
+// pattern cannot be compiled (too long, or syntactically/size-budget
+// invalid), the check must report `ValidationResult::config_error(..)` —
+// never the ordinary `invalid()` outcome — and `TitleValidationResult`'s
+// `diagnosis` must be `None` (diagnose_pr_title must NOT run against a
+// broken-pattern scenario).
+// ============================================================================
+
+const ADR006_MAX_PATTERN_LENGTH: usize = 256;
+
+fn create_config_with_oversized_title_pattern() -> CurrentPullRequestValidationConfiguration {
+    let mut config = create_default_config();
+    config.title_pattern = "a".repeat(ADR006_MAX_PATTERN_LENGTH + 1);
+    config
+}
+
+fn create_config_with_oversized_work_item_pattern() -> CurrentPullRequestValidationConfiguration {
+    let mut config = create_default_config();
+    config.work_item_reference_pattern = "a".repeat(ADR006_MAX_PATTERN_LENGTH + 1);
+    config
+}
+
+// ---------------------------------------------------------------------------
+// check_pr_title — config_error behaviour
+// ---------------------------------------------------------------------------
+
+#[test]
+fn should_return_config_error_when_title_pattern_is_oversized() {
+    let user = create_user(123, "developer");
+    let pr = create_pull_request(1, "feat: add new feature", None, Some(user));
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_config_with_oversized_title_pattern();
+
+    let result = check_pr_title(&pr, &bypass_rule, &config);
+
+    assert!(
+        !result.is_valid(),
+        "a check depending on an invalid pattern must report failure"
+    );
+    assert!(
+        result.validation.config_error.is_some(),
+        "an oversized title_pattern must populate config_error, not the ordinary invalid() path"
+    );
+}
+
+#[test]
+fn should_return_config_error_when_title_pattern_fails_to_compile() {
+    let user = create_user(123, "developer");
+    let pr = create_pull_request(1, "feat: add new feature", None, Some(user));
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_config_with_invalid_title_regex();
+
+    let result = check_pr_title(&pr, &bypass_rule, &config);
+
+    assert!(!result.is_valid());
+    assert!(
+        result.validation.config_error.is_some(),
+        "an uncompilable title_pattern must populate config_error"
+    );
+}
+
+#[test]
+fn should_not_run_title_diagnosis_when_title_pattern_is_broken() {
+    // Per the interface contract: when the title pattern is invalid,
+    // `diagnosis` must be `None` — diagnose_pr_title must never be run
+    // against a broken-pattern scenario, since the title itself was never
+    // actually evaluated against anything.
+    let user = create_user(123, "developer");
+    // Deliberately malformed title that WOULD normally produce a rich
+    // diagnosis, to prove the None is not a coincidence of a clean title.
+    let pr = create_pull_request(1, " FEAT:missing space", None, Some(user));
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_config_with_oversized_title_pattern();
+
+    let result = check_pr_title(&pr, &bypass_rule, &config);
+
+    assert!(
+        result.diagnosis.is_none(),
+        "diagnosis must be None when the configured pattern itself is broken, got: {:?}",
+        result.diagnosis
+    );
+}
+
+#[test]
+fn should_return_config_error_message_distinct_from_ordinary_title_failure_wording() {
+    // [security] Compile failure must never be reported with the ordinary
+    // "didn't match"/format-reminder wording — the message must name the
+    // configuration problem instead.
+    let user = create_user(123, "developer");
+    let pr = create_pull_request(1, "feat: add new feature", None, Some(user));
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_config_with_oversized_title_pattern();
+
+    let result = check_pr_title(&pr, &bypass_rule, &config);
+    let message = result
+        .validation
+        .config_error
+        .expect("config_error must be populated");
+
+    assert!(
+        !message.is_empty(),
+        "config_error message must not be empty"
+    );
+    assert!(
+        message.to_lowercase().contains("pattern") || message.to_lowercase().contains("configur"),
+        "config_error message should name the configuration/pattern problem; got: {message}"
+    );
+    assert!(
+        !message.to_lowercase().contains("conventional commit"),
+        "config_error message must not reuse the ordinary 'does not follow conventional \
+         commit format' wording; got: {message}"
+    );
+}
+
+#[test]
+fn should_bypass_before_evaluating_a_broken_title_pattern() {
+    // Ordering/short-circuit adversarial test: bypass evaluation must happen
+    // before the pattern is even consulted, so an authorized bypass user is
+    // never blocked by (and never sees) a configuration error.
+    let user = create_user(123, "bypass-user");
+    let pr = create_pull_request(1, "not a conventional title", None, Some(user));
+    let bypass_rule = create_bypass_rule_enabled_for_users(vec!["bypass-user"]);
+    let config = create_config_with_oversized_title_pattern();
+
+    let result = check_pr_title(&pr, &bypass_rule, &config);
+
+    assert!(result.is_valid());
+    assert!(result.was_bypassed());
+    assert!(
+        result.validation.config_error.is_none(),
+        "a bypassed check must never populate config_error"
+    );
+    assert!(result.diagnosis.is_none());
+}
+
+// ---------------------------------------------------------------------------
+// check_work_item_reference — config_error behaviour
+// ---------------------------------------------------------------------------
+
+#[test]
+fn should_return_config_error_when_work_item_pattern_is_oversized() {
+    let user = create_user(123, "developer");
+    let pr = create_pull_request(1, "feat: add feature", Some("Fixes #123"), Some(user));
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_config_with_oversized_work_item_pattern();
+
+    let result = check_work_item_reference(&pr, &bypass_rule, &config);
+
+    assert!(!result.is_valid());
+    assert!(
+        result.config_error.is_some(),
+        "an oversized work_item_reference_pattern must populate config_error"
+    );
+}
+
+#[test]
+fn should_return_config_error_when_work_item_pattern_fails_to_compile() {
+    let user = create_user(123, "developer");
+    let pr = create_pull_request(1, "feat: add feature", Some("Fixes #123"), Some(user));
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_config_with_invalid_work_item_regex();
+
+    let result = check_work_item_reference(&pr, &bypass_rule, &config);
+
+    assert!(!result.is_valid());
+    assert!(
+        result.config_error.is_some(),
+        "an uncompilable work_item_reference_pattern must populate config_error"
+    );
+}
+
+#[test]
+fn should_return_work_item_config_error_even_when_body_has_no_reference_shaped_text() {
+    // Stub-killing: a lazy implementation might only reach the config-error
+    // path when a reference-shaped match is attempted and happens to fail;
+    // it must fail closed on the broken pattern regardless of body content.
+    let user = create_user(123, "developer");
+    let pr = create_pull_request(
+        1,
+        "feat: add feature",
+        Some("no reference here"),
+        Some(user),
+    );
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_config_with_oversized_work_item_pattern();
+
+    let result = check_work_item_reference(&pr, &bypass_rule, &config);
+
+    assert!(!result.is_valid());
+    assert!(result.config_error.is_some());
+}
+
+#[test]
+fn should_return_config_error_message_distinct_from_ordinary_work_item_failure_wording() {
+    let user = create_user(123, "developer");
+    let pr = create_pull_request(1, "feat: add feature", Some("Fixes #123"), Some(user));
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_config_with_oversized_work_item_pattern();
+
+    let result = check_work_item_reference(&pr, &bypass_rule, &config);
+    let message = result.config_error.expect("config_error must be populated");
+
+    assert!(!message.is_empty());
+    assert!(
+        message.to_lowercase().contains("pattern") || message.to_lowercase().contains("configur"),
+        "config_error message should name the configuration/pattern problem; got: {message}"
+    );
+    assert!(
+        !message
+            .to_lowercase()
+            .contains("no work item reference found"),
+        "config_error message must not reuse the ordinary 'no work item reference found' \
+         wording; got: {message}"
+    );
+}
+
+#[test]
+fn should_bypass_before_evaluating_a_broken_work_item_pattern() {
+    let user = create_user(123, "bypass-user");
+    let pr = create_pull_request(1, "feat: add feature", Some("no reference"), Some(user));
+    let bypass_rule = create_bypass_rule_enabled_for_users(vec!["bypass-user"]);
+    let config = create_config_with_oversized_work_item_pattern();
+
+    let result = check_work_item_reference(&pr, &bypass_rule, &config);
+
+    assert!(result.is_valid());
+    assert!(result.was_bypassed());
+    assert!(
+        result.config_error.is_none(),
+        "a bypassed check must never populate config_error"
+    );
+}
+
+#[test]
+fn should_return_config_error_when_work_item_pattern_broken_and_body_is_none() {
+    // The existing None-body path returns ordinary invalid(); a broken
+    // pattern must still take priority and report config_error even when
+    // there is no body to evaluate against.
+    let user = create_user(123, "developer");
+    let pr = create_pull_request(1, "feat: add feature", None, Some(user));
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_config_with_oversized_work_item_pattern();
+
+    let result = check_work_item_reference(&pr, &bypass_rule, &config);
+
+    assert!(!result.is_valid());
+    assert!(
+        result.config_error.is_some(),
+        "a broken work_item_reference_pattern must report config_error even when \
+         pr.body is None, got: {:?}",
+        result
+    );
+}

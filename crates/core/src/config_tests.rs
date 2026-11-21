@@ -10086,3 +10086,716 @@ fn test_sanitize_config_error_detail_rewrites_every_targeted_token_in_one_pass()
     let out = sanitize_config_error_detail("<!-- ``` -->");
     assert_eq!(out, "<! -- ` ` ` -- >");
 }
+
+// ============================================================================
+// ADR-006: Regex Pattern Validation and Deterministic Failure Handling
+//
+// See docs/adr/ADR-006-regex-pattern-validation.md and
+// docs/spec/interfaces/core-config-validation.md#regex-pattern-validation-and-compilation
+//
+// NOTE for implementor: these tests assume `CompiledPatternCache` exposes a
+// public `pub fn new() -> Self` constructor in addition to the production
+// lazy_static! singleton, so that each test can exercise an independent cache
+// instance without any cross-test shared-state coupling. The interface
+// contract supplied to the Tester shows the struct as "internal, opaque" with
+// only `get_or_compile` listed; `new()` is the Tester's assumption for
+// testability and must be confirmed/adjusted with the Coder. See the test
+// suite report for details.
+// ============================================================================
+
+// ---------------------------------------------------------------------------
+// validate_pattern — Tier 1 specification tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_validate_pattern_at_exactly_max_length_is_ok() {
+    // Boundary is inclusive: exactly MAX_PATTERN_LENGTH bytes of a valid,
+    // literal (non-metacharacter) pattern must be accepted.
+    let pattern = "a".repeat(MAX_PATTERN_LENGTH);
+    assert_eq!(pattern.len(), MAX_PATTERN_LENGTH);
+    let result = validate_pattern(&pattern);
+    assert!(
+        result.is_ok(),
+        "a pattern of exactly MAX_PATTERN_LENGTH bytes must be accepted, got: {:?}",
+        result.err()
+    );
+}
+
+#[test]
+fn test_validate_pattern_one_byte_over_max_length_and_syntactically_invalid_short_circuits_on_length(
+) {
+    // Security-relevant: the length check must run BEFORE any compile attempt.
+    // This pattern is both one byte over MAX_PATTERN_LENGTH *and* syntactically
+    // invalid (unbalanced '('). If the implementation attempted to compile
+    // first, it would observe a regex syntax error, not TooLong. Observing
+    // TooLong here proves the length check short-circuits before compilation.
+    let mut pattern = "(".to_string();
+    pattern.push_str(&"a".repeat(MAX_PATTERN_LENGTH)); // total length = MAX + 1
+    assert_eq!(pattern.len(), MAX_PATTERN_LENGTH + 1);
+
+    let result = validate_pattern(&pattern);
+    match result {
+        Err(PatternValidationError::TooLong { length, max }) => {
+            assert_eq!(length, MAX_PATTERN_LENGTH + 1);
+            assert_eq!(max, MAX_PATTERN_LENGTH);
+        }
+        other => panic!(
+            "expected Err(TooLong {{ length: {}, max: {} }}) proving the length check \
+             short-circuits before any compile attempt on an oversized + syntactically \
+             invalid pattern, got: {:?}",
+            MAX_PATTERN_LENGTH + 1,
+            MAX_PATTERN_LENGTH,
+            other
+        ),
+    }
+}
+
+#[test]
+fn test_validate_pattern_one_byte_over_max_length_with_valid_syntax_is_still_too_long() {
+    // Isolates the pure length-boundary math from the length/compile
+    // short-circuit test above: this pattern is syntactically perfectly valid
+    // (a literal run of 'a's) and is rejected purely for being one byte over
+    // the cap, with the exact length/max reported.
+    let pattern = "a".repeat(MAX_PATTERN_LENGTH + 1);
+    // Compared via `expect_err` + inner-error equality rather than
+    // `assert_eq!` on the whole `Result`: `regex::Regex` (the `Ok` type of
+    // `validate_pattern`) does not implement `PartialEq`, so the `Result`
+    // type as a whole cannot derive it either, even on this always-`Err`
+    // path.
+    let err =
+        validate_pattern(&pattern).expect_err("a pattern one byte over the cap must be rejected");
+    assert_eq!(
+        err,
+        PatternValidationError::TooLong {
+            length: MAX_PATTERN_LENGTH + 1,
+            max: MAX_PATTERN_LENGTH,
+        }
+    );
+}
+
+#[test]
+fn test_validate_pattern_one_byte_under_max_length_is_ok() {
+    // N-1 boundary: one byte under the cap must be accepted.
+    let pattern = "a".repeat(MAX_PATTERN_LENGTH - 1);
+    assert!(validate_pattern(&pattern).is_ok());
+}
+
+#[test]
+fn test_validate_pattern_invalid_regex_syntax_is_compile_failed() {
+    let pattern = "(unbalanced";
+    assert!(pattern.len() < MAX_PATTERN_LENGTH);
+    match validate_pattern(pattern) {
+        Err(PatternValidationError::CompileFailed { message }) => {
+            assert!(
+                !message.is_empty(),
+                "CompileFailed message must not be empty"
+            );
+        }
+        other => panic!("expected Err(CompileFailed {{ .. }}), got: {:?}", other),
+    }
+}
+
+#[test]
+fn test_validate_pattern_exceeding_compile_size_budget_is_compile_failed() {
+    // ADR-006's worked example: 15 bytes, well under MAX_PATTERN_LENGTH, and
+    // syntactically perfectly valid — it is rejected ONLY because the
+    // compiled program exceeds PATTERN_COMPILE_SIZE_LIMIT.
+    let pattern = r"(#\d+){1,10000}";
+    assert!(pattern.len() < MAX_PATTERN_LENGTH);
+    match validate_pattern(pattern) {
+        Err(PatternValidationError::CompileFailed { message }) => {
+            assert!(
+                !message.is_empty(),
+                "CompileFailed message must not be empty"
+            );
+        }
+        other => panic!(
+            "expected Err(CompileFailed {{ .. }}) for a pattern that exceeds the \
+             compile-size budget while passing the length cap, got: {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
+fn test_validate_pattern_built_in_conventional_commit_regex_is_always_ok() {
+    // Regression guard: validation must never reject the shipped default.
+    assert!(
+        validate_pattern(CONVENTIONAL_COMMIT_REGEX).is_ok(),
+        "the built-in CONVENTIONAL_COMMIT_REGEX default must always pass validation"
+    );
+}
+
+#[test]
+fn test_validate_pattern_built_in_work_item_regex_is_always_ok() {
+    // Regression guard: validation must never reject the shipped default.
+    assert!(
+        validate_pattern(WORK_ITEM_REGEX).is_ok(),
+        "the built-in WORK_ITEM_REGEX default must always pass validation"
+    );
+}
+
+#[test]
+fn test_pattern_compile_size_limit_constant_is_one_mebibyte() {
+    assert_eq!(PATTERN_COMPILE_SIZE_LIMIT, 1_048_576);
+}
+
+#[test]
+fn test_max_pattern_length_constant_is_256() {
+    assert_eq!(MAX_PATTERN_LENGTH, 256);
+}
+
+// ---------------------------------------------------------------------------
+// validate_pattern — Tier 2 adversarial / boundary tests
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_validate_pattern_empty_string_is_ok() {
+    // Zero-length pattern: trivially valid regex (matches everything), and
+    // trivially within the length cap. Must not panic or be special-cased
+    // into an error.
+    assert!(validate_pattern("").is_ok());
+}
+
+#[test]
+fn test_validate_pattern_length_is_measured_in_bytes_not_unicode_chars_rejects_multibyte_overflow()
+{
+    // 'é' is 2 bytes in UTF-8. 129 repetitions = 129 chars but 258 bytes.
+    // MAX_PATTERN_LENGTH is defined as a BYTE cap (str::len()), so this must
+    // be rejected even though the character count (129) is well under 256.
+    let pattern: String = std::iter::repeat('é').take(129).collect();
+    assert_eq!(pattern.chars().count(), 129);
+    assert_eq!(pattern.len(), 258); // byte length, not char count
+    match validate_pattern(&pattern) {
+        Err(PatternValidationError::TooLong { length, max }) => {
+            assert_eq!(
+                length, 258,
+                "reported length must be the BYTE length, not the character count"
+            );
+            assert_eq!(max, MAX_PATTERN_LENGTH);
+        }
+        other => panic!(
+            "expected Err(TooLong {{ .. }}) for a 258-byte / 129-char multi-byte \
+             pattern, proving the cap is byte-based, got: {:?}",
+            other
+        ),
+    }
+}
+
+#[test]
+fn test_validate_pattern_length_boundary_with_multibyte_chars_at_exactly_256_bytes_is_ok() {
+    // 128 repetitions of 'é' (2 bytes each) = exactly 256 bytes, 128 chars.
+    // The boundary-inclusive rule must hold on byte length, not char count.
+    let pattern: String = std::iter::repeat('é').take(128).collect();
+    assert_eq!(pattern.len(), MAX_PATTERN_LENGTH);
+    assert!(validate_pattern(&pattern).is_ok());
+}
+
+#[test]
+fn test_validate_pattern_too_long_error_message_names_the_configuration_problem() {
+    let pattern = "a".repeat(MAX_PATTERN_LENGTH + 10);
+    let err = validate_pattern(&pattern).unwrap_err();
+    let message = err.to_string();
+    assert!(
+        message.contains(&(MAX_PATTERN_LENGTH + 10).to_string())
+            || message.to_lowercase().contains("length"),
+        "TooLong Display message should name the length problem; got: {message}"
+    );
+}
+
+#[test]
+fn test_validate_pattern_compile_failed_message_is_distinguishable_from_too_long() {
+    // [security] A PatternValidationError variant must never be conflated
+    // with the other: CompileFailed's rendered message must not resemble
+    // TooLong's wording, and vice versa, so maintainer-visible comments can
+    // never confuse the two failure modes.
+    let too_long = validate_pattern(&"a".repeat(MAX_PATTERN_LENGTH + 1)).unwrap_err();
+    let compile_failed = validate_pattern("(unbalanced").unwrap_err();
+
+    assert_ne!(too_long, compile_failed);
+    assert!(matches!(too_long, PatternValidationError::TooLong { .. }));
+    assert!(matches!(
+        compile_failed,
+        PatternValidationError::CompileFailed { .. }
+    ));
+    assert_ne!(too_long.to_string(), compile_failed.to_string());
+}
+
+#[test]
+fn test_pattern_validation_error_equality_and_clone() {
+    let a = PatternValidationError::TooLong {
+        length: 300,
+        max: 256,
+    };
+    let b = PatternValidationError::TooLong {
+        length: 300,
+        max: 256,
+    };
+    let c = a.clone();
+    assert_eq!(a, b);
+    assert_eq!(a, c);
+
+    let different_length = PatternValidationError::TooLong {
+        length: 301,
+        max: 256,
+    };
+    assert_ne!(a, different_length);
+
+    let compile_failed = PatternValidationError::CompileFailed {
+        message: "boom".to_string(),
+    };
+    assert_ne!(a, compile_failed);
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 256, .. ProptestConfig::default() })]
+
+    // ---------------------------------------------------------------------------
+    // validate_pattern — Tier 3 property-based tests
+    // ---------------------------------------------------------------------------
+
+    #[test]
+    fn test_validate_pattern_never_panics_on_arbitrary_input(input in ".{0,600}") {
+        // No input, however adversarial, may cause validate_pattern to panic —
+        // whether it is accepted, rejected as too long, or rejected as a
+        // compile failure is secondary to the "never panics" invariant.
+        let _ = validate_pattern(&input);
+    }
+
+    #[test]
+    fn test_validate_pattern_over_max_length_literal_strings_are_always_too_long(
+        extra in 1usize..200
+    ) {
+        // Any literal (non-metacharacter) ASCII string strictly longer than
+        // MAX_PATTERN_LENGTH must always be rejected as TooLong, regardless of
+        // how much longer it is, and the reported length must exactly match
+        // the input's byte length.
+        let pattern = "x".repeat(MAX_PATTERN_LENGTH + extra);
+        // `regex::Regex` does not implement `PartialEq`, so the `Result`
+        // returned by `validate_pattern` cannot be compared as a whole with
+        // `prop_assert_eq!` even on this always-`Err` path; extract the
+        // error first and compare that instead.
+        let result = validate_pattern(&pattern);
+        prop_assert!(result.is_err(), "expected an Err for an oversized pattern");
+        if let Err(err) = result {
+            prop_assert_eq!(
+                err,
+                PatternValidationError::TooLong {
+                    length: MAX_PATTERN_LENGTH + extra,
+                    max: MAX_PATTERN_LENGTH,
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn test_validate_pattern_under_max_length_literal_strings_are_always_ok(
+        len in 0usize..MAX_PATTERN_LENGTH
+    ) {
+        // Any literal (non-metacharacter) ASCII string within the length cap
+        // is syntactically valid as a regex (it matches itself literally) and
+        // must always be accepted.
+        let pattern = "x".repeat(len);
+        prop_assert!(validate_pattern(&pattern).is_ok());
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CompiledPatternCache::get_or_compile — Tier 1 + Tier 2 tests
+//
+// These tests exercise CompiledPatternCache exclusively through its public
+// get_or_compile method. "No recompilation occurred" is verified through two
+// different observable, black-box mechanisms depending on whether the cached
+// outcome is Ok or Err:
+//   - Ok case: Arc pointer identity (Arc::ptr_eq) between two calls proves the
+//     second call reused the already-compiled Regex rather than allocating a
+//     fresh one.
+//   - Err case: PatternValidationError carries no Arc, so pointer identity is
+//     not available. Instead, a deliberately compile-expensive pattern (the
+//     ADR-006 worked example, which fails only the compile-size budget after
+//     real compilation work) is used to show that a batch of cached-failure
+//     lookups is dramatically cheaper in aggregate than the single original
+//     (uncached) compile attempt.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_compiled_pattern_cache_returns_ok_for_a_valid_pattern() {
+    let cache = CompiledPatternCache::new();
+    let result = cache.get_or_compile(CONVENTIONAL_COMMIT_REGEX);
+    assert!(result.is_ok(), "got: {:?}", result.err());
+}
+
+#[test]
+fn test_compiled_pattern_cache_returns_err_for_an_invalid_pattern() {
+    let cache = CompiledPatternCache::new();
+    let result = cache.get_or_compile("(unbalanced");
+    assert!(matches!(
+        result,
+        Err(PatternValidationError::CompileFailed { .. })
+    ));
+}
+
+#[test]
+fn test_compiled_pattern_cache_second_call_with_same_valid_pattern_returns_identical_arc() {
+    let cache = CompiledPatternCache::new();
+    let pattern = "^feat(\\([a-z0-9_-]+\\))?: .+$";
+
+    let first = cache
+        .get_or_compile(pattern)
+        .expect("a valid pattern must compile");
+    let second = cache
+        .get_or_compile(pattern)
+        .expect("the second call for the same valid pattern must also succeed");
+
+    assert!(
+        std::sync::Arc::ptr_eq(&first, &second),
+        "the second call must return the SAME Arc<Regex> allocation as the first \
+         (an O(1) refcount bump), not a freshly compiled one — a stub that always \
+         recompiles would allocate a new Regex and fail this pointer-identity check"
+    );
+}
+
+#[test]
+fn test_compiled_pattern_cache_distinct_patterns_yield_distinct_arcs() {
+    // Companion to the identity test above: this guards against a trivial
+    // "always return the same Arc regardless of input" stub passing the
+    // pointer-identity assertion for the wrong reason.
+    let cache = CompiledPatternCache::new();
+    let first = cache.get_or_compile("^feat: .+$").unwrap();
+    let second = cache.get_or_compile("^fix: .+$").unwrap();
+    assert!(
+        !std::sync::Arc::ptr_eq(&first, &second),
+        "two different valid patterns must never resolve to the same cached Arc<Regex>"
+    );
+    // Sanity: each Arc actually matches only its own pattern.
+    assert!(first.is_match("feat: add x"));
+    assert!(!first.is_match("fix: add x"));
+    assert!(second.is_match("fix: add x"));
+    assert!(!second.is_match("feat: add x"));
+}
+
+#[test]
+fn test_compiled_pattern_cache_second_call_with_same_invalid_pattern_returns_equal_error() {
+    let cache = CompiledPatternCache::new();
+    let pattern = "(unbalanced";
+
+    // Compared via `expect_err` + inner-error equality rather than
+    // `assert_eq!` on the whole `Result`: `regex::Regex` (wrapped in `Arc`
+    // for the `Ok` type of `get_or_compile`) does not implement `PartialEq`,
+    // so the `Result` type as a whole cannot derive it either, even on this
+    // always-`Err` path.
+    let first = cache
+        .get_or_compile(pattern)
+        .expect_err("an invalid pattern must be rejected");
+    let second = cache
+        .get_or_compile(pattern)
+        .expect_err("the second call for the same invalid pattern must also be rejected");
+
+    assert_eq!(
+        first, second,
+        "a cached validation failure must be returned identically on every subsequent call"
+    );
+}
+
+#[test]
+fn test_compiled_pattern_cache_does_not_recompile_cached_invalid_pattern() {
+    // Adversarial/stub-killing: a lazy implementation that forwards every
+    // get_or_compile call straight to validate_pattern without caching would
+    // still pass the "equal error returned" test above (the error is
+    // deterministic), so that test alone cannot distinguish "cached" from
+    // "always recomputed". This test adds a black-box timing signal: the
+    // ADR-006 worked example pattern fails ONLY the compile-size budget,
+    // which means real compilation work happens before the failure is
+    // produced. A batch of 200 cached lookups must, in aggregate, be cheaper
+    // than the single original (uncached) compile attempt if — and only if —
+    // the failure result was actually cached rather than recomputed each
+    // time.
+    let cache = CompiledPatternCache::new();
+    let pattern = r"(#\d+){1,10000}"; // ADR-006 worked example; always CompileFailed
+
+    let start_first = std::time::Instant::now();
+    let first = cache
+        .get_or_compile(pattern)
+        .expect_err("the ADR-006 worked example must fail the compile-size budget");
+    let first_duration = start_first.elapsed();
+    assert!(matches!(
+        first,
+        PatternValidationError::CompileFailed { .. }
+    ));
+
+    const REPEATS: u32 = 200;
+    let start_batch = std::time::Instant::now();
+    for _ in 0..REPEATS {
+        let repeated = cache
+            .get_or_compile(pattern)
+            .expect_err("every repeat must also fail identically");
+        assert_eq!(repeated, first);
+    }
+    let batch_duration = start_batch.elapsed();
+
+    assert!(
+        batch_duration < first_duration,
+        "expected {REPEATS} cached-failure lookups (total {:?}) to be cheaper in \
+         aggregate than the single original, uncached compile attempt ({:?}) that \
+         produced the cached failure — a cache that re-attempts compilation on every \
+         call would make the batch take roughly {REPEATS}x the original duration, \
+         not less than it",
+        batch_duration,
+        first_duration
+    );
+}
+
+#[test]
+fn test_compiled_pattern_cache_valid_pattern_matches_what_validate_pattern_would_produce() {
+    // Cross-check: the cache must not silently alter matching semantics —
+    // the cached Regex must match exactly what a direct validate_pattern
+    // call would produce.
+    let cache = CompiledPatternCache::new();
+    let pattern = CONVENTIONAL_COMMIT_REGEX;
+    let direct = validate_pattern(pattern).expect("direct validation must succeed");
+    let cached = cache
+        .get_or_compile(pattern)
+        .expect("cached validation must succeed");
+
+    let samples = [
+        "feat: add thing",
+        "not a conventional title",
+        "fix(scope): resolve bug",
+    ];
+    for sample in samples {
+        assert_eq!(
+            direct.is_match(sample),
+            cached.is_match(sample),
+            "cached and direct compilations must agree on matching for {sample:?}"
+        );
+    }
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 128, .. ProptestConfig::default() })]
+
+    #[test]
+    fn test_compiled_pattern_cache_agrees_with_validate_pattern_ok_ness(
+        len in 0usize..MAX_PATTERN_LENGTH
+    ) {
+        // Property: for any literal pattern within the length cap, caching
+        // must never change whether the pattern is accepted or rejected
+        // compared to a direct, uncached validate_pattern call.
+        let cache = CompiledPatternCache::new();
+        let pattern = "x".repeat(len);
+        let direct_ok = validate_pattern(&pattern).is_ok();
+        let cached_ok = cache.get_or_compile(&pattern).is_ok();
+        prop_assert_eq!(direct_ok, cached_ok);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// validate_config_content — oversized/uncompilable pattern integration
+// (non-blocking; additive to the existing schema/TOML error checks above)
+// ---------------------------------------------------------------------------
+
+#[test]
+fn test_validate_config_content_oversized_title_pattern_is_invalid_with_dedicated_error() {
+    let oversized = "a".repeat(MAX_PATTERN_LENGTH + 1);
+    let content =
+        format!("schemaVersion = 1\n[policies.pullRequests.prTitle]\npattern = \"{oversized}\"\n");
+    let outcome = validate_config_content(&content);
+    assert!(
+        !outcome.valid,
+        "an oversized title_pattern must fail PR-diff config validation"
+    );
+    assert!(
+        !outcome.errors.is_empty(),
+        "at least one error entry is expected for the oversized title_pattern"
+    );
+    assert!(
+        outcome
+            .errors
+            .iter()
+            .any(|e| e.to_lowercase().contains("pattern")),
+        "an error entry should name the offending pattern field; got: {:?}",
+        outcome.errors
+    );
+}
+
+#[test]
+fn test_validate_config_content_uncompilable_work_item_pattern_is_invalid_with_dedicated_error() {
+    let content = r#"schemaVersion = 1
+[policies.pullRequests.workItem]
+pattern = "(unbalanced"
+"#;
+    let outcome = validate_config_content(content);
+    assert!(
+        !outcome.valid,
+        "an uncompilable work_item_reference_pattern must fail PR-diff config validation"
+    );
+    assert!(
+        outcome
+            .errors
+            .iter()
+            .any(|e| e.to_lowercase().contains("pattern")),
+        "an error entry should name the offending pattern field; got: {:?}",
+        outcome.errors
+    );
+}
+
+#[test]
+fn test_validate_config_content_valid_patterns_alongside_other_valid_fields_remain_valid() {
+    // Regression guard: a config with explicit, valid patterns must not be
+    // rejected merely because the pattern-validation rule now runs.
+    let content = r##"schemaVersion = 1
+[policies.pullRequests.prTitle]
+pattern = "^feat: .+$"
+
+[policies.pullRequests.workItem]
+pattern = "#\\d+"
+"##;
+    let outcome = validate_config_content(content);
+    assert!(
+        outcome.valid,
+        "valid, explicit patterns must not be rejected; errors: {:?}",
+        outcome.errors
+    );
+}
+
+// ---------------------------------------------------------------------------
+// load_org_policy — pattern validation (ADR-006 §"Call Sites")
+//
+// Routed through the existing fail_if_unreachable / OrgPolicyUnavailable
+// split: an invalid pattern in [enforced] or [defaults] is treated as a
+// parse-equivalent org-policy failure.
+// ---------------------------------------------------------------------------
+
+#[tokio::test]
+async fn test_load_org_policy_invalid_enforced_title_pattern_lenient_returns_none() {
+    let toml = r#"
+schemaVersion = 1
+
+[enforced.policies.pullRequests.prTitle]
+required = true
+pattern = "(unbalanced"
+
+[defaults]
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let source = make_org_source(false);
+    let result = load_org_policy(&source, &fetcher, &NoopMetricsRecorder)
+        .await
+        .unwrap();
+    assert!(
+        result.is_none(),
+        "an invalid enforced title pattern with fail_if_unreachable=false must return Ok(None)"
+    );
+}
+
+#[tokio::test]
+async fn test_load_org_policy_invalid_enforced_title_pattern_strict_returns_error() {
+    let toml = r#"
+schemaVersion = 1
+
+[enforced.policies.pullRequests.prTitle]
+required = true
+pattern = "(unbalanced"
+
+[defaults]
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let source = make_org_source(true);
+    let result = load_org_policy(&source, &fetcher, &NoopMetricsRecorder).await;
+    assert!(
+        matches!(result, Err(ConfigLoadError::OrgPolicyUnavailable(_))),
+        "an invalid enforced title pattern with fail_if_unreachable=true must return \
+         Err(OrgPolicyUnavailable), got: {:?}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn test_load_org_policy_invalid_defaults_work_item_pattern_lenient_returns_none() {
+    let toml = r#"
+schemaVersion = 1
+
+[enforced]
+
+[defaults.policies.pullRequests.workItem]
+required = true
+pattern = "(#\\d+){1,10000}"
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let source = make_org_source(false);
+    let result = load_org_policy(&source, &fetcher, &NoopMetricsRecorder)
+        .await
+        .unwrap();
+    assert!(
+        result.is_none(),
+        "an invalid defaults work-item pattern with fail_if_unreachable=false must return Ok(None)"
+    );
+}
+
+#[tokio::test]
+async fn test_load_org_policy_invalid_defaults_work_item_pattern_strict_returns_error() {
+    let toml = r#"
+schemaVersion = 1
+
+[enforced]
+
+[defaults.policies.pullRequests.workItem]
+required = true
+pattern = "(#\\d+){1,10000}"
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let source = make_org_source(true);
+    let result = load_org_policy(&source, &fetcher, &NoopMetricsRecorder).await;
+    assert!(
+        matches!(result, Err(ConfigLoadError::OrgPolicyUnavailable(_))),
+        "an invalid defaults work-item pattern with fail_if_unreachable=true must return \
+         Err(OrgPolicyUnavailable), got: {:?}",
+        result
+    );
+}
+
+#[tokio::test]
+async fn test_load_org_policy_invalid_pattern_lenient_emits_warn_log() {
+    let toml = r#"
+schemaVersion = 1
+
+[enforced.policies.pullRequests.prTitle]
+required = true
+pattern = "(unbalanced"
+
+[defaults]
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let source = make_org_source(false);
+    let (result, events) =
+        capture_tracing_events(load_org_policy(&source, &fetcher, &NoopMetricsRecorder)).await;
+
+    assert!(result.unwrap().is_none());
+    assert!(
+        events.iter().any(|e| e.level == tracing::Level::WARN),
+        "an invalid org-policy pattern must emit at least one WARN-level log entry; \
+         captured events: {events:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_load_org_policy_valid_patterns_do_not_affect_existing_valid_behaviour() {
+    // Regression guard alongside the new pattern-validation rule: existing
+    // valid org policy patterns must keep working exactly as before.
+    let toml = r#"
+schemaVersion = 1
+
+[enforced.policies.pullRequests.prTitle]
+required = true
+pattern = "^feat:"
+
+[defaults]
+"#;
+    let fetcher = MockFetcher::new(Some(toml.to_string()));
+    let source = make_org_source(false);
+    let policy = load_org_policy(&source, &fetcher, &NoopMetricsRecorder)
+        .await
+        .unwrap()
+        .expect("a valid pattern must not cause org policy loading to fail");
+    assert_eq!(policy.enforced.title.pattern, "^feat:");
+}

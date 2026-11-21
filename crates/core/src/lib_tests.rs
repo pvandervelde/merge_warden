@@ -6303,3 +6303,248 @@ async fn test_broken_config_notify_triple_backtick_detail_cannot_break_fence() {
         "a triple-backtick error_detail must be sanitised and rendered inside an intact fenced block"
     );
 }
+
+// ============================================================================
+// ADR-006: Regex Pattern Validation — check-time rewiring integration tests
+//
+// See docs/spec/interfaces/core-config-validation.md
+// #check-time-behaviour-on-patternvalidationerror
+//
+// These exercise the full process_pull_request pipeline with a repository
+// configuration carrying a broken title_pattern or work_item_reference_pattern,
+// proving:
+//   1. the dependent check fails closed with a distinct, maintainer-visible
+//      "configuration problem" message (never the ordinary "does not follow
+//      conventional commit format" / "no work item reference found" wording),
+//   2. the OTHER check (which has a perfectly valid pattern) is unaffected
+//      and evaluates normally in the same run.
+// ============================================================================
+
+const ADR006_OVERSIZED_PATTERN_LEN: usize = 300; // > MAX_PATTERN_LENGTH (256)
+
+fn adr006_valid_pr(title: &str, body: &str) -> PullRequest {
+    PullRequest {
+        number: 1,
+        title: title.to_string(),
+        draft: false,
+        body: Some(body.to_string()),
+        author: Some(User {
+            id: 1,
+            login: "developer".to_string(),
+        }),
+        milestone_number: None,
+        head_sha: String::new(),
+    }
+}
+
+#[tokio::test]
+async fn test_process_pull_request_oversized_title_pattern_fails_title_check_only() {
+    let provider = MockGitProvider::new();
+    provider.set_pull_request(adr006_valid_pr("feat: add new feature", "Fixes #123"));
+
+    let config = CurrentPullRequestValidationConfiguration {
+        title_pattern: "a".repeat(ADR006_OVERSIZED_PATTERN_LEN),
+        ..Default::default()
+    };
+    let warden = MergeWarden::with_config(provider, config);
+
+    let result = warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    assert!(
+        !result.title_valid,
+        "the title check must fail when its configured pattern is invalid"
+    );
+    assert!(
+        result.work_item_referenced,
+        "the work item check (valid pattern, matching body) must still evaluate \
+         normally and pass in the same run"
+    );
+}
+
+#[tokio::test]
+async fn test_process_pull_request_oversized_title_pattern_posts_distinct_config_error_comment() {
+    let provider = MockGitProvider::new();
+    provider.set_pull_request(adr006_valid_pr("feat: add new feature", "Fixes #123"));
+
+    let config = CurrentPullRequestValidationConfiguration {
+        title_pattern: "a".repeat(ADR006_OVERSIZED_PATTERN_LEN),
+        ..Default::default()
+    };
+    let warden = MergeWarden::with_config(provider, config);
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    let title_comment = comments
+        .iter()
+        .find(|c| c.body.contains(TITLE_COMMENT_MARKER))
+        .expect("expected a title-check comment to be posted for the broken pattern");
+
+    assert!(
+        !title_comment.body.contains("Conventional Commits"),
+        "a configuration-error comment must not reuse the ordinary format-reminder \
+         wording; got: {}",
+        title_comment.body
+    );
+    assert!(
+        title_comment.body.to_lowercase().contains("configur"),
+        "a configuration-error comment must name the configuration problem; got: {}",
+        title_comment.body
+    );
+
+    // The work item side of the same run must show no sign of a config
+    // problem — the valid work_item_reference_pattern passed, so no work
+    // item comment should exist at all.
+    assert!(
+        !comments
+            .iter()
+            .any(|c| c.body.contains(WORK_ITEM_COMMENT_MARKER)),
+        "the work item check passed with a valid pattern; no work item comment \
+         should be posted"
+    );
+}
+
+#[tokio::test]
+async fn test_process_pull_request_uncompilable_work_item_pattern_fails_work_item_check_only() {
+    let provider = MockGitProvider::new();
+    provider.set_pull_request(adr006_valid_pr("feat: add new feature", "Fixes #123"));
+
+    let config = CurrentPullRequestValidationConfiguration {
+        work_item_reference_pattern: "(unbalanced".to_string(),
+        ..Default::default()
+    };
+    let warden = MergeWarden::with_config(provider, config);
+
+    let result = warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    assert!(
+        result.title_valid,
+        "the title check (valid pattern, matching title) must still pass"
+    );
+    assert!(
+        !result.work_item_referenced,
+        "the work item check must fail when its configured pattern cannot compile"
+    );
+}
+
+#[tokio::test]
+async fn test_process_pull_request_uncompilable_work_item_pattern_posts_distinct_config_error_comment(
+) {
+    let provider = MockGitProvider::new();
+    provider.set_pull_request(adr006_valid_pr("feat: add new feature", "Fixes #123"));
+
+    let config = CurrentPullRequestValidationConfiguration {
+        work_item_reference_pattern: "(unbalanced".to_string(),
+        ..Default::default()
+    };
+    let warden = MergeWarden::with_config(provider, config);
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let comments = warden.provider.get_comments();
+    let work_item_comment = comments
+        .iter()
+        .find(|c| c.body.contains(WORK_ITEM_COMMENT_MARKER))
+        .expect("expected a work-item-check comment to be posted for the broken pattern");
+
+    assert!(
+        !work_item_comment
+            .body
+            .to_lowercase()
+            .contains("missing a valid work item reference"),
+        "a configuration-error comment must not reuse the ordinary 'missing a valid \
+         work item reference' wording; got: {}",
+        work_item_comment.body
+    );
+    assert!(
+        work_item_comment.body.to_lowercase().contains("configur"),
+        "a configuration-error comment must name the configuration problem; got: {}",
+        work_item_comment.body
+    );
+
+    assert!(
+        !comments
+            .iter()
+            .any(|c| c.body.contains(TITLE_COMMENT_MARKER)),
+        "the title check passed with a valid pattern; no title comment should be posted"
+    );
+}
+
+#[tokio::test]
+async fn test_process_pull_request_broken_title_pattern_forces_failure_conclusion_on_non_draft_pr()
+{
+    let provider = MockGitProvider::new();
+    provider.set_pull_request(adr006_valid_pr("feat: add new feature", "Fixes #123"));
+
+    let config = CurrentPullRequestValidationConfiguration {
+        title_pattern: "a".repeat(ADR006_OVERSIZED_PATTERN_LEN),
+        ..Default::default()
+    };
+    let warden = MergeWarden::with_config(provider, config);
+
+    warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    let updates = warden.provider.get_check_status_updates();
+    let last = updates
+        .last()
+        .expect("expected at least one check-status update");
+    assert_eq!(
+        last.conclusion, "failure",
+        "a non-draft PR with a check that fails closed on a broken pattern must \
+         produce a 'failure' conclusion, got: {:?}",
+        last
+    );
+}
+
+#[tokio::test]
+async fn test_process_pull_request_both_patterns_broken_both_checks_fail_independently() {
+    // Adversarial: both patterns broken simultaneously must not cause one
+    // check's failure to mask or short-circuit the other's independent
+    // evaluation and reporting.
+    let provider = MockGitProvider::new();
+    provider.set_pull_request(adr006_valid_pr("feat: add new feature", "Fixes #123"));
+
+    let config = CurrentPullRequestValidationConfiguration {
+        title_pattern: "a".repeat(ADR006_OVERSIZED_PATTERN_LEN),
+        work_item_reference_pattern: "(unbalanced".to_string(),
+        ..Default::default()
+    };
+    let warden = MergeWarden::with_config(provider, config);
+
+    let result = warden
+        .process_pull_request("owner", "repo", 1)
+        .await
+        .unwrap();
+
+    assert!(!result.title_valid);
+    assert!(!result.work_item_referenced);
+
+    let comments = warden.provider.get_comments();
+    assert!(
+        comments
+            .iter()
+            .any(|c| c.body.contains(TITLE_COMMENT_MARKER)),
+        "a distinct title config-error comment must still be posted"
+    );
+    assert!(
+        comments
+            .iter()
+            .any(|c| c.body.contains(WORK_ITEM_COMMENT_MARKER)),
+        "a distinct work-item config-error comment must still be posted"
+    );
+}
