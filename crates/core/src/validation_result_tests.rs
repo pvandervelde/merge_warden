@@ -195,3 +195,99 @@ fn test_validation_result_pattern_matching() {
         None => panic!("Bypassed result should have bypass info"),
     }
 }
+
+// ============================================================================
+// ADR-006: ValidationResult::config_error
+//
+// See docs/spec/interfaces/core-config-validation.md
+// #check-time-behaviour-on-patternvalidationerror
+// ============================================================================
+
+#[test]
+fn test_validation_result_config_error_is_not_valid() {
+    let result = ValidationResult::config_error("pattern failed to compile".to_string());
+    assert!(
+        !result.is_valid,
+        "a configuration-error result must never be valid"
+    );
+}
+
+#[test]
+fn test_validation_result_config_error_is_not_a_bypass() {
+    let result = ValidationResult::config_error("pattern failed to compile".to_string());
+    assert!(
+        !result.bypass_used,
+        "a configuration-error result must not be reported as a bypass"
+    );
+    assert!(result.bypass_info.is_none());
+}
+
+#[test]
+fn test_validation_result_config_error_carries_the_message_verbatim() {
+    let result = ValidationResult::config_error("the configured pattern is invalid".to_string());
+    assert_eq!(
+        result.config_error,
+        Some("the configured pattern is invalid".to_string())
+    );
+}
+
+#[test]
+fn test_validation_result_config_error_is_distinguishable_from_invalid() {
+    // [security] A compile failure must never be conflated with an ordinary
+    // "content did not match" failure: the two must be distinguishable at
+    // the result-type level, not merely by message text.
+    let config_error = ValidationResult::config_error("broken pattern".to_string());
+    let plain_invalid = ValidationResult::invalid();
+
+    assert_eq!(config_error.is_valid, plain_invalid.is_valid); // both false
+    assert!(
+        config_error.config_error.is_some(),
+        "config_error must be Some for a configuration failure"
+    );
+    assert!(
+        plain_invalid.config_error.is_none(),
+        "config_error must be None for an ordinary content-mismatch failure"
+    );
+    assert_ne!(config_error, plain_invalid);
+}
+
+#[test]
+fn test_validation_result_valid_has_no_config_error() {
+    assert!(ValidationResult::valid().config_error.is_none());
+}
+
+#[test]
+fn test_validation_result_invalid_has_no_config_error() {
+    assert!(ValidationResult::invalid().config_error.is_none());
+}
+
+#[test]
+fn test_validation_result_bypassed_has_no_config_error() {
+    let bypass_info = BypassInfo {
+        rule_type: BypassRuleType::TitleConvention,
+        user: "release-bot".to_string(),
+    };
+    assert!(ValidationResult::bypassed(bypass_info)
+        .config_error
+        .is_none());
+}
+
+#[test]
+fn test_validation_result_config_error_serialization_round_trips() {
+    let result = ValidationResult::config_error("pattern too long".to_string());
+    let json = serde_json::to_string(&result).expect("should serialize to JSON");
+    let deserialized: ValidationResult =
+        serde_json::from_str(&json).expect("should deserialize from JSON");
+    assert_eq!(result, deserialized);
+    assert_eq!(
+        deserialized.config_error,
+        Some("pattern too long".to_string())
+    );
+}
+
+#[test]
+fn test_validation_result_config_error_clone() {
+    let result = ValidationResult::config_error("broken".to_string());
+    let cloned = result.clone();
+    assert_eq!(result, cloned);
+}

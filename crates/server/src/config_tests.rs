@@ -746,3 +746,174 @@ fn load_config_succeeds_when_repository_scope_include_patterns_is_empty_list() {
         .expect("repository_scope should be Some");
     assert!(scope.include_patterns.is_empty());
 }
+
+// ---------------------------------------------------------------------------
+// load_config — regex pattern validation fail-fast (ADR-006, FR-011)
+//
+// See docs/adr/ADR-006-regex-pattern-validation.md and
+// docs/spec/interfaces/core-config-validation.md
+// #regex-pattern-validation-and-compilation — "load_config() (server startup)"
+// row of the Call Sites table: an invalid default_title_pattern or
+// default_work_item_pattern must fail process startup, mirroring the
+// existing validate_repository_scope_patterns precedent directly above.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn load_config_returns_config_error_for_oversized_default_title_pattern() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+
+    let mut path = std::env::temp_dir();
+    path.push("merge_warden_server_oversized_default_title_pattern_test.toml");
+    let oversized = "a".repeat(300); // > MAX_PATTERN_LENGTH (256)
+    std::fs::write(
+        &path,
+        format!("[policies]\ndefault_title_pattern = \"{oversized}\"\n"),
+    )
+    .unwrap();
+
+    let _env = EnvGuard::prepare(
+        &[("MERGE_WARDEN_CONFIG_FILE", path.to_str().unwrap())],
+        &[
+            "MERGE_WARDEN_PORT",
+            "MERGE_WARDEN_RECEIVER_MODE",
+            "MERGE_WARDEN_CONFIG_FILE",
+        ],
+    );
+
+    let r = load_config();
+    let _ = std::fs::remove_file(&path);
+
+    assert!(
+        matches!(r, Err(ServerError::ConfigError(_))),
+        "Expected ConfigError for an oversized default_title_pattern, got: {:?}",
+        r
+    );
+}
+
+#[test]
+fn load_config_returns_config_error_for_uncompilable_default_title_pattern() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+
+    let mut path = std::env::temp_dir();
+    path.push("merge_warden_server_uncompilable_default_title_pattern_test.toml");
+    std::fs::write(
+        &path,
+        "[policies]\ndefault_title_pattern = \"(unbalanced\"\n",
+    )
+    .unwrap();
+
+    let _env = EnvGuard::prepare(
+        &[("MERGE_WARDEN_CONFIG_FILE", path.to_str().unwrap())],
+        &[
+            "MERGE_WARDEN_PORT",
+            "MERGE_WARDEN_RECEIVER_MODE",
+            "MERGE_WARDEN_CONFIG_FILE",
+        ],
+    );
+
+    let r = load_config();
+    let _ = std::fs::remove_file(&path);
+
+    assert!(
+        matches!(r, Err(ServerError::ConfigError(_))),
+        "Expected ConfigError for an uncompilable default_title_pattern, got: {:?}",
+        r
+    );
+}
+
+#[test]
+fn load_config_returns_config_error_for_oversized_default_work_item_pattern() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+
+    let mut path = std::env::temp_dir();
+    path.push("merge_warden_server_oversized_default_work_item_pattern_test.toml");
+    let oversized = "a".repeat(300);
+    std::fs::write(
+        &path,
+        format!("[policies]\ndefault_work_item_pattern = \"{oversized}\"\n"),
+    )
+    .unwrap();
+
+    let _env = EnvGuard::prepare(
+        &[("MERGE_WARDEN_CONFIG_FILE", path.to_str().unwrap())],
+        &[
+            "MERGE_WARDEN_PORT",
+            "MERGE_WARDEN_RECEIVER_MODE",
+            "MERGE_WARDEN_CONFIG_FILE",
+        ],
+    );
+
+    let r = load_config();
+    let _ = std::fs::remove_file(&path);
+
+    assert!(
+        matches!(r, Err(ServerError::ConfigError(_))),
+        "Expected ConfigError for an oversized default_work_item_pattern, got: {:?}",
+        r
+    );
+}
+
+#[test]
+fn load_config_returns_config_error_for_uncompilable_default_work_item_pattern() {
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+
+    let mut path = std::env::temp_dir();
+    path.push("merge_warden_server_uncompilable_default_work_item_pattern_test.toml");
+    std::fs::write(
+        &path,
+        "[policies]\ndefault_work_item_pattern = \"(#\\\\d+){1,10000}\"\n",
+    )
+    .unwrap();
+
+    let _env = EnvGuard::prepare(
+        &[("MERGE_WARDEN_CONFIG_FILE", path.to_str().unwrap())],
+        &[
+            "MERGE_WARDEN_PORT",
+            "MERGE_WARDEN_RECEIVER_MODE",
+            "MERGE_WARDEN_CONFIG_FILE",
+        ],
+    );
+
+    let r = load_config();
+    let _ = std::fs::remove_file(&path);
+
+    assert!(
+        matches!(r, Err(ServerError::ConfigError(_))),
+        "Expected ConfigError for a default_work_item_pattern exceeding the \
+         compile-size budget (ADR-006 worked example), got: {:?}",
+        r
+    );
+}
+
+#[test]
+fn load_config_succeeds_with_a_valid_custom_default_title_pattern() {
+    // Regression guard: a legitimate, valid custom pattern must not be
+    // rejected merely because pattern validation now runs at startup.
+    let _lock = ENV_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+
+    let mut path = std::env::temp_dir();
+    path.push("merge_warden_server_valid_default_title_pattern_test.toml");
+    std::fs::write(
+        &path,
+        "[policies]\ndefault_title_pattern = \"^feat: .+$\"\n",
+    )
+    .unwrap();
+
+    let _env = EnvGuard::prepare(
+        &[("MERGE_WARDEN_CONFIG_FILE", path.to_str().unwrap())],
+        &[
+            "MERGE_WARDEN_PORT",
+            "MERGE_WARDEN_RECEIVER_MODE",
+            "MERGE_WARDEN_CONFIG_FILE",
+        ],
+    );
+
+    let r = load_config();
+    let _ = std::fs::remove_file(&path);
+
+    assert!(r.is_ok(), "{:?}", r);
+    assert_eq!(
+        r.unwrap().application_defaults.default_title_pattern,
+        "^feat: .+$"
+    );
+}

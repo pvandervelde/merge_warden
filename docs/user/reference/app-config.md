@@ -36,6 +36,20 @@ Top-level policy defaults.
 | `bot_mention` | string | `"@merge-warden"` | *(none — app-level only)* |
 | `broken_repo_config_behaviour` | string | `"silent_fallback"` | *(none — app-level only)* |
 
+### `default_title_pattern` and `default_work_item_pattern`
+
+Both fields are capped at 256 bytes and must compile within a fixed 1 MiB compiled-program
+size budget, the same limits that apply to the per-repo `pattern` fields — see
+[Per-repository configuration schema](per-repo-config.md#policiespullrequestsprtitle).
+
+**Unlike the per-repo fields, an invalid application default is checked at server
+startup, not at PR-evaluation time.** `load_config()` validates both patterns before the
+server starts accepting connections. If either is too long or fails to compile, the server
+logs the error and **exits without starting** — it does not start up with a disabled or
+substituted default. See
+[Set application-level defaults — startup pattern validation](../how-to/set-app-level-defaults.md#startup-validation-of-default-patterns)
+for the exact startup error and how to recover.
+
 ### `bot_mention`
 
 The mention prefix that PR participants use to issue bot commands in PR comments.

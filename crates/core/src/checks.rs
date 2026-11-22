@@ -850,17 +850,30 @@ pub fn check_pr_title(
     }
 
     // Otherwise, perform normal validation.
-    // NOTE: The title_pattern regex is recompiled on every call. Since the pattern is
-    // configuration-derived (not static), OnceLock is not suitable here. A per-instance
-    // cache keyed by pattern string would improve throughput under high load.
-    // This is a known performance gap — tracked for future optimisation.
-    let regex = match Regex::new(&current_configuration.title_pattern) {
+    // The configured title_pattern is validated and compiled through the
+    // process-wide CompiledPatternCache (ADR-006) rather than a raw
+    // `Regex::new` call: this bounds compile cost/length up front and avoids
+    // recompiling the same pattern string on every pull-request evaluation.
+    let regex = match crate::config::COMPILED_PATTERN_CACHE
+        .get_or_compile(&current_configuration.title_pattern)
+    {
         Ok(r) => r,
-        Err(_) => {
+        Err(e) => {
+            // A broken pattern is a configuration problem, not a title
+            // content problem: fail closed with `config_error` and do NOT
+            // run `diagnose_pr_title`, since the title was never actually
+            // evaluated against anything.
+            //
+            // Store ONLY the underlying `PatternValidationError` detail here
+            // (via its `Display` impl) — the maintainer-facing framing
+            // ("The configured `{field}`... is invalid and could not be
+            // evaluated: ...") is applied exactly once, by
+            // `config_error_comment_body` in `lib.rs`. Duplicating that
+            // framing here would double-wrap the rendered PR comment.
             return TitleValidationResult {
-                validation: ValidationResult::invalid(),
-                diagnosis: Some(diagnose_pr_title(&pr.title)),
-            }
+                validation: ValidationResult::config_error(e.to_string()),
+                diagnosis: None,
+            };
         }
     };
 
@@ -942,15 +955,26 @@ pub fn check_work_item_reference(
         return ValidationResult::bypassed(bypass_info);
     }
 
-    // If no bypass, perform normal validation
+    // Validate/compile the configured pattern through the process-wide
+    // CompiledPatternCache (ADR-006) BEFORE branching on `pr.body`: a broken
+    // pattern must surface as `config_error` unconditionally, regardless of
+    // whether the PR has a body to evaluate against.
+    let regex = match crate::config::COMPILED_PATTERN_CACHE
+        .get_or_compile(current_configuration.work_item_reference_pattern.as_str())
+    {
+        Ok(r) => r,
+        Err(e) => {
+            // Store ONLY the underlying `PatternValidationError` detail here
+            // (via its `Display` impl) — the maintainer-facing framing is
+            // applied exactly once, by `config_error_comment_body` in
+            // `lib.rs`. See the matching comment in `check_pr_title` above.
+            return ValidationResult::config_error(e.to_string());
+        }
+    };
+
+    // If no bypass and the pattern is valid, perform normal validation
     match &pr.body {
         Some(body) => {
-            let regex = match Regex::new(current_configuration.work_item_reference_pattern.as_str())
-            {
-                Ok(r) => r,
-                Err(_) => return ValidationResult::invalid(),
-            };
-
             if regex.is_match(body) {
                 ValidationResult::valid()
             } else {

@@ -114,6 +114,19 @@ silently never runs, which is worse than having no pattern validation at all.
     distinct custom patterns cannot cause unbounded cache growth. Cached entries
     are `Arc<Regex>`, so retrieving one is an O(1) refcount bump rather than a
     recompile or a deep copy.
+  - Worst-case resident memory for the cache is bounded but not small: each of
+    the 256 entries can hold a compiled program up to the 1 MiB
+    `PATTERN_COMPILE_SIZE_LIMIT` budget, so the cache's theoretical ceiling is
+    256 × 1 MiB ≈ **256 MiB** resident. Both inputs to that product
+    (`.github/merge-warden.toml`'s `title_pattern` / `work_item_reference_pattern`)
+    are contributor-influenced repository configuration evaluated at a pull
+    request's head SHA, not operator-only input. In practice this ceiling is
+    never reached by realistic patterns — it requires every one of the 256
+    distinct cached patterns to independently approach the 1 MiB compile-size
+    budget — but it is the explicit worst case this design accepts rather than
+    bounds further; see point 1/3 above for why `PATTERN_CACHE_CAPACITY`,
+    `MAX_PATTERN_LENGTH`, and `PATTERN_COMPILE_SIZE_LIMIT` remain fixed,
+    non-configurable constants rather than being lowered to shrink this bound.
 
 ## Alternatives considered
 

@@ -2,12 +2,17 @@
 //!
 //! This module centralizes configuration constants and settings used throughout
 //! the crate, making it easier to modify behavior in one place.
+use lazy_static::lazy_static;
+use lru::LruCache;
 use merge_warden_developer_platforms::{
     models::{RepositoryContext, User},
     ConfigFetcher, RepositoryMetadataProvider,
 };
+use regex::{Regex, RegexBuilder};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::num::NonZeroUsize;
+use std::sync::{Arc, Mutex};
 use tracing::{debug, info, warn};
 
 use crate::errors::ConfigLoadError;
@@ -226,11 +231,260 @@ pub fn validate_config_content(content: &str) -> ConfigValidationOutcome {
                 config.schema_version
             )],
         },
-        Ok(_) => ConfigValidationOutcome {
-            valid: true,
-            errors: vec![],
-        },
+        Ok(config) => {
+            // ADR-006: a syntactically-valid, schema-version-1 config can still carry
+            // an oversized or uncompilable `title_pattern` / `work_item_reference_pattern`.
+            // This is reported as an additional, non-blocking error entry naming the
+            // offending field — it never changes the TOML/schema outcome above, and a
+            // pattern failure here must never be escalated into a hard parse/schema
+            // failure (see docs/adr/ADR-006-regex-pattern-validation.md).
+            let mut errors = Vec::new();
+
+            let pr_policies = &config.policies.pull_requests;
+            if let Err(e) = validate_pattern(&pr_policies.title_policies.pattern) {
+                errors.push(format!(
+                    "Invalid `policies.pullRequests.prTitle.pattern`: {e}"
+                ));
+            }
+            if let Err(e) = validate_pattern(&pr_policies.work_item_policies.pattern) {
+                errors.push(format!(
+                    "Invalid `policies.pullRequests.workItem.pattern`: {e}"
+                ));
+            }
+
+            ConfigValidationOutcome {
+                valid: errors.is_empty(),
+                errors,
+            }
+        }
     }
+}
+
+/// Maximum permitted BYTE length (`str::len()`, not Unicode scalar count) of a
+/// configured `title_pattern` or `work_item_reference_pattern`.
+///
+/// This is a fixed application-level constant (ADR-006, point 1): it is never
+/// read from TOML/env and cannot be overridden per repository or organization.
+/// The length check always runs BEFORE any attempt to compile the pattern, so
+/// an oversized-and-syntactically-invalid pattern is rejected as [`PatternValidationError::TooLong`],
+/// never [`PatternValidationError::CompileFailed`].
+pub const MAX_PATTERN_LENGTH: usize = 256;
+
+/// Maximum permitted compiled-program size (in bytes) accepted by the
+/// [`regex`] crate when compiling a configured pattern, passed to
+/// [`RegexBuilder::size_limit`].
+///
+/// This bounds the worst-case memory/CPU cost of compiling an
+/// attacker-or-operator-supplied pattern (see ADR-006's worked example,
+/// `(#\d+){1,10000}`, which is well under [`MAX_PATTERN_LENGTH`] but produces
+/// a compiled program that exceeds this budget). Fixed application-level
+/// constant — never configurable per repository or organization. The crate's
+/// `dfa_size_limit` is deliberately left untouched at its crate default.
+pub const PATTERN_COMPILE_SIZE_LIMIT: usize = 1_048_576;
+
+/// Fixed capacity (entry count) of the process-wide [`CompiledPatternCache`].
+///
+/// ADR-006, point 1: fixed application-level constant, never configurable.
+const PATTERN_CACHE_CAPACITY: usize = 256;
+
+/// Errors produced when validating a regex pattern supplied through
+/// configuration (`title_pattern`, `work_item_reference_pattern`, or any
+/// equivalent repo/org-policy field) before it is compiled and used to
+/// evaluate a pull request.
+///
+/// See [`validate_pattern`] and `docs/adr/ADR-006-regex-pattern-validation.md`.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum PatternValidationError {
+    /// The pattern's BYTE length exceeds [`MAX_PATTERN_LENGTH`].
+    ///
+    /// This check always runs before any attempt to compile the pattern, so
+    /// a pattern that is both oversized and syntactically invalid is always
+    /// reported as `TooLong`, never [`PatternValidationError::CompileFailed`].
+    #[error("pattern length {length} exceeds the maximum of {max} bytes")]
+    TooLong {
+        /// The offending pattern's byte length.
+        length: usize,
+        /// The maximum permitted byte length ([`MAX_PATTERN_LENGTH`]).
+        max: usize,
+    },
+
+    /// The pattern is within the length cap but failed to compile — either
+    /// due to invalid regex syntax or because the compiled program would
+    /// exceed [`PATTERN_COMPILE_SIZE_LIMIT`].
+    #[error("pattern failed to compile: {message}")]
+    CompileFailed {
+        /// The underlying `regex` crate error, rendered as a human-readable string.
+        message: String,
+    },
+}
+
+/// Validates and compiles a configured regex pattern.
+///
+/// Rejects on BYTE length (`str::len()`, not Unicode scalar count) BEFORE
+/// attempting to compile, so an oversized-and-syntactically-invalid pattern
+/// is always reported as [`PatternValidationError::TooLong`].  A pattern
+/// within the length cap is compiled via
+/// `RegexBuilder::new(pattern).size_limit(PATTERN_COMPILE_SIZE_LIMIT).build()`;
+/// a syntax error or an exceeded compile-size budget are both reported as
+/// [`PatternValidationError::CompileFailed`].
+///
+/// `dfa_size_limit` is deliberately left untouched at the crate default (see
+/// ADR-006's implementation notes).
+///
+/// # Examples
+///
+/// ```
+/// use merge_warden_core::config::validate_pattern;
+///
+/// assert!(validate_pattern(r"^feat: .+$").is_ok());
+/// assert!(validate_pattern("(unbalanced").is_err());
+/// ```
+pub fn validate_pattern(pattern: &str) -> Result<Regex, PatternValidationError> {
+    let length = pattern.len();
+    if length > MAX_PATTERN_LENGTH {
+        return Err(PatternValidationError::TooLong {
+            length,
+            max: MAX_PATTERN_LENGTH,
+        });
+    }
+
+    RegexBuilder::new(pattern)
+        .size_limit(PATTERN_COMPILE_SIZE_LIMIT)
+        .build()
+        .map_err(|e| PatternValidationError::CompileFailed {
+            // Security review HIGH-3 (2026-11-22): `regex::Error::to_string()`
+            // echoes the original pattern text back as diagnostic context. A
+            // pattern within MAX_PATTERN_LENGTH can still be crafted to be
+            // syntactically invalid while containing this codebase's own
+            // HTML comment markers (e.g. `CONFIG_COMMENT_MARKER`) verbatim,
+            // and this message flows unsanitized into PR comments
+            // (`config_error_comment_body`, `communicate_config_validity_status`).
+            // Sanitizing here — at construction — means every consumer of
+            // `CompileFailed.message` (including `Display`/`{e}` formatting
+            // and the compiled-pattern cache, which stores this value) gets
+            // a safe value automatically, with no call site able to forget.
+            message: sanitize_config_error_detail(&e.to_string()),
+        })
+}
+
+/// Process-wide, fixed-capacity LRU cache of compiled regex patterns.
+///
+/// Caches `Ok` and `CompileFailed` outcomes (as `Arc<Regex>`, so repeated
+/// callers share one allocation, and as `PatternValidationError`
+/// respectively), so a pattern that is doomed to fail compiling is not
+/// re-validated/re-compiled on every check-time call — see ADR-006.
+/// `TooLong` outcomes are deliberately excluded from the cache (see
+/// [`CompiledPatternCache::get_or_compile`]).
+///
+/// # Implementation note (crate vs. hand-rolled)
+///
+/// Backed by the [`lru`] crate rather than a hand-rolled eviction policy:
+/// `lru::LruCache` is a small, synchronous, well-reviewed implementation of
+/// exactly the fixed-capacity O(1) get/insert/evict semantics this cache
+/// needs, and pulling it in is cheaper and less error-prone than
+/// re-implementing intrusive linked-list LRU bookkeeping by hand. The cache
+/// is wrapped in a [`std::sync::Mutex`] (not
+/// `parking_lot`, which is also not yet in this crate's dependency tree):
+/// every operation here is synchronous and fast (a hash lookup plus, at
+/// most, a cheap regex compile), and the lock is never held across an
+/// `.await` point, so the std mutex's lack of async-awareness is not a
+/// concern.
+pub struct CompiledPatternCache {
+    /// Fixed-capacity LRU map from pattern string to its cached validation
+    /// outcome. Never locked across an `.await` point — every operation on
+    /// it is synchronous (a hash lookup, and at most one regex compile).
+    cache: Mutex<LruCache<String, Result<Arc<Regex>, PatternValidationError>>>,
+}
+
+impl CompiledPatternCache {
+    /// Constructs a new, empty [`CompiledPatternCache`] with the fixed
+    /// capacity defined by [`PATTERN_CACHE_CAPACITY`].
+    ///
+    /// Provided as a public constructor — in addition to the process-wide
+    /// [`COMPILED_PATTERN_CACHE`] singleton used at check time — so that
+    /// tests can exercise an independent cache instance without any
+    /// cross-test shared-state coupling.
+    pub fn new() -> Self {
+        Self {
+            cache: Mutex::new(LruCache::new(
+                NonZeroUsize::new(PATTERN_CACHE_CAPACITY)
+                    .expect("PATTERN_CACHE_CAPACITY is a non-zero constant"),
+            )),
+        }
+    }
+
+    /// Returns the compiled [`Regex`] for `pattern`, consulting (and
+    /// populating) the cache.
+    ///
+    /// A cache hit — whether the cached outcome is `Ok` or `Err` — never
+    /// re-validates or re-compiles `pattern`. On a cache miss, `pattern` is
+    /// validated via [`validate_pattern`] and the outcome is returned.
+    ///
+    /// [`PatternValidationError::TooLong`] outcomes are deliberately **not**
+    /// stored in the cache: the cache key is the full pattern string, so
+    /// caching a `TooLong` result would mean the cache's 256-entry capacity
+    /// bounds entry *count* only, not entry *size* — an attacker/operator
+    /// could still fill all 256 slots with arbitrarily large rejected
+    /// strings (ADR-006 point 1/3: "the entity whose input is being bounded
+    /// must not control the bound"). Re-deriving a `TooLong` rejection is
+    /// already O(1) (a single `pattern.len()` comparison in
+    /// [`validate_pattern`]), so caching it has no performance benefit and
+    /// only the memory cost it exists to prevent. `Ok` and `CompileFailed`
+    /// outcomes are always for patterns within [`MAX_PATTERN_LENGTH`], so
+    /// caching them does not reintroduce the unbounded-size risk.
+    pub fn get_or_compile(&self, pattern: &str) -> Result<Arc<Regex>, PatternValidationError> {
+        // Recover from a poisoned mutex rather than propagating the panic:
+        // the cache holds only immutable, already-computed `Result<Arc<Regex>,
+        // PatternValidationError>` values, so no invariant this cache depends
+        // on can be left broken by a panic elsewhere while the lock was held.
+        // Propagating poisoning here would turn one unrelated panic into a
+        // permanent, process-wide denial of service for every subsequent
+        // `check_pr_title`/`check_work_item_reference` call.
+        {
+            let mut cache = self
+                .cache
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if let Some(cached) = cache.get(pattern) {
+                return cached.clone();
+            }
+        }
+
+        let result = validate_pattern(pattern).map(Arc::new);
+
+        if !matches!(result, Err(PatternValidationError::TooLong { .. })) {
+            let mut cache = self
+                .cache
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            cache.put(pattern.to_string(), result.clone());
+        }
+
+        result
+    }
+}
+
+impl Default for CompiledPatternCache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+lazy_static! {
+    /// Process-wide [`CompiledPatternCache`] consulted by [`crate::checks::check_pr_title`]
+    /// and [`crate::checks::check_work_item_reference`] so that a configured
+    /// `title_pattern` / `work_item_reference_pattern` is validated and compiled
+    /// once it is cached, rather than on every pull-request evaluation.
+    ///
+    /// This is not a strict "compiled at most once per distinct pattern string"
+    /// guarantee: `get_or_compile` releases the lock between its cache-miss read
+    /// and its cache-populating write, so two threads racing on the same
+    /// not-yet-cached pattern can both independently validate/compile it before
+    /// either writes back. This is harmless — compilation is a pure, idempotent
+    /// function of the pattern string, so both results are equivalent and
+    /// whichever `put` happens last simply wins — but callers should not rely on
+    /// a stronger single-compile guarantee under concurrency.
+    pub(crate) static ref COMPILED_PATTERN_CACHE: CompiledPatternCache = CompiledPatternCache::new();
 }
 
 /// Pre-compiled regex for conventional commit format validation
@@ -2955,6 +3209,52 @@ pub(crate) async fn load_org_policy(
             return Err(ConfigLoadError::OrgPolicyUnavailable(msg));
         }
         return Ok(None);
+    }
+
+    // ADR-006: validate the `title_pattern` / `work_item_reference_pattern`
+    // fields of both the `[enforced]` and `[defaults]` sections before
+    // building the returned `OrgPolicy`. A pattern-validation failure is
+    // routed through the exact same fail_if_unreachable split as every other
+    // failure branch above: `warn!` + a config-load-failure metric, then
+    // either `Ok(None)` (graceful three-tier fallback) or
+    // `Err(ConfigLoadError::OrgPolicyUnavailable(..))`. There is no need for
+    // a dedicated `ConfigLoadError` variant — wrapping the
+    // `PatternValidationError`'s message into the existing
+    // `OrgPolicyUnavailable(String)` keeps this symmetric with the
+    // fetch-error and parse-error branches above, which already reuse that
+    // same variant for an "org policy could not be used" outcome.
+    //
+    // Validation is routed through the process-wide `COMPILED_PATTERN_CACHE`
+    // rather than a raw `validate_pattern` call, so an org-level pattern is
+    // not recompiled from scratch on every webhook event for every member
+    // repository (see the now-resolved MEDIUM finding in
+    // `.llm/findings/regex-pattern-validation.md`). Only the `Err`/`Ok`
+    // outcome is needed here, so the compiled `Arc<Regex>` is discarded.
+    for (section_name, section) in [("enforced", &raw.enforced), ("defaults", &raw.defaults)] {
+        let pr = &section.policies.pull_requests;
+        for (field_name, pattern) in [
+            ("title_pattern", &pr.title_policies.pattern),
+            (
+                "work_item_reference_pattern",
+                &pr.work_item_policies.pattern,
+            ),
+        ] {
+            if let Err(e) = COMPILED_PATTERN_CACHE.get_or_compile(pattern).map(|_| ()) {
+                let msg = format!("Org policy [{section_name}] {field_name} is invalid: {e}");
+                warn!(
+                    repository_owner = source.owner.as_str(),
+                    repository = source.repo.as_str(),
+                    config_path = source.path.as_str(),
+                    error = msg.as_str(),
+                    "Org policy pattern failed validation; using three-tier config"
+                );
+                metrics.record_config_load_failure(&source.owner, &source.repo, "invalid_pattern");
+                if source.fail_if_unreachable {
+                    return Err(ConfigLoadError::OrgPolicyUnavailable(msg));
+                }
+                return Ok(None);
+            }
+        }
     }
 
     let policy = OrgPolicy {

@@ -264,6 +264,22 @@ pub struct MergeWarden<P: PullRequestProvider + std::fmt::Debug> {
     metrics_recorder: Arc<dyn MetricsRecorder>,
 }
 
+/// Renders the dedicated warning comment body used by
+/// `communicate_pr_title_validity_status` and
+/// `communicate_pr_work_item_validity_status` when the configured pattern
+/// for the given field (`title_pattern` or `work_item_reference_pattern`)
+/// itself failed validation (ADR-006): this is a configuration problem, not
+/// a PR-content problem, so it replaces the ordinary diagnosis/missing-
+/// reference body with a maintainer-facing message naming the broken field
+/// and the underlying [`crate::config::PatternValidationError`] text.
+fn config_error_comment_body(field_name: &str, config_error: &str) -> String {
+    format!(
+        "⚠️ The configured `{field_name}` in `{CONFIG_FILE_PATH}` is invalid \
+         and could not be evaluated: {config_error}. A repository maintainer \
+         must correct this pattern before this check can run."
+    )
+}
+
 impl<P: PullRequestProvider + ConfigFetcher + std::fmt::Debug> MergeWarden<P> {
     /// Checks if the PR title follows the Conventional Commits format.
     ///
@@ -769,21 +785,30 @@ Your PR title does not follow the [Conventional Commits](https://www.conventiona
 \n\
 Please update the PR title to match the conventional commit message guidelines.";
 
-            let comment_text = {
-                // Build the diagnosis section: one bullet per TitleIssue, optional suggested fix.
-                let mut diagnosis_section =
-                    String::from("\nThe pull request title needs correction:\n");
-                if let Some(diagnosis) = validation_result.diagnosis.as_ref() {
-                    for issue in &diagnosis.issues {
-                        diagnosis_section.push_str(&format!("- {issue}\n"));
+            let comment_text =
+                if let Some(config_error) = validation_result.validation.config_error.as_ref() {
+                    // ADR-006: the configured `title_pattern` itself is broken (too long or
+                    // uncompilable) — this is a configuration problem, not a title-content
+                    // problem, so it gets a dedicated message instead of the ordinary
+                    // diagnosis-bullets + format-reminder body. `diagnose_pr_title` was
+                    // never run in this case (see check_pr_title), so there is no
+                    // diagnosis to render here.
+                    config_error_comment_body("title_pattern", config_error)
+                } else {
+                    // Build the diagnosis section: one bullet per TitleIssue, optional suggested fix.
+                    let mut diagnosis_section =
+                        String::from("\nThe pull request title needs correction:\n");
+                    if let Some(diagnosis) = validation_result.diagnosis.as_ref() {
+                        for issue in &diagnosis.issues {
+                            diagnosis_section.push_str(&format!("- {issue}\n"));
+                        }
+                        if let Some(fix) = &diagnosis.suggested_fix {
+                            diagnosis_section.push_str(&format!("\nSuggested fix: `{fix}`"));
+                        }
                     }
-                    if let Some(fix) = &diagnosis.suggested_fix {
-                        diagnosis_section.push_str(&format!("\nSuggested fix: `{fix}`"));
-                    }
-                }
-                // Compose final comment: diagnosis section + separator + general format reminder.
-                format!("{diagnosis_section}\n\n{format_reminder}")
-            };
+                    // Compose final comment: diagnosis section + separator + general format reminder.
+                    format!("{diagnosis_section}\n\n{format_reminder}")
+                };
 
             let comment = format!(
                 "{prefix}{text}",
@@ -1103,7 +1128,14 @@ Please update the PR title to match the conventional commit message guidelines."
                 .map(|c| (c.id, c.body.clone()))
                 .collect();
 
-            let comment_text = r#"
+            let comment_text = if let Some(config_error) = validation_result.config_error.as_ref() {
+                // ADR-006: the configured `work_item_reference_pattern` itself is
+                // broken (too long or uncompilable) — a configuration problem, not
+                // a "no reference found" content problem, so it gets a dedicated
+                // message instead of the ordinary missing-reference body.
+                config_error_comment_body("work_item_reference_pattern", config_error)
+            } else {
+                r#"
 The pull request body needs improvement:
 
 The PR body is missing a valid work item reference.
@@ -1117,7 +1149,9 @@ The PR body is missing a valid work item reference.
     * references GH-3456
     * relates to #7890
 
-Please update the PR body to include a valid work item reference."#;
+Please update the PR body to include a valid work item reference."#
+                    .to_string()
+            };
             let comment = format!(
                 "{prefix}{text}",
                 prefix = WORK_ITEM_COMMENT_MARKER,
@@ -1172,7 +1206,7 @@ Please update the PR body to include a valid work item reference."#;
                 }
             }
 
-            comment_text.to_string()
+            comment_text
         } else {
             // Work item validation passed (either valid or bypassed)
 

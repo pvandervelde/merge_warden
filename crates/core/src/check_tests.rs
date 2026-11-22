@@ -1934,3 +1934,397 @@ fn should_return_invalid_with_empty_scope_in_diagnosis_when_title_has_empty_scop
         diagnosis.issues
     );
 }
+
+// ============================================================================
+// ADR-006: check_pr_title / check_work_item_reference config-error behaviour
+//
+// See docs/spec/interfaces/core-config-validation.md
+// #check-time-behaviour-on-patternvalidationerror
+//
+// These tests assert the NEW, distinct failure path: when the configured
+// pattern cannot be compiled (too long, or syntactically/size-budget
+// invalid), the check must report `ValidationResult::config_error(..)` —
+// never the ordinary `invalid()` outcome — and `TitleValidationResult`'s
+// `diagnosis` must be `None` (diagnose_pr_title must NOT run against a
+// broken-pattern scenario).
+// ============================================================================
+
+const ADR006_MAX_PATTERN_LENGTH: usize = 256;
+
+fn create_config_with_oversized_title_pattern() -> CurrentPullRequestValidationConfiguration {
+    let mut config = create_default_config();
+    config.title_pattern = "a".repeat(ADR006_MAX_PATTERN_LENGTH + 1);
+    config
+}
+
+fn create_config_with_oversized_work_item_pattern() -> CurrentPullRequestValidationConfiguration {
+    let mut config = create_default_config();
+    config.work_item_reference_pattern = "a".repeat(ADR006_MAX_PATTERN_LENGTH + 1);
+    config
+}
+
+// ---------------------------------------------------------------------------
+// check_pr_title — config_error behaviour
+// ---------------------------------------------------------------------------
+
+#[test]
+fn should_return_config_error_when_title_pattern_is_oversized() {
+    let user = create_user(123, "developer");
+    let pr = create_pull_request(1, "feat: add new feature", None, Some(user));
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_config_with_oversized_title_pattern();
+
+    let result = check_pr_title(&pr, &bypass_rule, &config);
+
+    assert!(
+        !result.is_valid(),
+        "a check depending on an invalid pattern must report failure"
+    );
+    assert!(
+        result.validation.config_error.is_some(),
+        "an oversized title_pattern must populate config_error, not the ordinary invalid() path"
+    );
+}
+
+#[test]
+fn should_return_config_error_when_title_pattern_fails_to_compile() {
+    let user = create_user(123, "developer");
+    let pr = create_pull_request(1, "feat: add new feature", None, Some(user));
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_config_with_invalid_title_regex();
+
+    let result = check_pr_title(&pr, &bypass_rule, &config);
+
+    assert!(!result.is_valid());
+    assert!(
+        result.validation.config_error.is_some(),
+        "an uncompilable title_pattern must populate config_error"
+    );
+}
+
+#[test]
+fn should_not_run_title_diagnosis_when_title_pattern_is_broken() {
+    // Per the interface contract: when the title pattern is invalid,
+    // `diagnosis` must be `None` — diagnose_pr_title must never be run
+    // against a broken-pattern scenario, since the title itself was never
+    // actually evaluated against anything.
+    let user = create_user(123, "developer");
+    // Deliberately malformed title that WOULD normally produce a rich
+    // diagnosis, to prove the None is not a coincidence of a clean title.
+    let pr = create_pull_request(1, " FEAT:missing space", None, Some(user));
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_config_with_oversized_title_pattern();
+
+    let result = check_pr_title(&pr, &bypass_rule, &config);
+
+    assert!(
+        result.diagnosis.is_none(),
+        "diagnosis must be None when the configured pattern itself is broken, got: {:?}",
+        result.diagnosis
+    );
+}
+
+#[test]
+fn should_return_config_error_message_distinct_from_ordinary_title_failure_wording() {
+    // [security] Compile failure must never be reported with the ordinary
+    // "didn't match"/format-reminder wording — the message must name the
+    // configuration problem instead.
+    let user = create_user(123, "developer");
+    let pr = create_pull_request(1, "feat: add new feature", None, Some(user));
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_config_with_oversized_title_pattern();
+
+    let result = check_pr_title(&pr, &bypass_rule, &config);
+    let message = result
+        .validation
+        .config_error
+        .expect("config_error must be populated");
+
+    assert!(
+        !message.is_empty(),
+        "config_error message must not be empty"
+    );
+    assert!(
+        message.to_lowercase().contains("pattern") || message.to_lowercase().contains("configur"),
+        "config_error message should name the configuration/pattern problem; got: {message}"
+    );
+    assert!(
+        !message.to_lowercase().contains("conventional commit"),
+        "config_error message must not reuse the ordinary 'does not follow conventional \
+         commit format' wording; got: {message}"
+    );
+}
+
+#[test]
+fn should_bypass_before_evaluating_a_broken_title_pattern() {
+    // Ordering/short-circuit adversarial test: bypass evaluation must happen
+    // before the pattern is even consulted, so an authorized bypass user is
+    // never blocked by (and never sees) a configuration error.
+    let user = create_user(123, "bypass-user");
+    let pr = create_pull_request(1, "not a conventional title", None, Some(user));
+    let bypass_rule = create_bypass_rule_enabled_for_users(vec!["bypass-user"]);
+    let config = create_config_with_oversized_title_pattern();
+
+    let result = check_pr_title(&pr, &bypass_rule, &config);
+
+    assert!(result.is_valid());
+    assert!(result.was_bypassed());
+    assert!(
+        result.validation.config_error.is_none(),
+        "a bypassed check must never populate config_error"
+    );
+    assert!(result.diagnosis.is_none());
+}
+
+// ---------------------------------------------------------------------------
+// check_work_item_reference — config_error behaviour
+// ---------------------------------------------------------------------------
+
+#[test]
+fn should_return_config_error_when_work_item_pattern_is_oversized() {
+    let user = create_user(123, "developer");
+    let pr = create_pull_request(1, "feat: add feature", Some("Fixes #123"), Some(user));
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_config_with_oversized_work_item_pattern();
+
+    let result = check_work_item_reference(&pr, &bypass_rule, &config);
+
+    assert!(!result.is_valid());
+    assert!(
+        result.config_error.is_some(),
+        "an oversized work_item_reference_pattern must populate config_error"
+    );
+}
+
+#[test]
+fn should_return_config_error_when_work_item_pattern_fails_to_compile() {
+    let user = create_user(123, "developer");
+    let pr = create_pull_request(1, "feat: add feature", Some("Fixes #123"), Some(user));
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_config_with_invalid_work_item_regex();
+
+    let result = check_work_item_reference(&pr, &bypass_rule, &config);
+
+    assert!(!result.is_valid());
+    assert!(
+        result.config_error.is_some(),
+        "an uncompilable work_item_reference_pattern must populate config_error"
+    );
+}
+
+#[test]
+fn should_return_work_item_config_error_even_when_body_has_no_reference_shaped_text() {
+    // Stub-killing: a lazy implementation might only reach the config-error
+    // path when a reference-shaped match is attempted and happens to fail;
+    // it must fail closed on the broken pattern regardless of body content.
+    let user = create_user(123, "developer");
+    let pr = create_pull_request(
+        1,
+        "feat: add feature",
+        Some("no reference here"),
+        Some(user),
+    );
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_config_with_oversized_work_item_pattern();
+
+    let result = check_work_item_reference(&pr, &bypass_rule, &config);
+
+    assert!(!result.is_valid());
+    assert!(result.config_error.is_some());
+}
+
+#[test]
+fn should_return_config_error_message_distinct_from_ordinary_work_item_failure_wording() {
+    let user = create_user(123, "developer");
+    let pr = create_pull_request(1, "feat: add feature", Some("Fixes #123"), Some(user));
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_config_with_oversized_work_item_pattern();
+
+    let result = check_work_item_reference(&pr, &bypass_rule, &config);
+    let message = result.config_error.expect("config_error must be populated");
+
+    assert!(!message.is_empty());
+    assert!(
+        message.to_lowercase().contains("pattern") || message.to_lowercase().contains("configur"),
+        "config_error message should name the configuration/pattern problem; got: {message}"
+    );
+    assert!(
+        !message
+            .to_lowercase()
+            .contains("no work item reference found"),
+        "config_error message must not reuse the ordinary 'no work item reference found' \
+         wording; got: {message}"
+    );
+}
+
+#[test]
+fn should_bypass_before_evaluating_a_broken_work_item_pattern() {
+    let user = create_user(123, "bypass-user");
+    let pr = create_pull_request(1, "feat: add feature", Some("no reference"), Some(user));
+    let bypass_rule = create_bypass_rule_enabled_for_users(vec!["bypass-user"]);
+    let config = create_config_with_oversized_work_item_pattern();
+
+    let result = check_work_item_reference(&pr, &bypass_rule, &config);
+
+    assert!(result.is_valid());
+    assert!(result.was_bypassed());
+    assert!(
+        result.config_error.is_none(),
+        "a bypassed check must never populate config_error"
+    );
+}
+
+#[test]
+fn should_return_config_error_when_work_item_pattern_broken_and_body_is_none() {
+    // The existing None-body path returns ordinary invalid(); a broken
+    // pattern must still take priority and report config_error even when
+    // there is no body to evaluate against.
+    let user = create_user(123, "developer");
+    let pr = create_pull_request(1, "feat: add feature", None, Some(user));
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_config_with_oversized_work_item_pattern();
+
+    let result = check_work_item_reference(&pr, &bypass_rule, &config);
+
+    assert!(!result.is_valid());
+    assert!(
+        result.config_error.is_some(),
+        "a broken work_item_reference_pattern must report config_error even when \
+         pr.body is None, got: {:?}",
+        result
+    );
+}
+
+#[test]
+fn should_return_ordinary_invalid_not_config_error_when_body_is_none_with_valid_pattern() {
+    // QA audit (ADR-006, item 4): a None body with a VALID
+    // work_item_reference_pattern must still take the pre-existing
+    // ValidationResult::invalid() path, not ValidationResult::config_error().
+    // The existing `should_return_invalid_when_body_is_none_with_bypass_disabled`
+    // test only asserts `!result.is_valid()`, which is true for BOTH
+    // `invalid()` and `config_error(..)` — it does not distinguish them, so a
+    // mutant that swapped the `None => ValidationResult::invalid()` arm for
+    // `None => ValidationResult::config_error(..)` would survive undetected.
+    // This test closes that gap by asserting `config_error` is explicitly
+    // `None` on this path.
+    let user = create_user(123, "developer");
+    let pr = create_pull_request(1, "feat: add feature", None, Some(user));
+    let bypass_rule = create_bypass_rule_disabled();
+    let config = create_default_config(); // uses the valid WORK_ITEM_REGEX default
+
+    let result = check_work_item_reference(&pr, &bypass_rule, &config);
+
+    assert!(!result.is_valid());
+    assert!(!result.was_bypassed());
+    assert!(
+        result.config_error.is_none(),
+        "a None body with a VALID work_item_reference_pattern must report ordinary \
+         invalid(), not config_error; got: {:?}",
+        result
+    );
+}
+
+// ---------------------------------------------------------------------------
+// Task 2.6 — check_pr_title must consult the process-wide
+// CompiledPatternCache singleton, not an independent cache or a raw
+// Regex::new call.
+//
+// check_pr_title returns a TitleValidationResult, not the resolved
+// Arc<Regex>, so this cannot be proven via Arc::ptr_eq on a value returned
+// directly by the check function. Instead — mirroring the timing-based
+// technique `config_tests.rs` uses for CompiledPatternCache::get_or_compile's
+// Err/CompileFailed path, since that path also lacks an Arc to compare —
+// this test uses a pattern deliberately constructed to be slow to compile
+// from scratch (a bounded repeated group, well under MAX_PATTERN_LENGTH and
+// PATTERN_COMPILE_SIZE_LIMIT) but cheap to re-read from cache:
+//   1. check_pr_title's FIRST call with this pattern is, by construction,
+//      this pattern's first-ever appearance anywhere in the test binary, so
+//      it necessarily pays the real compile cost — regardless of which
+//      mechanism check_pr_title uses internally.
+//   2. A batch of direct crate::config::COMPILED_PATTERN_CACHE.get_or_compile
+//      calls for the IDENTICAL pattern string is then timed. If
+//      check_pr_title populated the shared singleton, every one of these is
+//      a cache hit and the whole batch is a small fraction of the original
+//      compile. If check_pr_title used an independent cache (or no cache at
+//      all), the singleton still has no entry for this pattern, so the
+//      FIRST call in the batch pays the same from-scratch compile cost,
+//      making the batch take roughly as long as (or longer than) the
+//      original single compile — failing the assertion.
+// A unique marker substring is embedded in the pattern so it cannot collide
+// with CONVENTIONAL_COMMIT_REGEX, WORK_ITEM_REGEX, or any other test's
+// pattern sharing this process-wide cache singleton.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn should_populate_and_read_the_shared_compiled_pattern_cache_via_check_pr_title() {
+    const MARKER_PATTERN: &str = r"(CHECKPRTITLE26MARKER\d+){1,100}";
+
+    let mut config = create_default_config();
+    config.title_pattern = MARKER_PATTERN.to_string();
+    let bypass_rule = create_bypass_rule_disabled();
+    let pr = create_pull_request(1, "CHECKPRTITLE26MARKER1: add feature", None, None);
+
+    // First call: this exact pattern string has never been seen anywhere
+    // else in the test binary, so this necessarily forces a real,
+    // from-scratch compile through whichever mechanism check_pr_title uses
+    // internally.
+    let start_first = std::time::Instant::now();
+    let first = check_pr_title(&pr, &bypass_rule, &config);
+    let first_duration = start_first.elapsed();
+    assert!(first.is_valid(), "diagnosis: {:?}", first.diagnosis);
+
+    // Second call through check_pr_title with the identical pattern — must
+    // also succeed (sanity check; the real proof is the timing assertion
+    // below, since this call's internal Arc is not observable here).
+    let second = check_pr_title(&pr, &bypass_rule, &config);
+    assert!(second.is_valid(), "diagnosis: {:?}", second.diagnosis);
+
+    const REPEATS: u32 = 200;
+    let start_batch = std::time::Instant::now();
+    for _ in 0..REPEATS {
+        let regex = crate::config::COMPILED_PATTERN_CACHE
+            .get_or_compile(MARKER_PATTERN)
+            .expect("the marker pattern must compile");
+        assert!(regex.is_match(&pr.title));
+    }
+    let batch_duration = start_batch.elapsed();
+
+    // A tenth of the original compile time, not the raw original duration
+    // itself, is the threshold: if check_pr_title did NOT populate the
+    // shared singleton, this pattern is still absent from it, so the first
+    // of these REPEATS lookups pays the same from-scratch compile cost as
+    // `first_duration` — making `batch_duration` land close to
+    // `first_duration` (not reliably below it, which would make a plain
+    // `batch_duration < first_duration` comparison flaky/noise-sensitive).
+    // A real cache hit path clears this threshold with a huge margin (a
+    // mutex lock, hashmap lookup, and Arc clone vs. a full regex compile),
+    // so the threshold cleanly separates "cached" from "recompiled" without
+    // being sensitive to run-to-run compile-time jitter.
+    let threshold = first_duration / 10;
+    assert!(
+        batch_duration < threshold,
+        "expected {REPEATS} direct crate::config::COMPILED_PATTERN_CACHE lookups \
+         (total {:?}) to be well under a tenth of check_pr_title's single \
+         original, from-scratch compile ({:?}, threshold {:?}) of the identical \
+         pattern — this proves check_pr_title populated the shared singleton \
+         cache rather than compiling independently of it",
+        batch_duration,
+        first_duration,
+        threshold,
+    );
+
+    // Companion Arc-identity check (same idiom as the Task 1.4 tests in
+    // config_tests.rs): now that the pattern is known to be cached, two
+    // direct lookups must resolve to the same Arc<Regex> allocation.
+    let direct_a = crate::config::COMPILED_PATTERN_CACHE
+        .get_or_compile(MARKER_PATTERN)
+        .expect("the marker pattern must compile");
+    let direct_b = crate::config::COMPILED_PATTERN_CACHE
+        .get_or_compile(MARKER_PATTERN)
+        .expect("the marker pattern must compile");
+    assert!(
+        std::sync::Arc::ptr_eq(&direct_a, &direct_b),
+        "two direct lookups of the now-cached marker pattern must return the \
+         SAME Arc<Regex> allocation"
+    );
+}

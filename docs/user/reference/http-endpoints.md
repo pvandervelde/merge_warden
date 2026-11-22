@@ -175,12 +175,19 @@ suffix.
 `config_load_failures_total` is incremented whenever a repository's
 `.github/merge-warden.toml`, or the organisation policy file, fails to load because the
 fetch failed (`failure_reason="fetch_error"`), the file could not be parsed as TOML
-(`"toml_parse_error"`), or its `schemaVersion` is unsupported (`"unsupported_schema_version"`).
-It is **not** incremented when a config file is simply absent — that is the normal,
-supported case of falling back to defaults, not a failure. Use this counter to alert on
-configuration problems across a fleet of repositories; see
-[Per-repository configuration schema](per-repo-config.md) for what happens to policy
-evaluation when a repository's config fails to load.
+(`"toml_parse_error"`), its `schemaVersion` is unsupported (`"unsupported_schema_version"`),
+or — **organisation policy file only** — its `title_pattern`/`work_item_reference_pattern`
+fields are too long or fail to compile (`"invalid_pattern"`). It is **not** incremented when
+a config file is simply absent — that is the normal, supported case of falling back to
+defaults, not a failure. Use this counter to alert on configuration problems across a fleet
+of repositories; see [Per-repository configuration schema](per-repo-config.md) for what
+happens to policy evaluation when a repository's config fails to load.
+
+> **Note:** an invalid `pattern` in a repository's own `.github/merge-warden.toml` is
+> **not** counted here, and does not fall back to defaults for the whole file — every
+> other setting in that file still applies. Only the specific check that depends on the
+> broken pattern (title or work item) fails, with a distinct PR comment. See
+> [How Merge Warden works — regex pattern validation](../explanation/how-merge-warden-works.md#regex-pattern-validation).
 
 ---
 

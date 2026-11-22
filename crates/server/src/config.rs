@@ -7,7 +7,7 @@ use std::{fmt, path::PathBuf};
 mod tests;
 
 use merge_warden_core::{
-    config::{validate_repository_scope_patterns, ApplicationDefaults},
+    config::{validate_pattern, validate_repository_scope_patterns, ApplicationDefaults},
     errors::ConfigLoadError,
 };
 
@@ -305,6 +305,16 @@ pub fn load_config() -> Result<ServerConfig, ServerError> {
             other => ServerError::ConfigError(other.to_string()),
         },
     )?;
+
+    // --- Regex pattern validation (ADR-006, FR-011) ---
+    // Fail fast at startup rather than letting an oversized or uncompilable
+    // application-level default pattern surface only once a pull request is
+    // evaluated.
+    validate_pattern(&application_defaults.default_title_pattern)
+        .map_err(|e| ServerError::ConfigError(format!("Invalid default_title_pattern: {}", e)))?;
+    validate_pattern(&application_defaults.default_work_item_pattern).map_err(|e| {
+        ServerError::ConfigError(format!("Invalid default_work_item_pattern: {}", e))
+    })?;
 
     // --- Queue config (only in queue mode) ---
     let queue = if receiver_mode == ReceiverMode::Queue {

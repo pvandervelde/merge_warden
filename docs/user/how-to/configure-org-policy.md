@@ -153,12 +153,24 @@ an empty map and evaluates topic conditions normally.
 | :--- | :--- | :--- |
 | `false` (default) | Fetch error or parse error | Warn and fall back to three-tier resolution |
 | `false` (default) | File does not exist (`404`) | Warn and fall back to three-tier resolution |
+| `false` (default) | `title_pattern`/`work_item_reference_pattern` too long or fails to compile | Warn and fall back to three-tier resolution |
 | `true` | Fetch error or parse error | Return an error; PR processing aborted |
 | `true` | File does not exist (`404`) | Warn and fall back (file absence is always a graceful fallback) |
+| `true` | `title_pattern`/`work_item_reference_pattern` too long or fails to compile | Return an error; PR processing aborted |
 
 The rationale for the `404` exception: a missing file is the expected bootstrap state
 when the policy file has not yet been created. A fetch error, by contrast, indicates an
 infrastructure problem that the operator may want to surface explicitly.
+
+**A `title_pattern`/`work_item_reference_pattern` in `[enforced]` or `[defaults]` that is
+longer than 256 bytes, or that fails to compile, is treated exactly like any other org
+policy load failure** — the same `fail_if_unreachable` split above applies, and the
+failure is recorded under `config_load_failures_total{failure_reason="invalid_pattern"}`
+(see [HTTP endpoints reference](../reference/http-endpoints.md#get-metrics--prometheus-metrics)).
+This is different from a bad `pattern` in a repository's own `.github/merge-warden.toml`,
+which never aborts or falls back for the whole file — only the specific check (title or
+work item) fails. See
+[How Merge Warden works — regex pattern validation](../explanation/how-merge-warden-works.md#regex-pattern-validation).
 
 ---
 
