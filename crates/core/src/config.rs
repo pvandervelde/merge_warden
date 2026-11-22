@@ -433,8 +433,18 @@ impl CompiledPatternCache {
     /// outcomes are always for patterns within [`MAX_PATTERN_LENGTH`], so
     /// caching them does not reintroduce the unbounded-size risk.
     pub fn get_or_compile(&self, pattern: &str) -> Result<Arc<Regex>, PatternValidationError> {
+        // Recover from a poisoned mutex rather than propagating the panic:
+        // the cache holds only immutable, already-computed `Result<Arc<Regex>,
+        // PatternValidationError>` values, so no invariant this cache depends
+        // on can be left broken by a panic elsewhere while the lock was held.
+        // Propagating poisoning here would turn one unrelated panic into a
+        // permanent, process-wide denial of service for every subsequent
+        // `check_pr_title`/`check_work_item_reference` call.
         {
-            let mut cache = self.cache.lock().expect("pattern cache mutex poisoned");
+            let mut cache = self
+                .cache
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             if let Some(cached) = cache.get(pattern) {
                 return cached.clone();
             }
@@ -443,7 +453,10 @@ impl CompiledPatternCache {
         let result = validate_pattern(pattern).map(Arc::new);
 
         if !matches!(result, Err(PatternValidationError::TooLong { .. })) {
-            let mut cache = self.cache.lock().expect("pattern cache mutex poisoned");
+            let mut cache = self
+                .cache
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
             cache.put(pattern.to_string(), result.clone());
         }
 
@@ -460,9 +473,17 @@ impl Default for CompiledPatternCache {
 lazy_static! {
     /// Process-wide [`CompiledPatternCache`] consulted by [`crate::checks::check_pr_title`]
     /// and [`crate::checks::check_work_item_reference`] so that a configured
-    /// `title_pattern` / `work_item_reference_pattern` is validated and compiled at
-    /// most once per distinct pattern string, rather than on every pull-request
-    /// evaluation.
+    /// `title_pattern` / `work_item_reference_pattern` is validated and compiled
+    /// once it is cached, rather than on every pull-request evaluation.
+    ///
+    /// This is not a strict "compiled at most once per distinct pattern string"
+    /// guarantee: `get_or_compile` releases the lock between its cache-miss read
+    /// and its cache-populating write, so two threads racing on the same
+    /// not-yet-cached pattern can both independently validate/compile it before
+    /// either writes back. This is harmless — compilation is a pure, idempotent
+    /// function of the pattern string, so both results are equivalent and
+    /// whichever `put` happens last simply wins — but callers should not rely on
+    /// a stronger single-compile guarantee under concurrency.
     pub(crate) static ref COMPILED_PATTERN_CACHE: CompiledPatternCache = CompiledPatternCache::new();
 }
 
