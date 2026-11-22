@@ -3202,6 +3202,13 @@ pub(crate) async fn load_org_policy(
     // `OrgPolicyUnavailable(String)` keeps this symmetric with the
     // fetch-error and parse-error branches above, which already reuse that
     // same variant for an "org policy could not be used" outcome.
+    //
+    // Validation is routed through the process-wide `COMPILED_PATTERN_CACHE`
+    // rather than a raw `validate_pattern` call, so an org-level pattern is
+    // not recompiled from scratch on every webhook event for every member
+    // repository (see the now-resolved MEDIUM finding in
+    // `.llm/findings/regex-pattern-validation.md`). Only the `Err`/`Ok`
+    // outcome is needed here, so the compiled `Arc<Regex>` is discarded.
     for (section_name, section) in [("enforced", &raw.enforced), ("defaults", &raw.defaults)] {
         let pr = &section.policies.pull_requests;
         for (field_name, pattern) in [
@@ -3211,7 +3218,7 @@ pub(crate) async fn load_org_policy(
                 &pr.work_item_policies.pattern,
             ),
         ] {
-            if let Err(e) = validate_pattern(pattern) {
+            if let Err(e) = COMPILED_PATTERN_CACHE.get_or_compile(pattern).map(|_| ()) {
                 let msg = format!("Org policy [{section_name}] {field_name} is invalid: {e}");
                 warn!(
                     repository_owner = source.owner.as_str(),
