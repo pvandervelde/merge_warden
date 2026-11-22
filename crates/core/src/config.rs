@@ -300,7 +300,7 @@ pub enum PatternValidationError {
     /// This check always runs before any attempt to compile the pattern, so
     /// a pattern that is both oversized and syntactically invalid is always
     /// reported as `TooLong`, never [`PatternValidationError::CompileFailed`].
-    #[error("pattern length {length} exceeds the maximum of {max} characters")]
+    #[error("pattern length {length} exceeds the maximum of {max} bytes")]
     TooLong {
         /// The offending pattern's byte length.
         length: usize,
