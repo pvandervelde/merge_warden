@@ -863,10 +863,15 @@ pub fn check_pr_title(
             // content problem: fail closed with `config_error` and do NOT
             // run `diagnose_pr_title`, since the title was never actually
             // evaluated against anything.
+            //
+            // Store ONLY the underlying `PatternValidationError` detail here
+            // (via its `Display` impl) — the maintainer-facing framing
+            // ("The configured `{field}`... is invalid and could not be
+            // evaluated: ...") is applied exactly once, by
+            // `config_error_comment_body` in `lib.rs`. Duplicating that
+            // framing here would double-wrap the rendered PR comment.
             return TitleValidationResult {
-                validation: ValidationResult::config_error(format!(
-                    "the configured title_pattern is invalid and could not be evaluated: {e}"
-                )),
+                validation: ValidationResult::config_error(e.to_string()),
                 diagnosis: None,
             };
         }
@@ -959,9 +964,11 @@ pub fn check_work_item_reference(
     {
         Ok(r) => r,
         Err(e) => {
-            return ValidationResult::config_error(format!(
-                "the configured work_item_reference_pattern is invalid and could not be evaluated: {e}"
-            ));
+            // Store ONLY the underlying `PatternValidationError` detail here
+            // (via its `Display` impl) — the maintainer-facing framing is
+            // applied exactly once, by `config_error_comment_body` in
+            // `lib.rs`. See the matching comment in `check_pr_title` above.
+            return ValidationResult::config_error(e.to_string());
         }
     };
 
